@@ -16,6 +16,7 @@ use bootloader::boot_info::FrameBuffer;
 
 pub mod allocator;
 pub mod gdt;
+pub mod guests;
 pub mod interrupts;
 pub mod memory;
 pub mod print;

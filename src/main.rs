@@ -137,7 +137,6 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         );
         println!("VMXOFF: {:?}", vmx::raw::vmxoff());
     }
-
     kernel::qemu::exit(kernel::qemu::ExitCode::Success);
 }
 
@@ -381,7 +380,7 @@ unsafe fn guest_code_vmfunc() {
             asm!("mov eax, 0", "mov ecx, 0", "vmfunc", out("rax") _, out("rcx") _);
         }
         let end = rdtsc();
-        println!("After the vmfunc {}", (end - start));
+        println!("After the vmfunc {} - {} = {}", end, start, (end - start));
     }
     asm!("nop", "nop", "nop", "nop", "nop", "nop", "vmcall",);
 }
