@@ -227,12 +227,12 @@ fn launch_guest(
 }
 
 unsafe fn rdtsc() -> u64 {
-        let mut hi: u64 = 0;
-            let mut lo: u64 = 0;
-                asm!("rdtsc", "mov {hi}, rdx", "mov {lo}, rax",
+    let mut hi: u64 = 0;
+    let mut lo: u64 = 0;
+    asm!("rdtsc", "mov {hi}, rdx", "mov {lo}, rax",
                         hi = out(reg) hi,
                                 lo = out(reg) lo);
-                    lo | (hi << 32)
+    lo | (hi << 32)
 }
 
 fn setup_guest(vcpu: &mut vmx::VCpu) -> Result<(), vmx::VmxError> {
