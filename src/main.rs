@@ -371,11 +371,17 @@ fn configure_msr() -> Result<(), vmx::VmxError> {
 unsafe fn guest_code_vmfunc() {
     asm!("nop", "nop", "nop", "nop", "nop", "nop");
     asm!("nop", "nop", "nop", "nop", "nop", "nop");
-    println!("Hello from guest!");
-    let start = rdtsc();
-    asm!("mov eax, 0", "mov ecx, 1", "vmfunc");
-    let end = rdtsc();
-    println!("After the vmfunc {} - {} = {}", end, start, end - start);
+    for i in 0..10 {
+        println!("Hello from guest!");
+        let start = rdtsc();
+        if i % 2 == 0 {
+            asm!("mov eax, 0", "mov ecx, 1", "vmfunc");
+        } else {
+            asm!("mov eax, 0", "mov ecx, 0", "vmfunc");
+        }
+        let end = rdtsc();
+        println!("After the vmfunc {} - {} = {}", end, start, end - start);
+    }
     asm!("nop", "nop", "nop", "nop", "nop", "nop", "vmcall",);
 }
 
