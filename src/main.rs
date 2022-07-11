@@ -230,7 +230,7 @@ unsafe fn rdtsc() -> u64 {
     let mut lo: u64 = 0;
     asm!("rdtsc", "mov {hi}, rdx", "mov {lo}, rax",
                         hi = out(reg) hi,
-                                lo = out(reg) lo, out("rdx") _, out("rax") _);
+                        lo = out(reg) lo, out("rdx") _, out("rax") _);
     lo | (hi << 32)
 }
 
