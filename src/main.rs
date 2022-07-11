@@ -100,6 +100,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             "1'Ctrl: {:?}",
             vmcs.set_primary_ctrls(PrimaryControls::SECONDARY_CONTROLS)
         );
+        println!("Switching: {}", switching);
         let mut secondary_ctrls = SecondaryControls::ENABLE_RDTSCP | SecondaryControls::ENABLE_EPT;
         if switching {
             secondary_ctrls |= SecondaryControls::ENABLE_VM_FUNCTIONS
@@ -223,6 +224,15 @@ fn launch_guest(
     vmcs.vcpu.set_nat(fields::GuestStateNat::Rsp, guest_rsp)?;
 
     unsafe { vmcs.run() }
+}
+
+unsafe fn rdtsc() -> u64 {
+        let mut hi: u64 = 0;
+            let mut lo: u64 = 0;
+                asm!("rdtsc", "mov {hi}, rdx", "mov {lo}, rax",
+                        hi = out(reg) hi,
+                                lo = out(reg) lo);
+                    lo | (hi << 32)
 }
 
 fn setup_guest(vcpu: &mut vmx::VCpu) -> Result<(), vmx::VmxError> {
@@ -362,8 +372,10 @@ unsafe fn guest_code_vmfunc() {
     asm!("nop", "nop", "nop", "nop", "nop", "nop");
     asm!("nop", "nop", "nop", "nop", "nop", "nop");
     println!("Hello from guest!");
+    let start = rdtsc();
     asm!("mov eax, 0", "mov ecx, 1", "vmfunc");
-    println!("After the vmfunc");
+    let end = rdtsc();
+    println!("After the vmfunc {} - {} = {}", end, start, end - start);
     asm!("nop", "nop", "nop", "nop", "nop", "nop", "vmcall",);
 }
 
