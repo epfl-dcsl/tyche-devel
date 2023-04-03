@@ -5,13 +5,8 @@
 #include "encl_rt.h"
 #include "tyche_enclave.h"
 
-#define VMCALL_GATE_NAME "domain_gate_vmcall"
-
 /// Type of entry functions in the enclave.
 typedef void (*target_func_t)(void*);
-
-/// Type of vmcall gate that should be provided by the libencl.
-typedef void (*vmcall_gate_t)(tyche_encl_handle_t handle, target_func_t fn, void* args);
 
 /// The configuration of an enclave library (encl.so).
 typedef struct lib_encl_t {
@@ -20,9 +15,6 @@ typedef struct lib_encl_t {
 
   /// The size of the gate.
   size_t size;
-
-  /// Gate implemented as vmcall.
-  vmcall_gate_t vmcall_gate;
 
   /// TODO other gate mechanisms/interfaces provided by encl.so
 } lib_encl_t;

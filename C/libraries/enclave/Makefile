@@ -15,7 +15,7 @@ ELF_CONFIG= -Wl,-R $(ELF_LIB) -L$(ELF_LIB)
 encl_loader.so: loader/lib.c
 	gcc -g $(INCLUDES) -Iinclude/ $(ELF_CONFIG) -shared -o $@ -fPIC $^ -lelf64
 
-encl.so: runtime/lib.c runtime/entry.S
+encl.so: runtime/lib.c runtime/asm.S
 	gcc -g -I$(INCLUDES) -Iinclude/ -shared -o $@ -fPIC $^
 
 test-enclave: tests/enclave.c encl_loader.so encl.so
@@ -27,4 +27,4 @@ test: tests/test.c
 .PHONY: clean
 
 clean:
-	rm -rf encl_loader.so encl.so
+	rm -rf encl_loader.so encl.so test test-enclave

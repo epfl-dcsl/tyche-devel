@@ -77,7 +77,7 @@ int main(void) {
   // There is a bug, it does not find the data segment correctly.
   //trusted_entry = enclave.mappings[3];
   //trusted_entry(shared);
-  library->vmcall_gate(0, enclave.mappings[3], shared);
+ // library->vmcall_gate(0, enclave.mappings[3], shared);
   printf("Done with the loading. %s", shared);
   return 0;
 }

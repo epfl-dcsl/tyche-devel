@@ -5,13 +5,16 @@ ELF64=../../libraries/elf64
 LOADER=../../libraries/enclave
 DRIVER=../../drivers/enclave
 CAPA=../../libraries/capabilities
+ENCL=../../libraries/enclave
 DLL=../../libraries/dll
 
 # All the includes
-INCLUDES= -Iinclude/ -I$(DLL)/include -I$(ELF64)/include -I$(LOADER)/include -I$(DRIVER)/include -I$(CAPA)/include
+INCLUDES= -Iinclude/ -I$(DLL)/include -I$(ELF64)/include -I$(LOADER)/include -I$(DRIVER)/include -I$(CAPA)/include -I$(ENCL)/include
 
 # Enclave includes
 TRUSTED_INCLUDES=-I$(CAPA)/include
+TRUSTED_RT=../../libraries/enclave/runtime/
+TRUSTED_RT_SRC=$(TRUSTED_RT)/asm.S $(TRUSTED_RT)/lib.c
 CAPA_LIB=$(CAPA)/libcapabilities.a
 
 # Dynamic libraries
@@ -30,7 +33,7 @@ a.out: src/main.c enclave
 	cp $(LOADER)/encl.so libs/
 	gcc -g $(INCLUDES) -Wl,-R ./libs/ -L./libs/ -o $@ $< $(DYN_LIBS)
 
-enclave: trusted/main.c trusted/asm.S $(CAPA_LIB)
+enclave: trusted/main.c $(TRUSTED_RT_SRC) $(CAPA_LIB)
 	gcc -g $(INCLUDES) -nostdlib -static -o $@ $^
 
 install: a.out enclave

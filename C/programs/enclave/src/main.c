@@ -18,7 +18,7 @@
 const char* encl_so = "libs/encl.so";
 const char* trusted = "enclave";
 
-const char* msg = "A message for the enlave.\n\0";
+const char* MSG = "A message for the enlave.\n\0";
 
 int main(void) {
   printf("Let's create an enclave!\n");
@@ -37,12 +37,17 @@ int main(void) {
   }
 
   // Write a message.
-  memcpy(sharedRO,msg, strlen(msg)); 
+  memcpy(sharedRO, MSG, strlen(MSG)); 
 
   // Setup a struct describing the message.
-  my_encl_message_t* myencl_msg = (my_encl_message_t*) shared;
-  myencl_msg->message = sharedRO;
-  myencl_msg->message_len = strlen(msg);
+  my_encl_message_t* msg = (my_encl_message_t*) shared + sizeof(enclave_entry_t);
+  msg->message = sharedRO;
+  msg->message_len = strlen(MSG);
+
+  enclave_entry_t* entry = (enclave_entry_t*) shared;
+  //TODO this should be extended to enable looking up symbols.
+  entry->function = NULL;
+  entry->args = msg;
 
   struct tyche_encl_add_region_t extra_ro = {
     .start = (uint64_t) sharedRO,
@@ -70,8 +75,8 @@ int main(void) {
     exit(1);
   } 
   printf("Shared regions are %lx & %lx\n", shared, sharedRO);
-  enclave_driver_transition(enclave.handle, shared);
-  printf("Message from the enclave %s\n", myencl_msg->reply);
+  enclave_driver_transition(enclave.handle, (void*) entry);
+  printf("Message from the enclave %s\n", msg->reply);
   printf("Now let's delete the enclave.\n");
   if (delete_enclave(&enclave) != 0) {
     printf("Error deleting the enclave!\n");

@@ -398,16 +398,6 @@ const lib_encl_t* init_enclave_loader(const char* libencl)
   // Now mprotect.
   mprotect(library_plugin->plugin, library_plugin->size, PROT_READ|PROT_EXEC);
 
-  // Now find the gate.
-  Elf64_Sym* gate = find_symbol(fd, VMCALL_GATE_NAME, header, sections);
-  if (gate == NULL) {
-    LOG("no gate found.\n");
-    goto fail_unmap;
-  }
-
-  library_plugin->vmcall_gate = (gate->st_value - text_seg->p_vaddr) + library_plugin->plugin; 
-  
-  free(gate);
   close(fd);
   // All good, return the plugin.
   return library_plugin; 

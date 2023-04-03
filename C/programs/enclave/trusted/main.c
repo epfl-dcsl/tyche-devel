@@ -1,36 +1,23 @@
 #include "my_shared.h"
+#include "encl_rt.h"
 
 const char* message = "Hello World!\n\t";
 
 char encl_stack[0x4000] __attribute__((section(".encl_stack")));
 
-#define NO_CPU_SWITCH (~((unsigned long long)0)) 
+void my_memcpy(void* dest, void* src, int size)
+{
+  char* ptr_dest = (char*) dest;
+  char* ptr_src = (char*) src;
+  for (int i = 0; i < size; i++) {
+    ptr_dest[i] = ptr_src[i];
+  } 
+}
 
 void print_message(void* source)
 {
   my_encl_message_t* msg = (my_encl_message_t*) source;
-
-  // Handmade memcpy.
-  char* ptr = msg->reply;
-  char* src = (char*) msg->message;
-  for (int i = 0; i < msg->message_len; i++) {
-    ptr[i] = src[i];
-  } 
-}
-
-// Puts hello world inside the shared dest buffer.
-void trusted_entry(unsigned long long ret_handle, void* args)
-{
-  print_message(args);
-  // Use the return handle.
-  asm(
-    "movq $9, %%rax\n\t"
-    "movq %0, %%rdi\n\t"
-    "movq %1, %%rsi\n\t"
-    "vmcall"
-    :
-    : "rm" (ret_handle), "rm" (NO_CPU_SWITCH)
-    : "rax", "rdi", "memory");
+  my_memcpy(msg->reply, msg->message, msg->message_len);
 }
 
 int fibonnacci(int n)
@@ -43,12 +30,26 @@ int fibonnacci(int n)
   return (fibonnacci(n-1) + fibonnacci(n-2));
 }
 
-void fibonnacci_out()
-{
-  fibonnacci(10);
+void fibonnacci_top(void* args) {
+  my_fib_message_t* msg = (my_fib_message_t*) args;
+  fibonnacci(msg->value);
+  my_memcpy(msg->reply, "Done with fib\n", 14);
 }
 
-// Just to look good.
+
+void enclave_dispatch(enclave_entry_t* entry, gate_frame_t* frame)
+{
+  // Error.
+  if (entry == NULL) {
+    return;
+  } else if (entry->function == NULL || entry->function == print_message) {
+    print_message(entry->args);
+  } else if (entry->function == fibonnacci_top) {
+    fibonnacci_top(entry->args);
+  }
+}
+
+// Just to look good for the compiler.
 int _start() {
     /* exit system call */
     asm("movl $1,%eax;"

@@ -7,4 +7,9 @@ typedef struct my_encl_message_t {
   char reply[30];
 } my_encl_message_t;
 
+typedef struct my_fib_message_t {
+  int value;
+  char reply[30];
+} my_fib_message_t;
+
 #endif
