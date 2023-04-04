@@ -5,8 +5,8 @@ mod instrument;
 use std::path::PathBuf;
 
 use clap::{Args, Parser, Subcommand};
-use debug::print_elf_segments;
-use instrument::instrument;
+use debug::{print_elf_segments, print_page_tables};
+use instrument::dump_page_tables;
 use simple_logger;
 
 #[derive(Parser)]
@@ -20,7 +20,8 @@ struct Cli {
 #[derive(Subcommand)]
 enum Commands {
     PrintELFSegments(FileArg),
-    Instrument(InstrumentArgs),
+    DumpPageTables(DumpPageTablesArgs),
+    PrintPageTables(FileArg),
 }
 
 #[derive(Args)]
@@ -30,7 +31,7 @@ struct FileArg {
 }
 
 #[derive(Args)]
-struct InstrumentArgs {
+struct DumpPageTablesArgs {
     #[arg(short, long, value_name = "SRC")]
     src: PathBuf,
     #[arg(short, long, value_name = "DST")]
@@ -44,8 +45,11 @@ fn main() {
         Commands::PrintELFSegments(args) => {
             print_elf_segments(&args.path);
         }
-        Commands::Instrument(args) => {
-            instrument(&args.src, &args.dst);
+        Commands::DumpPageTables(args) => {
+            dump_page_tables(&args.src, &args.dst);
+        }
+        Commands::PrintPageTables(args) => {
+            print_page_tables(&args.path);
         }
     }
 }
