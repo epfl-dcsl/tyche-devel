@@ -15,3 +15,4 @@ simple_logger = "4.1.0"
 mmu = { version = "0.1.0", path = "../mmu"}
 xmas-elf = "0.8.0"
 utils = {path = "../utils"}
+object = "0.30.3"
