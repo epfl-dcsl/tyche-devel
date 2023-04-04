@@ -1,10 +1,12 @@
 mod allocator;
 mod debug;
+mod instrument;
 
 use std::path::PathBuf;
 
 use clap::{Args, Parser, Subcommand};
-use debug::{print_elf_segments, print_page_tables};
+use debug::print_elf_segments;
+use instrument::instrument;
 use simple_logger;
 
 #[derive(Parser)]
@@ -18,13 +20,21 @@ struct Cli {
 #[derive(Subcommand)]
 enum Commands {
     PrintELFSegments(FileArg),
-    BuildPageTables(FileArg),
+    Instrument(InstrumentArgs),
 }
 
 #[derive(Args)]
 struct FileArg {
     #[arg(short, long, value_name = "FILE")]
     path: PathBuf,
+}
+
+#[derive(Args)]
+struct InstrumentArgs {
+    #[arg(short, long, value_name = "SRC")]
+    src: PathBuf,
+    #[arg(short, long, value_name = "DST")]
+    dst: PathBuf,
 }
 
 fn main() {
@@ -34,8 +44,8 @@ fn main() {
         Commands::PrintELFSegments(args) => {
             print_elf_segments(&args.path);
         }
-        Commands::BuildPageTables(args) => {
-            print_page_tables(&args.path);
+        Commands::Instrument(args) => {
+            instrument(&args.src, &args.dst);
         }
     }
 }

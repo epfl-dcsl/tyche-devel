@@ -17,8 +17,8 @@ pub struct Page {
 pub struct BumpAllocator<const N: usize> {
     pub idx: usize,
     /// Physical offset where the allocator starts in the physical segment.
-    phys_offset: usize,
-    pages: [Page; N],
+    pub phys_offset: usize,
+    pub pages: [Page; N],
 }
 
 impl<const N: usize> BumpAllocator<N> {
