@@ -15,8 +15,9 @@ pub struct Page {
 }
 
 pub struct BumpAllocator<const N: usize> {
-    idx: usize,
-    offset: usize,
+    pub idx: usize,
+    /// Physical offset where the allocator starts in the physical segment.
+    phys_offset: usize,
     pages: [Page; N],
 }
 
@@ -24,7 +25,7 @@ impl<const N: usize> BumpAllocator<N> {
     pub fn new(offset: usize) -> Self {
         Self {
             idx: 0,
-            offset: offset,
+            phys_offset: offset,
             pages: [Page { data: [0; 0x1000] }; N],
         }
     }
@@ -35,11 +36,16 @@ impl<const N: usize> BumpAllocator<N> {
             let frame = &mut self.pages[idx].data as *mut u8;
             self.idx += 1;
             return Some(Frame {
-                phys_addr: HostPhysAddr::new(self.offset + idx * PAGE_SIZE),
+                phys_addr: HostPhysAddr::new(self.phys_offset + idx * PAGE_SIZE),
                 virt_addr: frame,
             });
         }
         return None;
+    }
+
+    pub fn get_virt_offset(&self) -> usize {
+        let addr = &self.pages[0].data as *const u8;
+        return addr as usize;
     }
 }
 
