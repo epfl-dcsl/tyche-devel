@@ -6,15 +6,6 @@
 #include "x86_64_pt.h"
 
 
-// ——————————————————————————————— Debugging ———————————————————————————————— //
-
-#define LOG(...)                                          \
-  do {                                                    \
-    printf("[%s:%d] %s: ", __FILE__, __LINE__, __func__); \
-    printf(__VA_ARGS__);                                  \
-    printf("\n");                                         \
-  } while (0);
-
 // ————————————————————————— Page Table Simulation —————————————————————————— //
 #define PTE_NB_ENTRIES 512
 typedef struct pte_t {
@@ -35,13 +26,13 @@ typedef struct pte_allocator_t {
 pte_allocator_t allocator = {0};
 
 /// We just simualte segmentation from the allocator region.
-addr_t pa_to_va(addr_t addr) {
+addr_t pa_to_va(addr_t addr, pt_profile_t* profile) {
   return  ((addr_t)allocator.start) + addr;
 }
 
 /// Again, we have segmentation.
 /// Remove the base from the virtual address.
-addr_t va_to_pa(addr_t addr) {
+addr_t va_to_pa(addr_t addr, pt_profile_t* profile) {
   TEST(addr >= ((addr_t)allocator.start));
   return addr - ((addr_t)allocator.start);
 }
@@ -51,7 +42,7 @@ entry_t* alloc(void* ptr) {
   TEST(allocator.next_free < allocator.end);
   entry_t* allocation = (entry_t*) allocator.next_free;
   allocator.next_free += PT_PAGE_SIZE; 
-  return (entry_t*) va_to_pa((addr_t)allocation);
+  return (entry_t*) va_to_pa((addr_t)allocation, ptr);
 }
 
 /// Easy way to specify a virtual address.

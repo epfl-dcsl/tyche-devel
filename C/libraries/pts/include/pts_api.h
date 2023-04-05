@@ -2,26 +2,9 @@
 #define __INCLUDE_PTS_API_H__
 
 // ——————————————————————————————— Debugging ———————————————————————————————— //
-#ifdef DEBUG_USER_SPACE
 #include <stdio.h>
 
-#define TEST(cond)                                                   \
-  do {                                                               \
-    if (!(cond)) {                                                   \
-      fprintf(stderr, "[%s:%d] %s\n", __FILE__, __LINE__, __func__); \
-      abort();                                                       \
-    }                                                                \
-  } while (0);
-#else
-#define TEST(cond)   \
-  do {               \
-    if (!(cond)) {   \
-      int* ptr = 0;  \
-      *ptr = 3;      \
-      while (1) { }; \
-    }                \
-  } while (0);
-#endif
+#include "common.h"
 
 // —————————————————————————————————— API ——————————————————————————————————— //
 
@@ -69,7 +52,7 @@ typedef entry_t (*next_level_t)(entry_t, level_t curr_lvl);
 typedef entry_t* (*allocator_t)(void*);
 
 /// Translates an addr_t (i.e., PA -> VA, VA -> PA).
-typedef addr_t (*translator_t)(addr_t);
+typedef addr_t (*translator_t)(addr_t, struct pt_profile_t* extra);
 
 /// A profile for a page table.
 typedef struct pt_profile_t {

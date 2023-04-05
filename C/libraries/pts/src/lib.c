@@ -21,7 +21,7 @@ int pt_walk_page_range(entry_t root, level_t level, addr_t start, addr_t end, pt
   next = 0;
   curr_va = start;
   s = get_index(start, level, profile);
-  va_root = (entry_t*) profile->pa_to_va(root);
+  va_root = (entry_t*) profile->pa_to_va(root, profile);
   for (i = s; i < profile->nb_entries; i++) {
     // Compute the current virtual address.
     curr_va = (start & ~(profile->masks[level])) 
