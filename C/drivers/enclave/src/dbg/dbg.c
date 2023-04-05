@@ -13,11 +13,11 @@
 
 static uint64_t other_cr3 = 0;
 
-static addr_t va_to_pa(addr_t addr) {
+static addr_t va_to_pa(addr_t addr, pt_profile_t* prof) {
   return (addr_t) virt_to_phys((void*) addr);
 }
 
-static addr_t pa_to_va(addr_t addr) {
+static addr_t pa_to_va(addr_t addr, pt_profile_t* prof) {
   return (addr_t) phys_to_virt((phys_addr_t) addr);
 }
 
@@ -32,7 +32,7 @@ callback_action_t default_visitor(entry_t* entry, level_t level, pt_profile_t* p
     goto failure;
   } 
   printk(KERN_ERR "[WALK] -- %llx -- lvl: %d, entry: %llx, va: %llx\n",
-      profile->va_to_pa((addr_t)entry), level, *entry, profile->curr_va);
+      profile->va_to_pa((addr_t)entry, profile), level, *entry, profile->curr_va);
   return WALK;
 failure:
   return ERROR;

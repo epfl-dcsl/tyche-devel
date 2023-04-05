@@ -1,10 +1,14 @@
 all: libelf64.so test_elf64
 
-libelf64.so: src/lib.c include/common.h include/elf64.h
-	gcc -g -shared -Iinclude/ -o $@ -fPIC src/lib.c 
+COMMON=../common/
+FILES=src/lib.c include/elf64.h $(COMMON)/include/common.h
+INCLUDES= -I$(COMMON)/include -Iinclude/
+
+libelf64.so: $(FILES) 
+	gcc -DTYCHE_USER_SPACE=1 -g -shared $(INCLUDES) -o $@ -fPIC src/lib.c 
 
 test_elf64: tests/test.c libelf64.so
-	gcc -g -Iinclude/ -Wl,-R . -L. tests/test.c -o $@ -lelf64
+	gcc -DTYCHE_USER_SPACE=1 -g -Iinclude/ -I$(COMMON)/include -Wl,-R . -L. tests/test.c -o $@ -lelf64
 
 .PHONY: clean
 

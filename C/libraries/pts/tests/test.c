@@ -4,6 +4,7 @@
 
 #include "pts_api.h"
 #include "x86_64_pt.h"
+#include "common.h"
 
 
 // ————————————————————————— Page Table Simulation —————————————————————————— //
@@ -136,7 +137,7 @@ void test_simple_map(pt_profile_t* profile)
   profile->visitors[PT_PTE] = pte_page_visit;
   TEST(pt_walk_page_range((entry_t) root, PT_PML4, s, e, profile) == 0);
   TEST(extra->invoc_count == 3);
-  LOG("Done walking.")
+  LOG("Done walking.");
 }
 
 void test_boundary_map(pt_profile_t* profile)

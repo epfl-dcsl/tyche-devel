@@ -6,11 +6,11 @@
 #include "mapper.h"
 
 
-static addr_t va_to_pa(addr_t addr) {
+static addr_t va_to_pa(addr_t addr, pt_profile_t* prof) {
   return (addr_t) virt_to_phys((void*) addr);
 }
 
-static addr_t pa_to_va(addr_t addr) {
+static addr_t pa_to_va(addr_t addr, pt_profile_t* prof) {
   return (addr_t) phys_to_virt((phys_addr_t) addr);
 }
 

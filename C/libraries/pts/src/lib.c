@@ -1,5 +1,7 @@
 #include "pts_api.h"
 
+#include "common.h"
+
 /// From a VA addr and a level, get the current index.
 index_t get_index(addr_t addr, level_t level, pt_profile_t* profile)
 {

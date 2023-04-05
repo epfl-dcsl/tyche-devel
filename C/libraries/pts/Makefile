@@ -21,7 +21,7 @@ INCLUDES=-Iinclude/ -I$(COMMON_LIB)/include
 	#ar rcs $@ $(OBJS_PTS)
 	#rm $(OBJS_PTS)
 
-libpts.a: $(CODE_PTS) $(HDRS_PTS) $(OBJS_PTS)
+libpts.a: $(CODE_PTS) $(HDRS_PTS)
 	gcc -DTYCHE_USER_SPACE=1 -g -nostdlib -c $(INCLUDES) -o pts.o src/lib.c
 	gcc -DTYCHE_USER_SPACE=1 -g -nostdlib -c $(INCLUDES) -o x86.o src/x86_64_pt.c
 	ar rcs $@ pts.o x86.o

@@ -2,7 +2,7 @@
 #define __INCLUDE_ELF64_H__
 
 #include <elf.h>
-
+#include <stddef.h>
 /// Parse an ELF file header and store the result in eh.
 /// eh is freeable.
 void read_elf64_header(int fd, Elf64_Ehdr* eh);

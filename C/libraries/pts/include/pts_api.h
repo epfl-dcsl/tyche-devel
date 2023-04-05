@@ -1,11 +1,6 @@
 #ifndef __INCLUDE_PTS_API_H__
 #define __INCLUDE_PTS_API_H__
 
-// ——————————————————————————————— Debugging ———————————————————————————————— //
-#include <stdio.h>
-
-#include "common.h"
-
 // —————————————————————————————————— API ——————————————————————————————————— //
 
 #define MAX_LEVEL 5
