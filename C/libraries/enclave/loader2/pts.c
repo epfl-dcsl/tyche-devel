@@ -9,10 +9,19 @@
 #include "common.h"
 #include "x86_64_pt.h"
 #include "tyche_enclave.h"
+#include "enclave_loader.h"
 
 uint64_t bump_nb_pages = DEFAULT_NB_PAGES; 
 uint64_t bump_size = DEFAULT_BUMP_SIZE; 
 
+
+addr_t align_up(addr_t addr)
+{
+  if (addr % PAGE_SIZE == 0) {
+    return addr;
+  }
+  return (addr + PAGE_SIZE) & ~(PAGE_SIZE-1); 
+}
 
 static void parse_env() {
   char* nb_pages = getenv(NB_PAGES_ENVVAR);
@@ -27,12 +36,19 @@ static void parse_env() {
   }
 }
 
-
-static callback_action_t default_mapper(entry_t* entry, level_t lvl, struct pt_profile_t* profile)
-{
-  return ERROR;
+static entry_t translate_flags(Elf64_Word flags) {
+  entry_t result = 0;
+  if ((flags & PF_R) == PF_R) {
+    result |= PT_PP;
+  }
+  if ((flags & PF_X) != PF_X) {
+    result |= PT_NX;
+  }
+  if ((flags & PF_W) == PF_W) {
+    result |= PT_RW;
+  }
+  return result;
 }
-
 
 static entry_t* allocate(void* ptr)
 {
@@ -50,6 +66,60 @@ static entry_t* allocate(void* ptr)
   return (entry_t*) page;
 failure:
   return NULL;
+}
+
+static callback_action_t default_mapper(entry_t* entry, level_t lvl, struct pt_profile_t* profile)
+{
+  info_t* info = NULL;
+  entry_t* new_page = NULL;
+  Elf64_Phdr* seg = NULL;
+  addr_t offset = 0;
+  if (entry == NULL) {
+    ERROR("Entry is null."); 
+    goto failure;
+  }
+  if (profile == NULL) {
+    ERROR("Profile is null.");
+    goto failure;
+  }
+  if (profile->extras == NULL) {
+    ERROR("Extras is null.");
+    goto failure;
+  }
+  info = (info_t*) profile->extras;
+  if (info->bump == NULL) {
+    ERROR("bump is null.");
+    goto failure;
+  }
+  if (info->segment == NULL) {
+    ERROR("Segment is null.");
+    goto failure;
+  }
+  offset = profile->curr_va - ((addr_t)(info->segment->p_vaddr)); 
+  switch(lvl) {
+    case PT_PGD:
+      // Normal mapping.
+      goto normal_page;
+      break;
+    case PT_PMD:
+      goto normal_page;
+      break;
+    case PT_PML4:
+      goto normal_page;
+    case PT_PTE:
+      goto entry_page;
+      break;
+  }
+entry_page:
+  *entry = ((info->segment_offset + offset) & PT_PHYS_PAGE_MASK) |
+    translate_flags(info->segment->p_flags) | PT_DIRT | PT_ACC; 
+  return WALK;
+normal_page:
+  new_page = profile->allocate((void*)(&info->bump));
+  *entry = ((entry_t)new_page) | info->intermed_flags;
+  return WALK; 
+failure:
+  return FAILURE;
 }
 
 static addr_t va_to_pa(addr_t addr, pt_profile_t* profile) {
@@ -116,18 +186,11 @@ fail_abort:
   return 0;
 }
 
-addr_t align_up(addr_t addr)
-{
-  if (addr % PAGE_SIZE == 0) {
-    return addr;
-  }
-  return (addr + PAGE_SIZE) & ~(PAGE_SIZE-1); 
-}
-
 int create_page_tables(uint64_t phys_offset, page_tables_t* bump, Elf64_Ehdr* header, Elf64_Phdr* segments)
 {
   pt_profile_t profile;
   info_t info;
+  uint64_t mem_size = 0;
   if (bump == NULL) {
     ERROR("The provided bump variable is null.");
     goto failure;
@@ -184,15 +247,22 @@ int create_page_tables(uint64_t phys_offset, page_tables_t* bump, Elf64_Ehdr* he
   entry_t root = (entry_t) pa_to_va((addr_t) allocate((void*)bump), &profile);
 
   // Map the segments.
+  mem_size = 0;
   for (int i = 0; i < header->e_phnum; i++) {
     Elf64_Phdr seg = segments[i];
     addr_t start = seg.p_vaddr;
     addr_t end = seg.p_vaddr + align_up(seg.p_memsz);
-    info.extras = (void*) &seg;
+    info.segment = &seg;
+    info.segment_offset = mem_size; 
     if (pt_walk_page_range(root, PT_PML4, start, end, &profile)) {
       ERROR("Unable to map the region %llx -- %llx ", start, end);
       goto unmap_failure;
     }
+    mem_size += align_up(seg.p_memsz);
+  }
+  if (mem_size != phys_offset) {
+    ERROR("The computed memsize differs from the phys_offset");
+    goto unmap_failure;
   }
   return SUCCESS;
 unmap_failure:
