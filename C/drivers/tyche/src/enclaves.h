@@ -72,5 +72,6 @@ int mprotect_enclave(
     usize flags,
     enclave_segment_type_t tpe);
 int commit_enclave(enclave_handle_t handle, usize cr3, usize rip, usize rsp);
+int delete_enclave(enclave_handle_t handle);
 
 #endif /*__SRC_ENCLAVES_H__*/

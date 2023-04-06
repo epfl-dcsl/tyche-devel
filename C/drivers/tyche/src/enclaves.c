@@ -320,5 +320,40 @@ delete_fail:
   encl->domain_id = UNINIT_DOM_ID;
 failure:
   return FAILURE;
+}
 
+int delete_enclave(enclave_handle_t handle)
+{
+  enclave_t* encl = NULL;
+  enclave_segment_t* segment = NULL;
+  encl = find_enclave(handle);
+  if (encl == NULL) {
+    ERROR("The enclave %lld does not exist.", handle);
+    goto failure;
+  }
+  if (encl->domain_id == UNINIT_DOM_ID) {
+    goto delete_encl_struct;
+  }
+  if (revoke_domain(encl->domain_id) != SUCCESS) {
+    ERROR("Unable to delete the domain %lld for enclave %lld",
+        encl->domain_id, handle);
+    goto failure;
+  }
+
+delete_encl_struct:
+  // Delete all segments;
+  while(!dll_is_empty(&(encl->segments))) {
+    segment = encl->segments.head;
+    dll_remove(&(encl->segments), segment, list);
+    kfree(segment);
+    segment = NULL;
+  }
+
+  // Delete the enclave memory region.
+  free_pages_exact(phys_to_virt((phys_addr_t)(encl->phys_start)), encl->size);
+  dll_remove(&enclaves, encl, list);
+  kfree(encl);
+  return SUCCESS;
+failure:
+  return FAILURE;
 }
