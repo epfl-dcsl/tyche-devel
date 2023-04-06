@@ -1,6 +1,8 @@
 #ifndef __SRC_ENCLAVES_H__
 #define __SRC_ENCLAVES_H__
 
+#include <linux/mm_types.h>
+
 #include "dll.h"
 #include "tyche_capabilities_types.h"
 #define _IN_MODULE
@@ -61,5 +63,6 @@ typedef struct enclave_t {
 
 void init_enclaves(void);
 int init_capabilities(void);
+int mmap_enclave(enclave_handle_t handle, struct vm_area_struct* vma);
 
 #endif /*__SRC_ENCLAVES_H__*/

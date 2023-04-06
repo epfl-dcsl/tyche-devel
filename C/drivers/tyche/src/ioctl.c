@@ -106,6 +106,7 @@ long tyche_ioctl(struct file* file, unsigned int cmd, unsigned long arg)
 
 int tyche_mmap(struct file *file, struct vm_area_struct *vma)
 {
-  //TODO
-  return FAILURE;
+  enclave_handle_t handle = (enclave_handle_t) vma->vm_pgoff;
+  vma->vm_pgoff = 0;
+  return mmap_enclave(handle, vma);
 }

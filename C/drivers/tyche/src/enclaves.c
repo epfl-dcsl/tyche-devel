@@ -111,7 +111,7 @@ int mmap_enclave(enclave_handle_t handle, struct vm_area_struct *vma)
     goto failure;
   }
   
-  // Now attempt to allocate a contiguous memory region.
+  // Allocate a contiguous memory region.
   size = vma->vm_end - vma->vm_start;
   allocation = alloc_pages_exact(size, GFP_KERNEL); 
   if (allocation == NULL) {
