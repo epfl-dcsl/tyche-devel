@@ -65,6 +65,8 @@ typedef struct enclave_t {
 void init_enclaves(void);
 /// Initializes the capability library.
 int init_capabilities(void);
+/// Create a new enclave with handle.
+int create_enclave(enclave_handle_t handle, usize spawn, usize comm);
 /// Handles an mmap call to the driver.
 /// We expect the enclave handle to be set in the offset.
 int mmap_enclave(enclave_handle_t handle, struct vm_area_struct* vma);

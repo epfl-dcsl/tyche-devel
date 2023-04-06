@@ -100,7 +100,98 @@ int tyche_open(struct inode* inode, struct file* file)
 
 long tyche_ioctl(struct file* file, unsigned int cmd, unsigned long arg)
 {
-  //TODO
+  msg_enclave_info_t info = {0, UNINIT_USIZE}; 
+  msg_enclave_commit_t commit = {0, 0, 0, 0};
+  msg_enclave_mprotect_t mprotect = {0, 0, 0, 0, 0};
+  switch(cmd) {
+    case TYCHE_ENCLAVE_CREATE:
+      info.handle = tyche_ids++;
+      if (create_enclave(info.handle, 1, 1) != SUCCESS) {
+        ERROR("Unable to create a new enclave");
+        goto failure;
+      }
+      if (copy_to_user(
+            (msg_enclave_info_t*) arg, 
+            &info, 
+            sizeof(msg_enclave_info_t))) {
+        ERROR("Unable to copy enclave handle %lld", info.handle);
+        goto failure;
+      }
+      break;
+    case TYCHE_ENCLAVE_GET_PHYSOFFSET:
+      if (copy_from_user(
+            &info,
+            (msg_enclave_info_t*) arg,
+            sizeof(msg_enclave_info_t))) {
+        ERROR("Unable to copy arguments from user.");
+        goto failure;
+      }
+      if (get_physoffset_enclave(info.handle, &info.physoffset) != SUCCESS) {
+        ERROR("Unable to get the physoffset for enclave %lld", info.handle);
+        goto failure;
+      }
+      if (copy_to_user(
+            (msg_enclave_info_t*) arg, 
+            &info, 
+            sizeof(msg_enclave_info_t))) {
+        ERROR("Unable to copy enclave physoffset for %lld", info.handle);
+        goto failure;
+      }
+      break;
+    case TYCHE_ENCLAVE_COMMIT:
+      if (copy_from_user(
+            &commit,
+            (msg_enclave_commit_t*) arg,
+            sizeof(msg_enclave_commit_t))) {
+        ERROR("Unable to copy commit arguments from user.");
+        goto failure;
+      }
+      if (commit_enclave(
+            commit.handle,
+            commit.page_tables,
+            commit.entry,
+            commit.stack) != SUCCESS) {
+        ERROR("Commit failed for enclave %lld", commit.handle);
+        goto failure;
+      }
+      break;
+    case TYCHE_ENCLAVE_MPROTECT:
+      if (copy_from_user(
+            &mprotect,
+            (msg_enclave_mprotect_t*) arg,
+            sizeof(msg_enclave_mprotect_t))) {
+        ERROR("Unable to copy arguments from user.");
+        goto failure;
+      }
+      if (mprotect_enclave(
+            mprotect.handle,
+            mprotect.start,
+            mprotect.size,
+            mprotect.flags,
+            mprotect.tpe) != SUCCESS) {
+        ERROR("Unable to mprotect he region for enclave %lld", mprotect.handle);
+        goto failure;
+      }
+      break;
+    case TYCHE_ENCLAVE_DELETE:
+      if (copy_from_user(
+            &info,
+            (msg_enclave_info_t*) arg,
+            sizeof(msg_enclave_info_t))) {
+        ERROR("Unable to copy arguments from user.");
+        goto failure;
+      }
+      if (delete_enclave(info.handle) != SUCCESS) {
+        ERROR("Unable to delete the enclave %lld", info.handle);
+        goto failure;
+      }
+      break;
+    default:
+      ERROR("The command is not valid!");
+      goto failure;
+  }
+  return SUCCESS;
+failure:
   return FAILURE;
 }
 
