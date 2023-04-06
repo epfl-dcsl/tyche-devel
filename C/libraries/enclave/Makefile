@@ -1,4 +1,4 @@
-all: encl_loader.so encl.so test-enclave test enclave_loader.so
+all: encl_loader.so encl.so test-enclave test
 
 # Dependencies for the build.
 LIB_PT=../pts
@@ -11,10 +11,6 @@ ENCL_DRIVER=../../drivers/enclave
 # Configuration for loader version 1.
 CODE_LOADER = $(wildcard loader/*.c)
 HDRS_LOADER = $(wildcard loader/*.h) $(wildcard include/*.h)
-
-# Configuration for loader version 2.
-CODE_LOADER2 = $(wildcard loader2/*.c)
-HDRS_LOADER2 = $(wildcard loader2/*.h) $(wildcard include/*.h)
 
 # Configuration for the runtime.
 CODE_RT = $(wildcard runtime/*.c) $(wildcard runtime/*.S)
@@ -35,14 +31,8 @@ WITH_PTS_INCLUDES = $(COMMON_INCLUDES) -I$(LIB_PT)/include
 # Configs for dynamic library.
 ELF_CONFIG= -Wl,-R $(ELF_LIB) -L$(ELF_LIB)
 
-#TODO fix this, cleanup this entire makefile.
-#LOADER2_SRC=loader2/lib.c loader2/pts.c $(LIB_PT)/src/lib.c $(LIB_PT)/src/x86_64_pt.c
-
 encl_loader.so: $(CODE_LOADER) $(HDRS_LOADER)
 	gcc -DTYCHE_USER_SPACE=1 -g $(COMMON_INCLUDES) $(ELF_CONFIG) -shared -o $@ -fPIC $(CODE_LOADER) -lelf64
-
-enclave_loader.so: $(CODE_LOADER2) $(HDRS_LOADER2)
-	gcc -DTYCHE_USER_SPACE=1 -g $(WITH_PTS_INCLUDES) $(ELF_CONFIG) -shared -o $@ -fPIC $(CODE_LOADER2) -lelf64
 
 # The following targets won't be needed anymore.
 encl.so: $(CODE_RT) $(HDRS_RT)
@@ -57,4 +47,4 @@ test-enclave: $(CODE_TEST_ENCLAVE) $(HDRS_TEST_ENCLAVE) encl_loader.so encl.so
 .PHONY: clean
 
 clean:
-	rm -rf encl_loader.so encl.so test test-enclave enclave_loader.so
+	rm -rf encl_loader.so encl.so test test-enclave
