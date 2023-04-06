@@ -33,7 +33,7 @@ int ioctl_getphysoffset_enclave(int driver_fd, enclave_handle_t handle, usize* p
   *physoffset = info.physoffset;
   return SUCCESS;
 failure:
-  return failure;
+  return FAILURE;
 }
 
 int ioctl_commit_enclave(
