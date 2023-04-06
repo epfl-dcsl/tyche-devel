@@ -65,22 +65,6 @@
 #endif
 
 #ifdef TYCHE_USER_SPACE
-#define WARN(...)                                              \
-  do {                                                         \
-    printf("[WARN @%s:%d %s] ", __FILE__, __LINE__, __func__); \
-    printf(__VA_ARGS__);                                       \
-    printf("\n");                                              \
-  } while (0);
-#else
-#define WARN(...)                                                      \
-  do {                                                                 \
-    printk(KERN_WARNING "[@%s:%d %s] ", __FILE__, __LINE__, __func__); \
-    printk(KERN_WARNING __VA_ARGS__);                                  \
-    printk("\n");                                                      \
-  } while (0);
-#endif
-
-#ifdef TYCHE_USER_SPACE
 #define ERROR(...)                                              \
   do {                                                          \
     printf("[ERROR @%s:%d %s] ", __FILE__, __LINE__, __func__); \
@@ -88,11 +72,11 @@
     printf("\n");                                               \
   } while (0);
 #else
-#define ERROR(...)                                                   \
-  do {                                                               \
-    printk(KERN_ERROR "[@%s:%d %s] ", __FILE__, __LINE__, __func__); \
-    printk(KERN_ERROR __VA_ARGS__);                                  \
-    printk("\n");                                                    \
+#define ERROR(...)                                                 \
+  do {                                                             \
+    printk(KERN_ERR "[@%s:%d %s] ", __FILE__, __LINE__, __func__); \
+    printk(KERN_ERR __VA_ARGS__);                                  \
+    printk("\n");                                                  \
   } while (0);
 #endif
 

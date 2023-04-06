@@ -11,9 +11,12 @@
 #include "tyche_enclave.h"
 #include "enclave_loader.h"
 
+// —————————————————— Actual constants used for the bumper —————————————————— //
+
 uint64_t bump_nb_pages = DEFAULT_NB_PAGES; 
 uint64_t bump_size = DEFAULT_BUMP_SIZE; 
 
+// ——————————————————————————————— Functions ———————————————————————————————— //
 
 addr_t align_up(addr_t addr)
 {
@@ -28,7 +31,7 @@ static void parse_env() {
   if (nb_pages != NULL) {
     uint64_t value = strtoull(nb_pages, NULL, 0);  
     if (value == ULLONG_MAX) {
-      WARN("The provided value for NB_PAGES_ENVVAR is invalid and ignored.");
+      ERROR("The provided value for NB_PAGES_ENVVAR is invalid and ignored.");
       return;
     } 
     bump_nb_pages = value;
