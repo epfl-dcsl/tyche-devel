@@ -10,11 +10,12 @@
 // ——————————————————————————————— Constants ———————————————————————————————— //
 
 #define PAGE_SIZE ((uint64_t)(0x1000))
+#define ENTRIES_PER_PAGE (512)
 
 // ————————————————————————————————— Types —————————————————————————————————— //
 
 typedef struct __attribute__((__packed__)) __attribute__((aligned(4096))) {
-  uint64_t data[512];
+  uint64_t data[ENTRIES_PER_PAGE];
 } page_t;
 
 /// The page tables rely on a bump allocator.
@@ -74,6 +75,8 @@ typedef struct {
   usize virtoffset;
   /// The physical offset for the enclave.
   usize physoffset;
+  /// The overall size of the enclave segment.
+  usize size;
   /// Entry point.
   usize vaddr_entry;
   /// Stack.
@@ -91,7 +94,7 @@ typedef struct {
   int elf_fd;
 
   /// Driver domain handle.
-  enclave_handle_t domain_handle;
+  enclave_handle_t handle;
 
   /// The parser state for the enclave.
   parser_t parser;

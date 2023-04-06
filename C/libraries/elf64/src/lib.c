@@ -50,6 +50,13 @@ size_t read_elf64_segments(int fd, Elf64_Ehdr eh, Elf64_Phdr** segments)
   return eh.e_phnum;
 }
 
+void load_elf64_segment(int fd, void* dest, Elf64_Phdr segment)
+{
+  TEST(dest != NULL);
+  TEST(lseek(fd, segment.p_offset, SEEK_SET) == segment.p_offset);
+  TEST(read(fd, dest, segment.p_filesz));
+}
+
 void* read_section64(int fd, Elf64_Shdr sh)
 {
   void* result = malloc(sh.sh_size);

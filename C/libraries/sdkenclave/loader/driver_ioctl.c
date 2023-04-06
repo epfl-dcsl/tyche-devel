@@ -1,4 +1,6 @@
 #include <sys/ioctl.h> 
+#include <sys/mman.h>
+#include <sys/errno.h>
 #include "driver_ioctl.h"
 #include "common.h"
 
@@ -79,6 +81,25 @@ int ioctl_delete_enclave(int driver_fd, enclave_handle_t handle)
     ERROR("Failed to delete enclave %lld.", handle);
     goto failure;
   }
+  return SUCCESS;
+failure:
+  return FAILURE;
+}
+
+int ioctl_mmap(int driver_fd, enclave_handle_t handle, usize size, usize* virtoffset)
+{
+  void* result = NULL;
+  if (virtoffset == NULL) {
+    ERROR("The virtoffset variable is null");
+    goto failure;
+  }
+  result = mmap(NULL, (size_t) size, PROT_READ|PROT_WRITE,
+      MAP_ANONYMOUS|MAP_PRIVATE|MAP_POPULATE, driver_fd, handle);
+  if (result == MAP_FAILED) {
+    ERROR("MMap to the driver failed %d", errno);
+    goto failure;
+  }
+  *virtoffset = (usize) result;
   return SUCCESS;
 failure:
   return FAILURE;

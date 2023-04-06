@@ -1,5 +1,5 @@
-#ifndef __LOADER2_PTS_H__
-#define __LOADER2_PTS_H__
+#ifndef __LOADER_PTS_H__
+#define __LOADER_PTS_H__
 
 #include "enclave_loader.h"
 
@@ -25,5 +25,7 @@ int create_page_tables(
     page_tables_t* bump,
     Elf64_Ehdr* header,
     Elf64_Phdr* segments);
+/// Adds offset to all the page tables entries.
+int fix_page_tables(usize offset, page_tables_t* tables);
 
-#endif /*__LOADER2_PTS_H__*/
+#endif /*__LOADER_PTS_H__*/

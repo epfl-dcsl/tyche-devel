@@ -17,6 +17,9 @@ size_t read_elf64_sections(int fd, Elf64_Ehdr eh, Elf64_Shdr** sections);
 /// segments is freeable.
 size_t read_elf64_segments(int fd, Elf64_Ehdr eh, Elf64_Phdr** segments);
 
+/// Loads the segment and reads it into dest.
+void load_elf64_segment(int fd, void* dest, Elf64_Phdr segment);
+
 /// Read a section from and ELF file.
 /// Result is freeable.
 void* read_section64(int fd, Elf64_Shdr sh);

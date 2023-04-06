@@ -24,5 +24,6 @@ int ioctl_mprotect_enclave(
     memory_access_right_t flags,
     enclave_segment_type_t tpe);
 int ioctl_delete_enclave(int driver_fd, enclave_handle_t handle);
+int ioctl_mmap(int driver_fd, enclave_handle_t handle, usize size, usize* virtoffset);
 
 #endif /*__LOADER_DRIVER_IOCTL_H__*/

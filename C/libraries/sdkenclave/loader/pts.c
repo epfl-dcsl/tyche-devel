@@ -273,3 +273,26 @@ unmap_failure:
 failure:
   return FAILURE;
 }
+
+
+int fix_page_tables(usize offset, page_tables_t * tables)
+{
+  if (tables == NULL) {
+    ERROR("The provided tables is null.");
+    goto failure;
+  }
+  for (int i = 0; i < tables->idx; i++) {
+    page_t* page = &tables->pages[i];
+    for (int j = 0; j < ENTRIES_PER_PAGE; j++) {
+      uint64_t* entry = &(page->data[j]); 
+      if (*entry & PT_PP != PT_PP) {
+        continue;
+      }
+      uint64_t addr = offset + (*entry & PT_PHYS_PAGE_MASK);
+      *entry = (*entry & !PT_PHYS_PAGE_MASK) | addr;
+    }
+  } 
+  return SUCCESS;
+failure:
+  return FAILURE;
+}
