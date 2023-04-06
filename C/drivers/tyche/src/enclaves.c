@@ -9,6 +9,7 @@
 
 #include "common.h"
 #include "enclaves.h"
+#include "tyche_capabilities.h"
 
 // ———————————————————————————————— Globals ————————————————————————————————— //
 
@@ -79,7 +80,6 @@ failure:
   return FAILURE;
 }
 
-
 int mmap_enclave(enclave_handle_t handle, struct vm_area_struct *vma)
 {
   void* allocation = NULL;
@@ -104,6 +104,11 @@ int mmap_enclave(enclave_handle_t handle, struct vm_area_struct *vma)
   encl = find_enclave(handle);
   if (encl == NULL) {
     ERROR("Unable to find the enclave.");
+    goto failure;
+  }
+  if (encl->pid != current->pid) {
+    ERROR("Wrong pid for enclave");
+    ERROR("Expected: %d, got: %d", encl->pid, current->pid);
     goto failure;
   }
   if (encl->phys_start != UNINIT_USIZE || encl->virt_start != UNINIT_USIZE) {
@@ -141,4 +146,179 @@ fail_free:
   free_pages_exact(allocation, size);
 failure:
   return FAILURE;
+}
+
+int get_physoffset_enclave(enclave_handle_t handle, usize* phys_offset)
+{
+  enclave_t* encl = NULL;
+  if (phys_offset == NULL) {
+    ERROR("The provided phys_offset variable is null.");
+    goto failure;
+  }
+  encl = find_enclave(handle);
+  if (encl == NULL) {
+    ERROR("The handle %lld does not correspond to an enclave.", handle);
+    goto failure;
+  }
+  if (encl->pid != current->pid) {
+    ERROR("Wrong pid for enclave");
+    ERROR("Expected: %d, got: %d", encl->pid, current->pid);
+    goto failure;
+  }
+  if (encl->virt_start == UNINIT_USIZE) {
+    ERROR("The enclave %lld is not initialized.", handle);
+    ERROR("Call mmap first!");
+    goto failure;
+  }
+  *phys_offset = encl->phys_start;
+  return SUCCESS;
+failure:
+  return FAILURE;
+}
+
+int mprotect_enclave(
+    enclave_handle_t handle,
+    usize vstart,
+    usize size,
+    usize flags,
+    enclave_segment_type_t tpe)
+{
+  enclave_t* encl = NULL;
+  enclave_segment_t* segment = NULL; 
+  encl = find_enclave(handle);
+  if (encl == NULL) {
+    ERROR("Unable to find the enclave.");
+    goto failure;
+  } 
+  if (encl->pid != current->pid) {
+    ERROR("Wrong pid for enclave");
+    ERROR("Expected: %d, got: %d", encl->pid, current->pid);
+    goto failure;
+  }
+  if (encl->virt_start == UNINIT_USIZE) {
+    ERROR("The enclave %lld doesn't have mmaped memory.", handle);
+    goto failure;
+  }
+  // Check the mprotect has the correct bounds.
+  if (dll_is_empty(&(encl->segments)) && vstart != encl->virt_start) {
+    ERROR("Out of order specification of segment");
+    ERROR("Expected: %llx, got: %llx", encl->virt_start, vstart);
+    goto failure;
+  }
+  if (!dll_is_empty(&(encl->segments)) 
+      && (encl->segments.tail->vstart + encl->segments.tail->size) != vstart) {
+    ERROR("Out of order specification of segment.");
+    ERROR("Expected %llx, got: %llx",
+        (encl->segments.tail->vstart + encl->segments.tail->size), vstart);
+    goto failure;
+  }
+  if(vstart + size > encl->virt_start + encl->size) {
+    ERROR("Mapping overflows the registered memory region.");
+    ERROR("Max valid address: %llx, got: %llx", encl->virt_start + encl->size,
+        vstart + size);
+    goto failure;
+  }
+  
+  // Add the segment.
+  segment = kmalloc(sizeof(enclave_segment_t), GFP_KERNEL);
+  if (segment == NULL) {
+    ERROR("Unable to allocate new segment");
+  }
+  memset(segment, 0, sizeof(enclave_segment_t));
+  segment->vstart = vstart;
+  segment->size = size;
+  segment->flags = flags;
+  segment->tpe = tpe;
+  dll_init_elem(segment, list);
+  dll_add(&(encl->segments), segment, list);
+  return SUCCESS;
+failure:
+  return FAILURE;
+}
+
+int commit_enclave(enclave_handle_t handle, usize cr3, usize rip, usize rsp)
+{
+  usize vbase = 0;
+  usize poffset = 0;
+  enclave_t* encl = NULL;
+  enclave_segment_t* segment = NULL;
+  encl = find_enclave(handle);
+  if (encl == NULL) {
+    ERROR("Unable to find the enclave.");
+    goto failure;
+  } 
+  if (encl->pid != current->pid) {
+    ERROR("Wrong pid for enclave");
+    ERROR("Expected: %d, got: %d", encl->pid, current->pid);
+    goto failure;
+  }
+  if (encl->virt_start == UNINIT_USIZE) {
+    ERROR("The enclave %lld doesn't have mmaped memory.", handle);
+    goto failure;
+  }
+  if (dll_is_empty(&encl->segments)) {
+    ERROR("Missing segments for enclave %lld", handle);
+    goto failure;
+  }
+  if ((encl->segments.tail->vstart + encl->segments.tail->size)
+      != (encl->virt_start + encl->size)) {
+    ERROR("Some segments were not specified for the enclave %lld", handle);
+    goto failure;
+  }
+  if (encl->domain_id != UNINIT_DOM_ID) {
+    ERROR("The enclave %lld is already committed.", handle);
+    goto failure;
+  }
+
+  // All checks are done, call into the capability library.
+  if (create_domain(&(encl->domain_id), 1, 1) != SUCCESS) {
+    ERROR("Monitor rejected the creation of a domain for enclave %lld", handle);
+    goto failure;
+  }
+
+  // Add the segments.
+  vbase = encl->virt_start;
+  poffset = encl->phys_start;
+  dll_foreach(&(encl->segments), segment, list) {
+    usize paddr = segment->vstart - vbase + poffset; 
+    switch(segment->tpe) {
+      case SHARED:
+        if (share_region(encl->domain_id, paddr, paddr + segment->size,
+              (memory_access_right_t) segment->flags) != SUCCESS) {
+          ERROR("Unable to share segment %llx -- %llx {%llx}", segment->vstart,
+              segment->size, segment->flags);
+          goto delete_fail;
+        }
+        break;
+      case CONFIDENTIAL:
+        if (grant_region(encl->domain_id, paddr, paddr + segment->size,
+              (memory_access_right_t) segment->flags) != SUCCESS) {
+          ERROR("Unable to share segment %llx -- %llx {%llx}", segment->vstart,
+              segment->size, segment->flags);
+          goto delete_fail;
+        }
+        break;
+      default:
+        ERROR("Invalid tpe for segment!");
+        goto delete_fail;
+    }
+  }
+
+  // Commit the enclave.
+  if (seal_domain(encl->domain_id, ALL_CORES_MAP, cr3, rip, rsp) != SUCCESS) {
+    ERROR("Unable to seal enclave %lld", handle);
+    goto delete_fail;
+  }
+
+  // We are all done!
+  return SUCCESS;
+delete_fail:
+  if (revoke_domain(encl->domain_id) != SUCCESS) {
+    ERROR("Failed to revoke the domain %lld for enclave %lld.",
+        encl->domain_id, handle);
+  }
+  encl->domain_id = UNINIT_DOM_ID;
+failure:
+  return FAILURE;
+
 }

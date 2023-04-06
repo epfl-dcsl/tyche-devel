@@ -14,10 +14,10 @@
 #define UNINIT_USIZE (~((usize)0))
 #define UNINIT_DOM_ID (~((domain_id_t)0))
 
-/// Describes an enclave's memory segment.
+/// Describes an enclave's memory segment in user process address space.
 typedef struct enclave_segment_t {
-  /// Start of the physical memory segment.
-  usize start;
+  /// Start of the virtual memory segment.
+  usize vstart;
 
   /// Size of the memory segment.
   usize size;
@@ -64,5 +64,13 @@ typedef struct enclave_t {
 void init_enclaves(void);
 int init_capabilities(void);
 int mmap_enclave(enclave_handle_t handle, struct vm_area_struct* vma);
+int get_physoffset_enclave(enclave_handle_t handle, usize* phys_offset);
+int mprotect_enclave(
+    enclave_handle_t handle,
+    usize vstart,
+    usize size,
+    usize flags,
+    enclave_segment_type_t tpe);
+int commit_enclave(enclave_handle_t handle, usize cr3, usize rip, usize rsp);
 
 #endif /*__SRC_ENCLAVES_H__*/
