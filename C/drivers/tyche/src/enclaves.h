@@ -23,7 +23,7 @@ typedef struct enclave_segment_t {
   usize size;
 
   /// Protection flags.
-  usize flags;
+  memory_access_right_t flags;
 
   /// Type for the region: {Shared|Confidential}.
   enclave_segment_type_t tpe;
@@ -61,17 +61,25 @@ typedef struct enclave_t {
 
 // ——————————————————————————————— Functions ———————————————————————————————— //
 
+/// Initializes the driver.
 void init_enclaves(void);
+/// Initializes the capability library.
 int init_capabilities(void);
+/// Handles an mmap call to the driver.
+/// We expect the enclave handle to be set in the offset.
 int mmap_enclave(enclave_handle_t handle, struct vm_area_struct* vma);
+/// Returns the physoffset of the enclave.
 int get_physoffset_enclave(enclave_handle_t handle, usize* phys_offset);
+/// Sets up access rights and conf|share for the segment.
 int mprotect_enclave(
     enclave_handle_t handle,
     usize vstart,
     usize size,
-    usize flags,
+    memory_access_right_t flags,
     enclave_segment_type_t tpe);
+/// Commits the enclave. This is where the capability operations are done.
 int commit_enclave(enclave_handle_t handle, usize cr3, usize rip, usize rsp);
+/// Delete the enclave and revoke the capabilities.
 int delete_enclave(enclave_handle_t handle);
 
 #endif /*__SRC_ENCLAVES_H__*/

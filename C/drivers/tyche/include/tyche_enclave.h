@@ -21,55 +21,53 @@
 // —————————————————————— Types Exposed by the Library —————————————————————— //
 typedef domain_id_t enclave_handle_t;
 
-/// Message type to create a new enclave.
-struct tyche_encl_create_t {
-  enclave_handle_t handle;
-};
-
 typedef enum enclave_segment_type_t {
   SHARED = 0,
   CONFIDENTIAL = 1,
 } enclave_segment_type_t;
 
+// ———————————————————————————————— Messages ———————————————————————————————— //
+
+/// Default message used to communicate with the driver.
+/// create_enclave sets the handle;
+/// get_physoffset expects the handle to be valid and sets the physoffset.
+typedef struct {
+  enclave_handle_t handle;
+  usize physoffset;
+} msg_enclave_info_t;
+
 /// Message type to add a new region.
-struct tyche_encl_add_region_t {
+typedef struct {
   /// Unique enclave reference capability.
   enclave_handle_t handle;
 
-  /// Start address. Must be page aligned.
-  uint64_t start;
+  /// Start virtual address. Must be page aligned and within the mmaped region.
+  usize start;
 
-  /// End address. Must be page aligned.
-  uint64_t end;
-
-  /// Source for the content of the region.
-  uint64_t src;
+  /// Must be page aligned, greater than start, and within the mmaped region.
+  usize size;
 
   /// Access right (RWXU) for this region.
   memory_access_right_t flags;
 
   /// Type of mapping: Confidential or Shared.
   enclave_segment_type_t tpe;
-
-  /// Not read by the module, but can be used by user level libraries for
-  /// extra information.
-  void* extra;
-};
+} msg_enclave_mprotect_t;
 
 /// Structure of the commit message.
-struct tyche_encl_commit_t {
+typedef struct {
   /// The driver handle.
   enclave_handle_t handle;
 
-  /// The handle to reference the domain.
-  domain_id_t domain_handle;
-
   /// The pointer to the stack.
-  uint64_t stack;
+  usize stack;
 
   /// The entry point.
-  uint64_t entry;
-};
+  usize entry;
+
+  /// The page tables.
+  usize page_tables;
+} msg_enclave_commit_t;
 
 /// Structure to perform a transition.
 struct tyche_encl_switch_t {
@@ -81,12 +79,11 @@ struct tyche_encl_switch_t {
 };
 
 // ——————————————————————————— Tyche Enclave IOCTL API —————————————————————— //
-#define TYCHE_ENCLAVE_DBG _IOR('a', 'a', uint64_t*)
-#define TYCHE_ENCLAVE_CREATE _IOR('a', 'b', struct tyche_encl_create_t*)
-#define TYCHE_ENCLAVE_ADD_REGION _IOW('a', 'c', struct tyche_encl_add_region_t*)
-#define TYCHE_ENCLAVE_COMMIT _IOWR('a', 'd', struct tyche_encl_commit_t*)
-#define TYCHE_ENCLAVE_ADD_STACK _IOW('a', 'e', struct tyche_encl_add_region_t*)
+#define TYCHE_ENCLAVE_CREATE _IOR('a', 'b', msg_enclave_info_t*)
+#define TYCHE_ENCLAVE_GET_PHYSOFFSET _IOW('a', 'c', msg_enclave_info_t*)
+#define TYCHE_ENCLAVE_COMMIT _IOWR('a', 'd', msg_enclave_commit_t*)
+#define TYCHE_ENCLAVE_MPROTECT _IOW('a', 'e', msg_enclave_mprotect_t*)
 #define TYCHE_TRANSITION _IOR('a', 'f', struct tyche_encl_switch_t*)
-#define TYCHE_ENCLAVE_DELETE _IOR('a', 'g', enclave_handle_t)
+#define TYCHE_ENCLAVE_DELETE _IOR('a', 'g', msg_enclave_info_t*)
 
 #endif

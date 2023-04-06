@@ -180,7 +180,7 @@ int mprotect_enclave(
     enclave_handle_t handle,
     usize vstart,
     usize size,
-    usize flags,
+    memory_access_right_t flags,
     enclave_segment_type_t tpe)
 {
   enclave_t* encl = NULL;
@@ -283,17 +283,23 @@ int commit_enclave(enclave_handle_t handle, usize cr3, usize rip, usize rsp)
     usize paddr = segment->vstart - vbase + poffset; 
     switch(segment->tpe) {
       case SHARED:
-        if (share_region(encl->domain_id, paddr, paddr + segment->size,
-              (memory_access_right_t) segment->flags) != SUCCESS) {
-          ERROR("Unable to share segment %llx -- %llx {%llx}", segment->vstart,
+        if (share_region(
+              encl->domain_id, 
+              paddr,
+              paddr + segment->size,
+              segment->flags) != SUCCESS) {
+          ERROR("Unable to share segment %llx -- %llx {%x}", segment->vstart,
               segment->size, segment->flags);
           goto delete_fail;
         }
         break;
       case CONFIDENTIAL:
-        if (grant_region(encl->domain_id, paddr, paddr + segment->size,
-              (memory_access_right_t) segment->flags) != SUCCESS) {
-          ERROR("Unable to share segment %llx -- %llx {%llx}", segment->vstart,
+        if (grant_region(
+              encl->domain_id,
+              paddr,
+              paddr + segment->size,
+              segment->flags) != SUCCESS) {
+          ERROR("Unable to share segment %llx -- %llx {%x}", segment->vstart,
               segment->size, segment->flags);
           goto delete_fail;
         }
