@@ -12,8 +12,34 @@
 
 // ——————————————————————————————— Constants ———————————————————————————————— //
 const char* ENCLAVE_DRIVER = "/dev/tyche_enclave"; 
+const char* SHARED_PREFIX = ".tyche_shared";
 
 // ——————————————————————————————— Functions ———————————————————————————————— //
+
+
+static memory_access_right_t translate_flags(Elf64_Word flags) {
+  memory_access_right_t rights = 0;
+  if ((flags & PF_R) == PF_R) {
+    rights |= MEM_READ;
+  }
+  if ((flags & PF_X) == PF_X) {
+    rights |= MEM_EXEC;
+  }
+  if ((flags & PF_W) == PF_W) {
+    rights |= MEM_WRITE;
+  }
+  //TODO do user?
+  rights |= MEM_SUPER;
+  return rights;
+}
+
+static enclave_segment_type_t get_section_tpe_from_name(char* name)
+{
+  if (strncmp(SHARED_PREFIX, name, strlen(SHARED_PREFIX)) == 0) {
+    return SHARED;
+  }
+  return CONFIDENTIAL;
+}
 
 int parse_enclave(enclave_t* enclave, const char* file)
 {
@@ -40,6 +66,10 @@ int parse_enclave(enclave_t* enclave, const char* file)
   read_elf64_header(enclave->parser.fd, &(enclave->parser.header));
   read_elf64_segments(enclave->parser.fd,
       enclave->parser.header, &(enclave->parser.segments)); 
+  read_elf64_sections(enclave->parser.fd,
+      enclave->parser.header, &(enclave->parser.sections));
+  enclave->parser.strings = read_section64(enclave->parser.fd,
+      enclave->parser.sections[enclave->parser.header.e_shstrndx]);
 
   //TODO find stack and entry point.
 
@@ -73,7 +103,7 @@ failure:
 int load_enclave(enclave_t* enclave)
 {
   usize size = 0;
-  usize mem_size = 0;
+  usize phys_size = 0;
   if (enclave == NULL) {
     ERROR("The enclave is null.");
     goto failure;
@@ -121,14 +151,43 @@ int load_enclave(enclave_t* enclave)
   }
 
   // Copy the enclave's content.
+  phys_size = 0;
   for (int i = 0; i < enclave->parser.header.e_phnum; i++) {
     Elf64_Phdr seg = enclave->parser.segments[i];
-    addr_t dest = enclave->map.virtoffset + mem_size;
+    addr_t dest = enclave->map.virtoffset + phys_size;
     addr_t size = align_up(seg.p_memsz);
+    addr_t local_size = 0;
     load_elf64_segment(enclave->parser.fd, (void*) dest, seg);
-    mem_size+= size;
+    addr_t curr_va = enclave->map.virtoffset;
+    // Find all the sections within that segment and call the driver.
+    // TODO First assume they all come sorted.
+    for (int j = 0; j < enclave->parser.header.e_shnum; j++) {
+      Elf64_Shdr sect = enclave->parser.sections[j]; 
+      usize sect_size = align_up(sect.sh_size);
+      enclave_segment_type_t tpe = get_section_tpe_from_name(
+          sect.sh_name + enclave->parser.strings);  
+      if (sect.sh_addr != curr_va) {
+        continue; 
+      }
+      if (ioctl_mprotect_enclave(
+            enclave->driver_fd,
+            enclave->handle,
+            sect.sh_addr,
+            sect_size,
+            translate_flags(seg.p_flags),
+            tpe) != SUCCESS) {
+        ERROR("Failed to mprotect the section %llx", sect.sh_addr);
+        goto failure;
+      }
+      local_size += sect_size;
+      curr_va += sect_size;
+    }
+    if (local_size != size) {
+      ERROR("We failed to find all the sections for the segment!");
+      goto failure;
+    } 
+    phys_size+= size;
   } 
-  //TODO read the sections now and call mprotect.
 
   // Copy the page tables + register them.
   do {

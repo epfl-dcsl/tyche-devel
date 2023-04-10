@@ -64,6 +64,12 @@ typedef struct {
   /// ELF segments, this is an array allocated by elf64.
   Elf64_Phdr* segments;
 
+  /// ELF sections, this is an array allocated by elf64.
+  Elf64_Shdr* sections;
+
+  /// ELF strings.
+  char* strings;
+
   /// Bump allocator for the page tables.
   page_tables_t bump;
 
