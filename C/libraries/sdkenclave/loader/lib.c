@@ -177,6 +177,7 @@ int load_enclave(enclave_t* enclave)
   if (ioctl_getphysoffset_enclave(
         enclave->driver_fd,
         enclave->handle,
+        enclave->map.virtoffset,
         &(enclave->map.physoffset)) != SUCCESS) {
     goto failure;
   }
@@ -195,13 +196,16 @@ int load_enclave(enclave_t* enclave)
   phys_size = 0;
   for (int i = 0; i < enclave->parser.header.e_phnum; i++) {
     Elf64_Phdr seg = enclave->parser.segments[i];
+    if (seg.p_type != PT_LOAD) {
+      continue;
+    }
     addr_t dest = enclave->map.virtoffset + phys_size;
     addr_t size = align_up(seg.p_memsz);
     addr_t local_size = 0;
     load_elf64_segment(enclave->parser.fd, (void*) dest, seg);
-    addr_t curr_va = enclave->map.virtoffset;
+    addr_t curr_va = seg.p_vaddr;
     // Find all the sections within that segment and call the driver.
-    // TODO First assume they all come sorted.
+    // TODO change this, they are not page aligned...
     for (int j = 0; j < enclave->parser.header.e_shnum; j++) {
       Elf64_Shdr sect = enclave->parser.sections[j]; 
       usize sect_size = align_up(sect.sh_size);
@@ -224,7 +228,8 @@ int load_enclave(enclave_t* enclave)
       curr_va += sect_size;
     }
     if (local_size != size) {
-      ERROR("We failed to find all the sections for the segment!");
+      ERROR("We failed to find all the sections for segment at %llx", seg.p_vaddr);
+      ERROR("expected %llx, got %llx, at curr_va: %llx", size, local_size, curr_va);
       goto failure;
     } 
     phys_size+= size;

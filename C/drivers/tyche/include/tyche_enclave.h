@@ -33,6 +33,7 @@ typedef enum enclave_segment_type_t {
 /// get_physoffset expects the handle to be valid and sets the physoffset.
 typedef struct {
   enclave_handle_t handle;
+  usize virtaddr;
   usize physoffset;
 } msg_enclave_info_t;
 

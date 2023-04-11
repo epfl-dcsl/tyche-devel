@@ -9,6 +9,7 @@ int ioctl_create_enclave(int driver_fd, enclave_handle_t* handle);
 int ioctl_getphysoffset_enclave(
     int driver_fd,
     enclave_handle_t handle,
+    usize virtoffset,
     usize* physoffset);
 int ioctl_commit_enclave(
     int driver_fd,

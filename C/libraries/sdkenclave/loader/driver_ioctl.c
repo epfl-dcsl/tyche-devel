@@ -21,9 +21,13 @@ failure:
   return FAILURE;
 }
 
-int ioctl_getphysoffset_enclave(int driver_fd, enclave_handle_t handle, usize* physoffset)
+int ioctl_getphysoffset_enclave(
+    int driver_fd,
+    enclave_handle_t handle,
+    usize virtoffset,
+    usize* physoffset)
 {
-  msg_enclave_info_t info = {handle, 0};
+  msg_enclave_info_t info = {handle, virtoffset, 0};
   if (physoffset == NULL) {
     ERROR("The physoffset is null.");
     goto failure;
@@ -94,12 +98,13 @@ int ioctl_mmap(int driver_fd, enclave_handle_t handle, usize size, usize* virtof
     goto failure;
   }
   result = mmap(NULL, (size_t) size, PROT_READ|PROT_WRITE,
-      MAP_ANONYMOUS|MAP_PRIVATE|MAP_POPULATE, driver_fd, handle);
+      /*MAP_ANONYMOUS|MAP_PRIVATE|MAP_POPULATE*/ MAP_PRIVATE, driver_fd, 0);
   if (result == MAP_FAILED) {
     ERROR("MMap to the driver failed %d", errno);
     goto failure;
   }
   *virtoffset = (usize) result;
+  LOG("mmap success for %lld, address %llx", handle, result);
   return SUCCESS;
 failure:
   return FAILURE;

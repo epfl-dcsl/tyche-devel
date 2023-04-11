@@ -20,7 +20,7 @@ static struct cdev tyche_cdev;
 static struct class *dev_class;
 
 // —————————————————————————————— Local State ——————————————————————————————— //
-static enclave_handle_t tyche_ids = 0; 
+static enclave_handle_t tyche_ids = 1; 
 
 // ———————————————————————————— File Operations ————————————————————————————— //
 
@@ -126,7 +126,7 @@ long tyche_ioctl(struct file* file, unsigned int cmd, unsigned long arg)
         ERROR("Unable to copy arguments from user.");
         goto failure;
       }
-      if (get_physoffset_enclave(info.handle, &info.physoffset) != SUCCESS) {
+      if (get_physoffset_enclave(info.handle, info.virtaddr, &info.physoffset) != SUCCESS) {
         ERROR("Unable to get the physoffset for enclave %lld", info.handle);
         goto failure;
       }
@@ -197,7 +197,5 @@ failure:
 
 int tyche_mmap(struct file *file, struct vm_area_struct *vma)
 {
-  enclave_handle_t handle = (enclave_handle_t) vma->vm_pgoff;
-  vma->vm_pgoff = 0;
-  return mmap_enclave(handle, vma);
+  return mmap_segment(vma);
 }

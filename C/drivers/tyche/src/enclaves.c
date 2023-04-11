@@ -14,6 +14,7 @@
 // ———————————————————————————————— Globals ————————————————————————————————— //
 
 static dll_list(enclave_t, enclaves);
+static dll_list(mmap_segment_t, mapped_segments);
 
 // ———————————————————————————— Helper Functions ———————————————————————————— //
 
@@ -45,6 +46,7 @@ failure:
 void init_enclaves(void)
 {
   dll_init_list((&enclaves));
+  dll_init_list((&mapped_segments));
   init_capabilities();
 }
 
@@ -80,11 +82,11 @@ failure:
   return FAILURE;
 }
 
-int mmap_enclave(enclave_handle_t handle, struct vm_area_struct *vma)
+int mmap_segment(struct vm_area_struct *vma)
 {
   void* allocation = NULL;
   usize size = 0;
-  enclave_t* encl = NULL;
+  mmap_segment_t* segment = NULL;
   unsigned long pfn = 0;
   if (vma == NULL) {
     ERROR("The provided vma is null.");
@@ -100,28 +102,30 @@ int mmap_enclave(enclave_handle_t handle, struct vm_area_struct *vma)
     goto failure;
   }
 
-  // Checks on the enclave.
-  encl = find_enclave(handle);
-  if (encl == NULL) {
-    ERROR("Unable to find the enclave.");
+  // Create the segment.
+  segment = kmalloc(sizeof(mmap_segment_t), GFP_KERNEL);
+  if (segment == NULL) {
+    ERROR("Unable to allocate mmap segment.");
     goto failure;
   }
+  segment->pid = current->pid;
+  /*
   if (encl->pid != current->pid) {
     ERROR("Wrong pid for enclave");
     ERROR("Expected: %d, got: %d", encl->pid, current->pid);
-    goto failure;
+    goto fail_free;
   }
   if (encl->phys_start != UNINIT_USIZE || encl->virt_start != UNINIT_USIZE) {
     ERROR("The enclave %lld  already has memory @%llx", handle, encl->phys_start);
-    goto failure;
-  }
+    goto fail_free;
+  }*/
   
   // Allocate a contiguous memory region.
   size = vma->vm_end - vma->vm_start;
   allocation = alloc_pages_exact(size, GFP_KERNEL); 
   if (allocation == NULL) {
     ERROR("Alloca pages exact failed to allocate the pages.");
-    goto failure;
+    goto fail_free;
   }
   memset(allocation, 0, size);
   // Prevent pages from being collected.
@@ -134,23 +138,33 @@ int mmap_enclave(enclave_handle_t handle, struct vm_area_struct *vma)
   pfn = page_to_pfn(virt_to_page(allocation)); 
   if (remap_pfn_range(vma, vma->vm_start, pfn, size, vma->vm_page_prot)) {
     ERROR("Unable to map the allocated physical memory into the user process.");
-    goto fail_free;
+    goto fail_free_pages;
   }
 
   // Set the values inside the enclave structure.
-  encl->phys_start = (usize) virt_to_phys(allocation);
-  encl->virt_start = (usize) vma->vm_start;
-  encl->size = size;
+  segment->phys_start = (usize) virt_to_phys(allocation);
+  segment->virt_start = (usize) vma->vm_start;
+  segment->size = size;
+  dll_init_elem(segment, list);
+  dll_add(&mapped_segments, segment, list);
+  LOG("mmap success pa: %llx va: %llx, size: %llx",
+      segment->phys_start, segment->virt_start, segment->size);
   return SUCCESS;
-fail_free:
+fail_free_pages:
   free_pages_exact(allocation, size);
+fail_free:
+  kfree(segment);
 failure:
   return FAILURE;
 }
 
-int get_physoffset_enclave(enclave_handle_t handle, usize* phys_offset)
+int get_physoffset_enclave(
+    enclave_handle_t handle,
+    usize virtaddr,
+    usize* phys_offset)
 {
   enclave_t* encl = NULL;
+  mmap_segment_t* segment = NULL;
   if (phys_offset == NULL) {
     ERROR("The provided phys_offset variable is null.");
     goto failure;
@@ -165,11 +179,28 @@ int get_physoffset_enclave(enclave_handle_t handle, usize* phys_offset)
     ERROR("Expected: %d, got: %d", encl->pid, current->pid);
     goto failure;
   }
-  if (encl->virt_start == UNINIT_USIZE) {
-    ERROR("The enclave %lld is not initialized.", handle);
-    ERROR("Call mmap first!");
+  if (encl->virt_start != UNINIT_USIZE || encl->phys_start != UNINIT_USIZE) {
+    ERROR("The enclave %lld has already been initialized.", handle);
     goto failure;
   }
+  dll_foreach(&mapped_segments, segment, list) {
+    if (segment->virt_start == virtaddr && segment->pid == encl->pid) {
+      // Found the right segment.
+      break;
+    }  
+  } 
+  if (segment == NULL) {
+    ERROR("Unable to find segment for %lld at %llx", handle, virtaddr);
+    goto failure;
+  }
+  dll_remove(&mapped_segments, segment, list);
+  encl->virt_start = segment->virt_start;
+  encl->phys_start = segment->phys_start;
+  encl->size = segment->size;
+
+  // Free the segment now.
+  kfree(segment);
+  segment = NULL;
   *phys_offset = encl->phys_start;
   return SUCCESS;
 failure:
