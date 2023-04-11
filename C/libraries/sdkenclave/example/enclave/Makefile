@@ -1,14 +1,17 @@
 all: app enclave
 
 # Libraries
-SDK=../../
-DLL_LIB= ../../../dll
-CAPA_LIB=../../../capabilities
-COMMON_LIB=../../../common
+LIB_PATH=../../../
+DRIVERS_PATH=../../../../drivers/
 
-ELF64=../../../elf64
-PTS=../../../pts
-DRIVER=../../../../drivers/tyche
+SDK=$(LIB_PATH)/sdkenclave
+DLL_LIB= $(LIB_PATH)/dll
+CAPA_LIB=$(LIB_PATH)/capabilities
+COMMON_LIB=$(LIB_PATH)/common
+
+ELF64=$(LIB_PATH)/elf64
+PTS=$(LIB_PATH)/pts
+DRIVER=$(DRIVERS_PATH)/tyche
 
 # App Code and headers
 CODE_APP=$(wildcard untrusted/*.c)
@@ -28,6 +31,11 @@ APP_INCLUDES = $(COMMON_INCLUDES) -I$(ELF64)/include -I$(PTS)/include -I$(DRIVER
 # Dynamic libraries
 DYNS= -l:enclave_loader.so -lelf64 -lpts
 
+# Installation configuration.
+DISK_PATH ?= /tmp/mount/tyche/programs 
+
+# Rules
+
 app: $(CODE_APP) $(HDRS_APP) 
 	mkdir -p libs
 	make -C $(SDK)
@@ -42,6 +50,12 @@ app: $(CODE_APP) $(HDRS_APP)
 
 enclave: $(CODE_ENCLAVE) $(CODE_RUNTIME) $(HDRS_ENCLAVE) $(HDRS_RUNTIME)
 	gcc -DTYCHE_USER_SPACE=1 -DDEFAULT_SHARED_BUFFER=1 -g $(COMMON_INCLUDES) -nostdlib -static -o $@ $(CODE_ENCLAVE) $(CODE_RUNTIME)
+
+install_disk: all
+	mkdir -p $(DISK_PATH)
+	cp -r libs $(DISK_PATH)
+	cp -t $(DISK_PATH) app enclave
+
 
 .PHONY: clean
 

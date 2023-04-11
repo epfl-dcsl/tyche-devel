@@ -106,6 +106,9 @@ int parse_enclave(enclave_t* enclave, const char* file)
 
   // Compute the entire size of all segments.
   for (int i = 0; i < enclave->parser.header.e_phnum; i++) {
+    if (enclave->parser.segments[i].p_type != PT_LOAD) {
+      continue;
+    }
     segments_size += align_up(enclave->parser.segments[i].p_memsz);
   }
   if (segments_size % PAGE_SIZE != 0) {

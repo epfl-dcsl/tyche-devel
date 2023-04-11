@@ -61,12 +61,16 @@ static entry_t* allocate(void* ptr)
     goto failure;
   }
   if (bump->idx >= bump_nb_pages) {
-    ERROR("Bump ran out of pages %d", bump->idx);
+    ERROR("Bump ran out of pages %d [bump at %llx]", bump->idx, bump);
     goto failure;
   }
   page_t* page = &(bump->pages[bump->idx]);
   bump->idx++;
-  return (entry_t*) page;
+  DEBUG("Allocating pages %llx [bump at %llx]", bump->idx, bump);
+  // Convert to physical address.
+  addr_t va_offset = ((addr_t)page) - ((addr_t) (bump->pages));
+  addr_t pa = bump->phys_offset + va_offset;
+  return (entry_t*) pa;
 failure:
   return NULL;
 }
@@ -118,7 +122,7 @@ entry_page:
     translate_flags(info->segment->p_flags) | PT_DIRT | PT_ACC; 
   return WALK;
 normal_page:
-  new_page = profile->allocate((void*)(&info->bump));
+  new_page = profile->allocate((void*)(info->bump));
   *entry = ((entry_t)new_page) | info->intermed_flags;
   return WALK; 
 failure:
@@ -174,12 +178,14 @@ static addr_t pa_to_va(addr_t addr, pt_profile_t* profile) {
   }
   base = (addr_t) info->bump->pages;
   if (addr < info->bump->phys_offset) {
-    ERROR("The addr is below the offset.");
+    ERROR("The addr is below the offset %llx.", info->bump->phys_offset);
     goto fail_abort;
   }
   va = addr - info->bump->phys_offset;
   if (va + base > base + bump_size) {
-    ERROR("The addr is above the max address.");
+    ERROR("The addr is above the max address. %llx > [%llx + %llx] (%llx)",
+        va + base, base, bump_size, base + bump_size);
+    ERROR("The phys_offset %llx", info->bump->phys_offset);
     goto fail_abort;
   }
   va += base;
@@ -247,12 +253,15 @@ int create_page_tables(uint64_t phys_offset, page_tables_t* bump, Elf64_Ehdr* he
   profile.mappers[PT_PML4] = default_mapper;
 
   // Allocate the root.
-  entry_t root = (entry_t) pa_to_va((addr_t) allocate((void*)bump), &profile);
+  entry_t root = (entry_t) allocate((void*)bump);
 
   // Map the segments.
   mem_size = 0;
   for (int i = 0; i < header->e_phnum; i++) {
     Elf64_Phdr seg = segments[i];
+    if (seg.p_type != PT_LOAD) {
+      continue;
+    }
     addr_t start = seg.p_vaddr;
     addr_t end = seg.p_vaddr + align_up(seg.p_memsz);
     info.segment = &seg;
@@ -264,7 +273,7 @@ int create_page_tables(uint64_t phys_offset, page_tables_t* bump, Elf64_Ehdr* he
     mem_size += align_up(seg.p_memsz);
   }
   if (mem_size != phys_offset) {
-    ERROR("The computed memsize differs from the phys_offset");
+    ERROR("The computed memsize: %llx differs from the phys_offset: %llx", mem_size, phys_offset);
     goto unmap_failure;
   }
   return SUCCESS;

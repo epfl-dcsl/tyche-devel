@@ -39,7 +39,7 @@ PWD:=$(shell pwd)
 
 ## —————————————————————— Where to install the module ——————————————————————— ##
 INSTALL_PATH ?= /tyche/tyche
-DISK_PATH ?= /tmp/mount/tyche/tyche
+DISK_PATH ?= /tmp/mount/tyche/drivers/
 
 all :
 # run kernel build system to make module
