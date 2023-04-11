@@ -7,6 +7,11 @@
 #define DEFAULT_SHARED_BUFFER_SIZE 0x1000
 #define DEFAULT_STACK_SIZE 0x6000
 
+const char* STACK_SECTION_NAME = ".tyche_enclave_stack";
+const char* DEFAULT_SHARED_BUFFER_SECTION_NAME = ".tyche_shared_default_buffer";
+
+#define STACK_OFFSET_TOP ((usize)4)
+
 // ————————————————————————————————— Types —————————————————————————————————— //
 
 /// Represents a call frame for the enclave.

@@ -2,6 +2,7 @@
 #include "enclave_rt.h"
 // ———————————————————————————— Enclave sections ———————————————————————————— //
 
+///@warn these string constants must be the same as in enclave_rt.h
 #ifdef DEFAULT_SHARED_BUFFER 
 __attribute__((section(".tyche_shared_default_buffer")))
 char shared_buffer[DEFAULT_SHARED_BUFFER_SIZE];

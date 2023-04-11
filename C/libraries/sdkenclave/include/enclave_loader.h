@@ -91,6 +91,30 @@ typedef struct {
   usize paddr_page_tables;
 } enclave_map_t;
 
+/// Quick access to shared sections.
+typedef struct enclave_shared_section_t {
+  /// Reference to the section.
+  Elf64_Shdr* section;
+  /// Stored as a list.
+  dll_elem(struct enclave_shared_section_t, list);
+} enclave_shared_section_t;
+
+/// Configuration for the enclave, necessary for proper commit.
+typedef struct {
+  /// The root page table for the enclave.
+  usize cr3;
+
+  /// The entry point for the enclave, parsed from the binary.
+  usize entry;
+
+  /// The stack pointer for the enclave, parsed from the binary.
+  usize stack;
+
+  /// List of shared sections.
+  dll_list(enclave_shared_section_t, shared_sections);
+
+} enclave_config_t;
+
 /// The representation of an enclave from the user program.
 typedef struct {
   /// Enclave driver fd.
@@ -101,6 +125,9 @@ typedef struct {
 
   /// Driver domain handle.
   enclave_handle_t handle;
+
+  /// Configuration for the commit.
+  enclave_config_t config;
 
   /// The parser state for the enclave.
   parser_t parser;

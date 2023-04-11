@@ -9,6 +9,7 @@
 #include "pts.h"
 #include "common.h"
 #include "enclave_loader.h"
+#include "enclave_rt.h"
 
 // ——————————————————————————————— Constants ———————————————————————————————— //
 const char* ENCLAVE_DRIVER = "/dev/tyche_enclave"; 
@@ -54,6 +55,7 @@ int parse_enclave(enclave_t* enclave, const char* file)
     goto failure;
   }
   memset(enclave, 0, sizeof(enclave_t));
+  dll_init_list(&(enclave->config.shared_sections));
   
   // Open the enclave file.
   enclave->parser.fd = open(file, O_RDONLY);
@@ -71,7 +73,36 @@ int parse_enclave(enclave_t* enclave, const char* file)
   enclave->parser.strings = read_section64(enclave->parser.fd,
       enclave->parser.sections[enclave->parser.header.e_shstrndx]);
 
-  //TODO find stack and entry point.
+  // Set up the entry point.
+  enclave->config.entry = enclave->parser.header.e_entry;
+
+  // Find the stack and the shared regions.
+  for (int i = 0; i < enclave->parser.header.e_shnum; i++) {
+    Elf64_Shdr section = enclave->parser.sections[i];
+    // Look for shared sections.
+    if (get_section_tpe_from_name(
+          section.sh_name + enclave->parser.strings) == SHARED) {
+      enclave_shared_section_t* shared = malloc(sizeof(enclave_shared_section_t));
+      if (shared == NULL) {
+        ERROR("Unable to malloc enclave_shared_section.");
+        goto failure;
+      }
+      memset(shared, 0, sizeof(enclave_shared_section_t));
+      shared->section = &(enclave->parser.sections[i]);
+      dll_init_elem(shared, list);
+      dll_add(&(enclave->config.shared_sections), shared, list);
+      DEBUG("We found a shared region: %llx - %llx ",
+          section.sh_addr, section.sh_addr + section.sh_size);
+    } 
+
+    // Check if this is the stack.
+    if (strncmp(STACK_SECTION_NAME,
+          section.sh_name + enclave->parser.strings,
+          strlen(STACK_SECTION_NAME)) == 0) {
+          enclave->config.stack = section.sh_addr + section.sh_size - STACK_OFFSET_TOP; 
+          DEBUG("We found the enclave stack: %llx", enclave->config.stack);
+        }
+  }
 
   // Compute the entire size of all segments.
   for (int i = 0; i < enclave->parser.header.e_phnum; i++) {
@@ -92,6 +123,9 @@ int parse_enclave(enclave_t* enclave, const char* file)
     ERROR("Unable to map the page tables.");
     goto close_failure;
   }
+
+  // Put the temporary offset for the cr3.
+  enclave->config.cr3 = enclave->parser.bump.phys_offset;
   // We are done for now, next step is to load the enclave.
   return SUCCESS;
 close_failure:
@@ -143,6 +177,10 @@ int load_enclave(enclave_t* enclave)
         &(enclave->map.physoffset)) != SUCCESS) {
     goto failure;
   }
+
+  // Add the offset to the enclave's cr3.
+  enclave->config.cr3 += enclave->map.physoffset;
+  DEBUG("The enclave's cr3 is at %llx", enclave->config.cr3);
 
   // Fix the page tables.
   if (fix_page_tables(enclave->map.physoffset, &enclave->parser.bump) != SUCCESS) {
