@@ -109,17 +109,7 @@ int mmap_segment(struct vm_area_struct *vma)
     goto failure;
   }
   segment->pid = current->pid;
-  /*
-  if (encl->pid != current->pid) {
-    ERROR("Wrong pid for enclave");
-    ERROR("Expected: %d, got: %d", encl->pid, current->pid);
-    goto fail_free;
-  }
-  if (encl->phys_start != UNINIT_USIZE || encl->virt_start != UNINIT_USIZE) {
-    ERROR("The enclave %lld  already has memory @%llx", handle, encl->phys_start);
-    goto fail_free;
-  }*/
-  
+
   // Allocate a contiguous memory region.
   size = vma->vm_end - vma->vm_start;
   allocation = alloc_pages_exact(size, GFP_KERNEL); 
@@ -262,6 +252,8 @@ int mprotect_enclave(
   segment->tpe = tpe;
   dll_init_elem(segment, list);
   dll_add(&(encl->segments), segment, list);
+  LOG("Mprotect success for enclave %lld, start: %llx, end: %llx", 
+      handle, vstart, vstart + size);
   return SUCCESS;
 failure:
   return FAILURE;

@@ -195,52 +195,83 @@ int load_enclave(enclave_t* enclave)
   // Copy the enclave's content.
   phys_size = 0;
   for (int i = 0; i < enclave->parser.header.e_phnum; i++) {
+    enclave_shared_section_t* shared_sect = NULL;
     Elf64_Phdr seg = enclave->parser.segments[i];
     if (seg.p_type != PT_LOAD) {
       continue;
     }
     addr_t dest = enclave->map.virtoffset + phys_size;
     addr_t size = align_up(seg.p_memsz);
-    addr_t local_size = 0;
+    memory_access_right_t flags = translate_flags(seg.p_flags);
     load_elf64_segment(enclave->parser.fd, (void*) dest, seg);
     addr_t curr_va = seg.p_vaddr;
-    // Find all the sections within that segment and call the driver.
-    // TODO change this, they are not page aligned...
-    for (int j = 0; j < enclave->parser.header.e_shnum; j++) {
-      Elf64_Shdr sect = enclave->parser.sections[j]; 
-      usize sect_size = align_up(sect.sh_size);
-      enclave_segment_type_t tpe = get_section_tpe_from_name(
-          sect.sh_name + enclave->parser.strings);  
-      if (sect.sh_addr != curr_va) {
-        continue; 
+    usize local_size = 0;
+
+    // Check if we have shared sections in this segment.
+    dll_foreach(&(enclave->config.shared_sections), shared_sect, list) {
+      Elf64_Shdr* section = shared_sect->section;
+      usize virt_addr = dest + local_size; 
+      //TODO we need to compute the right address, this one is incorrect.
+      if (section->sh_addr >= curr_va && section->sh_addr <= curr_va + size) {
+        if (curr_va != section->sh_addr) {
+          if (ioctl_mprotect_enclave(
+              enclave->driver_fd,
+              enclave->handle,
+              /*curr_va*/ virt_addr,
+              section->sh_addr - curr_va,
+              flags,
+              CONFIDENTIAL) != SUCCESS) {
+            ERROR("Unable to map confidential segment for enclave %lld at %llx",
+              enclave->handle, curr_va);
+            goto failure;
+          }
+          local_size += section->sh_addr - curr_va;
+          virt_addr += section->sh_addr - curr_va;
+        }
+        if (ioctl_mprotect_enclave(
+              enclave->driver_fd,
+              enclave->handle,
+              virt_addr, 
+              align_up(section->sh_size),
+              flags,
+              SHARED) != SUCCESS) {
+          ERROR("Unable to map shared region for %lld at %llx",
+              enclave->handle, section->sh_addr);
+          goto failure;
+        }
+        local_size += align_up(section->sh_size);
+        curr_va = section->sh_addr + align_up(section->sh_size);
       }
-      if (ioctl_mprotect_enclave(
-            enclave->driver_fd,
-            enclave->handle,
-            sect.sh_addr,
-            sect_size,
-            translate_flags(seg.p_flags),
-            tpe) != SUCCESS) {
-        ERROR("Failed to mprotect the section %llx", sect.sh_addr);
-        goto failure;
-      }
-      local_size += sect_size;
-      curr_va += sect_size;
-    }
-    if (local_size != size) {
-      ERROR("We failed to find all the sections for segment at %llx", seg.p_vaddr);
-      ERROR("expected %llx, got %llx, at curr_va: %llx", size, local_size, curr_va);
-      goto failure;
     } 
+   
+    // Map the rest of the segment.
+    // TODO need to compute the right address.
+    if (curr_va  < size + seg.p_vaddr && 
+        ioctl_mprotect_enclave(
+          enclave->driver_fd,
+          enclave->handle,
+          dest + local_size,
+          (seg.p_vaddr+ size - curr_va),
+          flags,
+          CONFIDENTIAL) != SUCCESS) {
+       ERROR("Unable to map the rest of the enclave %lld at %llx",
+           enclave->handle, curr_va);
+       goto failure;
+    } else if (curr_va > size + seg.p_vaddr) {
+      ERROR("Mprotect overflow for enclave %lld, expected: %llx, got: %llx",
+          enclave->handle, size + seg.p_vaddr, curr_va);
+      goto failure;
+    }
     phys_size+= size;
   } 
   DEBUG("Done mprotecting enclave %lld's sections", enclave->handle);
 
   // Copy the page tables + register them.
   do {
-    void* source = (void*)&(enclave->parser.bump.pages);
+    void* source = (void*)(enclave->parser.bump.pages);
     size_t size = enclave->parser.bump.idx * PAGE_SIZE;
     uint64_t dest = enclave->parser.bump.phys_offset + enclave->map.virtoffset;
+    //TODO apparently segfaults here.
     memcpy((void*) dest, source, size); 
     if (ioctl_mprotect_enclave(
           enclave->driver_fd, 
