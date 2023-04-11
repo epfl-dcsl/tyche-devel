@@ -12,7 +12,7 @@
 #include "enclave_rt.h"
 
 // ——————————————————————————————— Constants ———————————————————————————————— //
-const char* ENCLAVE_DRIVER = "/dev/tyche_enclave"; 
+const char* ENCLAVE_DRIVER = "/dev/tyche"; 
 const char* SHARED_PREFIX = ".tyche_shared";
 
 // ——————————————————————————————— Functions ———————————————————————————————— //

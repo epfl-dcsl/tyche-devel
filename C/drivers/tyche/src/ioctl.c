@@ -36,7 +36,7 @@ static struct file_operations fops =
 // ———————————————————————————— Driver Functions ———————————————————————————— //
 
 
-int tyche_enclave_register(void)
+int tyche_register(void)
 {
   // Allocating Major number
   if((alloc_chrdev_region(&dev, 0, 1, device_region)) <0){

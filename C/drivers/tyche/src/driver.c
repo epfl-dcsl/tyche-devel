@@ -1,3 +1,4 @@
+#include "tyche_ioctl.h"
 #include <linux/init.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
@@ -14,13 +15,15 @@ MODULE_VERSION("0.01");
 static int __init tyche_enclave_init(void)
 {
   int result = 0;
-  printk(KERN_INFO "Loading Tyche Enclave LKM driver.");
+  printk(KERN_INFO "Loading Tyche driver.");
+  result = tyche_register();
   return result;
 }
 
 static void __exit tyche_enclave_exit(void)
 {
-  printk(KERN_INFO "Removing Tyche Enclave LKM driver.");
+  printk(KERN_INFO "Removing Tyche driver.");
+  tyche_unregister();
 }
 
 // ————————————————————————— Module's Registration —————————————————————————— //
