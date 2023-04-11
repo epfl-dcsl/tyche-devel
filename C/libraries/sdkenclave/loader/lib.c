@@ -226,6 +226,7 @@ int load_enclave(enclave_t* enclave)
     } 
     phys_size+= size;
   } 
+  DEBUG("Done mprotecting enclave %lld's sections", enclave->handle);
 
   // Copy the page tables + register them.
   do {
@@ -243,8 +244,21 @@ int load_enclave(enclave_t* enclave)
       ERROR("Unable to register the page tables for enclave %lld", enclave->handle);
       goto failure;
     }
+    DEBUG("Done mprotecting enclave %lld's pages", enclave->handle);
   } while(0);
- 
+
+  // Commit the enclave.
+  if (ioctl_commit_enclave(
+        enclave->driver_fd,
+        enclave->handle,
+        enclave->config.cr3,
+        enclave->config.entry,
+        enclave->config.stack)!= SUCCESS) {
+    ERROR("Unable to commit the enclave %lld", enclave->handle);
+    goto failure;
+  } 
+
+  DEBUG("Done loading enclave %lld", enclave->handle);
 failure:
   return FAILURE;
 }
