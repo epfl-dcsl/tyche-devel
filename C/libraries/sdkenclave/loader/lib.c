@@ -8,6 +8,7 @@
 #include "elf64.h"
 #include "driver_ioctl.h"
 #include "pts.h"
+#include "x86_64_pt.h"
 #include "common.h"
 #include "enclave_loader.h"
 #include "enclave_rt.h"
@@ -115,7 +116,7 @@ int parse_enclave(enclave_t* enclave, const char* file)
     ERROR("The computed size for the segments is %zu", segments_size);
     goto close_failure;
   }
-  DEBUG("The overall size for the binary is %zu", segments_size);
+  DEBUG("The overall size for the binary is %zx", segments_size);
   
   // Create the page tables.
   if (create_page_tables(
@@ -129,6 +130,9 @@ int parse_enclave(enclave_t* enclave, const char* file)
 
   // Put the temporary offset for the cr3.
   enclave->config.cr3 = enclave->parser.bump.phys_offset;
+  DEBUG("The bump's phys_offset after creating the page tables: %llx",
+      enclave->config.cr3);
+  DEBUG("We consummed %d pages", enclave->parser.bump.idx);
   // We are done for now, next step is to load the enclave.
   return SUCCESS;
 close_failure:
@@ -272,6 +276,19 @@ int load_enclave(enclave_t* enclave)
     size_t size = enclave->parser.bump.idx * PAGE_SIZE;
     uint64_t dest = enclave->parser.bump.phys_offset + enclave->map.virtoffset;
     memcpy((void*) dest, source, size); 
+    
+    /*// TODO remove afterwards, debugging now.
+    for (int i = 0; i < enclave->parser.bump.idx; i++) {
+      page_t* page = &(enclave->parser.bump.pages[i]);
+      for (int j = 0; j < ENTRIES_PER_PAGE; j++) {
+        uint64_t* entry = &(page->data[j]);  
+        if ((*entry & PT_PP) != PT_PP) {
+          continue;
+        }
+        DEBUG("Post copy entry: %llx @(%d, %d)", *entry, i, j);
+      }
+    } */
+
     if (ioctl_mprotect_enclave(
           enclave->driver_fd, 
           enclave->handle,

@@ -7,6 +7,7 @@ BUILDSYSTEM_DIR ?= ../../../builds/linux-x86
 ## —————————————————————————— Library Dependencies —————————————————————————— ## 
 
 LIB_DLL=../../libraries/dll
+LIB_COMMON=../../libraries/common
 LIB_CAPA=../../libraries/capabilities
 
 # This apparently does not work if used to specify objects.
@@ -17,7 +18,7 @@ CAPA_OBJS=$(patsubst %.c,%.o,$(CAPA_SRCS))
 
 $(TARGET_MODULE)-objs := src/driver.o $(LIB_CAPA)/src/ecs.o $(LIB_CAPA)/src/lib.o $(LIB_CAPA)/src/tyche_api.o 
 obj-m := $(TARGET_MODULE).o
-ccflags-y += -I$(src)/$(LIB_DLL)/include -I$(src)/$(LIB_CAPA)/include
+ccflags-y += -I$(src)/$(LIB_COMMON)/include -I$(src)/$(LIB_DLL)/include -I$(src)/$(LIB_CAPA)/include 
 
 ## ——————————————————— Where to generate the build files ———————————————————— ##
 

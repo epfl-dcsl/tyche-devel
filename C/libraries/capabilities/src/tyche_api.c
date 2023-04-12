@@ -1,4 +1,5 @@
 #include "tyche_api.h"
+#include "common.h"
 
 /// Simple generic vmcall implementation.
 int tyche_call(vmcall_frame_t* frame)
@@ -191,6 +192,7 @@ int tyche_switch(capa_index_t transition_handle, usize cpu, void* args)
     .arg_2 = cpu,
     .arg_3 = (usize) args,
   };
+  DEBUG("About to switch from the capability lib: handle %lld", transition_handle);
   asm volatile(
     "cli \n\t"
     "movq %2, %%rax\n\t"

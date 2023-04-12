@@ -412,7 +412,7 @@ impl Backend for BackendX86 {
                     vcpu.set(vmx::Register::Rip, to_restore_context.state.rip);
                     vcpu.set(vmx::Register::Rsp, to_restore_context.state.rsp);
                     println!(
-                        "We have rip {:x?}, rsp {:#?}, cr3: {:#?}",
+                        "We have rip {:x?}, rsp {:x?}, cr3: {:x?}",
                         to_restore_context.state.rip,
                         to_restore_context.state.rsp,
                         to_restore_context.state.cr3

@@ -27,14 +27,15 @@ static void local_free(void* ptr)
   kfree(ptr);
 }
 
+/*
 static void local_print(const char *msg)
 {
   printk(KERN_NOTICE "[CAPA | %lld]: %s\n",counter_alloc, msg);
 }
-
+*/
 // —————————————————————— Loading/Unloading  functions —————————————————————— //
 static int __init tyche_capabilities_init(void) {
-  return init(local_allocator, local_free, local_print);
+  return init(local_allocator, local_free);
 }
 static void __exit tyche_capabilities_exit(void)
 {

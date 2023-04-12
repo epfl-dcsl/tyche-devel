@@ -72,6 +72,9 @@ int ioctl_mprotect_enclave(
     ERROR("Failed to mprotect region %llx -- %llx for enclave %lld", vstart, vstart + size, handle);
     goto failure;
   }
+  DEBUG("mprotect %llx -- %llx [%llx:%llx]",
+      mprotect.start, mprotect.start + mprotect.size,
+      mprotect.flags, mprotect.tpe);
   return SUCCESS;
 failure:
   return FAILURE;

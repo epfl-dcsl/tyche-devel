@@ -66,7 +66,6 @@ static entry_t* allocate(void* ptr)
   }
   page_t* page = &(bump->pages[bump->idx]);
   bump->idx++;
-  DEBUG("Allocating pages %llx [bump at %llx]", bump->idx, bump);
   // Convert to physical address.
   addr_t va_offset = ((addr_t)page) - ((addr_t) (bump->pages));
   addr_t pa = bump->phys_offset + va_offset;
@@ -120,10 +119,13 @@ static callback_action_t default_mapper(entry_t* entry, level_t lvl, struct pt_p
 entry_page:
   *entry = ((info->segment_offset + offset) & PT_PHYS_PAGE_MASK) |
     translate_flags(info->segment->p_flags) | PT_DIRT | PT_ACC; 
+  DEBUG("entry: lvl: %d, curr_va: %llx, entry: %llx, pa: %llx",
+      lvl, profile->curr_va, *entry, profile->va_to_pa((addr_t)entry, profile));
   return WALK;
 normal_page:
   new_page = profile->allocate((void*)(info->bump));
   *entry = ((entry_t)new_page) | info->intermed_flags;
+  DEBUG("map: lvl: %d, curr_va: %llx, entry: %llx", lvl, profile->curr_va, *entry);
   return WALK; 
 failure:
   return FAILURE;
@@ -290,15 +292,17 @@ int fix_page_tables(usize offset, page_tables_t * tables)
     ERROR("The provided tables is null.");
     goto failure;
   }
+  DEBUG("About to fix the page tables, the physical offset is: %llx", offset);
   for (int i = 0; i < tables->idx; i++) {
     page_t* page = &tables->pages[i];
     for (int j = 0; j < ENTRIES_PER_PAGE; j++) {
       uint64_t* entry = &(page->data[j]); 
-      if (*entry & PT_PP != PT_PP) {
+      if ((*entry & PT_PP) != PT_PP) {
         continue;
       }
       uint64_t addr = offset + (*entry & PT_PHYS_PAGE_MASK);
-      *entry = (*entry & !PT_PHYS_PAGE_MASK) | addr;
+      *entry = (*entry & ~PT_PHYS_PAGE_MASK) | addr;
+      DEBUG("fixed: entry: %llx @(%d, %d)", *entry, i, j);
     }
   } 
   return SUCCESS;

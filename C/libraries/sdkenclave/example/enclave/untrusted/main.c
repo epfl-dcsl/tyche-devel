@@ -46,7 +46,7 @@ int main(void) {
   if (call_enclave(&enclave, shared_buffer) != SUCCESS) {
     ERROR("Unable to call the enclave %lld!", enclave.handle);
     goto failure;
-  } 
+  }
   LOG("Here is the message from the enclave %s", msg->reply);
 
   if (delete_enclave(&enclave) != SUCCESS) {

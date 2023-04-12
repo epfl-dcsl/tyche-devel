@@ -331,6 +331,8 @@ int commit_enclave(enclave_handle_t handle, usize cr3, usize rip, usize rsp)
         ERROR("Invalid tpe for segment!");
         goto delete_fail;
     }
+    DEBUG("Registered segment with tyche: %llx -- %llx [%x]",
+        paddr, paddr + segment->size, segment->tpe);
   }
 
   // Commit the enclave.
