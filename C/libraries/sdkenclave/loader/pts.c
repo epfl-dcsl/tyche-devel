@@ -317,6 +317,7 @@ int unmap_parser(page_tables_t* bump)
     goto failure;
   }
   munmap(bump->pages, bump_size);
+  return SUCCESS;
 failure:
   return FAILURE;
 }

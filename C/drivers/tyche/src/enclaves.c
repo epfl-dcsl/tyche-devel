@@ -7,6 +7,7 @@
 #include <linux/mm_types.h>
 #include <asm/io.h>
 
+#define TYCHE_DEBUG 1
 #include "common.h"
 #include "enclaves.h"
 #include "tyche_capabilities.h"
@@ -136,7 +137,7 @@ int mmap_segment(struct vm_area_struct *vma)
   segment->size = size;
   dll_init_elem(segment, list);
   dll_add(&mapped_segments, segment, list);
-  LOG("mmap success pa: %llx va: %llx, size: %llx",
+  DEBUG("mmap success pa: %llx va: %llx, size: %llx",
       segment->phys_start, segment->virt_start, segment->size);
   return SUCCESS;
 fail_free_pages:
@@ -251,7 +252,7 @@ int mprotect_enclave(
   segment->tpe = tpe;
   dll_init_elem(segment, list);
   dll_add(&(encl->segments), segment, list);
-  LOG("Mprotect success for enclave %lld, start: %llx, end: %llx", 
+  DEBUG("Mprotect success for enclave %lld, start: %llx, end: %llx", 
       handle, vstart, vstart + size);
   return SUCCESS;
 failure:
