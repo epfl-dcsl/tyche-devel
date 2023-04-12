@@ -1,6 +1,7 @@
 #include "tyche_capabilities_types.h"
 #include "tyche_capabilities.h"
 #include "tyche_api.h"
+#include "common.h"
 
 // ———————————————————————————————— Globals ————————————————————————————————— //
 domain_t local_domain;
@@ -25,16 +26,15 @@ void local_memset(void* dest, unsigned long n) {
 // —————————————————————————————— Public APIs ——————————————————————————————— //
 
 
-int init(capa_alloc_t allocator, capa_dealloc_t deallocator, capa_dbg_print_t print)
+int init(capa_alloc_t allocator, capa_dealloc_t deallocator)
 {
   capa_index_t i = 0;
-  if (allocator == 0 || deallocator == 0 || print == 0) {
+  if (allocator == 0 || deallocator == 0) {
     goto fail;
   }
   // Set the local domain's functions.
   local_domain.alloc = allocator;
   local_domain.dealloc = deallocator;
-  local_domain.print = print;
   local_domain.self = NULL;
   dll_init_list(&(local_domain.capabilities));
   dll_init_list(&(local_domain.children));
@@ -49,7 +49,7 @@ int init(capa_alloc_t allocator, capa_dealloc_t deallocator, capa_dbg_print_t pr
     };
     capa = (capability_t*) (local_domain.alloc(sizeof(capability_t)));
     if (capa == NULL) {
-      local_domain.print("Unable to allocate a capability!\n");
+      ERROR("Unable to allocate a capability!\n");
       goto failure;
     }
     // Copy the capability into the dynamically allocated one.
@@ -62,7 +62,7 @@ int init(capa_alloc_t allocator, capa_dealloc_t deallocator, capa_dbg_print_t pr
         capa->access.domain.status == Sealed) {
       if (local_domain.self != NULL) {
         // We have two sealed capabilities this doesn't make sense.
-        local_domain.print("Found two sealed capa for the current domain.\n");
+        ERROR("Found two sealed capa for the current domain.\n");
         goto failure;
       }
       local_domain.self = capa;
@@ -73,9 +73,7 @@ int init(capa_alloc_t allocator, capa_dealloc_t deallocator, capa_dbg_print_t pr
     // Add the capability to the list.
     dll_add(&(local_domain.capabilities), capa, list);
   }
-
-  // For debugging, remove afterwards.
-  local_domain.print("[init] success");
+  DEBUG("success");
   return SUCCESS;
 failure:
   while(!dll_is_empty(&local_domain.capabilities))
@@ -95,27 +93,27 @@ int create_domain(domain_id_t* id, usize spawn, usize comm)
   capability_t* revocation_capa = NULL; 
   child_domain_t* child = NULL;
   
-  local_domain.print("[create_domain] start");
+  DEBUG("start");
   // Initialization was not performed correctly.
   if (local_domain.self == NULL || id == NULL) {
-    local_domain.print("Error[create_domain] self is null or id null.");
+    ERROR("self is null or id null.");
     goto fail;
   }
 
   // Perform allocations.
   child = (child_domain_t*) local_domain.alloc(sizeof(child_domain_t));
   if (child == NULL) {
-    local_domain.print("Error[create_domain] failed to allocate child.");
+    ERROR("Failed to allocate child.");
     goto fail;
   }
   revocation_capa = (capability_t*) local_domain.alloc(sizeof(capability_t));
   if (revocation_capa == NULL) {
-    local_domain.print("Error[create_domain] failed to allocate revocation.");
+    ERROR("Failed to allocate revocation.");
     goto fail_child;
   }
   child_capa = (capability_t*) local_domain.alloc(sizeof(capability_t));
   if (child_capa == NULL) {
-    local_domain.print("Error[create_domain] failed to allocate child_capa.");
+    ERROR("Failed to allocate child_capa.");
     goto fail_revocation; 
   }
 
@@ -125,21 +123,21 @@ int create_domain(domain_id_t* id, usize spawn, usize comm)
         &(child_capa->local_id),
         &(revocation_capa->local_id),
         spawn, comm) != 0) {
-    local_domain.print("Error[create_domain] failed to create domain.");
+    ERROR("Failed to create domain.");
     goto fail;
   }
 
   // Populate the capabilities.
   if (enumerate_capa(new_self, local_domain.self) != 0) {
-    local_domain.print("Error[create_domain] enumerate left failed.");
+    ERROR("Enumerate left failed.");
     goto fail_child_capa;
   }
   if (enumerate_capa(child_capa->local_id, child_capa) != 0) {
-    local_domain.print("Error[create_domain] enumerate child_capa failed.");
+    ERROR("Enumerate child_capa failed.");
     goto fail_child_capa;
   }
   if (enumerate_capa(revocation_capa->local_id, revocation_capa) != 0) {
-    local_domain.print("Error[create_domain] enumerate revocation_capa failed.");
+    ERROR("Enumerate revocation_capa failed.");
     goto fail_child_capa;
   }
 
@@ -148,6 +146,7 @@ int create_domain(domain_id_t* id, usize spawn, usize comm)
   child->revoke = revocation_capa;
   child->manipulate = child_capa; 
   dll_init_list(&(child->revocations));
+  dll_init_list(&(child->transitions));
   dll_init_elem(child, list);
   revocation_capa->left = NULL; //local_domain.self;
   revocation_capa->right = NULL; //child_capa;
@@ -166,7 +165,7 @@ int create_domain(domain_id_t* id, usize spawn, usize comm)
 
   // All done!
   *id = child->id;
-  local_domain.print("[create_domain] Success");
+  DEBUG("Success");
   return SUCCESS;
 
   // Failure paths.
@@ -194,7 +193,7 @@ int seal_domain(
   usize tpe = 0;
   transition_t *trans_wrapper = NULL;
 
-  local_domain.print("[seal_domain] start");
+  DEBUG("start");
   // Find the target domain.
   dll_foreach(&(local_domain.children), child, list) {
     if (child->id == id) {
@@ -205,25 +204,25 @@ int seal_domain(
 
   // We were not able to find the child.
   if (child == NULL) {
-    local_domain.print("Error[grant_region]: child not found."); 
+    ERROR("Child not found."); 
     goto failure;
   }
 
   transition = (capability_t*) local_domain.alloc(sizeof(capability_t));
   if (transition == NULL) {
-    local_domain.print("Error[seal_domain]: could not allocate transition capa.");
+    ERROR("Could not allocate transition capa.");
     goto failure;
   }
  
   trans_wrapper = (transition_t*) local_domain.alloc(sizeof(transition_t));
   if (trans_wrapper == NULL) {
-    local_domain.print("Error[seal_domain]: Unable to allocate transition_t wrapper");
+    ERROR("Unable to allocate transition_t wrapper");
     goto failure_transition;
   }
   
   // Create the transfer.
   if (child->manipulate->access.domain.status != Unsealed) {
-    local_domain.print("Error[seal_domain]: we do not have an unseal capa.");
+    ERROR("we do not have an unsealed capa.");
     goto failure_dealloc;
   }
   tpe = Unsealed ;
@@ -236,7 +235,7 @@ int seal_domain(
   if (duplicate_capa(
         &new_unsealed, &channel, child->manipulate, 
         tpe, 0, 0, Channel, 0, 0) != SUCCESS) {
-    local_domain.print("Error[seal_domain] unable to create a channel.");
+    ERROR("Unable to create a channel.");
     goto failure_dealloc;
   }
   
@@ -258,12 +257,12 @@ int seal_domain(
   // Now seal.
   if (tyche_seal(&(transition->local_id), to_seal,
         core_map, cr3, rip, rsp) != SUCCESS) {
-    local_domain.print("Error[seal_domain]: error sealing domain.");
+    ERROR("Error sealing domain.");
     goto failure_dealloc;
   }
 
   if (enumerate_capa(transition->local_id, transition) != SUCCESS) {
-    local_domain.print("Error[seal_domain]: error enumerating transition.");
+    ERROR("Error enumerating transition.");
     goto failure_dealloc;
   }
 
@@ -271,10 +270,15 @@ int seal_domain(
   trans_wrapper->lock = TRANSITION_UNLOCKED;
   trans_wrapper->transition = transition; 
   dll_init_elem(trans_wrapper, list);
+  if (!dll_is_empty(&(child->transitions))) {
+      ERROR("The transitions is not empty?!");
+    }
   dll_add(&(child->transitions), trans_wrapper, list);
+  DEBUG("trans_wrapper address %p for child  %p", (void*) trans_wrapper,
+      (void*) child);
   
   // All done !
-  local_domain.print("[seal_domain] Success");
+  DEBUG("Success");
   return SUCCESS;
 failure_dealloc:
   local_domain.dealloc(trans_wrapper);
@@ -301,12 +305,12 @@ int duplicate_capa(
   // Attempt to allocate left and right.
   *left = (capability_t*) local_domain.alloc(sizeof(capability_t));
   if (*left == NULL) {
-    local_domain.print("Error[duplicate_capa] left alloc failed.");
+    ERROR("Left alloc failed.");
     goto failure;
   }
   *right = (capability_t*) local_domain.alloc(sizeof(capability_t));
   if (*right == NULL) {
-    local_domain.print("Error[duplicate_capa] right alloc failed.");
+    ERROR("Right alloc failed.");
     goto fail_left;
   }
 
@@ -314,13 +318,13 @@ int duplicate_capa(
   if (tyche_duplicate(
         &((*left)->local_id), &((*right)->local_id), capa->local_id,
         a1_1, a1_2, a1_3, a2_1, a2_2, a2_3 ) != SUCCESS) {
-    local_domain.print("Error[duplicate_capa] duplicate rejected.");
+    ERROR("Duplicate rejected.");
     goto fail_right; 
   }
 
   // Update the capability.
   if (enumerate_capa(capa->local_id, capa) != SUCCESS) {
-    local_domain.print("We failed to enumerate the root of a duplicate!");
+    ERROR("We failed to enumerate the root of a duplicate!");
     goto fail_right;
   }
   capa->left = *left;
@@ -328,7 +332,7 @@ int duplicate_capa(
   
   // Initialize the left.
   if(enumerate_capa((*left)->local_id, *left) != SUCCESS) {
-    local_domain.print("We failed to enumerate the left of duplicate!");
+    ERROR("We failed to enumerate the left of duplicate!");
     goto fail_right;
   }
   dll_init_elem((*left), list);
@@ -339,7 +343,7 @@ int duplicate_capa(
 
   // Initialize the right.
   if (enumerate_capa((*right)->local_id, (*right)) != SUCCESS) {
-    local_domain.print("We failed to enumerate the right of duplicate!");
+    ERROR("We failed to enumerate the right of duplicate!");
     goto fail_right;
   }
   dll_init_elem((*right), list);
@@ -366,10 +370,10 @@ int grant_region(domain_id_t id, paddr_t start, paddr_t end, memory_access_right
   child_domain_t* child = NULL;
   capability_t* capa = NULL;
 
-  local_domain.print("[grant_region] start");
+  DEBUG("[grant_region] start");
   // Quick checks.
   if (start >= end) {
-    local_domain.print("Error[grant_region]: start is greater or equal to end.\n");
+    ERROR("Start is greater or equal to end.\n");
     goto failure;
   }
 
@@ -383,7 +387,7 @@ int grant_region(domain_id_t id, paddr_t start, paddr_t end, memory_access_right
 
   // We were not able to find the child.
   if (child == NULL) {
-    local_domain.print("Error[grant_region]: child not found."); 
+    ERROR("Child not found."); 
     goto failure;
   }
 
@@ -401,7 +405,7 @@ int grant_region(domain_id_t id, paddr_t start, paddr_t end, memory_access_right
 
   // We were not able to find the capability.
   if (capa == NULL) {
-    local_domain.print("Error[grant_region] unable to find the containing capa.");
+    ERROR("Unable to find the containing capa.");
     goto failure;
   }
 
@@ -416,7 +420,7 @@ int grant_region(domain_id_t id, paddr_t start, paddr_t end, memory_access_right
     if (duplicate_capa(&left, &right, capa,
           capa->access.region.start, start, capa->access.region.flags,
           start, capa->access.region.end, capa->access.region.flags) != SUCCESS) {
-      local_domain.print("Error[grant_region] middle case duplicate failed.");
+      ERROR("Middle case duplicate failed.");
       goto failure;
     }
     // Update the capa to point to the right.
@@ -455,7 +459,7 @@ int grant_region(domain_id_t id, paddr_t start, paddr_t end, memory_access_right
     // Do the duplicate.
     if (duplicate_capa(&left, &right, capa, s, m, capa->access.region.flags,
           m, e, capa->access.region.flags) != SUCCESS) {
-      local_domain.print("Error[grant_region] left or right duplicate case failed.");
+      ERROR("Left or right duplicate case failed.");
       goto failure;
     }
    
@@ -481,12 +485,13 @@ int grant_region(domain_id_t id, paddr_t start, paddr_t end, memory_access_right
   // Now we update the capabilities.
   dll_remove(&(local_domain.capabilities), capa, list);
   if (capa->capa_type != Revocation) {
-    local_domain.print("[DBG] not a revocation 2");
+    ERROR("not a revocation 2");
+    goto failure;
   }
   dll_add(&(child->revocations), capa, list);
 
   // We are done!
-  local_domain.print("[grant_region] Success");
+  DEBUG("Success");
   return SUCCESS;
 failure:
   return FAILURE;
@@ -498,10 +503,10 @@ int share_region(
   child_domain_t* child = NULL;
   capability_t* capa = NULL, *left = NULL, *right = NULL;
 
-  local_domain.print("[share_region] start");
+  DEBUG("start");
   // Quick checks.
   if (start >= end) {
-    local_domain.print("Error[share_region]: start is greater or equal to end.\n");
+    ERROR("start is greater or equal to end.\n");
     goto failure;
   }
 
@@ -515,7 +520,7 @@ int share_region(
 
   // We were not able to find the child.
   if (child == NULL) {
-    local_domain.print("Error[share_region]: child not found."); 
+    ERROR("child not found."); 
     goto failure;
   }
 
@@ -549,23 +554,24 @@ int share_region(
   // We implement the share as a grant of the cut out region.
   if (tyche_grant(child->manipulate->local_id, right->local_id,
         start, end, (usize) access) != SUCCESS) {
-    local_domain.print("Failed sharing the region with the domain.");
+    ERROR("Failed sharing the region with the domain.");
     goto failure;
   }
 
   // Now we update the capabilities.
   if (enumerate_capa(right->local_id, right) != SUCCESS) {
-    local_domain.print("We failed enumerating the revocation after share.");
+    ERROR("We failed enumerating the revocation after share.");
     goto failure;
   }
   dll_remove(&(local_domain.capabilities), right, list);
   if (right->capa_type != Revocation) {
-    local_domain.print("[DBG] not a revocation 3");
+    DEBUG("[DBG] not a revocation 3");
+    goto failure;
   }
   dll_add(&(child->revocations), right, list);
 
   // All done!
-  local_domain.print("[share_region] Success");
+  DEBUG("Success");
   return SUCCESS;
 failure:
   return FAILURE;
@@ -575,12 +581,12 @@ failure:
 int internal_revoke(child_domain_t* child, capability_t* capa)
 {
   if (child == NULL || capa == NULL) {
-    local_domain.print("Error[internal_revoke]: null args.");
+    ERROR("null args.");
     goto failure;
   }
 
   if (capa->capa_type != Revocation) {
-    local_domain.print("Error[internal revoke] supplied capability is not a revocation");
+    ERROR("Error[internal revoke] supplied capability is not a revocation");
     goto failure;
   }
 
@@ -589,7 +595,7 @@ int internal_revoke(child_domain_t* child, capability_t* capa)
   }
   
   if (enumerate_capa(capa->local_id, capa) != SUCCESS) {
-    local_domain.print("Error[internal_revoke]: unable to enumerate the revoked capa");
+    ERROR("Error[internal_revoke]: unable to enumerate the revoked capa");
     goto failure;
   }
 
@@ -616,17 +622,17 @@ int internal_revoke(child_domain_t* child, capability_t* capa)
     parent->left = NULL;
     parent->right = NULL;
     if (enumerate_capa(parent->local_id, parent) != SUCCESS) {
-      local_domain.print("Error[internal_revoke]: unable to enumerate after the merge.");
+      ERROR("Error[internal_revoke]: unable to enumerate after the merge.");
       goto failure;
     }
     capa = parent;
   }
 
   // All done!
-  local_domain.print("[internal_revoke] success");
+  DEBUG("success");
   return SUCCESS;
 failure:
-  local_domain.print("[internal_revoke] failure");
+  ERROR("failure");
   return FAILURE;
 }
 
@@ -635,7 +641,7 @@ int revoke_region(domain_id_t id, paddr_t start, paddr_t end)
   child_domain_t* child = NULL;
   capability_t* capa = NULL;
   
-  local_domain.print("[revoke_region] start");
+  DEBUG("start");
   // Find the target domain.
   dll_foreach(&(local_domain.children), child, list) {
     if (child->id == id) {
@@ -646,7 +652,7 @@ int revoke_region(domain_id_t id, paddr_t start, paddr_t end)
 
   // We were not able to find the child.
   if (child == NULL) {
-    local_domain.print("Error[revoke_region]: child not found."); 
+    ERROR("child not found."); 
     goto failure;
   }
 
@@ -659,16 +665,16 @@ int revoke_region(domain_id_t id, paddr_t start, paddr_t end)
     } 
   }
   if (capa == NULL) {
-    local_domain.print("Error[revoke_region]: unable to find region to revoke.");
+    ERROR("Error[revoke_region]: unable to find region to revoke.");
     goto failure;
   }
   if (internal_revoke(child, capa) != SUCCESS) {
     goto failure;
   }
-  local_domain.print("[revoke_region] success");
+  DEBUG("success");
   return SUCCESS;
 failure:
-  local_domain.print("[revoke_region] failure");
+  ERROR("failure");
   return FAILURE;
 }
 
@@ -677,7 +683,7 @@ int switch_domain(domain_id_t id, void* args)
 {
   child_domain_t* child = NULL;
   transition_t* wrapper = NULL;
-  local_domain.print("[switch_domain] start");
+  DEBUG("start");
 
   // Find the target domain.
   dll_foreach(&(local_domain.children), child, list) {
@@ -689,7 +695,7 @@ int switch_domain(domain_id_t id, void* args)
 
   // We were not able to find the child.
   if (child == NULL) {
-    local_domain.print("Error[switch_domain]: child not found."); 
+    ERROR("child not found."); 
     goto failure;
   }
 
@@ -698,17 +704,21 @@ int switch_domain(domain_id_t id, void* args)
     if (wrapper->lock == TRANSITION_UNLOCKED) {
       wrapper->lock = TRANSITION_LOCKED;
       break;
+    } else if (wrapper->lock != TRANSITION_LOCKED) {
+      ERROR("There is an invalid lock value %d (%p) (child: %p)",
+          wrapper->lock, (void*) wrapper, (void*) child);
+      goto failure;
     }
   }
   if (wrapper == NULL) {
-    local_domain.print("Error[switch_domain]: Unable to find a transition handle!");
+    ERROR("Unable to find a transition handle!");
     goto failure;
   }
   if (tyche_switch(wrapper->transition->local_id, NO_CPU_SWITCH, args) != SUCCESS) {
-    local_domain.print("Error[switch_domain]: failed to perform a switch");
+    ERROR("Error[switch_domain]: failed to perform a switch");
     goto failure;
   }
-  local_domain.print("[switch_domain] Came back from the switch");
+  DEBUG("[switch_domain] Came back from the switch");
   // We are back from the switch, unlock the wrapper.
   wrapper->lock = TRANSITION_UNLOCKED;
   return SUCCESS;
@@ -722,7 +732,7 @@ int revoke_domain(domain_id_t id)
   capability_t* capa = NULL;
   transition_t* wrapper = NULL;
   
-  local_domain.print("[revoke_domain] start");
+  DEBUG("start");
 
   // Find the target domain.
   dll_foreach(&(local_domain.children), child, list) {
@@ -734,7 +744,7 @@ int revoke_domain(domain_id_t id)
 
   // We were not able to find the child.
   if (child == NULL) {
-    local_domain.print("Error[revoke_domain]: unable to find the child.");
+    ERROR("unable to find the child.");
     goto failure;
   }
 
@@ -743,16 +753,16 @@ int revoke_domain(domain_id_t id)
     capa = child->revocations.head;
     if (capa->left != NULL) {
       // By construction this should never happen.
-      local_domain.print("Error[revoke_domain]: The revoked capa has non empty left.");
+      ERROR("The revoked capa has non empty left.");
       goto failure;
     }
     if (capa->right != NULL) {
       // By construction this should never happen.
-      local_domain.print("Error[revoke_domain]: The revoked capa has non empty right.");
+      ERROR("The revoked capa has non empty right.");
       goto failure;
     }
     if (internal_revoke(child, capa) != SUCCESS) {
-      local_domain.print("Error[revoke_domain] unable to revoke a capability.");
+      ERROR("unable to revoke a capability.");
       goto failure;
     }
   }
@@ -772,16 +782,16 @@ int revoke_domain(domain_id_t id)
     goto failure;
   }
   if (enumerate_capa(child->revoke->local_id, local_domain.self) != SUCCESS) {
-    local_domain.print("Error[revoke_domain] Unable to enumerate self");
+    ERROR("Unable to enumerate self");
     goto failure;
   }
   local_domain.dealloc(child->revoke);
   dll_remove(&(local_domain.children), child, list);
   local_domain.dealloc(child);
   
-  local_domain.print("[revoke_domain] success");
+  DEBUG("[revoke_domain] success");
   return SUCCESS;
 failure:
-  local_domain.print("[revoke_domain] failure");
+  ERROR("[revoke_domain] failure");
   return FAILURE;
 }

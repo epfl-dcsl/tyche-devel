@@ -27,7 +27,6 @@ static enclave_t* find_enclave(enclave_handle_t handle)
     }
   }
   if (encl == NULL) {
-    LOG("Enclave not found for handle %lld",  handle);
     goto failure;
   }
   if (encl->pid != current->pid) {
@@ -338,7 +337,8 @@ int commit_enclave(enclave_handle_t handle, usize cr3, usize rip, usize rsp)
     ERROR("Unable to seal enclave %lld", handle);
     goto delete_fail;
   }
-
+  
+  DEBUG("Managed to seal domain %lld | encl %lld", encl->domain_id, encl->handle);
   // We are all done!
   return SUCCESS;
 delete_fail:
@@ -347,6 +347,25 @@ delete_fail:
         encl->domain_id, handle);
   }
   encl->domain_id = UNINIT_DOM_ID;
+failure:
+  return FAILURE;
+}
+
+int switch_enclave(enclave_handle_t handle, void* args)
+{
+  enclave_t* enclave = NULL;
+  enclave = find_enclave(handle);
+  if (enclave == NULL) {
+    ERROR("Unable to find the enclave %lld", handle);
+    goto failure;
+  }
+  DEBUG("About to try to switch to domain %lld| encl %lld",
+      enclave->domain_id, enclave->handle);
+  if (switch_domain(enclave->domain_id, args) != SUCCESS) {
+    ERROR("Unable to switch to enclave %lld", enclave->handle);
+    goto failure;
+  }
+  return SUCCESS;
 failure:
   return FAILURE;
 }

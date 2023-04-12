@@ -103,6 +103,8 @@ int mprotect_enclave(
     enclave_segment_type_t tpe);
 /// Commits the enclave. This is where the capability operations are done.
 int commit_enclave(enclave_handle_t handle, usize cr3, usize rip, usize rsp);
+/// Implements the transition into an enclave.
+int switch_enclave(enclave_handle_t handle, void* args);
 /// Delete the enclave and revoke the capabilities.
 int delete_enclave(enclave_handle_t handle);
 

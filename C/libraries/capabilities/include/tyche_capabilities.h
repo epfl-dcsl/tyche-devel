@@ -13,7 +13,7 @@ extern domain_t local_domain;
 /// Initialize the local domain.
 /// This function enumerates the regions attributed to this domain and populates
 /// the local_domain.
-int init(capa_alloc_t allocator, capa_dealloc_t deallocator, capa_dbg_print_t print);
+int init(capa_alloc_t allocator, capa_dealloc_t deallocator);
 
 /// Creates a new domain.
 /// Sets the result inside the provided id handle.

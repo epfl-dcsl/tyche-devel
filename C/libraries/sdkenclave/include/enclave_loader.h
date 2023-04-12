@@ -95,6 +95,8 @@ typedef struct {
 typedef struct enclave_shared_section_t {
   /// Reference to the section.
   Elf64_Shdr* section;
+  /// The address in the untrusted user space.
+  usize untrusted_vaddr;
   /// Stored as a list.
   dll_elem(struct enclave_shared_section_t, list);
 } enclave_shared_section_t;
@@ -120,9 +122,6 @@ typedef struct {
   /// Enclave driver fd.
   int driver_fd;
 
-  /// Binary ELF fd.
-  int elf_fd;
-
   /// Driver domain handle.
   enclave_handle_t handle;
 
@@ -143,5 +142,11 @@ int parse_enclave(enclave_t* enclave, const char* file);
 
 /// Loads the enclave, needs to be parsed first.
 int load_enclave(enclave_t* enclave);
+
+/// Transitions into the enclave.
+int call_enclave(enclave_t* enclave, void* args);
+
+/// Delete the enclave.
+int delete_enclave(enclave_t* enclave);
 
 #endif /*__INCLUDE_ENCLAVE_LOADER_H__*/

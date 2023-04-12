@@ -104,7 +104,19 @@ int ioctl_mmap(int driver_fd, enclave_handle_t handle, usize size, usize* virtof
     goto failure;
   }
   *virtoffset = (usize) result;
-  LOG("mmap success for %lld, address %llx", handle, result);
+  DEBUG("mmap success for %lld, address %llx", handle, result);
+  return SUCCESS;
+failure:
+  return FAILURE;
+}
+
+int ioctl_switch_enclave(int driver_fd, enclave_handle_t handle, void* args)
+{
+  msg_enclave_switch_t transition = {handle, args};
+  if (ioctl(driver_fd, TYCHE_TRANSITION, &transition) != SUCCESS) {
+    ERROR("ioctl failed to switch to %lld", handle);
+    goto failure;
+  }
   return SUCCESS;
 failure:
   return FAILURE;

@@ -17,15 +17,16 @@ static void local_free(void* ptr)
   counter_alloc--;
   kfree(ptr);
 }
-
+/*
 static void local_print(const char *msg)
 {
   LOG("[CAPA | %lld]: %s\n", counter_alloc, msg);
 }
+*/
 
 // ——————————————————————————————— Public API ——————————————————————————————— //
 
 int init_capabilities(void)
 {
-  return init(local_allocator, local_free, local_print); 
+  return init(local_allocator, local_free); 
 } 

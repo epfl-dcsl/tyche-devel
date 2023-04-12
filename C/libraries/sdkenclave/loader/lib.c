@@ -2,6 +2,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <string.h>
+#include <sys/mman.h>
 #include <unistd.h>
 
 #include "elf64.h"
@@ -15,9 +16,7 @@
 const char* ENCLAVE_DRIVER = "/dev/tyche"; 
 const char* SHARED_PREFIX = ".tyche_shared";
 
-// ——————————————————————————————— Functions ———————————————————————————————— //
-
-
+// ———————————————————————————— Local Functions ————————————————————————————— //
 static memory_access_right_t translate_flags(Elf64_Word flags) {
   memory_access_right_t rights = 0;
   if ((flags & PF_R) == PF_R) {
@@ -42,6 +41,7 @@ static enclave_segment_type_t get_section_tpe_from_name(char* name)
   return CONFIDENTIAL;
 }
 
+// ——————————————————————————————— Functions ———————————————————————————————— //
 int parse_enclave(enclave_t* enclave, const char* file)
 {
   size_t segments_size = 0;
@@ -211,7 +211,6 @@ int load_enclave(enclave_t* enclave)
     dll_foreach(&(enclave->config.shared_sections), shared_sect, list) {
       Elf64_Shdr* section = shared_sect->section;
       usize virt_addr = dest + local_size; 
-      //TODO we need to compute the right address, this one is incorrect.
       if (section->sh_addr >= curr_va && section->sh_addr <= curr_va + size) {
         if (curr_va != section->sh_addr) {
           if (ioctl_mprotect_enclave(
@@ -239,13 +238,14 @@ int load_enclave(enclave_t* enclave)
               enclave->handle, section->sh_addr);
           goto failure;
         }
+        // Update the virt_addr of the shared_sect;
+        shared_sect->untrusted_vaddr = virt_addr;
         local_size += align_up(section->sh_size);
         curr_va = section->sh_addr + align_up(section->sh_size);
       }
     } 
    
     // Map the rest of the segment.
-    // TODO need to compute the right address.
     if (curr_va  < size + seg.p_vaddr && 
         ioctl_mprotect_enclave(
           enclave->driver_fd,
@@ -271,7 +271,6 @@ int load_enclave(enclave_t* enclave)
     void* source = (void*)(enclave->parser.bump.pages);
     size_t size = enclave->parser.bump.idx * PAGE_SIZE;
     uint64_t dest = enclave->parser.bump.phys_offset + enclave->map.virtoffset;
-    //TODO apparently segfaults here.
     memcpy((void*) dest, source, size); 
     if (ioctl_mprotect_enclave(
           enclave->driver_fd, 
@@ -296,9 +295,63 @@ int load_enclave(enclave_t* enclave)
     ERROR("Unable to commit the enclave %lld", enclave->handle);
     goto failure;
   } 
-
   DEBUG("Done loading enclave %lld", enclave->handle);
+  return SUCCESS;
 failure:
   return FAILURE;
 }
 
+int call_enclave(enclave_t* enclave, void* args)
+{
+  if (enclave == NULL) {
+    ERROR("The provided enclave is null.");
+    goto failure;
+  } 
+  if (ioctl_switch_enclave(
+        enclave->driver_fd,
+        enclave->handle,
+        args) != SUCCESS) {
+    ERROR("Unable to switch to the enclave %lld", enclave->handle);
+    goto failure;
+  }
+failure:
+  return FAILURE;
+}
+
+int delete_enclave(enclave_t* enclave)
+{
+  if (enclave == NULL) {
+    ERROR("The provided enclave is null.");
+    goto failure;
+  }
+  // First call the driver.
+  if (ioctl_delete_enclave(enclave->driver_fd, enclave->handle) != SUCCESS) {
+    ERROR("Unable to delete the enclave %lld", enclave->handle);
+    goto failure;
+  }
+  // Now collect everything else.
+  // The config.
+  while (!dll_is_empty(&(enclave->config.shared_sections))) {
+    enclave_shared_section_t* sec = enclave->config.shared_sections.head;
+    dll_remove(&(enclave->config.shared_sections), sec, list);
+    free(sec);
+  }
+  // The parser.
+  if (unmap_parser(&(enclave->parser.bump)) != SUCCESS) {
+    ERROR("Unable to munmap the bump for enclave %lld", enclave->handle);
+    goto failure;
+  }
+  free(enclave->parser.segments);
+  free(enclave->parser.sections);
+  free(enclave->parser.strings);
+  close(enclave->parser.fd);
+
+  // Unmap the enclave.
+  munmap((void*) enclave->map.virtoffset, enclave->map.size); 
+
+  // Close the driver.
+  close(enclave->driver_fd);
+  return SUCCESS;
+failure:
+  return FAILURE;
+}

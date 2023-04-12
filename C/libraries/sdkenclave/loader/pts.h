@@ -27,5 +27,7 @@ int create_page_tables(
     Elf64_Phdr* segments);
 /// Adds offset to all the page tables entries.
 int fix_page_tables(usize offset, page_tables_t* tables);
+/// Calls munmap on bump->pages.
+int unmap_parser(page_tables_t* bump);
 
 #endif /*__LOADER_PTS_H__*/

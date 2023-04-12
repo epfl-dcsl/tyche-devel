@@ -103,6 +103,7 @@ long tyche_ioctl(struct file* file, unsigned int cmd, unsigned long arg)
   msg_enclave_info_t info = {0, UNINIT_USIZE}; 
   msg_enclave_commit_t commit = {0, 0, 0, 0};
   msg_enclave_mprotect_t mprotect = {0, 0, 0, 0, 0};
+  msg_enclave_switch_t transition = {0 , 0};
   switch(cmd) {
     case TYCHE_ENCLAVE_CREATE:
       info.handle = tyche_ids++;
@@ -170,6 +171,19 @@ long tyche_ioctl(struct file* file, unsigned int cmd, unsigned long arg)
             mprotect.flags,
             mprotect.tpe) != SUCCESS) {
         ERROR("Unable to mprotect he region for enclave %lld", mprotect.handle);
+        goto failure;
+      }
+      break;
+    case TYCHE_TRANSITION:
+      if (copy_from_user(
+            &transition,
+            (msg_enclave_switch_t*) arg,
+            sizeof(msg_enclave_switch_t))) {
+        ERROR("Unable to copy arguments from user.");
+        goto failure;
+      }
+      if (switch_enclave(transition.handle, transition.args) != SUCCESS) {
+        ERROR("Unable to switch to enclave %lld", transition.handle);
         goto failure;
       }
       break;

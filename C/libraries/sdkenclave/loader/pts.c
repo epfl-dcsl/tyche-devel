@@ -305,3 +305,18 @@ int fix_page_tables(usize offset, page_tables_t * tables)
 failure:
   return FAILURE;
 }
+
+int unmap_parser(page_tables_t* bump)
+{
+  if (bump == NULL) {
+    ERROR("The bump is null.");
+    goto failure;
+  }
+  if (bump->pages == NULL) {
+    ERROR("The bump's pages are null.");
+    goto failure;
+  }
+  munmap(bump->pages, bump_size);
+failure:
+  return FAILURE;
+}
