@@ -107,5 +107,7 @@ int commit_enclave(enclave_handle_t handle, usize cr3, usize rip, usize rsp);
 int switch_enclave(enclave_handle_t handle, void* args);
 /// Delete the enclave and revoke the capabilities.
 int delete_enclave(enclave_handle_t handle);
+/// For debugging purposes, sets the phys_addr for virt_addr.
+int debug_addr(usize virt_addr, usize* phys_addr);
 
 #endif /*__SRC_ENCLAVES_H__*/

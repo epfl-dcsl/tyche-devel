@@ -86,5 +86,6 @@ typedef struct {
 #define TYCHE_ENCLAVE_MPROTECT _IOW('a', 'e', msg_enclave_mprotect_t*)
 #define TYCHE_TRANSITION _IOR('a', 'f', msg_enclave_switch_t*)
 #define TYCHE_ENCLAVE_DELETE _IOR('a', 'g', msg_enclave_info_t*)
+#define TYCHE_DEBUG_ADDR _IOWR('a', 'h', msg_enclave_info_t*)
 
 #endif

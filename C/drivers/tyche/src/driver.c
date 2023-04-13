@@ -3,6 +3,9 @@
 #include <linux/module.h>
 #include <linux/kernel.h>
 
+#include "common.h"
+#include "dbg_addresses.h"
+
 // —————————————————————————————— Module Info ——————————————————————————————— //
 
 MODULE_LICENSE("GPL");
@@ -17,6 +20,10 @@ static int __init tyche_enclave_init(void)
   int result = 0;
   printk(KERN_INFO "Loading Tyche driver.");
   result = tyche_register();
+  if (init_page_walker() != 0) {
+    ERROR("Unable to init the page walker for some reason!");
+    return -1;
+  }
   return result;
 }
 

@@ -27,4 +27,5 @@ int ioctl_mprotect_enclave(
 int ioctl_delete_enclave(int driver_fd, enclave_handle_t handle);
 int ioctl_mmap(int driver_fd, enclave_handle_t handle, usize size, usize* virtoffset);
 int ioctl_switch_enclave(int driver_fd, enclave_handle_t handle, void* args);
+int ioctl_debug_addr(int driver_fd, usize virtaddr, usize* physaddr);
 #endif /*__LOADER_DRIVER_IOCTL_H__*/

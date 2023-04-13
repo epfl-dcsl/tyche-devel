@@ -10,6 +10,9 @@
 
 extern void my_func(void);
 
+__attribute__ ((aligned (0x1000)))
+char attempt[0x1000];
+
 int main(void)
 {
   int driver_fd = -1;
@@ -68,6 +71,32 @@ int main(void)
   page_t* p1_table = (page_t*) (virt_addr + 4 * PAGE_SIZE);
   p1_table->data[lvl1] = phys_addr | flags;
   LOG("lvl1 entry: %llx", p1_table->data[lvl1]);
+
+  do {
+    usize physaddr = 0;
+    LOG("About to walk for %llx", (usize) attempt);
+    // Make sure it's populated.
+    attempt[0] = 'a';
+    if (attempt[0] != 'a') {
+      ERROR("What the hell");
+      goto failure;
+    }
+    if (ioctl_debug_addr(driver_fd, (usize) attempt, &physaddr) != SUCCESS) {
+      ERROR("Failed with the attempt data too.");
+      goto failure;
+    }
+    LOG("We found it %llx -> %llx", (usize) attempt, physaddr);
+  } while(0);
+
+    // Let's checkout the mappings now.
+  for (usize vaddr = virt_addr; vaddr < virt_addr + size; vaddr += PAGE_SIZE) {
+    usize physaddr = 0;
+    if (ioctl_debug_addr(driver_fd, vaddr, &physaddr) != SUCCESS) {
+      ERROR("Unable to get the debugged phys address for %llx", vaddr);
+      goto failure;
+    }
+    LOG("DBG: vaddr: %llx, paddr: %llx", vaddr, physaddr);
+  }
 
   // Do the mprotect.
   if (ioctl_mprotect_enclave(

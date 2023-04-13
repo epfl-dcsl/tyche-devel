@@ -10,6 +10,7 @@
 #define TYCHE_DEBUG 1
 #include "common.h"
 #include "enclaves.h"
+#include "dbg_addresses.h"
 #include "tyche_capabilities.h"
 
 // ———————————————————————————————— Globals ————————————————————————————————— //
@@ -126,6 +127,7 @@ int mmap_segment(struct vm_area_struct *vma)
 
   // Map the result into the user address space.
   pfn = page_to_pfn(virt_to_page(allocation)); 
+  //ERROR("The pfn for %llx is %lx, pg_off: %lx", (usize) allocation, pfn, vma->vm_pgoff);
   if (remap_pfn_range(vma, vma->vm_start, pfn, size, vma->vm_page_prot)) {
     ERROR("Unable to map the allocated physical memory into the user process.");
     goto fail_free_pages;
@@ -404,6 +406,22 @@ delete_encl_struct:
   free_pages_exact(phys_to_virt((phys_addr_t)(encl->phys_start)), encl->size);
   dll_remove(&enclaves, encl, list);
   kfree(encl);
+  return SUCCESS;
+failure:
+  return FAILURE;
+}
+
+int debug_addr(usize virt_addr, usize* phys_addr)
+{
+  if (phys_addr == NULL) {
+    ERROR("Provided phys_addr is null.");
+    goto failure;
+  }
+  //*phys_addr = (usize) virt_to_phys((void*)virt_addr);
+  if (walk_and_collect_region(virt_addr, 0x1000, phys_addr) != SUCCESS) {
+    ERROR("Walk and collect failed!");
+    goto failure;
+  }
   return SUCCESS;
 failure:
   return FAILURE;

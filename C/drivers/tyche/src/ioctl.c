@@ -200,6 +200,27 @@ long tyche_ioctl(struct file* file, unsigned int cmd, unsigned long arg)
         goto failure;
       }
       break;
+    case TYCHE_DEBUG_ADDR:
+      if (copy_from_user(
+            &info,
+            (msg_enclave_info_t*) arg,
+            sizeof(msg_enclave_info_t)) != SUCCESS) {
+        ERROR("Unable to copy argument from user");
+        goto failure;
+      }
+
+      if (debug_addr(info.virtaddr, &info.physoffset) != SUCCESS) {
+        ERROR("Unable to read the phys address for %llx", info.virtaddr);
+        goto failure;
+      }
+      if (copy_to_user(
+            (msg_enclave_info_t*) arg, 
+            &info, 
+            sizeof(msg_enclave_info_t))) {
+        ERROR("Unable to copy enclave physoffset for %lld", info.handle);
+        goto failure;
+      }
+      break;
     default:
       ERROR("The command is not valid!");
       goto failure;
