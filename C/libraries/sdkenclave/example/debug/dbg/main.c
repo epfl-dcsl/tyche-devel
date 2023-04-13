@@ -25,7 +25,7 @@ int main(void)
   usize dest_addr = 0x400000;
   size_t lvl4 = 0, lvl3 = 0, lvl2 = 2, lvl1 = 0;
   usize flags = PT_PP | PT_RW | PT_ACC | PT_DIRT;
-  driver_fd = open("/dev/tyche", O_RDONLY);
+  driver_fd = open("/dev/tyche", O_RDWR);
   if (driver_fd < 0) {
     ERROR("Unable to open the driver");
     goto failure;
@@ -72,6 +72,7 @@ int main(void)
   p1_table->data[lvl1] = phys_addr | flags;
   LOG("lvl1 entry: %llx", p1_table->data[lvl1]);
 
+  /*
   do {
     usize physaddr = 0;
     LOG("About to walk for %llx", (usize) attempt);
@@ -96,7 +97,7 @@ int main(void)
       goto failure;
     }
     LOG("DBG: vaddr: %llx, paddr: %llx", vaddr, physaddr);
-  }
+  }*/
 
   // Do the mprotect.
   if (ioctl_mprotect_enclave(

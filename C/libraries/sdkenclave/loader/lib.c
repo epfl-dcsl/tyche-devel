@@ -156,7 +156,7 @@ int load_enclave(enclave_t* enclave)
   }
 
   // Open the driver.
-  enclave->driver_fd = open(ENCLAVE_DRIVER, O_RDONLY);
+  enclave->driver_fd = open(ENCLAVE_DRIVER, O_RDWR);
   if (enclave->driver_fd < 0) {
     ERROR("Unable to open the enclave driver %s", ENCLAVE_DRIVER);
     goto failure;

@@ -88,7 +88,7 @@ int mmap_segment(struct vm_area_struct *vma)
   void* allocation = NULL;
   usize size = 0;
   mmap_segment_t* segment = NULL;
-  unsigned long pfn = 0;
+  //unsigned long pfn = 0;
   if (vma == NULL) {
     ERROR("The provided vma is null.");
     goto failure;
@@ -119,19 +119,27 @@ int mmap_segment(struct vm_area_struct *vma)
     goto fail_free;
   }
   memset(allocation, 0, size);
+  ERROR("The base is %lx", page_to_pfn(virt_to_page(allocation)));
   // Prevent pages from being collected.
   for (int i = 0; i < (size/PAGE_SIZE); i++) {
-    char* mem = ((char*)allocation) + PAGE_SIZE;
+    char* mem = ((char*)allocation) + i * PAGE_SIZE;
     SetPageReserved(virt_to_page((unsigned long)mem));
   }
 
   // Map the result into the user address space.
-  pfn = page_to_pfn(virt_to_page(allocation)); 
-  //ERROR("The pfn for %llx is %lx, pg_off: %lx", (usize) allocation, pfn, vma->vm_pgoff);
+  /*pfn = page_to_pfn(virt_to_page(allocation)); 
+  ERROR("The pfn for %llx is %lx, pg_off: %lx, virt_to_phys: %llx flags: %lx, prot: %lx",
+      (usize) allocation, pfn, vma->vm_pgoff, (usize) (virt_to_phys(allocation)), (vma->vm_flags & (VM_READ | VM_WRITE)), vma->vm_page_prot);
   if (remap_pfn_range(vma, vma->vm_start, pfn, size, vma->vm_page_prot)) {
     ERROR("Unable to map the allocated physical memory into the user process.");
     goto fail_free_pages;
+  }*/
+  DEBUG("The phys address %llx, virt: %llx", (usize) virt_to_phys(allocation), (usize) allocation);
+  if (vm_iomap_memory(vma, virt_to_phys(allocation), size)) {
+    ERROR("Unable to map the memory...");
+    goto fail_free_pages;
   }
+
 
   // Set the values inside the enclave structure.
   segment->phys_start = (usize) virt_to_phys(allocation);

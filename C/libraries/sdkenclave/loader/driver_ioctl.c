@@ -1,3 +1,4 @@
+#include <string.h>
 #include <sys/ioctl.h> 
 #include <sys/mman.h>
 #include <sys/errno.h>
@@ -101,9 +102,9 @@ int ioctl_mmap(int driver_fd, enclave_handle_t handle, usize size, usize* virtof
     goto failure;
   }
   result = mmap(NULL, (size_t) size, PROT_READ|PROT_WRITE,
-      /*MAP_ANONYMOUS|MAP_PRIVATE|MAP_POPULATE*/ MAP_PRIVATE|MAP_POPULATE, driver_fd, 0);
+      /*MAP_ANONYMOUS|MAP_PRIVATE|MAP_POPULATE*/ MAP_SHARED|MAP_POPULATE, driver_fd, 0);
   if (result == MAP_FAILED) {
-    ERROR("MMap to the driver failed %d", errno);
+    ERROR("MMap to the driver failed %s", strerror(errno));
     goto failure;
   }
   *virtoffset = (usize) result;
