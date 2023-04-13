@@ -294,7 +294,7 @@ int load_enclave(enclave_t* enclave)
           enclave->handle,
           (usize) dest,
           (usize) size,
-          TE_READ|TE_WRITE|TE_SUPER,
+          MEM_READ|MEM_WRITE|MEM_SUPER,
           CONFIDENTIAL) != SUCCESS) {
       ERROR("Unable to register the page tables for enclave %lld", enclave->handle);
       goto failure;
