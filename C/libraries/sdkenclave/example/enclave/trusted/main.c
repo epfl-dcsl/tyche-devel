@@ -12,9 +12,13 @@ void my_memcpy(void* dest, void* src, int size)
   } 
 }
 
-void print_message(void* source)
+void print_message(void* args)
 {
-  my_encl_message_t* msg = (my_encl_message_t*) source;
+  my_encl_message_t* msg = (my_encl_message_t*) get_default_shared_buffer();
+  if (msg == 0) {
+    int* ptr = (int*) 0xdeadbeef;
+    *ptr = 0xdeadbabe;
+  }
   my_memcpy(msg->reply, (void*) message, 15);
 }
 

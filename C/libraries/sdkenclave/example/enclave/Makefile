@@ -49,7 +49,7 @@ app: $(CODE_APP) $(HDRS_APP)
 
 
 enclave: $(CODE_ENCLAVE) $(CODE_RUNTIME) $(HDRS_ENCLAVE) $(HDRS_RUNTIME)
-	gcc -DTYCHE_USER_SPACE=1 -DDEFAULT_SHARED_BUFFER=1 -g $(COMMON_INCLUDES) -nostdlib -static -o $@ $(CODE_ENCLAVE) $(CODE_RUNTIME)
+	gcc -DTYCHE_USER_SPACE=1 -g $(COMMON_INCLUDES) -nostdlib -static -o $@ $(CODE_RUNTIME) $(CODE_ENCLAVE) 
 
 install_disk: all
 	mkdir -p $(DISK_PATH)

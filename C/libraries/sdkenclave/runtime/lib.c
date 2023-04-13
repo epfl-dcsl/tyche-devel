@@ -3,11 +3,9 @@
 // ———————————————————————————— Enclave sections ———————————————————————————— //
 
 ///@warn these string constants must be the same as in enclave_rt.h
-#ifdef DEFAULT_SHARED_BUFFER 
 __attribute__((section(".tyche_shared_default_buffer")))
 __attribute__ ((aligned (0x1000)))
 char shared_buffer[DEFAULT_SHARED_BUFFER_SIZE];
-#endif
 
 __attribute__((section(".tyche_enclave_stack")))
 __attribute__ ((aligned (0x1000)))
@@ -51,4 +49,9 @@ int gate_call(frame_t* frame)
   frame->ret_handle = ret_frame.ret_handle;
   frame->args = ret_frame.args;
   return result;
+}
+
+void* get_default_shared_buffer()
+{
+  return (void*) (shared_buffer);
 }

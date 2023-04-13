@@ -43,7 +43,7 @@ int main(void) {
   LOG("We have shared memory with the enclave at %llx", shared_buffer);
   msg = (my_encl_message_t*) shared_buffer;
 
-  if (call_enclave(&enclave, shared_buffer) != SUCCESS) {
+  if (call_enclave(&enclave, NULL) != SUCCESS) {
     ERROR("Unable to call the enclave %lld!", enclave.handle);
     goto failure;
   }

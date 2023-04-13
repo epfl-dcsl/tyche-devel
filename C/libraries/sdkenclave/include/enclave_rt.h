@@ -26,4 +26,5 @@ typedef struct {
 // —————————————————————————————————— API ——————————————————————————————————— //
 int gate_call(frame_t* frame);
 void trusted_main(capa_index_t ret_handle, void* args);
+void* get_default_shared_buffer();
 #endif
