@@ -25,7 +25,7 @@ WITH_PTS_INCLUDES = $(LOADER_INCLUDES) -I$(LIB_PT)/include
 ELF_CONFIG= -Wl,-R $(ELF_LIB) -L$(ELF_LIB)
 
 enclave_loader.so: $(CODE_LOADER) $(HDRS_LOADER)
-	gcc -DTYCHE_USER_SPACE=1 -DTYCHE_DEBUG=1 -g $(WITH_PTS_INCLUDES) $(ELF_CONFIG) -shared -o $@ -fPIC $(CODE_LOADER) -lelf64
+	gcc -DTYCHE_USER_SPACE=1 -g $(WITH_PTS_INCLUDES) $(ELF_CONFIG) -shared -o $@ -fPIC $(CODE_LOADER) -lelf64
 
 # This is mostly to make sure the code compiles.
 # When used by an enclave, include the code directly as shown below.

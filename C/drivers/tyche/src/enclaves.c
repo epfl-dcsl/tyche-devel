@@ -7,7 +7,6 @@
 #include <linux/mm_types.h>
 #include <asm/io.h>
 
-#define TYCHE_DEBUG 1
 #include "common.h"
 #include "enclaves.h"
 #include "dbg_addresses.h"
@@ -119,7 +118,6 @@ int mmap_segment(struct vm_area_struct *vma)
     goto fail_free;
   }
   memset(allocation, 0, size);
-  ERROR("The base is %lx", page_to_pfn(virt_to_page(allocation)));
   // Prevent pages from being collected.
   for (int i = 0; i < (size/PAGE_SIZE); i++) {
     char* mem = ((char*)allocation) + i * PAGE_SIZE;

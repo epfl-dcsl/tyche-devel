@@ -331,6 +331,7 @@ int call_enclave(enclave_t* enclave, void* args)
     ERROR("Unable to switch to the enclave %lld", enclave->handle);
     goto failure;
   }
+  return SUCCESS;
 failure:
   return FAILURE;
 }
