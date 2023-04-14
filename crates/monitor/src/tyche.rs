@@ -7,7 +7,7 @@ use capabilities::cpu::CPU;
 use capabilities::domain::{Domain, DomainAccess, OwnedCapability};
 use capabilities::error::ErrorCode;
 use capabilities::memory::MemoryRegion;
-use capabilities::{Capability, CapabilityType, Object, Ownership, Pool};
+use capabilities::{Capability, CapabilityType, Object, Pool};
 
 use crate::{Monitor, MonitorCallResult, MonitorState, Parameters, Registers};
 
