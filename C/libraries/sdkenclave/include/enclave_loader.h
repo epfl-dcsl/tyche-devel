@@ -137,6 +137,9 @@ typedef struct {
 
 // —————————————————————————————————— API ——————————————————————————————————— //
 
+/// Combines parse and load enclave into one call.
+int init_enclave(enclave_t* enclave, const char* file);
+
 /// Parse the ELF and compute the page tables (still need to be patched).
 int parse_enclave(enclave_t* enclave, const char* file);
 

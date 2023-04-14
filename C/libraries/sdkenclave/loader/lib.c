@@ -43,6 +43,22 @@ static enclave_segment_type_t get_section_tpe_from_name(char* name)
 }
 
 // ——————————————————————————————— Functions ———————————————————————————————— //
+
+int init_enclave(enclave_t* enclave, const char* file)
+{
+  if (parse_enclave(enclave, file) != SUCCESS) {
+    ERROR("Failure to parse the enclave");
+    goto failure;
+  }
+  if (load_enclave(enclave) != SUCCESS) {
+    ERROR("Failure to load the enclave %s", file);
+    goto failure;
+  }
+  return SUCCESS;
+failure:
+  return FAILURE;
+}
+
 int parse_enclave(enclave_t* enclave, const char* file)
 {
   size_t segments_size = 0;

@@ -40,17 +40,11 @@ int main(void) {
   enclave_t enclave;
   LOG("Let's load an enclave!");
 
-  // Parse the enclave.
-  if (parse_enclave(&enclave, ENCLAVE_PATH) != SUCCESS) {
+  // Init the enclave.
+  if (init_enclave(&enclave, ENCLAVE_PATH) != SUCCESS) {
     ERROR("Unable to parse the enclave '%s'", ENCLAVE_PATH);
     goto failure;
   }
-
-  // Load the enclave with tyche.
-  if (load_enclave(&enclave) != SUCCESS) {
-    ERROR("Unable to load the enclave '%s'", ENCLAVE_PATH);
-    goto failure;
-  } 
 
   /// Get the shared buffer address.
   msg = (my_encl_message_t*) find_default_shared(&enclave);
