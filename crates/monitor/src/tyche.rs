@@ -7,7 +7,7 @@ use capabilities::cpu::CPU;
 use capabilities::domain::{Domain, DomainAccess, OwnedCapability};
 use capabilities::error::ErrorCode;
 use capabilities::memory::MemoryRegion;
-use capabilities::{Capability, CapabilityType, Object, Pool};
+use capabilities::{Capability, CapabilityType, Object, Ownership, Pool};
 
 use crate::{Monitor, MonitorCallResult, MonitorState, Parameters, Registers};
 
@@ -442,10 +442,21 @@ impl Tyche {
         let res = current
             .enumerate_at(
                 capa_idx,
-                |idx, own| -> (usize, usize, usize, usize, usize, usize) {
+                |idx, own| -> Result<(usize, usize, usize, usize, usize, usize), ErrorCode> {
                     match *own {
                         OwnedCapability::Domain(h) => {
                             let capa = state.resources.get_capa(h);
+                            // Ensuring the capa is owned.
+                            match capa.get_owner::<ErrorCode, B>() {
+                                Ok(h) => {
+                                    if h.idx() != curr_handle.idx() {
+                                        return Err(ErrorCode::WrongOwnership);
+                                    }
+                                }
+                                Err(_) => {
+                                    return Err(ErrorCode::WrongOwnership);
+                                }
+                            }
                             let obj = state.resources.get(capa.handle);
                             let (b1, b2, b3) = capa.access.as_bits();
                             let ref_count = obj.get_ref(&state.resources, &capa);
@@ -454,7 +465,7 @@ impl Tyche {
                             } else {
                                 EnumerationFlags::TYCHE_DOMAIN | EnumerationFlags::TYCHE_REVOKE
                             };
-                            return (idx, flags.bits(), b1, b2, b3, ref_count);
+                            return Ok((idx, flags.bits(), b1, b2, b3, ref_count));
                         }
                         OwnedCapability::CPU(h) => {
                             let capa = state.resources.get_capa(h);
@@ -466,7 +477,7 @@ impl Tyche {
                             } else {
                                 EnumerationFlags::TYCHE_CPU | EnumerationFlags::TYCHE_REVOKE
                             };
-                            return (idx, flags.bits(), b1, b2, b3, ref_count);
+                            return Ok((idx, flags.bits(), b1, b2, b3, ref_count));
                         }
                         OwnedCapability::Region(h) => {
                             let capa = state.resources.get_capa(h);
@@ -478,21 +489,15 @@ impl Tyche {
                             } else {
                                 EnumerationFlags::TYCHE_REGION | EnumerationFlags::TYCHE_REVOKE
                             };
-                            return (idx, flags.bits(), b1, b2, b3, ref_count);
+                            return Ok((idx, flags.bits(), b1, b2, b3, ref_count));
                         }
                         _ => {
-                            return (
-                                usize::MAX,
-                                usize::MAX,
-                                usize::MAX,
-                                usize::MAX,
-                                usize::MAX,
-                                usize::MAX,
-                            )
+                            return Err(ErrorCode::WrongOwnership);
                         }
                     };
                 },
             )
+            .map_err(|e| e.wrap())?
             .map_err(|e| e.wrap())?;
         if res.0 == usize::MAX {
             return ErrorCode::OutOfBound.as_err();
@@ -601,7 +606,8 @@ impl Tyche {
                         return Err(ErrorCode::InvalidTransition.wrap());
                     }
                     // If this capability does not belong to the target
-                    if return_capa.get_owner()? != target {
+                    let owner = return_capa.get_owner()?;
+                    if owner != target {
                         return Err(ErrorCode::InvalidTransition.wrap());
                     }
 

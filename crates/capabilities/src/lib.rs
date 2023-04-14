@@ -263,6 +263,7 @@ where
     pub fn get_owner<E, B: Backend>(&self) -> Result<Handle<Domain<B>>, Error<E>> {
         match self.owner {
             Ownership::Domain(dom, _idx) => Ok(Handle::new_unchecked(dom)),
+            Ownership::Zombie => ErrorCode::ZombieCapaUsed.as_err(),
             _ => ErrorCode::NotOwnedCapability.as_err(),
         }
     }
@@ -515,6 +516,10 @@ impl<Back: Backend + Sized> Pool<Domain<Back>> for State<'_, Back> {
             let right = self.get_capa(orig.right);
             if let DomainAccess::Transition(id) = right.access {
                 let domain = self.get(right.handle);
+                // TODO are we leaking handles? Charly is working on v3 so
+                // probably not worth fixing right now.
+                let mut ctxt = domain.contexts.get_mut(Handle::new_unchecked(id));
+                ctxt.return_context = None;
                 domain.contexts.free(Handle::new_unchecked(id));
             }
         }

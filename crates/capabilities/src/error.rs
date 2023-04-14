@@ -31,9 +31,10 @@ pub enum ErrorCode {
     NotACpu = 22,
     InvalidTransition = 23,
     WrongAccessType = 24,
-    TODO = 25,
-    Debug = 26,
-    Unexpected = 27,
+    ZombieCapaUsed = 25,
+    TODO = 26,
+    Debug = 27,
+    Unexpected = 28,
 }
 
 impl ErrorCode {

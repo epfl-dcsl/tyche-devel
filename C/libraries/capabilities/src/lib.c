@@ -1,6 +1,7 @@
 #include "tyche_capabilities_types.h"
 #include "tyche_capabilities.h"
 #include "tyche_api.h"
+#define TYCHE_DEBUG 1
 #include "common.h"
 
 // ———————————————————————————————— Globals ————————————————————————————————— //
@@ -274,8 +275,20 @@ int seal_domain(
       ERROR("The transitions is not empty?!");
     }
   dll_add(&(child->transitions), trans_wrapper, list);
-  DEBUG("trans_wrapper address %p for child  %p", (void*) trans_wrapper,
+  DEBUG("trans_wrapper address %p, idx: %lld, type: %d for child  %p",
+      (void*) trans_wrapper,
+      trans_wrapper->transition->local_id,
+      transition->capa_type,
       (void*) child);
+  if (transition->capa_type != Resource ||
+      transition->resource_type != Domain ||
+      transition->access.domain.status != Transition) {
+    ERROR("Something is wrong with the capa %d %d %d",
+        transition->capa_type,
+        transition->resource_type,
+        transition->access.domain.status);
+    goto failure_dealloc;
+  } 
   
   // All done !
   DEBUG("Success");
@@ -714,8 +727,12 @@ int switch_domain(domain_id_t id, void* args)
     ERROR("Unable to find a transition handle!");
     goto failure;
   }
+  DEBUG("Found a handle for domain %lld, id %lld", 
+      id, wrapper->transition->local_id);
+
+
   if (tyche_switch(wrapper->transition->local_id, NO_CPU_SWITCH, args) != SUCCESS) {
-    ERROR("Error[switch_domain]: failed to perform a switch");
+    ERROR("failed to perform a switch on capa %lld", wrapper->transition->local_id);
     goto failure;
   }
   DEBUG("[switch_domain] Came back from the switch");
