@@ -1,6 +1,7 @@
 #ifndef __SRC_ENCLAVES_H__
 #define __SRC_ENCLAVES_H__
 
+#include <linux/fs.h>
 #include <linux/mm_types.h>
 
 #include "dll.h"
@@ -32,31 +33,14 @@ typedef struct enclave_segment_t {
   dll_elem(struct enclave_segment_t, list);
 } enclave_segment_t;
 
-/// This structure registers segments mapped in the user address space.
-typedef struct mmap_segment_t {
-  /// The creator's pid.
-  pid_t pid;
-
-  /// The virtual start.
-  usize virt_start;
-
-  /// The physical start.
-  usize phys_start;
-
-  /// The size of the contiguous memory region.
-  usize size;
-
-  /// The segments are part of a global list mapped_segments.
-  dll_elem(struct mmap_segment_t, list);
-} mmap_segment_t;
-
 /// Describes an enclave.
 typedef struct enclave_t {
   /// The creator task's pid.
   pid_t pid;
 
   /// The enclave's handle within the driver.
-  enclave_handle_t handle;
+  struct file* handle;
+  //enclave_handle_t handle;
 
   /// The enclave's domain id.
   domain_id_t domain_id;
@@ -84,15 +68,14 @@ void init_enclaves(void);
 /// Initializes the capability library.
 int init_capabilities(void);
 /// Create a new enclave with handle.
-int create_enclave(enclave_handle_t handle, usize spawn, usize comm);
+int create_enclave(enclave_handle_t handle);
 /// Handles an mmap call to the driver.
 /// This reserves a contiguous region and registers it until an enclave claims it.
-int mmap_segment(struct vm_area_struct* vma);
+int mmap_segment(enclave_handle_t enclave, struct vm_area_struct* vma);
 /// Returns the physoffset of the enclave.
 /// We expect the handle to be valid, and the virtaddr to exist in segments.
 int get_physoffset_enclave(
     enclave_handle_t handle,
-    usize virtaddr,
     usize* phys_offset);
 /// Sets up access rights and conf|share for the segment.
 int mprotect_enclave(

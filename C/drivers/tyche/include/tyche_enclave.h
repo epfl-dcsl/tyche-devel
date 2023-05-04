@@ -19,7 +19,7 @@
 #define TE_DEFAULT ((uint64_t)(TE_READ | TE_WRITE | TE_EXEC))
 
 // —————————————————————— Types Exposed by the Library —————————————————————— //
-typedef domain_id_t enclave_handle_t;
+typedef struct file* enclave_handle_t;
 
 typedef enum enclave_segment_type_t {
   SHARED = 0,
@@ -32,16 +32,12 @@ typedef enum enclave_segment_type_t {
 /// create_enclave sets the handle;
 /// get_physoffset expects the handle to be valid and sets the physoffset.
 typedef struct {
-  enclave_handle_t handle;
   usize virtaddr;
   usize physoffset;
 } msg_enclave_info_t;
 
 /// Message type to add a new region.
 typedef struct {
-  /// Unique enclave reference capability.
-  enclave_handle_t handle;
-
   /// Start virtual address. Must be page aligned and within the mmaped region.
   usize start;
 
@@ -57,9 +53,6 @@ typedef struct {
 
 /// Structure of the commit message.
 typedef struct {
-  /// The driver handle.
-  enclave_handle_t handle;
-
   /// The pointer to the stack.
   usize stack;
 
@@ -72,9 +65,6 @@ typedef struct {
 
 /// Structure to perform a transition.
 typedef struct {
-  /// The driver handle.
-  enclave_handle_t handle;
-
   /// The args, will end up in r11 on x86.
   void* args;
 } msg_enclave_switch_t;

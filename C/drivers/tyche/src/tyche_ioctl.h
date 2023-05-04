@@ -10,6 +10,7 @@ void tyche_unregister(void);
 
 // —————————————————————————————————— API ——————————————————————————————————— //
 int tyche_open(struct inode* inode, struct file* file);
+int tyche_close(struct inode* inode, struct file* file);
 long tyche_ioctl(struct file* file, unsigned int cmd, unsigned long arg);
 int tyche_mmap(struct file*, struct vm_area_struct*);
 

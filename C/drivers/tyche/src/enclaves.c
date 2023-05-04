@@ -6,6 +6,7 @@
 #include <linux/mmzone.h>
 #include <linux/mm_types.h>
 #include <asm/io.h>
+#include <linux/fs.h>
 
 #include "common.h"
 #include "enclaves.h"
@@ -15,7 +16,6 @@
 // ———————————————————————————————— Globals ————————————————————————————————— //
 
 static dll_list(enclave_t, enclaves);
-static dll_list(mmap_segment_t, mapped_segments);
 
 // ———————————————————————————— Helper Functions ———————————————————————————— //
 
@@ -31,7 +31,7 @@ static enclave_t* find_enclave(enclave_handle_t handle)
     goto failure;
   }
   if (encl->pid != current->pid) {
-    ERROR("Attempt to access enclave %lld from wrong pid", handle);
+    ERROR("Attempt to access enclave %p from wrong pid", handle);
     ERROR("Expected pid: %d, got: %d", encl->pid, current->pid);
     goto failure;
   }
@@ -46,17 +46,16 @@ failure:
 void init_enclaves(void)
 {
   dll_init_list((&enclaves));
-  dll_init_list((&mapped_segments));
   init_capabilities();
 }
 
 
-int create_enclave(enclave_handle_t handle, usize spawn, usize comm)
+int create_enclave(enclave_handle_t handle)
 {
   enclave_t* encl = NULL;
   encl = find_enclave(handle);
   if (encl != NULL) {
-    ERROR("The enclave with handle %lld already exists.", handle);
+    ERROR("The enclave with handle %p already exists.", handle);
     goto failure;
   }
   encl = kmalloc(sizeof(enclave_t), GFP_KERNEL);
@@ -76,18 +75,17 @@ int create_enclave(enclave_handle_t handle, usize spawn, usize comm)
 
   // Add the enclave to the list.
   dll_add((&enclaves), encl, list);
-  LOG("A new enclave was added to the driver with id %lld", handle);
+  LOG("A new enclave was added to the driver with id %p", handle);
   return SUCCESS;
 failure:
   return FAILURE;
 }
 
-int mmap_segment(struct vm_area_struct *vma)
+int mmap_segment(enclave_handle_t handle, struct vm_area_struct *vma)
 {
   void* allocation = NULL;
   usize size = 0;
-  mmap_segment_t* segment = NULL;
-  //unsigned long pfn = 0;
+  enclave_t* encl = NULL;
   if (vma == NULL) {
     ERROR("The provided vma is null.");
     goto failure;
@@ -101,21 +99,21 @@ int mmap_segment(struct vm_area_struct *vma)
     ERROR("End or/and Start is/are not page-aligned.");
     goto failure;
   }
-
-  // Create the segment.
-  segment = kmalloc(sizeof(mmap_segment_t), GFP_KERNEL);
-  if (segment == NULL) {
-    ERROR("Unable to allocate mmap segment.");
+  encl = find_enclave(handle);
+  if (encl == NULL) {
+    ERROR("Unable to find the right enclave.");
+  }
+  if (encl->virt_start != UNINIT_USIZE || encl->phys_start != UNINIT_USIZE) {
+    ERROR("The enclave has already been initialized.");
     goto failure;
   }
-  segment->pid = current->pid;
 
   // Allocate a contiguous memory region.
   size = vma->vm_end - vma->vm_start;
   allocation = alloc_pages_exact(size, GFP_KERNEL); 
   if (allocation == NULL) {
     ERROR("Alloca pages exact failed to allocate the pages.");
-    goto fail_free;
+    goto failure;
   }
   memset(allocation, 0, size);
   // Prevent pages from being collected.
@@ -124,81 +122,41 @@ int mmap_segment(struct vm_area_struct *vma)
     SetPageReserved(virt_to_page((unsigned long)mem));
   }
 
-  // Map the result into the user address space.
-  /*pfn = page_to_pfn(virt_to_page(allocation)); 
-  ERROR("The pfn for %llx is %lx, pg_off: %lx, virt_to_phys: %llx flags: %lx, prot: %lx",
-      (usize) allocation, pfn, vma->vm_pgoff, (usize) (virt_to_phys(allocation)), (vma->vm_flags & (VM_READ | VM_WRITE)), vma->vm_page_prot);
-  if (remap_pfn_range(vma, vma->vm_start, pfn, size, vma->vm_page_prot)) {
-    ERROR("Unable to map the allocated physical memory into the user process.");
-    goto fail_free_pages;
-  }*/
   DEBUG("The phys address %llx, virt: %llx", (usize) virt_to_phys(allocation), (usize) allocation);
   if (vm_iomap_memory(vma, virt_to_phys(allocation), size)) {
     ERROR("Unable to map the memory...");
     goto fail_free_pages;
   }
 
-
   // Set the values inside the enclave structure.
-  segment->phys_start = (usize) virt_to_phys(allocation);
-  segment->virt_start = (usize) vma->vm_start;
-  segment->size = size;
-  dll_init_elem(segment, list);
-  dll_add(&mapped_segments, segment, list);
-  DEBUG("mmap success pa: %llx va: %llx, size: %llx",
-      segment->phys_start, segment->virt_start, segment->size);
+  encl->phys_start = (usize) virt_to_phys(allocation);
+  encl->virt_start = (usize) vma->vm_start;
+  encl->size = size;
   return SUCCESS;
 fail_free_pages:
   free_pages_exact(allocation, size);
-fail_free:
-  kfree(segment);
 failure:
   return FAILURE;
 }
 
 int get_physoffset_enclave(
     enclave_handle_t handle,
-    usize virtaddr,
     usize* phys_offset)
 {
   enclave_t* encl = NULL;
-  mmap_segment_t* segment = NULL;
   if (phys_offset == NULL) {
     ERROR("The provided phys_offset variable is null.");
     goto failure;
   }
   encl = find_enclave(handle);
   if (encl == NULL) {
-    ERROR("The handle %lld does not correspond to an enclave.", handle);
+    ERROR("The handle %p does not correspond to an enclave.", handle);
     goto failure;
   }
-  if (encl->pid != current->pid) {
-    ERROR("Wrong pid for enclave");
-    ERROR("Expected: %d, got: %d", encl->pid, current->pid);
+  if (encl->virt_start == UNINIT_USIZE || encl->phys_start == UNINIT_USIZE) {
+    ERROR("The enclave %p has not been initialized, call mmap first!", handle);
     goto failure;
   }
-  if (encl->virt_start != UNINIT_USIZE || encl->phys_start != UNINIT_USIZE) {
-    ERROR("The enclave %lld has already been initialized.", handle);
-    goto failure;
-  }
-  dll_foreach(&mapped_segments, segment, list) {
-    if (segment->virt_start == virtaddr && segment->pid == encl->pid) {
-      // Found the right segment.
-      break;
-    }  
-  } 
-  if (segment == NULL) {
-    ERROR("Unable to find segment for %lld at %llx", handle, virtaddr);
-    goto failure;
-  }
-  dll_remove(&mapped_segments, segment, list);
-  encl->virt_start = segment->virt_start;
-  encl->phys_start = segment->phys_start;
-  encl->size = segment->size;
-
-  // Free the segment now.
-  kfree(segment);
-  segment = NULL;
   *phys_offset = encl->phys_start;
   return SUCCESS;
 failure:
@@ -225,7 +183,7 @@ int mprotect_enclave(
     goto failure;
   }
   if (encl->virt_start == UNINIT_USIZE) {
-    ERROR("The enclave %lld doesn't have mmaped memory.", handle);
+    ERROR("The enclave %p doesn't have mmaped memory.", handle);
     goto failure;
   }
   // Check the mprotect has the correct bounds.
@@ -284,26 +242,26 @@ int commit_enclave(enclave_handle_t handle, usize cr3, usize rip, usize rsp)
     goto failure;
   }
   if (encl->virt_start == UNINIT_USIZE) {
-    ERROR("The enclave %lld doesn't have mmaped memory.", handle);
+    ERROR("The enclave %p doesn't have mmaped memory.", handle);
     goto failure;
   }
   if (dll_is_empty(&encl->segments)) {
-    ERROR("Missing segments for enclave %lld", handle);
+    ERROR("Missing segments for enclave %p", handle);
     goto failure;
   }
   if ((encl->segments.tail->vstart + encl->segments.tail->size)
       != (encl->virt_start + encl->size)) {
-    ERROR("Some segments were not specified for the enclave %lld", handle);
+    ERROR("Some segments were not specified for the enclave %p", handle);
     goto failure;
   }
   if (encl->domain_id != UNINIT_DOM_ID) {
-    ERROR("The enclave %lld is already committed.", handle);
+    ERROR("The enclave %p is already committed.", handle);
     goto failure;
   }
 
   // All checks are done, call into the capability library.
   if (create_domain(&(encl->domain_id)) != SUCCESS) {
-    ERROR("Monitor rejected the creation of a domain for enclave %lld", handle);
+    ERROR("Monitor rejected the creation of a domain for enclave %p", handle);
     goto failure;
   }
 
@@ -345,16 +303,16 @@ int commit_enclave(enclave_handle_t handle, usize cr3, usize rip, usize rsp)
 
   // Commit the enclave.
   if (seal_domain(encl->domain_id, ALL_CORES_MAP, cr3, rip, rsp) != SUCCESS) {
-    ERROR("Unable to seal enclave %lld", handle);
+    ERROR("Unable to seal enclave %p", handle);
     goto delete_fail;
   }
   
-  DEBUG("Managed to seal domain %lld | encl %lld", encl->domain_id, encl->handle);
+  DEBUG("Managed to seal domain %lld | encl %p", encl->domain_id, encl->handle);
   // We are all done!
   return SUCCESS;
 delete_fail:
   if (revoke_domain(encl->domain_id) != SUCCESS) {
-    ERROR("Failed to revoke the domain %lld for enclave %lld.",
+    ERROR("Failed to revoke the domain %lld for enclave %p.",
         encl->domain_id, handle);
   }
   encl->domain_id = UNINIT_DOM_ID;
@@ -367,13 +325,13 @@ int switch_enclave(enclave_handle_t handle, void* args)
   enclave_t* enclave = NULL;
   enclave = find_enclave(handle);
   if (enclave == NULL) {
-    ERROR("Unable to find the enclave %lld", handle);
+    ERROR("Unable to find the enclave %p", handle);
     goto failure;
   }
   DEBUG("About to try to switch to domain %lld| encl %lld",
       enclave->domain_id, enclave->handle);
   if (switch_domain(enclave->domain_id, args) != SUCCESS) {
-    ERROR("Unable to switch to enclave %lld", enclave->handle);
+    ERROR("Unable to switch to enclave %p", enclave->handle);
     goto failure;
   }
   return SUCCESS;
@@ -387,14 +345,14 @@ int delete_enclave(enclave_handle_t handle)
   enclave_segment_t* segment = NULL;
   encl = find_enclave(handle);
   if (encl == NULL) {
-    ERROR("The enclave %lld does not exist.", handle);
+    ERROR("The enclave %p does not exist.", handle);
     goto failure;
   }
   if (encl->domain_id == UNINIT_DOM_ID) {
     goto delete_encl_struct;
   }
   if (revoke_domain(encl->domain_id) != SUCCESS) {
-    ERROR("Unable to delete the domain %lld for enclave %lld",
+    ERROR("Unable to delete the domain %lld for enclave %p",
         encl->domain_id, handle);
     goto failure;
   }

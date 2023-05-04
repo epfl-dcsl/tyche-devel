@@ -15,8 +15,7 @@ char attempt[0x1000];
 
 int main(void)
 {
-  int driver_fd = -1;
-  enclave_handle_t handle = -1;
+  handle_t handle = -1;
   size_t size = 5 * PAGE_SIZE;
   usize virt_addr = 0;
   usize phys_addr = 0;
@@ -25,18 +24,13 @@ int main(void)
   usize dest_addr = 0x400000;
   size_t lvl4 = 0, lvl3 = 0, lvl2 = 2, lvl1 = 0;
   usize flags = PT_PP | PT_RW | PT_ACC | PT_DIRT;
-  driver_fd = open("/dev/tyche", O_RDWR);
-  if (driver_fd < 0) {
-    ERROR("Unable to open the driver");
-    goto failure;
-  }
-
-  if (ioctl_create_enclave(driver_fd, &handle) != SUCCESS) {
+  handle = open("/dev/tyche", O_RDWR);
+  if (handle < 0) {
     ERROR("Unable to create an enclave");
     goto failure;
   }
-  
-  if (ioctl_mmap(driver_fd, handle, size, &virt_addr) != SUCCESS) {
+
+  if (ioctl_mmap(handle, size, &virt_addr) != SUCCESS) {
     ERROR("Unable to mmap!");
     goto failure;
   } 
@@ -44,8 +38,7 @@ int main(void)
   // Zero-out everything.
   memset((void*) virt_addr, 0, size);
 
-  if (ioctl_getphysoffset_enclave(
-        driver_fd, handle, virt_addr, &phys_addr) != SUCCESS) {
+  if (ioctl_getphysoffset_enclave(handle, &phys_addr) != SUCCESS) {
     ERROR("Unable to get the physoffset");
     goto failure;
   }
@@ -72,36 +65,8 @@ int main(void)
   p1_table->data[lvl1] = phys_addr | flags;
   LOG("lvl1 entry: %llx", p1_table->data[lvl1]);
 
-  /*
-  do {
-    usize physaddr = 0;
-    LOG("About to walk for %llx", (usize) attempt);
-    // Make sure it's populated.
-    attempt[0] = 'a';
-    if (attempt[0] != 'a') {
-      ERROR("What the hell");
-      goto failure;
-    }
-    if (ioctl_debug_addr(driver_fd, (usize) attempt, &physaddr) != SUCCESS) {
-      ERROR("Failed with the attempt data too.");
-      goto failure;
-    }
-    LOG("We found it %llx -> %llx", (usize) attempt, physaddr);
-  } while(0);
-
-    // Let's checkout the mappings now.
-  for (usize vaddr = virt_addr; vaddr < virt_addr + size; vaddr += PAGE_SIZE) {
-    usize physaddr = 0;
-    if (ioctl_debug_addr(driver_fd, vaddr, &physaddr) != SUCCESS) {
-      ERROR("Unable to get the debugged phys address for %llx", vaddr);
-      goto failure;
-    }
-    LOG("DBG: vaddr: %llx, paddr: %llx", vaddr, physaddr);
-  }*/
-
   // Do the mprotect.
   if (ioctl_mprotect_enclave(
-        driver_fd,
         handle,
         virt_addr,
         size,
@@ -113,7 +78,6 @@ int main(void)
   
   // Commit.
   if (ioctl_commit_enclave(
-        driver_fd,
         handle,
         phys_addr + PAGE_SIZE,
         dest_addr,
@@ -124,7 +88,7 @@ int main(void)
   LOG("Done creating the enclave.");
 
   // Call the enclave.
-  if (ioctl_switch_enclave(driver_fd, handle, NULL) != SUCCESS) {
+  if (ioctl_switch_enclave(handle, NULL) != SUCCESS) {
     ERROR("Unable to transition to the enclave");
     goto failure;
   }

@@ -172,21 +172,15 @@ int load_enclave(enclave_t* enclave)
   }
 
   // Open the driver.
-  enclave->driver_fd = open(ENCLAVE_DRIVER, O_RDWR);
-  if (enclave->driver_fd < 0) {
-    ERROR("Unable to open the enclave driver %s", ENCLAVE_DRIVER);
-    goto failure;
-  }
-
-  // Create an enclave.
-  if (ioctl_create_enclave(enclave->driver_fd, &enclave->handle) != SUCCESS) {
+  enclave->handle = open(ENCLAVE_DRIVER, O_RDWR);
+  if (enclave->handle < 0) {
+    ERROR("Unable to create an enclave with open %s", ENCLAVE_DRIVER);
     goto failure;
   }
 
   // Mmap the size of memory we need.
   enclave->map.size = enclave->parser.bump.phys_offset + enclave->parser.bump.idx * PAGE_SIZE; 
   if (ioctl_mmap(
-        enclave->driver_fd,
         enclave->handle,
         enclave->map.size,
         &(enclave->map.virtoffset)) != SUCCESS) {
@@ -195,9 +189,7 @@ int load_enclave(enclave_t* enclave)
 
   // Get the physoffset.
   if (ioctl_getphysoffset_enclave(
-        enclave->driver_fd,
         enclave->handle,
-        enclave->map.virtoffset,
         &(enclave->map.physoffset)) != SUCCESS) {
     goto failure;
   }
@@ -234,7 +226,6 @@ int load_enclave(enclave_t* enclave)
       if (section->sh_addr >= curr_va && section->sh_addr <= curr_va + size) {
         if (curr_va != section->sh_addr) {
           if (ioctl_mprotect_enclave(
-              enclave->driver_fd,
               enclave->handle,
               /*curr_va*/ virt_addr,
               section->sh_addr - curr_va,
@@ -248,7 +239,6 @@ int load_enclave(enclave_t* enclave)
           virt_addr += section->sh_addr - curr_va;
         }
         if (ioctl_mprotect_enclave(
-              enclave->driver_fd,
               enclave->handle,
               virt_addr, 
               align_up(section->sh_size),
@@ -268,7 +258,6 @@ int load_enclave(enclave_t* enclave)
     // Map the rest of the segment.
     if (curr_va  < size + seg.p_vaddr && 
         ioctl_mprotect_enclave(
-          enclave->driver_fd,
           enclave->handle,
           dest + local_size,
           (seg.p_vaddr+ size - curr_va),
@@ -292,21 +281,7 @@ int load_enclave(enclave_t* enclave)
     size_t size = enclave->parser.bump.idx * PAGE_SIZE;
     uint64_t dest = enclave->parser.bump.phys_offset + enclave->map.virtoffset;
     memcpy((void*) dest, source, size); 
-    
-    /*// TODO remove afterwards, debugging now.
-    for (int i = 0; i < enclave->parser.bump.idx; i++) {
-      page_t* page = &(enclave->parser.bump.pages[i]);
-      for (int j = 0; j < ENTRIES_PER_PAGE; j++) {
-        uint64_t* entry = &(page->data[j]);  
-        if ((*entry & PT_PP) != PT_PP) {
-          continue;
-        }
-        DEBUG("Post copy entry: %llx @(%d, %d)", *entry, i, j);
-      }
-    } */
-
     if (ioctl_mprotect_enclave(
-          enclave->driver_fd, 
           enclave->handle,
           (usize) dest,
           (usize) size,
@@ -320,7 +295,6 @@ int load_enclave(enclave_t* enclave)
 
   // Commit the enclave.
   if (ioctl_commit_enclave(
-        enclave->driver_fd,
         enclave->handle,
         enclave->config.cr3,
         enclave->config.entry,
@@ -341,7 +315,6 @@ int call_enclave(enclave_t* enclave, void* args)
     goto failure;
   } 
   if (ioctl_switch_enclave(
-        enclave->driver_fd,
         enclave->handle,
         args) != SUCCESS) {
     ERROR("Unable to switch to the enclave %lld", enclave->handle);
@@ -359,7 +332,7 @@ int delete_enclave(enclave_t* enclave)
     goto failure;
   }
   // First call the driver.
-  if (ioctl_delete_enclave(enclave->driver_fd, enclave->handle) != SUCCESS) {
+  if (close(enclave->handle) != SUCCESS) {
     ERROR("Unable to delete the enclave %lld", enclave->handle);
     goto failure;
   }
@@ -383,8 +356,6 @@ int delete_enclave(enclave_t* enclave)
   // Unmap the enclave.
   munmap((void*) enclave->map.virtoffset, enclave->map.size); 
 
-  // Close the driver.
-  close(enclave->driver_fd);
   return SUCCESS;
 failure:
   return FAILURE;

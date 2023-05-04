@@ -19,9 +19,6 @@ dev_t dev = 0;
 static struct cdev tyche_cdev;
 static struct class *dev_class;
 
-// —————————————————————————————— Local State ——————————————————————————————— //
-static enclave_handle_t tyche_ids = 1; 
-
 // ———————————————————————————— File Operations ————————————————————————————— //
 
 // File operation structure
@@ -29,6 +26,7 @@ static struct file_operations fops =
 {
         .owner          = THIS_MODULE,
         .open           = tyche_open,
+        .release        = tyche_close,
         .unlocked_ioctl = tyche_ioctl,
         .mmap           = tyche_mmap,
 };
@@ -93,49 +91,48 @@ void tyche_unregister(void)
 
 int tyche_open(struct inode* inode, struct file* file) 
 {
-  LOG("Tyche opened from user space.");
+  if (file == NULL) {
+    ERROR("We received a Null file descriptor.");
+    goto failure;
+  }
+  if (create_enclave(file) != SUCCESS) {
+    ERROR("Unable to create a new enclave");
+    goto failure;
+  }
   return SUCCESS;
+failure:
+  return FAILURE;
+}
+
+int tyche_close(struct inode* inode, struct file* handle)
+{
+   if (delete_enclave(handle) != SUCCESS) {
+        ERROR("Unable to delete the enclave %p", handle);
+        goto failure;
+    }
+  return SUCCESS;
+failure:
+  return FAILURE;
 }
 
 
-long tyche_ioctl(struct file* file, unsigned int cmd, unsigned long arg)
+long tyche_ioctl(struct file* handle, unsigned int cmd, unsigned long arg)
 {
-  msg_enclave_info_t info = {0, UNINIT_USIZE}; 
-  msg_enclave_commit_t commit = {0, 0, 0, 0};
-  msg_enclave_mprotect_t mprotect = {0, 0, 0, 0, 0};
-  msg_enclave_switch_t transition = {0 , 0};
+  msg_enclave_info_t info = {UNINIT_USIZE, UNINIT_USIZE}; 
+  msg_enclave_commit_t commit = {0, 0, 0};
+  msg_enclave_mprotect_t mprotect = {0, 0, 0, 0};
+  msg_enclave_switch_t transition = {0};
   switch(cmd) {
-    case TYCHE_ENCLAVE_CREATE:
-      info.handle = tyche_ids++;
-      if (create_enclave(info.handle, 1, 1) != SUCCESS) {
-        ERROR("Unable to create a new enclave");
-        goto failure;
-      }
-      if (copy_to_user(
-            (msg_enclave_info_t*) arg, 
-            &info, 
-            sizeof(msg_enclave_info_t))) {
-        ERROR("Unable to copy enclave handle %lld", info.handle);
-        goto failure;
-      }
-      break;
     case TYCHE_ENCLAVE_GET_PHYSOFFSET:
-      if (copy_from_user(
-            &info,
-            (msg_enclave_info_t*) arg,
-            sizeof(msg_enclave_info_t))) {
-        ERROR("Unable to copy arguments from user.");
-        goto failure;
-      }
-      if (get_physoffset_enclave(info.handle, info.virtaddr, &info.physoffset) != SUCCESS) {
-        ERROR("Unable to get the physoffset for enclave %lld", info.handle);
+      if (get_physoffset_enclave(handle, &info.physoffset) != SUCCESS) {
+        ERROR("Unable to get the physoffset for enclave %p", handle);
         goto failure;
       }
       if (copy_to_user(
             (msg_enclave_info_t*) arg, 
             &info, 
             sizeof(msg_enclave_info_t))) {
-        ERROR("Unable to copy enclave physoffset for %lld", info.handle);
+        ERROR("Unable to copy enclave physoffset for %p", handle);
         goto failure;
       }
       break;
@@ -148,11 +145,11 @@ long tyche_ioctl(struct file* file, unsigned int cmd, unsigned long arg)
         goto failure;
       }
       if (commit_enclave(
-            commit.handle,
+            handle,
             commit.page_tables,
             commit.entry,
             commit.stack) != SUCCESS) {
-        ERROR("Commit failed for enclave %lld", commit.handle);
+        ERROR("Commit failed for enclave %p", handle);
         goto failure;
       }
       break;
@@ -165,12 +162,12 @@ long tyche_ioctl(struct file* file, unsigned int cmd, unsigned long arg)
         goto failure;
       }
       if (mprotect_enclave(
-            mprotect.handle,
+            handle,
             mprotect.start,
             mprotect.size,
             mprotect.flags,
             mprotect.tpe) != SUCCESS) {
-        ERROR("Unable to mprotect he region for enclave %lld", mprotect.handle);
+        ERROR("Unable to mprotect he region for enclave %p", handle);
         goto failure;
       }
       break;
@@ -182,42 +179,8 @@ long tyche_ioctl(struct file* file, unsigned int cmd, unsigned long arg)
         ERROR("Unable to copy arguments from user.");
         goto failure;
       }
-      if (switch_enclave(transition.handle, transition.args) != SUCCESS) {
-        ERROR("Unable to switch to enclave %lld", transition.handle);
-        goto failure;
-      }
-      break;
-    case TYCHE_ENCLAVE_DELETE:
-      if (copy_from_user(
-            &info,
-            (msg_enclave_info_t*) arg,
-            sizeof(msg_enclave_info_t))) {
-        ERROR("Unable to copy arguments from user.");
-        goto failure;
-      }
-      if (delete_enclave(info.handle) != SUCCESS) {
-        ERROR("Unable to delete the enclave %lld", info.handle);
-        goto failure;
-      }
-      break;
-    case TYCHE_DEBUG_ADDR:
-      if (copy_from_user(
-            &info,
-            (msg_enclave_info_t*) arg,
-            sizeof(msg_enclave_info_t)) != SUCCESS) {
-        ERROR("Unable to copy argument from user");
-        goto failure;
-      }
-
-      if (debug_addr(info.virtaddr, &info.physoffset) != SUCCESS) {
-        ERROR("Unable to read the phys address for %llx", info.virtaddr);
-        goto failure;
-      }
-      if (copy_to_user(
-            (msg_enclave_info_t*) arg, 
-            &info, 
-            sizeof(msg_enclave_info_t))) {
-        ERROR("Unable to copy enclave physoffset for %lld", info.handle);
+      if (switch_enclave(handle, transition.args) != SUCCESS) {
+        ERROR("Unable to switch to enclave %p", handle);
         goto failure;
       }
       break;
@@ -232,5 +195,5 @@ failure:
 
 int tyche_mmap(struct file *file, struct vm_area_struct *vma)
 {
-  return mmap_segment(vma);
+  return mmap_segment(file, vma);
 }

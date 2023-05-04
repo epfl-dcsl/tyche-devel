@@ -23,7 +23,7 @@ DYNS= -l:enclave_loader.so -lelf64 -lpts
 # Code
 SRC_POC=$(wildcard poc/*.S) $(wildcard poc/*.c)
 
-SRC_DBG= $(wildcard dbg/*.S) $(wildcard dbg/*.c)
+SRC_DBG= $(wildcard src/*.S) $(wildcard src/*.c)
 
 # Installing
 DISK_PATH = /tmp/mount/tyche/debug

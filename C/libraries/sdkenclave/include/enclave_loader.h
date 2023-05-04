@@ -14,6 +14,9 @@
 
 // ————————————————————————————————— Types —————————————————————————————————— //
 
+/// The fd that represents an enclave.
+typedef int handle_t;
+
 typedef struct __attribute__((__packed__)) __attribute__((aligned(4096))) {
   uint64_t data[ENTRIES_PER_PAGE];
 } page_t;
@@ -119,11 +122,8 @@ typedef struct {
 
 /// The representation of an enclave from the user program.
 typedef struct {
-  /// Enclave driver fd.
-  int driver_fd;
-
   /// Driver domain handle.
-  enclave_handle_t handle;
+  handle_t handle;
 
   /// Configuration for the commit.
   enclave_config_t config;
