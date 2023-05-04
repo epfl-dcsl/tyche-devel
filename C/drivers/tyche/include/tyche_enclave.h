@@ -70,12 +70,14 @@ typedef struct {
 } msg_enclave_switch_t;
 
 // ——————————————————————————— Tyche Enclave IOCTL API —————————————————————— //
-#define TYCHE_ENCLAVE_CREATE _IOR('a', 'b', msg_enclave_info_t*)
+// @deprecated, use open.
+//#define TYCHE_ENCLAVE_CREATE _IOR('a', 'b', msg_enclave_info_t*)
 #define TYCHE_ENCLAVE_GET_PHYSOFFSET _IOW('a', 'c', msg_enclave_info_t*)
 #define TYCHE_ENCLAVE_COMMIT _IOWR('a', 'd', msg_enclave_commit_t*)
 #define TYCHE_ENCLAVE_MPROTECT _IOW('a', 'e', msg_enclave_mprotect_t*)
 #define TYCHE_TRANSITION _IOR('a', 'f', msg_enclave_switch_t*)
-#define TYCHE_ENCLAVE_DELETE _IOR('a', 'g', msg_enclave_info_t*)
+// @deprecate, use close
+//#define TYCHE_ENCLAVE_DELETE _IOR('a', 'g', msg_enclave_info_t*)
 #define TYCHE_DEBUG_ADDR _IOWR('a', 'h', msg_enclave_info_t*)
 
 #endif
