@@ -12,4 +12,5 @@ update_disk:
 	make -B -C drivers/tyche install_disk
 	make -B -C libraries/sdkenclave/example/enclave install_disk
 	make -B -C libraries/sdkenclave/example/debug install_disk
+	make -B -C libraries/sdkenclave/example/transition_benchmark install_disk
 	cp scripts/install_drivers.sh /tmp/mount/tyche
