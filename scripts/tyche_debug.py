@@ -73,7 +73,7 @@ class TycheLoadStage2(gdb.Command):
 
     def invoke(self, arg, from_tty):
         offset = get_convenience("STAGE2_VOFF")
-        gdb.execute("add-symbol-file target/x86_64-unknown-kernel/release/second-stage")
+        gdb.execute("add-symbol-file target/x86_64-unknown-kernel/release/tyche")
 
 """ Starts the remote gdb session attached to the debugger/debugger executable.
 The remote gdb session executes until QEMU file-backed memory is mmaped into

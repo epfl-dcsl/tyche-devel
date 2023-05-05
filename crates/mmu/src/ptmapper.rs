@@ -160,13 +160,7 @@ where
     }
 
     /// Prints the permissions of page tables for the given range.
-    pub fn debug_range(
-        &mut self,
-        virt_addr: VirtAddr,
-        size: usize,
-        dept: Level,
-        print: impl Fn(core::fmt::Arguments),
-    ) {
+    pub fn debug_range(&mut self, virt_addr: VirtAddr, size: usize, dept: Level) {
         unsafe {
             self.walk_range(
                 virt_addr,
@@ -193,14 +187,14 @@ where
                             Level::L2 => "    ",
                             Level::L1 => "      ",
                         };
-                        print(core::format_args!(
+                        log::info!(
                             "{}{:?} Virt: 0x{:x} - Phys: 0x{:x} - {:?}\n",
                             padding,
                             level,
                             addr.as_usize(),
                             phys,
                             flags
-                        ));
+                        );
                         WalkNext::Continue
                     } else {
                         WalkNext::Leaf

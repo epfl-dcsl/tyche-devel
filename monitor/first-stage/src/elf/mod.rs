@@ -288,6 +288,11 @@ impl ElfProgram {
         assert!(segment.p_offset + segment.p_filesz <= self.bytes.len() as u64);
 
         // Prepare destination
+        log::debug!(
+            "Loading segment [0x{:x}, 0x{:x}]",
+            segment.p_paddr,
+            segment.p_paddr + segment.p_memsz
+        );
         let dest = core::slice::from_raw_parts_mut(
             (segment.p_paddr + host_physical_offset.as_u64()) as *mut u8,
             segment.p_filesz as usize,

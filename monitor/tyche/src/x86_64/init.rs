@@ -6,7 +6,7 @@ use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use allocator::FrameAllocator;
 use capa_engine::{Context, Domain, Handle};
 use stage_two_abi::{GuestInfo, Manifest};
-pub use vmx::{ActiveVmcs, VmxError as BackendError};
+pub use vmx::{ActiveVmcs, ControlRegister, VmxError as BackendError};
 
 use super::{arch, cpuid, launch_guest, monitor, vmx_helper};
 use crate::allocator;
@@ -43,8 +43,8 @@ pub fn arch_entry_point(log_level: log::LevelFilter) -> ! {
         allocator::init(manifest);
         monitor::init(manifest);
 
-        log::info!("Waiting for {} cores", manifest.smp);
-        while NB_BOOTED_CORES.load(Ordering::SeqCst) + 1 < manifest.smp {
+        log::info!("Waiting for {} cores", manifest.smp.smp);
+        while NB_BOOTED_CORES.load(Ordering::SeqCst) + 1 < manifest.smp.smp {
             core::hint::spin_loop();
         }
         log::info!("Stage 2 initialized");
@@ -132,7 +132,7 @@ pub fn init_arch(manifest: &Manifest, cpuid: usize) {
 
 unsafe fn wait_on_mailbox(manifest: &Manifest, vcpu: &mut ActiveVmcs<'static>, cpuid: usize) {
     // Spin on the MP Wakeup Page command
-    let mp_mailbox = manifest.mp_mailbox as usize;
+    let mp_mailbox = manifest.smp.mailbox as usize;
     let command = mp_mailbox as *const u16;
     let apic_id = (mp_mailbox + 4) as *const u32;
     loop {
@@ -143,8 +143,9 @@ unsafe fn wait_on_mailbox(manifest: &Manifest, vcpu: &mut ActiveVmcs<'static>, c
     }
 
     let wakeup_vector = (mp_mailbox + 8) as *const u64;
+    let wakeup_vector = wakeup_vector.read_volatile();
     log::info!(
-        "Launching CPU {} on wakeup_vector {:#?}",
+        "Launching CPU {} on wakeup_vector 0x{:x}",
         cpuid,
         wakeup_vector
     );
@@ -152,6 +153,7 @@ unsafe fn wait_on_mailbox(manifest: &Manifest, vcpu: &mut ActiveVmcs<'static>, c
     // Set RIP entry point
     vcpu.set_nat(vmx::fields::GuestStateNat::Rip, wakeup_vector as usize)
         .ok();
+    vcpu.set_cr(ControlRegister::Cr3, manifest.smp.wakeup_cr3 as usize);
 
     (mp_mailbox as *mut u16).write_volatile(0);
 }

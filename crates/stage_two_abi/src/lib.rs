@@ -63,10 +63,19 @@ pub struct Manifest {
     pub vga: VgaInfo,
     /// Optionnal address of the I/O MMU. Absent if set to 0.
     pub iommu: u64,
+    /// SMP info:
+    pub smp: Smp,
+}
+
+/// Suport for x86_64 SMP
+#[repr(C)]
+pub struct Smp {
     /// SMP info: number of available cores
     pub smp: usize,
     /// ACPI MP Wakeup Mailbox Address
-    pub mp_mailbox: u64,
+    pub mailbox: u64,
+    /// The CR3 value for MP wakeup
+    pub wakeup_cr3: u64,
 }
 
 impl Manifest {
@@ -109,8 +118,11 @@ macro_rules! make_manifest {
                 info: $crate::GuestInfo::default_config(),
                 vga: $crate::VgaInfo::no_vga(),
                 iommu: 0,
-                smp: 0,
-                mp_mailbox: 0,
+                smp: $crate::Smp {
+                    smp: 0,
+                    mailbox: 0,
+                    wakeup_cr3: 0,
+                },
             };
             static TAKEN: AtomicBool = AtomicBool::new(false);
 

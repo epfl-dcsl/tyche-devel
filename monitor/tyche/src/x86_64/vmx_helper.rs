@@ -29,9 +29,6 @@ pub unsafe fn init_vcpu<'vmx>(vcpu: &mut ActiveVmcs<'vmx>, info: &GuestInfo) {
     vcpu.set_nat(fields::GuestStateNat::Cr3, info.cr3).ok();
     vcpu.set_nat(fields::GuestStateNat::Rsp, info.rsp).ok();
     vcpu.set(Register::Rsi, info.rsi as u64);
-    // Zero out the gdt and idt.
-    vcpu.set_nat(fields::GuestStateNat::GdtrBase, 0x0).ok();
-    vcpu.set_nat(fields::GuestStateNat::IdtrBase, 0x0).ok();
     // VMXE flags, required during VMX operations.
     let vmxe = 1 << 13;
     let cr4 = 0xA0 | vmxe;
@@ -71,7 +68,9 @@ fn default_vmcs_config(vmcs: &mut ActiveVmcs, info: &GuestInfo, switching: bool)
         )
     );
 
-    let mut secondary_ctrls = SecondaryControls::ENABLE_RDTSCP | SecondaryControls::ENABLE_EPT;
+    let mut secondary_ctrls = SecondaryControls::ENABLE_RDTSCP
+        | SecondaryControls::ENABLE_EPT
+        | SecondaryControls::UNRESTRICTED_GUEST;
     if switching {
         secondary_ctrls |= SecondaryControls::ENABLE_VM_FUNCTIONS
     }

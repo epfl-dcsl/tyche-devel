@@ -143,7 +143,14 @@ impl BootInfoFrameAllocator {
             allocator
                 .goto_next_region()
                 .expect("No usable memory region");
+        } else {
+            log::debug!(
+                "Allocating from [0x{:x}, 0x{:x}]",
+                memory_map[0].start,
+                memory_map[0].end
+            );
         }
+
         // Allocate one frame, so that we don't use frame zero
         allocator
             .allocate_frame()
@@ -198,6 +205,11 @@ impl BootInfoFrameAllocator {
 
             // Check if usable
             if self.memory_map[self.region_idx].kind == MemoryRegionKind::Usable {
+                log::debug!(
+                    "Allocating from [0x{:x}, 0x{:x}]",
+                    self.memory_map[self.region_idx].start,
+                    self.memory_map[self.region_idx].end
+                );
                 self.next_frame = self.memory_map[self.region_idx].start;
                 return Ok(());
             }
@@ -280,6 +292,11 @@ impl RangeFrameAllocator {
         range_end: HostPhysAddr,
         physical_memory_offset: HostVirtAddr,
     ) -> Self {
+        log::debug!(
+            "Allocator range: [0x{:x}, 0x{:x}]",
+            range_start.as_usize(),
+            range_end.as_usize()
+        );
         let range_start = range_start.align_up(PAGE_SIZE).as_u64();
         let range_end = range_end.align_down(PAGE_SIZE).as_u64();
         Self {

@@ -6,7 +6,7 @@ use core::sync::atomic::{AtomicBool, Ordering};
 
 use mmu::frame_allocator::PhysRange;
 use mmu::{PtFlag, PtMapper, RangeAllocator};
-use stage_two_abi::{EntryPoint, Manifest};
+use stage_two_abi::{EntryPoint, Manifest, Smp};
 
 use crate::cpu::MAX_CPU_NUM;
 use crate::elf::{Elf64PhdrType, ElfProgram};
@@ -113,7 +113,7 @@ pub fn load(
     stage1_allocator: &impl RangeAllocator,
     stage2_allocator: &impl RangeAllocator,
     pt_mapper: &mut PtMapper<HostPhysAddr, HostVirtAddr>,
-    mailbox_addr: u64,
+    smp: Smp,
 ) {
     // Read elf and allocate second stage memory
     let mut second_stage = ElfProgram::new(SECOND_STAGE);
@@ -185,8 +185,8 @@ pub fn load(
     // Map the MP wakeup mailbox page into stage 2
     loaded_elf.pt_mapper.map_range(
         stage2_allocator,
-        HostVirtAddr::new(mailbox_addr as usize),
-        HostPhysAddr::new(mailbox_addr as usize),
+        HostVirtAddr::new(smp.mailbox as usize),
+        HostPhysAddr::new(smp.mailbox as usize),
         0x1000,
         PtFlag::PRESENT | PtFlag::WRITE,
     );
@@ -230,8 +230,7 @@ pub fn load(
     manifest.poffset = elf_range.start.as_u64();
     manifest.voffset = LOAD_VIRT_ADDR.as_u64();
     manifest.vga = info.vga_info.clone();
-    manifest.smp = smp_cores;
-    manifest.mp_mailbox = mailbox_addr;
+    manifest.smp = smp;
 
     debug::hook_stage2_offsets(manifest.poffset, manifest.voffset);
     debug::tyche_hook_stage1(1);

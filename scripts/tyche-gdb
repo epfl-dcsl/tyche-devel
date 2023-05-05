@@ -29,4 +29,4 @@ else
   print_usage
 fi
 
-rust-gdb -q -ex "file target/x86_64-kernel/debug/first-stage" -ex "target remote ${DBG}" -ex "source scripts/tyche-gdb.gdb" -ex "${TGT}"
+rust-gdb -q -ex "file target/x86_64-kernel/debug/s1" -ex "target remote ${DBG}" -ex "source scripts/tyche-gdb.gdb" -ex "${TGT}"

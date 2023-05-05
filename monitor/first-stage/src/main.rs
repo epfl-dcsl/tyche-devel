@@ -17,8 +17,9 @@ use s1::acpi::AcpiInfo;
 use s1::acpi_handler::TycheACPIHandler;
 use s1::guests::Guest;
 use s1::mmu::MemoryMap;
+use s1::smp::allocate_wakeup_page_tables;
 use s1::{guests, println, second_stage, smp, HostPhysAddr, HostVirtAddr};
-use stage_two_abi::VgaInfo;
+use stage_two_abi::{Smp, VgaInfo};
 use x86_64::registers::control::Cr4;
 
 const LOG_LEVEL: LevelFilter = LevelFilter::Info;
@@ -112,6 +113,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             &mut pt_mapper,
         )
     };
+    let wakeup_cr3 = allocate_wakeup_page_tables(&host_allocator);
 
     // Check I/O MMU support
     if let Some(iommus) = &acpi_info.iommu {
@@ -129,6 +131,11 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     unsafe {
         smp::boot(acpi_platform_info, &host_allocator, &mut pt_mapper);
     }
+    let smp_info = Smp {
+        smp: s1::cpu::cores(),
+        mailbox,
+        wakeup_cr3,
+    };
 
     // Enable interrupts
     x86_64::instructions::interrupts::enable();
@@ -144,7 +151,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             memory_map,
             pt_mapper,
             rsdp as u64,
-            mailbox,
+            smp_info,
         )
     } else if cfg!(feature = "guest_rawc") {
         launch_guest(
@@ -156,7 +163,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             memory_map,
             pt_mapper,
             rsdp as u64,
-            mailbox,
+            smp_info,
         )
     } else if cfg!(feature = "no_guest") {
         launch_guest(
@@ -168,7 +175,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             memory_map,
             pt_mapper,
             rsdp as u64,
-            mailbox,
+            smp_info,
         )
     } else {
         panic!("Unrecognized guest");
@@ -184,7 +191,7 @@ fn launch_guest(
     memory_map: MemoryMap,
     mut pt_mapper: PtMapper<HostPhysAddr, HostVirtAddr>,
     rsdp: u64,
-    mailbox: u64,
+    smp: Smp,
 ) -> ! {
     let mut stage2_allocator = second_stage::second_stage_allocator(stage1_allocator);
     unsafe {
@@ -205,7 +212,7 @@ fn launch_guest(
             stage1_allocator,
             &mut stage2_allocator,
             &mut pt_mapper,
-            mailbox,
+            smp,
         );
         smp::BSP_READY.store(true, Ordering::SeqCst);
         second_stage::enter();

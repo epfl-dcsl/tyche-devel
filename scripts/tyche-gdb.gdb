@@ -26,9 +26,9 @@ define symbol_rawc
 end
 
 define symbol_linux
-  add-symbol-file linux-image/images/vmlinux
+  add-symbol-file builds/linux-x86/vmlinux
   set $tyche_guest_image=1
-  source linux-image/builds/linux-tyche-embedded/vmlinux-gdb.py
+  source builds/linux-x86/vmlinux-gdb.py
   #lx-symbols
 end
 

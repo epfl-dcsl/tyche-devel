@@ -312,11 +312,24 @@ fn handle_exit(
             match vcpu.interrupt_info() {
                 Ok(Some(exit)) => {
                     log::info!("Exception: {:?}", vcpu.interrupt_info());
-                    dump(vcpu);
+                    if exit.int_type == vmx::InterruptionType::HardwareException
+                        && exit.vector == 14
+                    {
+                        // This is a page fault
+                        log::info!(
+                            "    Page fault at 0x{:x}",
+                            vcpu.exit_qualification()
+                                .expect("Missing VM Exit qualification")
+                                .raw
+                        );
+                    }
+                    log::error!("VM received an exception");
+                    log::info!("{:?}", vcpu);
+                    Ok(HandlerResult::Crash)
                     // Inject the fault back into the guest.
-                    let injection = exit.as_injectable_u32();
-                    vcpu.set_vm_entry_interruption_information(injection)?;
-                    Ok(HandlerResult::Resume)
+                    // let injection = exit.as_injectable_u32();
+                    // vcpu.set_vm_entry_interruption_information(injection)?;
+                    // Ok(HandlerResult::Resume)
                 }
                 _ => {
                     log::error!("VM received an exception");

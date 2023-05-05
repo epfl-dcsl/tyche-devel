@@ -202,3 +202,22 @@ pub unsafe fn boot(
     cpu::set_cores(ap.len() + 1);
     log::info!("Booted {} AP.", ap.len());
 }
+
+/// Creates the wakeup page tables, that map the whole bottom 4Gb of memory. Returns the
+/// corresponding cr3.
+pub fn allocate_wakeup_page_tables(allocator: &impl RangeAllocator) -> u64 {
+    let l4 = allocator
+        .allocate_frame()
+        .expect("Failed to allocate L4 wakeup PT")
+        .zeroed();
+    let mut mapper = PtMapper::new(allocator.get_physical_offset().as_usize(), 0, l4.phys_addr);
+    mapper.map_range(
+        allocator,
+        HostVirtAddr::new(0),
+        HostPhysAddr::new(0),
+        1 << 32,
+        PtFlag::PRESENT | PtFlag::WRITE | PtFlag::USER,
+    );
+
+    l4.phys_addr.as_u64()
+}
