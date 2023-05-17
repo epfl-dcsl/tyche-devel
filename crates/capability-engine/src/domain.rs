@@ -73,13 +73,23 @@ impl NextCapaToken {
 // ————————————————————————————————— Domain ————————————————————————————————— //
 
 pub struct Domain {
+    /// Unique domain ID.
     id: usize,
+    /// Domain capabilities.
     capas: [Capa; NB_CAPAS_PER_DOMAIN],
+    /// Free list of capabilities, used for allocating new capabilities.
     free_list: FreeList<NB_CAPAS_PER_DOMAIN>,
+    /// Tracker for region permissions.
     regions: RegionTracker,
+    /// The (optional) manager of this domain.
     manager: Option<Handle<Domain>>,
+    /// A bitmap of permissions.
     permissions: u64,
+    /// A bitmap of interrupts and exception the domain can handle.
+    interrupts: u64,
+    /// Is this domain in the process of being revoked?
     is_being_revoked: bool,
+    /// Is the domain sealed?
     is_sealed: bool,
 }
 
@@ -94,6 +104,7 @@ impl Domain {
             regions: RegionTracker::new(),
             manager: None,
             permissions: permission::NONE,
+            interrupts: 0,
             is_being_revoked: false,
             is_sealed: false,
         }
@@ -151,6 +162,11 @@ impl Domain {
 
     pub fn id(&self) -> usize {
         self.id
+    }
+
+    /// Returns Wether or not this domain can handle the given interrupt.
+    pub fn can_handle(&self, interrupt: u64) -> bool {
+        self.interrupts & interrupt != 0 && self.is_sealed
     }
 
     pub fn seal(&mut self) -> Result<(), CapaError> {
