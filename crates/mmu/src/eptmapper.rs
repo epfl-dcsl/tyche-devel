@@ -67,6 +67,9 @@ impl EptMapper {
                         return WalkNext::Leaf;
                     }
                     log::info!("{:?} -> 0x{:x} | {:x?}", level, addr.as_usize(), entry);
+                    if (*entry & EptEntryFlags::PAGE.bits()) != 0 {
+                        return WalkNext::Leaf;
+                    }
                     return WalkNext::Continue;
                 },
             )
