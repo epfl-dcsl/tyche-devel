@@ -86,12 +86,6 @@ typedef struct {
   usize physoffset;
   /// The overall size of the enclave segment.
   usize size;
-  /// Entry point.
-  usize vaddr_entry;
-  /// Stack.
-  usize vaddr_stack;
-  /// Page table address.
-  usize paddr_page_tables;
 } enclave_map_t;
 
 /// Quick access to shared sections.
