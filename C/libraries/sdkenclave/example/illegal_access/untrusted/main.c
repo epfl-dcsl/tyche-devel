@@ -87,11 +87,8 @@ int main(void) {
   LOG("Address we try to write to %llx", enclave.map.virtoffset);
 
   // Now attempt illegal access.
-  // Let's just overright the entire enclave.
-  char *conf_ptr = (char*) (enclave.map.virtoffset);
-  for (int i = 0; i < enclave.map.size; i++) {
-    conf_ptr[i] = 0;
-  }
+  int *conf_ptr = (int*) (enclave.map.virtoffset);
+  *conf_ptr = 0x666;
 
   if (has_faulted != SUCCESS) {
     LOG("Haven't been caught writting the address, here is the message: '%s'", msg->reply);
