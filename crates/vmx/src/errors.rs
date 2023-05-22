@@ -205,7 +205,7 @@ impl VmExitInterrupt {
         let mut res: u32 = 0;
         res |= self.vector as u32;
         res |= (self.int_type as u32) << 8;
-        //res |= EntryInterruptionInformationField::DELIVER.bits();
+        res |= EntryInterruptionInformationField::DELIVER.bits();
         res |= EntryInterruptionInformationField::VALID.bits();
         return res;
     }

@@ -4,7 +4,10 @@ use core::arch::asm;
 
 use capa_engine::{Domain, Handle, LocalCapa, NextCapaToken};
 use vmx::bitmaps::exit_qualification;
-use vmx::{ActiveVmcs, ControlRegister, Register, VmxExitReason};
+use vmx::errors::Trapnr;
+use vmx::{
+    ActiveVmcs, ControlRegister, InterruptionType, Register, VmExitInterrupt, VmxExitReason,
+};
 
 use super::{cpuid, monitor};
 use crate::calls;
@@ -243,6 +246,19 @@ fn handle_exit(
                 addr.as_u64(),
             );
             log::info!("The vcpu {:x?}", vcpu);
+
+            //TODO: replace this with proper handler for interrupts.
+            if domain.idx() == 0 {
+                let interrupt = VmExitInterrupt {
+                    vector: Trapnr::PageFault.as_u8(),
+                    int_type: InterruptionType::HardwareException,
+                    error_code: None,
+                };
+                let flags = interrupt.as_injectable_u32();
+                vcpu.set_vm_entry_interruption_information(flags)
+                    .expect("Unable to inject an exception");
+                return Ok(HandlerResult::Resume);
+            }
             Ok(HandlerResult::Crash)
         }
         VmxExitReason::Xsetbv => {
