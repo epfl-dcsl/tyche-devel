@@ -299,7 +299,7 @@ fn update_permission(domain_handle: Handle<Domain>, engine: &mut MutexGuard<Capa
     domain.ept = Some(ept_root.phys_addr);
 }
 
-unsafe fn free_ept(_ept: HostPhysAddr, _allocator: &impl FrameAllocator) {
-    //let mapper = EptMapper::new(allocator.get_physical_offset().as_usize(), ept);
-    //mapper.free_all(allocator);
+unsafe fn free_ept(ept: HostPhysAddr, allocator: &impl FrameAllocator) {
+    let mapper = EptMapper::new(allocator.get_physical_offset().as_usize(), ept);
+    mapper.free_all(allocator);
 }
