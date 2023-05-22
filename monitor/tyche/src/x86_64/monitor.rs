@@ -226,6 +226,12 @@ pub fn do_debug() {
     }
 }
 
+//TODO quick fix, find a better way and only update when needed.
+pub fn get_domain_ept(current: Handle<Domain>) -> HostPhysAddr {
+    let domain = get_domain(current);
+    return domain.ept.expect("No ept in the domain!");
+}
+
 // ———————————————————————————————— Updates ————————————————————————————————— //
 
 fn apply_updates(engine: &mut MutexGuard<CapaEngine>) {

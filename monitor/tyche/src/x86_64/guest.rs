@@ -3,9 +3,12 @@
 use core::arch::asm;
 
 use capa_engine::{Context, Domain, Handle, LocalCapa, NextCapaToken};
+use mmu::eptmapper::EPT_ROOT_FLAGS;
+use utils::HostPhysAddr;
 use vmx::bitmaps::exit_qualification;
 use vmx::{ActiveVmcs, ControlRegister, Register, VmxExitReason};
 
+use super::monitor::get_domain_ept;
 use super::{cpuid, monitor};
 use crate::calls;
 use crate::error::TycheError;
@@ -25,8 +28,17 @@ pub fn main_loop(
     let mut result = unsafe { vcpu.launch() };
     loop {
         let exit_reason = match result {
-            Ok(exit_reason) => handle_exit(&mut vcpu, exit_reason, &mut domain, &mut ctx)
-                .expect("Failed to handle VM exit"),
+            Ok(exit_reason) => {
+                let res = handle_exit(&mut vcpu, exit_reason, &mut domain, &mut ctx)
+                    .expect("Failed to handle VM exit");
+                // TODO this is a quick fix for the ept.
+                // It does not take into account the locking of the engine.
+                // It updates the ept pointer too often.
+                let ept = get_domain_ept(domain);
+                vcpu.set_ept_ptr(HostPhysAddr::new(ept.as_usize() | EPT_ROOT_FLAGS))
+                    .expect("Unable to update the ept");
+                res
+            }
             Err(err) => {
                 log::error!("Guest crash: {:?}", err);
                 HandlerResult::Crash
