@@ -2,6 +2,7 @@
 
 mod capa;
 mod context;
+mod cores;
 mod domain;
 mod free_list;
 mod gen_arena;
@@ -15,6 +16,7 @@ use capa::Capa;
 pub use capa::{capa_type, CapaInfo};
 pub use context::Context;
 use context::ContextPool;
+use cores::{Core, CoreList};
 use domain::{insert_capa, remove_capa, DomainHandle, DomainPool};
 pub use domain::{permission, Domain, LocalCapa, NextCapaToken};
 use gen_arena::GenArena;
@@ -32,6 +34,7 @@ pub mod config {
     pub const NB_REGIONS: usize = 256;
     pub const NB_UPDATES: usize = 128;
     pub const NB_CONTEXTS: usize = 128;
+    pub const NB_CORES: usize = 64; // NOTE: Can't be greater than 64 as we use 64 bits bitmaps.
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -48,9 +51,11 @@ pub enum CapaError {
     InvalidPermissions,
     OutOfMemory,
     CouldNotDeserializeInfo,
+    InvalidCore,
 }
 
 pub struct CapaEngine {
+    cores: CoreList,
     domains: DomainPool,
     regions: RegionPool,
     updates: UpdateBuffer,
@@ -63,8 +68,10 @@ impl CapaEngine {
         const EMPTY_DOMAIN: Domain = Domain::new(0);
         const EMPTY_CAPA: RegionCapa = RegionCapa::new_invalid();
         const EMPTY_CONTEXT: Context = Context::new();
+        const EMPTY_CORE: Core = Core::new();
 
         Self {
+            cores: [EMPTY_CORE; config::NB_CORES],
             domains: GenArena::new([EMPTY_DOMAIN; config::NB_DOMAINS]),
             regions: GenArena::new([EMPTY_CAPA; config::NB_REGIONS]),
             updates: UpdateBuffer::new(),
@@ -91,11 +98,24 @@ impl CapaEngine {
         }
     }
 
-    pub fn start_cpu_on_domain(
+    pub fn start_domain_on_core(
         &mut self,
-        _domain: Handle<Domain>,
+        domain: Handle<Domain>,
+        core_id: usize,
     ) -> Result<Handle<Context>, CapaError> {
         log::trace!("Start CPU");
+
+        if core_id > self.cores.len() {
+            log::warn!(
+                "Trid to initialize core {}, but there are only {} cores",
+                core_id,
+                self.cores.len()
+            );
+            return Err(CapaError::InvalidCore);
+        }
+
+        self.cores[core_id].initialize(domain)?;
+        self.domains[domain].execute_on_core(core_id);
 
         self.contexts.allocate(Context::new()).ok_or({
             log::trace!("Unable to allocate context!");
@@ -338,6 +358,7 @@ impl CapaEngine {
         domain: Handle<Domain>,
         ctx: Handle<Context>,
         capa: LocalCapa,
+        core_id: usize,
     ) -> Result<(Handle<Domain>, Handle<Context>, LocalCapa), CapaError> {
         let (next_dom, next_ctx) = self.domains[domain].get(capa)?.as_switch()?;
         let return_capa = insert_capa(
@@ -348,6 +369,11 @@ impl CapaEngine {
             &mut self.contexts,
         )?;
         remove_capa(domain, capa, &mut self.domains)?;
+        next_domain.execute_on_core(core_id);
+
+        let current_domain = &mut self.domains[domain];
+        current_domain.remove(capa).unwrap(); // We already checked that the capa exists
+        current_domain.remove_from_core(core_id);
 
         Ok((next_dom, next_ctx, return_capa))
     }

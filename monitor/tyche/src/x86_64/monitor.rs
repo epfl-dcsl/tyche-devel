@@ -72,19 +72,20 @@ pub fn init(manifest: &'static Manifest) {
 }
 
 pub fn init_vcpu(vcpu: &mut ActiveVmcs<'static>) -> (Handle<Domain>, Handle<Context>) {
+    let cpuid = cpuid();
     let mut engine = CAPA_ENGINE.lock();
     let initial_domain = INITIAL_DOMAIN
         .lock()
         .expect("CapaEngine is not initialized yet");
     let ctx = engine
-        .start_cpu_on_domain(initial_domain)
+        .start_domain_on_core(initial_domain, cpuid)
         .expect("Failed to allocate initial domain");
     let domain = get_domain(initial_domain);
     vcpu.set_ept_ptr(HostPhysAddr::new(
         domain.ept.unwrap().as_usize() | EPT_ROOT_FLAGS,
     ))
     .expect("Failed to set initial EPT PTR");
-    let mut core = get_core(cpuid());
+    let mut core = get_core(cpuid);
     core.domain = initial_domain;
     (initial_domain, ctx)
 }
@@ -199,7 +200,8 @@ pub fn do_switch(
 > {
     // TODO: check that the domain is not already running! Maybe this should be done in the engine?
     let mut engine = CAPA_ENGINE.lock();
-    let (next_domain, next_context, return_capa) = engine.switch(current, current_ctx, capa)?;
+    let (next_domain, next_context, return_capa) =
+        engine.switch(current, current_ctx, capa, cpuid)?;
     get_core(cpuid).domain = next_domain;
     apply_updates(&mut engine);
     Ok((

@@ -87,6 +87,8 @@ pub struct Domain {
     permissions: u64,
     /// A bitmap of interrupts and exception the domain can handle.
     interrupts: u64,
+    /// A bitmap of cores the domain is runing on.
+    cores: u64,
     /// Is this domain in the process of being revoked?
     is_being_revoked: bool,
     /// Is the domain sealed?
@@ -105,6 +107,7 @@ impl Domain {
             manager: None,
             permissions: permission::NONE,
             interrupts: 0,
+            cores: 0,
             is_being_revoked: false,
             is_sealed: false,
         }
@@ -154,6 +157,33 @@ impl Domain {
             return Err(CapaError::CapabilityDoesNotExist);
         }
         Ok(&mut self.capas[index.idx])
+    }
+
+    /// Remove a capability from a domain.
+    pub(crate) fn remove(&mut self, index: LocalCapa) -> Result<Capa, CapaError> {
+        let capa = self.get(index)?;
+        self.free_list.free(index.idx);
+        Ok(capa)
+    }
+
+    /// Mark the domain as executing on the given core.
+    pub(crate) fn execute_on_core(&mut self, core_id: usize) {
+        let core_id = 1 << core_id;
+        self.cores |= core_id;
+    }
+
+    /// Remove the core from the bitmap of cores runing the domain.
+    pub(crate) fn remove_from_core(&mut self, core_id: usize) {
+        let core_id = 1 << core_id;
+        if self.cores & core_id == 0 {
+            log::error!("Removing from a core in which the domains was NOT executing");
+        }
+        self.cores &= !core_id
+    }
+
+    fn free_invalid_capas(&mut self) {
+        log::trace!("Runing garbage collection");
+        // TODO
     }
 
     pub fn regions(&self) -> &RegionTracker {

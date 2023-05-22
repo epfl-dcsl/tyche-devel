@@ -127,10 +127,11 @@ fn scenario_1() {
 #[test]
 fn scenario_2() {
     let mut engine = CapaEngine::new();
+    let core = 0;
 
     // Create an initial domain with range 0x0 to 0x1000
     let domain = engine.create_manager_domain(permission::ALL).unwrap();
-    let ctx = engine.start_cpu_on_domain(domain).unwrap();
+    let ctx = engine.start_domain_on_core(domain, core).unwrap();
     let region = engine
         .create_root_region(
             domain,
@@ -194,7 +195,7 @@ fn scenario_2() {
     assert!(engine.seal(domain, dom2).is_err());
 
     // Switch
-    engine.switch(domain, ctx, switch).unwrap();
+    engine.switch(domain, ctx, switch, core).unwrap();
 }
 
 #[test]
