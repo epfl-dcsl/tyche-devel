@@ -65,6 +65,10 @@ int main(void) {
     ERROR("Unable to register handler");
     goto failure;
   }
+  if (sigaction(SIGTRAP, &action, NULL) == -1) {
+    ERROR("Unable to register second handler");
+    goto failure;
+  }
 
   LOG("Let's load an enclave!");
 
