@@ -201,11 +201,15 @@ pub struct VmExitInterrupt {
 /// @warn apparently setting the deliver bit results in invalid ctrls fields
 /// upon a vmresume.
 impl VmExitInterrupt {
-    pub fn as_injectable_u32(&self) -> u32 {
+    pub fn as_injectable_u32(&self, deliver: bool) -> u32 {
         let mut res: u32 = 0;
         res |= self.vector as u32;
         res |= (self.int_type as u32) << 8;
-        res |= EntryInterruptionInformationField::DELIVER.bits();
+        // TODO: I am not sure how deliver works.
+        // It is required for PageFault, but should not be provided for breakpoint.
+        if deliver {
+            res |= EntryInterruptionInformationField::DELIVER.bits();
+        }
         res |= EntryInterruptionInformationField::VALID.bits();
         return res;
     }

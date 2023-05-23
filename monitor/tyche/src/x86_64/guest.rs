@@ -250,11 +250,11 @@ fn handle_exit(
             //TODO: replace this with proper handler for interrupts.
             if domain.idx() == 0 {
                 let interrupt = VmExitInterrupt {
-                    vector: Trapnr::PageFault.as_u8(),
+                    vector: Trapnr::Breakpoint.as_u8(),
                     int_type: InterruptionType::HardwareException,
                     error_code: None,
                 };
-                let flags = interrupt.as_injectable_u32();
+                let flags = interrupt.as_injectable_u32(false);
                 vcpu.set_vm_entry_interruption_information(flags)
                     .expect("Unable to inject an exception");
                 return Ok(HandlerResult::Resume);
