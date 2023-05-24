@@ -1,5 +1,6 @@
 use crate::config::NB_REGIONS;
-use crate::domain::{Domain, DomainPool, LocalCapa};
+use crate::context::ContextPool;
+use crate::domain::{insert_capa, Domain, DomainPool, LocalCapa};
 use crate::gen_arena::{GenArena, Handle};
 use crate::region::{AccessRights, PermissionChange};
 use crate::update::{Update, UpdateBuffer};
@@ -114,6 +115,7 @@ pub(crate) fn duplicate(
     handle: Handle<RegionCapa>,
     regions: &mut RegionPool,
     domains: &mut DomainPool,
+    contexts: &mut ContextPool,
     updates: &mut UpdateBuffer,
     access_left: AccessRights,
     access_right: AccessRights,
@@ -155,15 +157,14 @@ pub(crate) fn duplicate(
     };
 
     // Insert the capas in the domain
-    let domain = &mut domains[domain_handle];
-    let Ok(capa_left) = domain.insert_capa(left) else {
+    let Ok(capa_left) = insert_capa(domain_handle, left, regions, domains, contexts) else {
         log::info!("Failed to insert left capa in domain");
         // Cleanup previous allocatons
         regions.free(left);
         regions.free(right);
         return Err(CapaError::OutOfMemory);
     };
-    let Ok(capa_right) = domain.insert_capa(right) else {
+    let Ok(capa_right) = insert_capa(domain_handle, right, regions, domains, contexts) else {
         log::info!("Failed to insert right capa in domain");
         // Cleanup previous allocatons
         regions.free(left);
@@ -210,19 +211,18 @@ pub(crate) fn install(
     domain: Handle<Domain>,
     regions: &mut RegionPool,
     domains: &mut DomainPool,
+    contexts: &mut ContextPool,
     updates: &mut UpdateBuffer,
 ) -> Result<LocalCapa, CapaError> {
     log::trace!("Installing {:?}", handle);
 
-    let capa = &mut regions[handle];
-
-    if capa.domain != domain {
+    if regions[handle].domain != domain {
         log::error!("tried a region capability with a different domain");
         return Err(CapaError::InvalidInstall);
     }
 
-    let local_capa = domains[domain].insert_capa(handle)?;
-    apply_install(capa, domain, domains, updates)?;
+    let local_capa = insert_capa(domain, handle, regions, domains, contexts)?;
+    apply_install(&mut regions[handle], domain, domains, updates)?;
 
     Ok(local_capa)
 }

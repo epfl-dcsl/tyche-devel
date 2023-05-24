@@ -15,8 +15,8 @@ use capa::Capa;
 pub use capa::{capa_type, CapaInfo};
 pub use context::Context;
 use context::ContextPool;
+use domain::{insert_capa, remove_capa, DomainHandle, DomainPool};
 pub use domain::{permission, Domain, LocalCapa, NextCapaToken};
-use domain::{DomainHandle, DomainPool};
 use gen_arena::GenArena;
 pub use gen_arena::Handle;
 pub use region::{AccessRights, RegionTracker};
@@ -112,7 +112,13 @@ impl CapaEngine {
         match self.domains.allocate(Domain::new(id)) {
             Some(handle) => {
                 self.domains[handle].set_manager(manager);
-                let capa = self.domains[manager].insert_capa(Capa::management(handle))?;
+                let capa = insert_capa(
+                    manager,
+                    Capa::management(handle),
+                    &mut self.regions,
+                    &mut self.domains,
+                    &mut self.contexts,
+                )?;
                 self.updates.push(Update::CreateDomain { domain: handle });
                 Ok(capa)
             }
@@ -150,6 +156,7 @@ impl CapaEngine {
                     domain,
                     &mut self.regions,
                     &mut self.domains,
+                    &mut self.contexts,
                     &mut self.updates,
                 )?;
                 Ok(capa)
@@ -190,6 +197,7 @@ impl CapaEngine {
             region,
             &mut self.regions,
             &mut self.domains,
+            &mut self.contexts,
             &mut self.updates,
             access_left,
             access_right,
@@ -204,7 +212,13 @@ impl CapaEngine {
     ) -> Result<LocalCapa, CapaError> {
         // Enforce permissions
         domain::has_permission(domain, &self.domains, permission::DUPLICATE)?;
-        domain::duplicate_capa(domain, capa, &mut self.domains)
+        domain::duplicate_capa(
+            domain,
+            capa,
+            &mut self.regions,
+            &mut self.domains,
+            &mut self.contexts,
+        )
     }
 
     pub fn send(
@@ -217,7 +231,7 @@ impl CapaEngine {
         domain::has_permission(domain, &self.domains, permission::SEND)?;
 
         let to = self.domains[domain].get(to)?.as_channel()?;
-        let capa = self.domains[domain].remove(capa)?;
+        let capa = remove_capa(domain, capa, &mut self.domains)?;
         match capa {
             // No side effect for those capas
             Capa::None => (),
@@ -241,10 +255,10 @@ impl CapaEngine {
         }
 
         // Move the capa to the new domain
-        let Ok(_) = self.domains[to].insert_capa(capa) else {
+        let Ok(_) = insert_capa(to, capa, &mut self.regions, &mut self.domains, &mut self.contexts) else {
             log::info!("Send failed, receiving domain is out of memory");
             // Insert capa back, this should never fail as removed it just before
-            self.domains[domain].insert_capa(capa).unwrap();
+            insert_capa(domain, capa, &mut self.regions, &mut self.domains, &mut self.contexts).unwrap();
             return Err(CapaError::OutOfMemory);
         };
 
@@ -273,10 +287,16 @@ impl CapaEngine {
             .allocate(Context::new())
             .ok_or(CapaError::OutOfMemory)?;
         self.domains[capa].seal()?;
-        let capa = self.domains[domain].insert_capa(Capa::Switch {
-            to: capa,
-            ctx: context,
-        })?;
+        let capa = insert_capa(
+            domain,
+            Capa::Switch {
+                to: capa,
+                ctx: context,
+            },
+            &mut self.regions,
+            &mut self.domains,
+            &mut self.contexts,
+        )?;
         Ok((capa, context))
     }
 
@@ -303,7 +323,12 @@ impl CapaEngine {
 
     /// Creates a new switch handle for the current domain.
     pub fn create_switch(&mut self, domain: Handle<Domain>) -> Result<LocalCapa, CapaError> {
-        domain::create_switch(domain, &mut self.domains, &mut self.contexts)
+        domain::create_switch(
+            domain,
+            &mut self.regions,
+            &mut self.domains,
+            &mut self.contexts,
+        )
     }
 
     /// Returns the new domain if the switch succeeds
@@ -314,8 +339,14 @@ impl CapaEngine {
         capa: LocalCapa,
     ) -> Result<(Handle<Domain>, Handle<Context>, LocalCapa), CapaError> {
         let (next_dom, next_ctx) = self.domains[domain].get(capa)?.as_switch()?;
-        let return_capa = self.domains[next_dom].insert_capa(Capa::Switch { to: domain, ctx })?;
-        self.domains[domain].remove(capa)?;
+        let return_capa = insert_capa(
+            next_dom,
+            Capa::Switch { to: domain, ctx },
+            &mut self.regions,
+            &mut self.domains,
+            &mut self.contexts,
+        )?;
+        remove_capa(domain, capa, &mut self.domains)?;
 
         Ok((next_dom, next_ctx, return_capa))
     }

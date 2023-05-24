@@ -123,26 +123,6 @@ impl Domain {
         self.regions.remove_region(access.start, access.end)
     }
 
-    pub(crate) fn insert_capa(&mut self, capa: impl IntoCapa) -> Result<LocalCapa, CapaError> {
-        // Find a free slot
-        let idx = match self.free_list.allocate() {
-            Some(idx) => idx,
-            None => {
-                // Run the garbage collection and retry
-                self.free_invalid_capas();
-                let Some(idx) = self.free_list.allocate() else {
-                    log::trace!("Could not insert capa in domain: out of memory");
-                    return Err(CapaError::OutOfMemory);
-                };
-                idx
-            }
-        };
-
-        // Insert the capa
-        self.capas[idx] = capa.into_capa();
-        Ok(LocalCapa { idx })
-    }
-
     pub(crate) fn set_manager(&mut self, manager: Handle<Domain>) {
         self.manager = Some(manager);
     }
@@ -163,18 +143,6 @@ impl Domain {
             return Err(CapaError::CapabilityDoesNotExist);
         }
         Ok(&mut self.capas[index.idx])
-    }
-
-    /// Remove a capability from a domain.
-    pub(crate) fn remove(&mut self, index: LocalCapa) -> Result<Capa, CapaError> {
-        let capa = self.get(index)?;
-        self.free_list.free(index.idx);
-        Ok(capa)
-    }
-
-    fn free_invalid_capas(&mut self) {
-        log::trace!("Runing garbage collection");
-        // TODO
     }
 
     pub fn regions(&self) -> &RegionTracker {
@@ -211,6 +179,80 @@ impl Domain {
             Capa::Management(handle) => domains.get(handle).is_some(),
             Capa::Channel(handle) => domains.get(handle).is_some(),
             Capa::Switch { to, ctx } => domains.get(to).is_some() && contexts.get(ctx).is_some(),
+        }
+    }
+}
+
+// —————————————————————————————— Insert Capa ——————————————————————————————— //
+
+/// insert a capability into a domain.
+pub(crate) fn insert_capa(
+    domain: Handle<Domain>,
+    capa: impl IntoCapa,
+    regions: &mut RegionPool,
+    domains: &mut DomainPool,
+    contexts: &mut ContextPool,
+) -> Result<LocalCapa, CapaError> {
+    // Find a free slot
+    let idx = match domains[domain].free_list.allocate() {
+        Some(idx) => idx,
+        None => {
+            // Run the garbage collection and retry
+            free_invalid_capas(domain, regions, domains, contexts);
+            let Some(idx) = domains[domain].free_list.allocate() else {
+                    log::trace!("Could not insert capa in domain: out of memory");
+                    return Err(CapaError::OutOfMemory);
+                };
+            idx
+        }
+    };
+
+    // Insert the capa
+    domains[domain].capas[idx] = capa.into_capa();
+    Ok(LocalCapa { idx })
+}
+
+/// Remove a capability from a domain.
+pub(crate) fn remove_capa(
+    domain: Handle<Domain>,
+    index: LocalCapa,
+    domains: &mut DomainPool,
+) -> Result<Capa, CapaError> {
+    let domain = &mut domains[domain];
+    let capa = domain.get(index)?;
+    domain.free_list.free(index.idx);
+    Ok(capa)
+}
+
+/// Run garbage collection on the domain's capabilities.
+///
+/// This is necessary as some capabilities are invalidated but not removed eagerly.
+fn free_invalid_capas(
+    domain: Handle<Domain>,
+    regions: &mut RegionPool,
+    domains: &mut DomainPool,
+    contexts: &mut ContextPool,
+) {
+    log::trace!("Runing garbage collection");
+    for idx in 0..NB_CAPAS_PER_DOMAIN {
+        if domains[domain].free_list.is_free(idx) {
+            // Capa is already free
+            continue;
+        }
+
+        // Check if capa is still valid
+        let capa = domains[domain].capas[idx];
+        let is_invalid = match capa {
+            Capa::None => false,
+            Capa::Region(h) => regions.get(h).is_none(),
+            Capa::Management(h) => domains.get(h).is_none(),
+            Capa::Channel(h) => domains.get(h).is_none(),
+            Capa::Switch { to, ctx } => domains.get(to).is_none() || contexts.get(ctx).is_none(),
+        };
+
+        if is_invalid {
+            // We checked before that the capa exists
+            remove_capa(domain, LocalCapa { idx }, domains).unwrap();
         }
     }
 }
@@ -270,10 +312,11 @@ pub(crate) fn send_management(
 pub(crate) fn duplicate_capa(
     domain: Handle<Domain>,
     capa: LocalCapa,
+    regions: &mut RegionPool,
     domains: &mut DomainPool,
+    contexts: &mut ContextPool,
 ) -> Result<LocalCapa, CapaError> {
-    let domain = &mut domains[domain];
-    let capa = domain.get(capa)?;
+    let capa = domains[domain].get(capa)?;
 
     match capa {
         // Capa that can not be duplicated
@@ -282,7 +325,7 @@ pub(crate) fn duplicate_capa(
         }
         Capa::Channel(_) => {
             // NOTE: there is no side effects when duplicating these capas
-            domain.insert_capa(capa)
+            insert_capa(domain, capa, regions, domains, contexts)
         }
     }
 }
@@ -290,18 +333,19 @@ pub(crate) fn duplicate_capa(
 // ————————————————————————————————— Switch ————————————————————————————————— //
 
 pub(crate) fn create_switch(
-    capa: Handle<Domain>,
+    domain: Handle<Domain>,
+    regions: &mut RegionPool,
     domains: &mut DomainPool,
     contexts: &mut ContextPool,
 ) -> Result<LocalCapa, CapaError> {
-    let domain = &mut domains[capa];
     let context = contexts
         .allocate(Context::new())
         .ok_or(CapaError::OutOfMemory)?;
-    domain.insert_capa(Capa::Switch {
-        to: capa,
+    let capa = Capa::Switch {
+        to: domain,
         ctx: context,
-    })
+    };
+    insert_capa(domain, capa, regions, domains, contexts)
 }
 
 // ——————————————————————————————— Enumerate ———————————————————————————————— //
