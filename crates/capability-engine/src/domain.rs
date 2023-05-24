@@ -243,11 +243,17 @@ fn free_invalid_capas(
         // Check if capa is still valid
         let capa = domains[domain].capas[idx];
         let is_invalid = match capa {
-            Capa::None => false,
+            Capa::None => true,
             Capa::Region(h) => regions.get(h).is_none(),
             Capa::Management(h) => domains.get(h).is_none(),
             Capa::Channel(h) => domains.get(h).is_none(),
-            Capa::Switch { to, ctx } => domains.get(to).is_none() || contexts.get(ctx).is_none(),
+            Capa::Switch { to, ctx } => {
+                let res = domains.get(to).is_none() || contexts.get(ctx).is_none();
+                if res {
+                    contexts.free(ctx);
+                }
+                res
+            }
         };
 
         if is_invalid {
@@ -338,9 +344,10 @@ pub(crate) fn create_switch(
     domains: &mut DomainPool,
     contexts: &mut ContextPool,
 ) -> Result<LocalCapa, CapaError> {
-    let context = contexts
-        .allocate(Context::new())
-        .ok_or(CapaError::OutOfMemory)?;
+    let context = contexts.allocate(Context::new()).ok_or({
+        log::trace!("Unable to allocate context for switch!");
+        CapaError::OutOfMemory
+    })?;
     let capa = Capa::Switch {
         to: domain,
         ctx: context,
@@ -426,7 +433,9 @@ pub(crate) fn revoke_capa(
         // Those capa so not cause revocation side effects
         Capa::None => (),
         Capa::Channel(_) => (),
-        Capa::Switch { .. } => (),
+        Capa::Switch { to: _t, ctx: c } => {
+            contexts.free(c);
+        }
 
         // Those capa cause revocation side effects
         Capa::Region(region) => {
@@ -439,6 +448,7 @@ pub(crate) fn revoke_capa(
 
     // Deactivate capa
     let capa = domains[handle].get_mut(local).unwrap();
+    //TODO(aghosn) this is why the capa is marked valid but none.
     *capa = Capa::None;
 
     Ok(())

@@ -55,7 +55,7 @@ fn scenario_1() {
         )
         .unwrap();
     snap!(
-        "{[0x0, 0x200 | 1] -> [0x200, 0x300 | 0] -> [0x300, 0x1000 | 1]}",
+        "{[0x0, 0x200 | 1] -> [0x300, 0x1000 | 1]}",
         regions(domain, &engine),
     );
     snap!(
@@ -80,7 +80,7 @@ fn scenario_1() {
         )
         .unwrap();
     snap!(
-        "{[0x0, 0x50 | 1] -> [0x50, 0x200 | 1] -> [0x200, 0x300 | 0] -> [0x300, 0x1000 | 1]}",
+        "{[0x0, 0x200 | 1] -> [0x300, 0x1000 | 1]}",
         regions(domain, &engine),
     );
     snap!(
@@ -94,7 +94,7 @@ fn scenario_1() {
     let domain2 = engine.get_domain_capa(domain, dom2).unwrap();
     engine.send(domain, reg2, dom2).unwrap();
     snap!(
-        "{[0x0, 0x50 | 1] -> [0x50, 0x200 | 1] -> [0x200, 0x300 | 0] -> [0x300, 0x1000 | 1]}",
+        "{[0x0, 0x200 | 1] -> [0x300, 0x1000 | 1]}",
         regions(domain, &engine),
     );
     snap!("{}", regions(domain2, &engine));
@@ -107,10 +107,7 @@ fn scenario_1() {
 
     // Revoke the domain owning the active region. This invalidates regions from the first domain
     engine.revoke_domain(domain2).unwrap();
-    snap!(
-        "{[0x0, 0x50 | 0] -> [0x50, 0x200 | 0] -> [0x200, 0x300 | 0] -> [0x300, 0x1000 | 1]}",
-        regions(domain, &engine),
-    );
+    snap!("{[0x300, 0x1000 | 1]}", regions(domain, &engine),);
     snap!(
         "{Region([0x0, 0x1000 | _C]), Region([0x300, 0x1000 | AC])}",
         capas(domain, &mut engine)
@@ -122,10 +119,7 @@ fn scenario_1() {
 
     // Restore the initial region
     engine.restore_region(domain, region).unwrap();
-    snap!(
-        "{[0x0, 0x50 | 1] -> [0x50, 0x200 | 1] -> [0x200, 0x300 | 1] -> [0x300, 0x1000 | 1]}",
-        regions(domain, &engine),
-    );
+    snap!("{[0x0, 0x1000 | 1]}", regions(domain, &engine),);
     snap!("{Region([0x0, 0x1000 | AC])}", capas(domain, &mut engine));
     snap!("{PermissionUpdate(H(0, gen 0))}", updates(&mut engine));
 }
@@ -169,7 +163,7 @@ fn scenario_2() {
         )
         .unwrap();
     snap!(
-        "{[0x0, 0x200 | 1] -> [0x200, 0x300 | 0] -> [0x300, 0x1000 | 1]}",
+        "{[0x0, 0x200 | 1] -> [0x300, 0x1000 | 1]}",
         regions(domain, &engine),
     );
     snap!(
@@ -182,10 +176,7 @@ fn scenario_2() {
     let dom2 = engine.create_domain(domain).unwrap();
     let domain2 = engine.get_domain_capa(domain, dom2).unwrap();
     engine.send(domain, reg2, dom2).unwrap();
-    snap!(
-        "{[0x0, 0x200 | 0] -> [0x200, 0x300 | 0] -> [0x300, 0x1000 | 1]}",
-        regions(domain, &engine),
-    );
+    snap!("{[0x300, 0x1000 | 1]}", regions(domain, &engine),);
     snap!("{[0x0, 0x200 | 1]}", regions(domain2, &engine));
     snap!(
         "{Region([0x0, 0x1000 | _C]), Region([0x300, 0x1000 | AC]), Management(2 | _)}",
@@ -199,11 +190,89 @@ fn scenario_2() {
 
     // Seal domain
     let (switch, _) = engine.seal(domain, dom2).unwrap();
-    // Second seal should failt
+    // Second seal should fail
     assert!(engine.seal(domain, dom2).is_err());
 
-    // Swirtch
+    // Switch
     engine.switch(domain, ctx, switch).unwrap();
+}
+
+#[test]
+fn scenario_3() {
+    let mut engine = CapaEngine::new();
+
+    // Create initial domain and range memory 0x0 to 0x10000.
+    let domain = engine.create_manager_domain(permission::ALL).unwrap();
+    let _ctx = engine.start_cpu_on_domain(domain).unwrap();
+    let region = engine
+        .create_root_region(
+            domain,
+            AccessRights {
+                start: 0x0,
+                end: 0x10000,
+            },
+        )
+        .unwrap();
+    // Carve a hole into the region: 0x0 -- 0x1000 | 0x1000 -- 0x2000 | 0x2000 -- 0x10000
+    let (_reg0, reg_chg) = engine
+        .segment_region(
+            domain,
+            region,
+            AccessRights {
+                start: 0x0,
+                end: 0x1000,
+            },
+            AccessRights {
+                start: 0x1000,
+                end: 0x10000,
+            },
+        )
+        .unwrap();
+    let (reg1, _reg2) = engine
+        .segment_region(
+            domain,
+            reg_chg,
+            AccessRights {
+                start: 0x1000,
+                end: 0x2000,
+            },
+            AccessRights {
+                start: 0x2000,
+                end: 0x10000,
+            },
+        )
+        .unwrap();
+    // mimic the null segment trick.
+    let (_reg_empty, reg_to_give) = engine
+        .segment_region(
+            domain,
+            reg1,
+            AccessRights {
+                start: 0x1000,
+                end: 0x1000,
+            },
+            AccessRights {
+                start: 0x1000,
+                end: 0x2000,
+            },
+        )
+        .unwrap();
+    // Create a new domain and send the region.
+    let encl = engine.create_domain(domain).unwrap();
+    let enclave = engine.get_domain_capa(domain, encl).unwrap();
+    engine.send(domain, reg_to_give, encl).unwrap();
+
+    // Seal domain.
+    let (_, _) = engine.seal(domain, encl).unwrap();
+    snap!("{[0x1000, 0x2000 | 1]}", regions(enclave, &engine));
+    // Now delete the enclaves' region.
+    engine.revoke(domain, reg1).unwrap();
+    snap!("{}", regions(enclave, &engine));
+    engine.revoke(domain, encl).unwrap();
+    // Test cleanup
+    engine.revoke(domain, region).unwrap();
+    snap!("{[0x0, 0x10000 | 1]}", regions(domain, &engine));
+    snap!("{Region([0x0, 0x10000 | AC])}", capas(domain, &mut engine));
 }
 
 // ————————————————————————————————— Utils —————————————————————————————————— //

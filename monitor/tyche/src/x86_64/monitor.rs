@@ -223,6 +223,7 @@ pub fn do_debug() {
             next_capa = next_next_capa;
             log::info!(" - {}", info);
         }
+        log::info!("{}", engine[domain].regions());
     }
 }
 

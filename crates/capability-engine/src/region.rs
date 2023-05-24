@@ -70,7 +70,7 @@ pub struct RegionTracker {
 
 impl RegionTracker {
     pub const fn new() -> Self {
-        const EMPTY_REGIION: Region = Region {
+        const EMPTY_REGION: Region = Region {
             start: 0,
             end: 0,
             ref_count: 0,
@@ -78,7 +78,7 @@ impl RegionTracker {
         };
 
         Self {
-            regions: GenArena::new([EMPTY_REGIION; NB_REGIONS_PER_DOMAIN]),
+            regions: GenArena::new([EMPTY_REGION; NB_REGIONS_PER_DOMAIN]),
             head: None,
         }
     }
@@ -106,25 +106,63 @@ impl RegionTracker {
     ) -> Result<PermissionChange, CapaError> {
         log::trace!("Removing region [0x{:x}, 0x{:x}]", start, end);
 
-        let Some(lower_bound_handle) = self.find_lower_bound(start) else {
+        let (Some(mut bound), mut prev) = self.find_lower_bound(start) else {
             log::trace!("Region does not exist");
             return Err(CapaError::InvalidRegion);
         };
 
+        // Check if we need a split for the start.
+        if self.regions[bound].start < start {
+            prev = Some(bound);
+            bound = self.split_region_at(bound, start)?;
+        }
+        // Check if we need a split for the end.
+        if self.regions[bound].end > end {
+            let _ = self.split_region_at(bound, end)?;
+        }
+
         assert_eq!(
-            self.regions[lower_bound_handle].start, start,
+            self.regions[bound].start, start,
             "Remove region must specify exact boundaries"
         );
 
         let mut change = PermissionChange::None;
-        let mut next = lower_bound_handle;
+        let mut next = bound;
         while self.regions[next].start < end {
             let update = self.decrease_refcount(next);
             change.update(update);
-            // TODO: Coalesce & free regions
+
+            // Free regions with ref_count 0.
+            if self.regions[next].ref_count == 0 {
+                // Remove the element from the list.
+                let to_visit = self.regions[next].next;
+                match prev {
+                    Some(handle) => {
+                        self.regions[handle].next = self.regions[next].next;
+                    }
+                    None => {
+                        self.head = self.regions[next].next;
+                    }
+                }
+                // Free the region.
+                self.regions.free(next);
+
+                // Update next.
+                match to_visit {
+                    Some(handle) => {
+                        next = handle;
+                        continue;
+                    }
+                    None => {
+                        break;
+                    }
+                }
+                // End of free block.
+            }
 
             match &self.regions[next].next {
                 Some(handle) => {
+                    prev = Some(next);
                     next = *handle;
                 }
                 None => {
@@ -132,7 +170,8 @@ impl RegionTracker {
                 }
             }
         }
-
+        // coalesce.
+        self.coalesce();
         Ok(change)
     }
 
@@ -146,30 +185,31 @@ impl RegionTracker {
         };
 
         let mut change = PermissionChange::None;
-        let (mut previous, mut cursor) = if let Some(lower_bound) = self.find_lower_bound(start) {
-            let region = &self.regions[lower_bound];
-            if start == region.start {
-                // Regions have the same start
-                let (previous, update) =
-                    self.partial_add_region_overlapping(start, end, lower_bound)?;
-                change.update(update);
-                let cursor = self.regions[previous].end;
-                (previous, cursor)
-            } else if region.contains(start) {
-                // Region start in the middle of the lower bound region
-                self.split_region_at(lower_bound, start)?;
-                (lower_bound, start)
+        let (mut previous, mut cursor) =
+            if let (Some(lower_bound), _) = self.find_lower_bound(start) {
+                let region = &self.regions[lower_bound];
+                if start == region.start {
+                    // Regions have the same start
+                    let (previous, update) =
+                        self.partial_add_region_overlapping(start, end, lower_bound)?;
+                    change.update(update);
+                    let cursor = self.regions[previous].end;
+                    (previous, cursor)
+                } else if region.contains(start) {
+                    // Region start in the middle of the lower bound region
+                    self.split_region_at(lower_bound, start)?;
+                    (lower_bound, start)
+                } else {
+                    // Region starts after lower bound region
+                    (lower_bound, start)
+                }
             } else {
-                // Region starts after lower bound region
-                (lower_bound, start)
-            }
-        } else {
-            let head = &self.regions[head];
-            let cursor = core::cmp::min(end, head.start);
-            let previous = self.insert_head(start, cursor)?;
-            change = PermissionChange::Some;
-            (previous, cursor)
-        };
+                let head = &self.regions[head];
+                let cursor = core::cmp::min(end, head.start);
+                let previous = self.insert_head(start, cursor)?;
+                change = PermissionChange::Some;
+                (previous, cursor)
+            };
 
         // Add the remaining portions of the region
         while cursor < end {
@@ -178,6 +218,9 @@ impl RegionTracker {
             change.update(update);
             cursor = self.regions[previous].end;
         }
+
+        // Coalesce.
+        self.coalesce();
         Ok(change)
     }
 
@@ -228,23 +271,27 @@ impl RegionTracker {
     }
 
     /// Returns a handle to the region with the closest (inferior or equal) start address.
-    fn find_lower_bound(&self, start: usize) -> Option<Handle<Region>> {
-        let mut closest = self.head?;
+    /// First value is the closest, second is the previous element.
+    fn find_lower_bound(&self, start: usize) -> (Option<Handle<Region>>, Option<Handle<Region>>) {
+        let Some(mut closest) = self.head else {return (None, None)} ;
 
         if self.regions[closest].start > start {
             // The first region already starts at a higher address
-            return None;
+            return (None, None);
         }
-
+        let mut prev = None;
+        let mut iter = None;
         for (handle, region) in self {
             if region.start <= start {
+                prev = iter;
                 closest = handle
             } else {
                 break;
             }
+            iter = Some(handle);
         }
 
-        Some(closest)
+        (Some(closest), prev)
     }
 
     /// Split the given region at the provided address. Returns a handle to the second half (the
@@ -267,10 +314,10 @@ impl RegionTracker {
             ref_count: region.ref_count,
             next: region.next,
         };
-        let second_half_handle = self
-            .regions
-            .allocate(second_half)
-            .ok_or(CapaError::OutOfMemory)?;
+        let second_half_handle = self.regions.allocate(second_half).ok_or({
+            log::trace!("Unable to allocate new region!");
+            CapaError::OutOfMemory
+        })?;
 
         // Update the first half
         let region = &mut self.regions[handle];
@@ -300,7 +347,10 @@ impl RegionTracker {
         let handle = self
             .regions
             .allocate(Region::new(start, end).set_next(region.next))
-            .ok_or(CapaError::OutOfMemory)?;
+            .ok_or({
+                log::trace!("Unable to allocate new region!");
+                CapaError::OutOfMemory
+            })?;
         let region = &mut self.regions[after];
         region.next = Some(handle);
 
@@ -317,10 +367,10 @@ impl RegionTracker {
         }
 
         let region = Region::new(start, end).set_next(self.head);
-        let handle = self
-            .regions
-            .allocate(region)
-            .ok_or(CapaError::OutOfMemory)?;
+        let handle = self.regions.allocate(region).ok_or({
+            log::trace!("Unable to allocate new region!");
+            CapaError::OutOfMemory
+        })?;
         self.head = Some(handle);
         Ok(handle)
     }
@@ -344,6 +394,37 @@ impl RegionTracker {
             PermissionChange::Some
         } else {
             PermissionChange::None
+        }
+    }
+
+    fn coalesce(&mut self) {
+        if self.head == None {
+            // Nothing to do.
+            return;
+        }
+        let mut prev = self.head.unwrap();
+        let mut curr = self.regions[prev].next;
+
+        // Go through the list.
+        while curr != None {
+            let current = curr.unwrap();
+            if self.regions[prev].end == self.regions[current].start
+                && (self.regions[prev].ref_count == self.regions[current].ref_count
+                    || self.regions[current].start == self.regions[current].end
+                    || self.regions[prev].start == self.regions[prev].end)
+            {
+                // Coalesce
+                if self.regions[prev].start == self.regions[prev].end {
+                    self.regions[prev].ref_count = self.regions[current].ref_count;
+                }
+                self.regions[prev].next = self.regions[current].next;
+                self.regions[prev].end = self.regions[current].end;
+                self.regions.free(curr.unwrap());
+                curr = self.regions[prev].next;
+                continue;
+            }
+            prev = curr.unwrap();
+            curr = self.regions[current].next;
         }
     }
 
@@ -486,11 +567,11 @@ mod tests {
         regions.add_region(0x100, 0x1000).unwrap();
 
         // Should return None if there is no lower bound region
-        assert_eq!(regions.find_lower_bound(0x50), None);
+        assert_eq!(regions.find_lower_bound(0x50), (None, None));
 
         let head = regions.head;
-        assert_eq!(regions.find_lower_bound(0x100), head);
-        assert_eq!(regions.find_lower_bound(0x200), head);
+        assert_eq!(regions.find_lower_bound(0x100), (head, None));
+        assert_eq!(regions.find_lower_bound(0x200), (head, None));
     }
 
     #[test]
@@ -536,9 +617,12 @@ mod tests {
         pool.add_region(0x200, 0x300).unwrap();
         snap("{[0x200, 0x300 | 1]}", &pool);
         pool.add_region(0x300, 0x400).unwrap();
-        snap("{[0x200, 0x300 | 1] -> [0x300, 0x400 | 1]}", &pool);
+        snap("{[0x200, 0x400 | 1]}", &pool);
         pool.add_region(0x100, 0x500).unwrap();
-        snap("{[0x100, 0x200 | 1] -> [0x200, 0x300 | 2] -> [0x300, 0x400 | 2] -> [0x400, 0x500 | 1]}", &pool);
+        snap(
+            "{[0x100, 0x200 | 1] -> [0x200, 0x400 | 2] -> [0x400, 0x500 | 1]}",
+            &pool,
+        );
 
         // Region is added twice
         let mut pool = RegionTracker::new();

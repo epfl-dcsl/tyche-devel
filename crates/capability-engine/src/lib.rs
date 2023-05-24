@@ -97,9 +97,10 @@ impl CapaEngine {
     ) -> Result<Handle<Context>, CapaError> {
         log::trace!("Start CPU");
 
-        self.contexts
-            .allocate(Context::new())
-            .ok_or(CapaError::OutOfMemory)
+        self.contexts.allocate(Context::new()).ok_or({
+            log::trace!("Unable to allocate context!");
+            CapaError::OutOfMemory
+        })
     }
 
     pub fn create_domain(&mut self, manager: Handle<Domain>) -> Result<LocalCapa, CapaError> {
@@ -282,10 +283,10 @@ impl CapaEngine {
         capa: LocalCapa,
     ) -> Result<(LocalCapa, Handle<Context>), CapaError> {
         let capa = self.domains[domain].get(capa)?.as_management()?;
-        let context = self
-            .contexts
-            .allocate(Context::new())
-            .ok_or(CapaError::OutOfMemory)?;
+        let context = self.contexts.allocate(Context::new()).ok_or({
+            log::trace!("Unable to allocate context for seal!");
+            CapaError::OutOfMemory
+        })?;
         self.domains[capa].seal()?;
         let capa = insert_capa(
             domain,
