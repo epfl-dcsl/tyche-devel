@@ -401,6 +401,33 @@ pub(crate) fn create_switch(
     insert_capa(domain, capa, regions, domains, contexts)
 }
 
+// ——————————————————————————— Interrupt Handler ———————————————————————————— //
+
+/// Find the domain's manager who is responsible for handling the provided interrupt.
+///
+/// The domain itself is assumed to not be authorized to handle the domain.
+/// Return none if no suitable manager exists.
+pub(crate) fn find_interrupt_handler(
+    domain: Handle<Domain>,
+    interrupt: u64,
+    domains: &DomainPool
+) -> Option<Handle<Domain>> {
+    let mut handle = domain;
+    while let Some(manager) = domains.get(handle) {
+        if manager.interrupts & interrupt != 0 {
+            return Some(handle);
+        }
+        let Some(next_handle) = manager.manager else {
+            // This domain has no manager
+            break;
+        };
+        handle = next_handle;
+    }
+
+    // Could not find a suitable manager
+    None
+}
+
 // ——————————————————————————————— Enumerate ———————————————————————————————— //
 
 pub(crate) fn next_capa(

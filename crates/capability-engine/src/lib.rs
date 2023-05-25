@@ -378,6 +378,16 @@ impl CapaEngine {
         Ok((next_dom, next_ctx, return_capa))
     }
 
+    pub fn handle_interrupt(
+        &mut self,
+        domain: Handle<Domain>,
+        _core_id: usize,
+        interrupt: u64,
+    ) {
+        let _ = domain::find_interrupt_handler(domain, interrupt, &self.domains);
+        // TODO: generate an appropriate context switch event.
+    }
+
     pub fn enumerate(
         &mut self,
         domain: Handle<Domain>,
