@@ -2,8 +2,8 @@
 
 use capa_engine::config::{NB_CONTEXTS, NB_DOMAINS};
 use capa_engine::{
-    permission, AccessRights, CapaEngine, CapaError, CapaInfo, Context, Domain, Handle, LocalCapa,
-    NextCapaToken,
+    permission, AccessRights, Buffer, CapaEngine, CapaError, CapaInfo, Context, Domain, Handle,
+    LocalCapa, NextCapaToken,
 };
 use mmu::eptmapper::EPT_ROOT_FLAGS;
 use mmu::{EptMapper, FrameAllocator};
@@ -23,6 +23,7 @@ static CAPA_ENGINE: Mutex<CapaEngine> = Mutex::new(CapaEngine::new());
 static INITIAL_DOMAIN: Mutex<Option<Handle<Domain>>> = Mutex::new(None);
 static DOMAINS: [Mutex<DomainData>; NB_DOMAINS] = [EMPTY_DOMAIN; NB_DOMAINS];
 static CORES: [Mutex<CoreData>; NB_CORES] = [EMPTY_CORE; NB_CORES];
+static CORE_UPDATES: [Mutex<Buffer<CoreUpdate>>; NB_CORES] = [EMPTY_UPDATE_BUFFER; NB_CORES];
 static CONTEXTS: [Mutex<ContextData>; NB_CONTEXTS] = [EMPTY_CONTEXT; NB_CONTEXTS];
 
 pub struct DomainData {
@@ -48,6 +49,7 @@ const EMPTY_CONTEXT: Mutex<ContextData> = Mutex::new(ContextData {
     rip: 0,
     rsp: 0,
 });
+const EMPTY_UPDATE_BUFFER: Mutex<Buffer<CoreUpdate>> = Mutex::new(Buffer::new());
 
 // ————————————————————————————— Initialization ————————————————————————————— //
 
@@ -237,13 +239,37 @@ pub fn get_domain_ept(current: Handle<Domain>) -> HostPhysAddr {
 
 // ———————————————————————————————— Updates ————————————————————————————————— //
 
+/// Per-core updates
+#[derive(Debug, Clone, Copy)]
+enum CoreUpdate {
+    TlbShootdown,
+    Switch {
+        domain: Handle<Domain>,
+        context: Handle<Context>,
+    },
+}
+
 fn apply_updates(engine: &mut MutexGuard<CapaEngine>) {
     while let Some(update) = engine.pop_update() {
         match update {
+            // Updates that can be handled locally
             capa_engine::Update::PermissionUpdate { domain } => update_permission(domain, engine),
             capa_engine::Update::RevokeDomain { domain } => revoke_domain(domain),
             capa_engine::Update::CreateDomain { domain } => create_domain(domain),
-            capa_engine::Update::None => todo!(),
+
+            // Updates that needs to be routed to some specific cores
+            capa_engine::Update::Switch {
+                domain,
+                context,
+                core,
+            } => {
+                let mut core_updates = CORE_UPDATES[core as usize].lock();
+                core_updates.push(CoreUpdate::Switch { domain, context });
+            }
+            capa_engine::Update::TlbShootdown { core } => {
+                let mut core_updates = CORE_UPDATES[core as usize].lock();
+                core_updates.push(CoreUpdate::TlbShootdown);
+            }
         }
     }
 }
@@ -305,4 +331,15 @@ fn update_permission(domain_handle: Handle<Domain>, engine: &mut MutexGuard<Capa
 unsafe fn free_ept(ept: HostPhysAddr, allocator: &impl FrameAllocator) {
     let mapper = EptMapper::new(allocator.get_physical_offset().as_usize(), ept);
     mapper.free_all(allocator);
+}
+
+// ———————————————————————————————— Display ————————————————————————————————— //
+
+impl core::fmt::Display for CoreUpdate {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            CoreUpdate::TlbShootdown => write!(f, "TLB Shootdown"),
+            CoreUpdate::Switch { domain, context } => write!(f, "Switch({}, {})", domain, context),
+        }
+    }
 }

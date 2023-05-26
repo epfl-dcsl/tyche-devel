@@ -2,9 +2,9 @@ use crate::config::NB_REGIONS;
 use crate::context::ContextPool;
 use crate::domain::{insert_capa, Domain, DomainPool, LocalCapa};
 use crate::gen_arena::{GenArena, Handle};
-use crate::region::{AccessRights, PermissionChange};
-use crate::update::{Update, UpdateBuffer};
-use crate::CapaError;
+use crate::region::AccessRights;
+use crate::update::UpdateBuffer;
+use crate::{domain, CapaError};
 
 pub struct RegionCapa {
     domain: Handle<Domain>,
@@ -237,13 +237,8 @@ fn apply_install(
         return Ok(());
     }
 
-    if let Some(domain) = domains.get_mut(domain_handle) {
-        let change = domain.activate_region(capa.access)?;
-        if let PermissionChange::Some = change {
-            updates.push(Update::PermissionUpdate {
-                domain: domain_handle,
-            });
-        }
+    if domains.get(domain_handle).is_some() {
+        domain::activate_region(domain_handle, capa.access, domains, updates)?;
     }
 
     Ok(())
@@ -259,13 +254,8 @@ fn apply_uninstall(
         return Ok(());
     }
 
-    if let Some(domain) = domains.get_mut(domain_handle) {
-        let change = domain.deactivate_region(capa.access)?;
-        if let PermissionChange::Some = change {
-            updates.push(Update::PermissionUpdate {
-                domain: domain_handle,
-            });
-        }
+    if domains.get(domain_handle).is_some() {
+        domain::deactivate_region(domain_handle, capa.access, domains, updates)?;
     }
 
     Ok(())

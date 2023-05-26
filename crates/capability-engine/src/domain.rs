@@ -5,6 +5,7 @@ use crate::free_list::FreeList;
 use crate::gen_arena::GenArena;
 use crate::region::{PermissionChange, RegionTracker};
 use crate::update::{Update, UpdateBuffer};
+use crate::utils::BitmapIterator;
 use crate::{region_capa, AccessRights, CapaError, Handle, RegionPool};
 
 pub type DomainHandle = Handle<Domain>;
@@ -113,30 +114,6 @@ impl Domain {
         }
     }
 
-    pub(crate) fn activate_region(
-        &mut self,
-        access: AccessRights,
-    ) -> Result<PermissionChange, CapaError> {
-        // Drop updates on domain in the process of being revoked
-        if self.is_being_revoked {
-            return Ok(PermissionChange::None);
-        }
-
-        self.regions.add_region(access.start, access.end)
-    }
-
-    pub(crate) fn deactivate_region(
-        &mut self,
-        access: AccessRights,
-    ) -> Result<PermissionChange, CapaError> {
-        // Drop updates on domain in the process of being revoked
-        if self.is_being_revoked {
-            return Ok(PermissionChange::None);
-        }
-
-        self.regions.remove_region(access.start, access.end)
-    }
-
     pub(crate) fn set_manager(&mut self, manager: Handle<Domain>) {
         self.manager = Some(manager);
     }
@@ -159,13 +136,6 @@ impl Domain {
         Ok(&mut self.capas[index.idx])
     }
 
-    /// Remove a capability from a domain.
-    pub(crate) fn remove(&mut self, index: LocalCapa) -> Result<Capa, CapaError> {
-        let capa = self.get(index)?;
-        self.free_list.free(index.idx);
-        Ok(capa)
-    }
-
     /// Mark the domain as executing on the given core.
     pub(crate) fn execute_on_core(&mut self, core_id: usize) {
         let core_id = 1 << core_id;
@@ -181,9 +151,11 @@ impl Domain {
         self.cores &= !core_id
     }
 
-    fn free_invalid_capas(&mut self) {
-        log::trace!("Runing garbage collection");
-        // TODO
+    /// Emit TLB shootdown updates for all cores executing the domain.
+    fn emit_shootdown(&self, updates: &mut UpdateBuffer) {
+        for core in BitmapIterator::new(self.cores) {
+            updates.push(Update::TlbShootdown { core })
+        }
     }
 
     pub fn regions(&self) -> &RegionTracker {
@@ -401,6 +373,52 @@ pub(crate) fn create_switch(
     insert_capa(domain, capa, regions, domains, contexts)
 }
 
+// ———————————————————————————— Activate Region ————————————————————————————— //
+
+pub(crate) fn activate_region(
+    domain: Handle<Domain>,
+    access: AccessRights,
+    domains: &mut DomainPool,
+    updates: &mut UpdateBuffer,
+) -> Result<(), CapaError> {
+    let dom = &mut domains[domain];
+
+    // Drop updates on domain in the process of being revoked
+    if dom.is_being_revoked {
+        return Ok(());
+    }
+
+    let change = dom.regions.add_region(access.start, access.end)?;
+    if let PermissionChange::Some = change {
+        dom.emit_shootdown(updates);
+        updates.push(Update::PermissionUpdate { domain });
+    };
+
+    Ok(())
+}
+
+pub(crate) fn deactivate_region(
+    domain: Handle<Domain>,
+    access: AccessRights,
+    domains: &mut DomainPool,
+    updates: &mut UpdateBuffer,
+) -> Result<(), CapaError> {
+    let dom = &mut domains[domain];
+
+    // Drop updates on domain in the process of being revoked
+    if dom.is_being_revoked {
+        return Ok(());
+    }
+
+    let change = dom.regions.remove_region(access.start, access.end)?;
+    if let PermissionChange::Some = change {
+        dom.emit_shootdown(updates);
+        updates.push(Update::PermissionUpdate { domain });
+    };
+
+    Ok(())
+}
+
 // ——————————————————————————— Interrupt Handler ———————————————————————————— //
 
 /// Find the domain's manager who is responsible for handling the provided interrupt.
@@ -410,7 +428,7 @@ pub(crate) fn create_switch(
 pub(crate) fn find_interrupt_handler(
     domain: Handle<Domain>,
     interrupt: u64,
-    domains: &DomainPool
+    domains: &DomainPool,
 ) -> Option<Handle<Domain>> {
     let mut handle = domain;
     while let Some(manager) = domains.get(handle) {

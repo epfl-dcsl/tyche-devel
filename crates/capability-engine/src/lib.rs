@@ -9,6 +9,7 @@ mod gen_arena;
 mod region;
 mod region_capa;
 mod update;
+mod utils;
 
 use core::ops::Index;
 
@@ -23,8 +24,8 @@ use gen_arena::GenArena;
 pub use gen_arena::Handle;
 pub use region::{AccessRights, RegionTracker};
 use region_capa::{RegionCapa, RegionPool};
-pub use update::Update;
 use update::UpdateBuffer;
+pub use update::{Buffer, Update};
 
 /// Configuration for the static Capa Engine size.
 pub mod config {
@@ -368,22 +369,20 @@ impl CapaEngine {
             &mut self.domains,
             &mut self.contexts,
         )?;
-        remove_capa(domain, capa, &mut self.domains)?;
-        next_domain.execute_on_core(core_id);
+        remove_capa(domain, capa, &mut self.domains).unwrap(); // We already checked the capa
+        self.domains[next_dom].execute_on_core(core_id);
+        self.domains[domain].remove_from_core(core_id);
 
-        let current_domain = &mut self.domains[domain];
-        current_domain.remove(capa).unwrap(); // We already checked that the capa exists
-        current_domain.remove_from_core(core_id);
+        self.updates.push(Update::Switch {
+            domain: next_dom,
+            context: next_ctx,
+            core: core_id,
+        });
 
         Ok((next_dom, next_ctx, return_capa))
     }
 
-    pub fn handle_interrupt(
-        &mut self,
-        domain: Handle<Domain>,
-        _core_id: usize,
-        interrupt: u64,
-    ) {
+    pub fn handle_interrupt(&mut self, domain: Handle<Domain>, _core_id: usize, interrupt: u64) {
         let _ = domain::find_interrupt_handler(domain, interrupt, &self.domains);
         // TODO: generate an appropriate context switch event.
     }

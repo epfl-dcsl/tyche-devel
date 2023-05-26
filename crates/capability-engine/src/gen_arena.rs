@@ -48,6 +48,7 @@ impl<T, const N: usize> GenArena<T, N> {
         self.gen[handle.idx] += 1;
     }
 
+    #[allow(dead_code)]
     pub fn get_mut(&mut self, handle: Handle<T>) -> Option<&mut T> {
         let idx = handle.idx;
         if self.gen[idx] == handle.gen {

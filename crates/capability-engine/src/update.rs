@@ -3,31 +3,48 @@
 use core::{fmt, mem};
 
 use crate::config::NB_UPDATES;
-use crate::{Domain, Handle};
+use crate::{Context, Domain, Handle};
 
-#[derive(Debug)]
+pub type UpdateBuffer = Buffer<Update>;
+
+#[derive(Debug, Clone, Copy)]
 pub enum Update {
-    PermissionUpdate { domain: Handle<Domain> },
-    RevokeDomain { domain: Handle<Domain> },
-    CreateDomain { domain: Handle<Domain> },
-    None,
+    PermissionUpdate {
+        domain: Handle<Domain>,
+    },
+    TlbShootdown {
+        core: usize,
+    },
+    RevokeDomain {
+        domain: Handle<Domain>,
+    },
+    CreateDomain {
+        domain: Handle<Domain>,
+    },
+    Switch {
+        domain: Handle<Domain>,
+        context: Handle<Context>,
+        core: usize,
+    },
 }
 
-pub struct UpdateBuffer {
-    buff: [Update; NB_UPDATES],
+pub struct Buffer<U> {
+    buff: [Option<U>; NB_UPDATES],
     head: usize,
 }
 
-impl UpdateBuffer {
+impl<U> Buffer<U>
+where
+    U: Copy + fmt::Display,
+{
     pub const fn new() -> Self {
-        const NOOP: Update = Update::None;
-        UpdateBuffer {
-            buff: [NOOP; NB_UPDATES],
+        Buffer {
+            buff: [None; NB_UPDATES],
             head: 0,
         }
     }
 
-    pub fn push(&mut self, update: Update) {
+    pub fn push(&mut self, update: U) {
         log::trace!("Push {}", update);
 
         // Safety checks
@@ -35,16 +52,16 @@ impl UpdateBuffer {
             log::error!("Update buffer is full");
             panic!("Update buffer if full");
         }
-        let Update::None = self.buff[self.head] else {
+        let None = self.buff[self.head] else {
             log::error!("Update buffer contains unapplied update");
             panic!("Update buffer contains unapplied update");
         };
 
-        self.buff[self.head] = update;
+        self.buff[self.head] = Some(update);
         self.head += 1;
     }
 
-    pub fn pop(&mut self) -> Option<Update> {
+    pub fn pop(&mut self) -> Option<U> {
         log::trace!("Poping");
 
         if self.head == 0 {
@@ -52,18 +69,16 @@ impl UpdateBuffer {
         }
 
         self.head -= 1;
-        let update = mem::replace(&mut self.buff[self.head], Update::None);
+        let update = mem::replace(&mut self.buff[self.head], None);
 
-        // Safety checks
         match update {
-            Update::None => {
+            None => {
+                // Safety checks, there should be no None on the buffer stack
                 log::error!("Update buffer contains unapplied update");
                 panic!("Update buffer contains unapplied update");
             }
-            _ => (),
+            Some(update) => Some(update),
         }
-
-        Some(update)
     }
 }
 
@@ -75,7 +90,12 @@ impl fmt::Display for Update {
             Update::PermissionUpdate { domain } => write!(f, "PermissionUpdate({})", domain),
             Update::RevokeDomain { domain } => write!(f, "RevokeDomain({})", domain),
             Update::CreateDomain { domain } => write!(f, "CreateDomain({})", domain),
-            Update::None => write!(f, "None"),
+            Update::TlbShootdown { core } => write!(f, "TlbShootdown({})", core),
+            Update::Switch {
+                domain,
+                context,
+                core,
+            } => write!(f, "Switch({}, {}, core {})", domain, context, core),
         }
     }
 }

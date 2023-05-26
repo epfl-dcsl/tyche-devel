@@ -144,7 +144,7 @@ fn scenario_2() {
     snap!("{[0x0, 0x1000 | 1]}", regions(domain, &engine));
     snap!("{Region([0x0, 0x1000 | AC])}", capas(domain, &mut engine));
     snap!(
-        "{PermissionUpdate(H(0, gen 0)), CreateDomain(H(0, gen 0))}",
+        "{PermissionUpdate(H(0, gen 0)), TlbShootdown(0), CreateDomain(H(0, gen 0))}",
         updates(&mut engine)
     );
 
@@ -171,7 +171,10 @@ fn scenario_2() {
         "{Region([0x0, 0x1000 | _C]), Region([0x0, 0x200 | AC]), Region([0x300, 0x1000 | AC])}",
         capas(domain, &mut engine),
     );
-    snap!("{PermissionUpdate(H(0, gen 0))}", updates(&mut engine));
+    snap!(
+        "{PermissionUpdate(H(0, gen 0)), TlbShootdown(0)}",
+        updates(&mut engine)
+    );
 
     // Create a new domain and send a region there
     let dom2 = engine.create_domain(domain).unwrap();
@@ -185,7 +188,7 @@ fn scenario_2() {
     );
     snap!("{Region([0x0, 0x200 | AC])}", capas(domain2, &mut engine));
     snap!(
-        "{PermissionUpdate(H(1, gen 0)), PermissionUpdate(H(0, gen 0)), CreateDomain(H(1, gen 0))}",
+        "{PermissionUpdate(H(1, gen 0)), PermissionUpdate(H(0, gen 0)), TlbShootdown(0), CreateDomain(H(1, gen 0))}",
         updates(&mut engine)
     );
 
@@ -204,7 +207,7 @@ fn scenario_3() {
 
     // Create initial domain and range memory 0x0 to 0x10000.
     let domain = engine.create_manager_domain(permission::ALL).unwrap();
-    let _ctx = engine.start_cpu_on_domain(domain).unwrap();
+    let _ctx = engine.start_domain_on_core(domain, 0).unwrap();
     let region = engine
         .create_root_region(
             domain,
