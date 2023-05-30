@@ -1,58 +1,68 @@
 all: app enclave
 
-# Libraries
+
+## ————————————————————————————————— Paths —————————————————————————————————— ##
 LIB_PATH=../../../
 DRIVERS_PATH=../../../../drivers/
 
+## ——————————————————————————————— Libraries ———————————————————————————————— ##
 SDK=$(LIB_PATH)/sdkenclave
 DLL_LIB= $(LIB_PATH)/dll
 CAPA_LIB=$(LIB_PATH)/capabilities
 COMMON_LIB=$(LIB_PATH)/common
-
 ELF64=$(LIB_PATH)/elf64
 PTS=$(LIB_PATH)/pts
 DRIVER=$(DRIVERS_PATH)/tyche
 
-# App Code and headers
-CODE_APP=$(wildcard untrusted/*.c)
-HDRS_APP=$(wildcard include/*.h)
+## ——————————————————————— Untrusted code and headers ——————————————————————— ##
+CODE_UNTRUSTED=$(wildcard untrusted/*.c)
+HDRS_UNTRUSTED=$(wildcard include/*.h)
 
-# Enclave Code and headers
-CODE_ENCLAVE=$(wildcard trusted/*.c)
-HDRS_ENCLAVE=$(wildcard include/*.h)
+## ———————————————————————— Trusted code and headers ———————————————————————— ##
+CODE_TRUSTED=$(wildcard trusted/*.c)
+HDRS_TRUSTED=$(wildcard include/*.h)
 
+## ———————————————————————— Runtime code and headers ———————————————————————— ##
 CODE_RUNTIME=$(wildcard $(SDK)/runtime/*.c) $(wildcard $(SDK)/runtime/*.S)
 HDRS_RUNTIME= $(wildcard $(SDK)/include/*.h)
 
-# Includes
+## ———————————————————————— Loader code and headers ————————————————————————— ##
+CODE_LOADER=$(wildcard $(SDK)/loader/*.c) $(wildcard $(SDK)/loader/*.S)
+HDRS_LOADER=$(wildcard $(SDK)/include/*.h)
+
+## ————————————————————————— ELF64 code and headers ————————————————————————— ##
+CODE_ELF64=$(wildcard $(ELF64)/src/*.c)
+HDRS_ELF64=$(wildcard $(ELF64)/include/*.h)
+
+## —————————————————————— Page table code and headers ——————————————————————— ##
+CODE_PTS=$(wildcard $(PTS)/src/*.c)
+HDRS_PTS=$(wildcard $(PTS)/include/*.h)
+
+## —————————————————————— Application code and headers —————————————————————— ##
+CODE_APP=$(CODE_ELF64) $(CODE_PTS) $(CODE_LOADER) $(CODE_UNTRUSTED)
+HDRS_APP=$(HDRS_ELF64) $(HDRS_PTS) $(HDRS_LOADER) $(HDRS_UNTRUSTED)
+
+## ———————————————————————— Enclave code and headers ———————————————————————— ##
+CODE_ENCLAVE=$(CODE_RUNTIME) $(CODE_TRUSTED)
+HDRS_ENCLAVE=$(HDRS_RUNTIME) $(HDRS_TRUSTED)
+
+## ———————————————————————————————— Includes ———————————————————————————————— ##
 COMMON_INCLUDES = -Iinclude -I$(CAPA_LIB)/include -I$(COMMON_LIB)/include -I$(DLL_LIB)/include -I$(SDK)/include 
 APP_INCLUDES = $(COMMON_INCLUDES) -I$(ELF64)/include -I$(PTS)/include -I$(DRIVER)/include
 
-# Dynamic libraries
-DYNS= -Wl,-R ./libs  -L./libs/ -l:enclave_loader.so -lpts
-
-# Installation configuration.
+## ————————————————————— Configuration for the install —————————————————————— ##
 DISK_PATH ?= /tmp/mount/tyche/programs 
 
-# Rules
+## ———————————————————————————————— Targets ————————————————————————————————— ##
 
 app: $(CODE_APP) $(HDRS_APP) 
-	mkdir -p libs
-	make -C $(SDK)
-	make -C $(ELF64)
-	make -C $(PTS)
-	cp $(SDK)/enclave_loader.so libs/
-	cp $(PTS)/libpts.a libs/
-	gcc -DTYCHE_USER_SPACE=1 -g $(APP_INCLUDES) -o $@ $(CODE_APP) $(DYNS)
+	gcc -DTYCHE_USER_SPACE=1 -g $(APP_INCLUDES) -o $@ $(CODE_APP)
 
-
-
-enclave: $(CODE_ENCLAVE) $(CODE_RUNTIME) $(HDRS_ENCLAVE) $(HDRS_RUNTIME)
-	gcc -DTYCHE_USER_SPACE=1 -g $(COMMON_INCLUDES) -nostdlib -static -o $@ $(CODE_RUNTIME) $(CODE_ENCLAVE) 
+enclave: $(CODE_ENCLAVE) $(HDRS_ENCLAVE)
+	gcc -DTYCHE_USER_SPACE=1 -g $(COMMON_INCLUDES) -nostdlib -static -o $@ $(CODE_ENCLAVE) 
 
 install_disk: all
 	mkdir -p $(DISK_PATH)
-	cp -r libs $(DISK_PATH)
 	cp -t $(DISK_PATH) app enclave
 
 
