@@ -28,4 +28,7 @@ typedef struct idtr_t {
   uint64_t base;
 } __attribute__((packed)) idtr_t;
 
+// ——————————————————————————————— Functions ———————————————————————————————— //
+void idt_init(void);
+
 #endif
