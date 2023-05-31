@@ -28,7 +28,7 @@ pub mod permission {
 // —————————————————————————— Domain Capabilities ——————————————————————————— //
 
 /// An index into the capability table of a domain.
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub struct LocalCapa {
     idx: usize,
 }

@@ -23,7 +23,7 @@ impl Core {
         }
     }
 
-    pub fn initialize(&mut self, domain: DomainHandle) -> Result<(), CapaError> {
+    pub(crate) fn initialize(&mut self, domain: DomainHandle) -> Result<(), CapaError> {
         if self.is_initialized {
             log::warn!("Tried to initialize already initialized domain");
             return Err(CapaError::InvalidCore);
@@ -32,5 +32,10 @@ impl Core {
         self.domain = domain;
         self.is_initialized = true;
         Ok(())
+    }
+
+    pub(crate) fn set_domain(&mut self, domain: DomainHandle) {
+        assert!(self.is_initialized, "Setting domain on unitialized core");
+        self.domain = domain;
     }
 }

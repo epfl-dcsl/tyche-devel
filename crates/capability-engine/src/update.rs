@@ -3,7 +3,7 @@
 use core::{fmt, mem};
 
 use crate::config::NB_UPDATES;
-use crate::{Context, Domain, Handle};
+use crate::{Context, Domain, Handle, LocalCapa};
 
 pub type UpdateBuffer = Buffer<Update>;
 
@@ -24,6 +24,7 @@ pub enum Update {
     Switch {
         domain: Handle<Domain>,
         context: Handle<Context>,
+        return_capa: LocalCapa,
         core: usize,
     },
 }
@@ -95,6 +96,7 @@ impl fmt::Display for Update {
                 domain,
                 context,
                 core,
+                ..
             } => write!(f, "Switch({}, {}, core {})", domain, context, core),
         }
     }

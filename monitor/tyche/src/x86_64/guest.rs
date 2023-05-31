@@ -3,12 +3,9 @@
 use core::arch::asm;
 
 use capa_engine::{Context, Domain, Handle, LocalCapa, NextCapaToken};
-use mmu::eptmapper::EPT_ROOT_FLAGS;
-use utils::HostPhysAddr;
 use vmx::bitmaps::exit_qualification;
 use vmx::{ActiveVmcs, ControlRegister, Register, VmxExitReason};
 
-use super::monitor::get_domain_ept;
 use super::{cpuid, monitor};
 use crate::calls;
 use crate::error::TycheError;
@@ -25,18 +22,17 @@ pub fn main_loop(
     mut domain: Handle<Domain>,
     mut ctx: Handle<Context>,
 ) {
+    let core_id = cpuid();
     let mut result = unsafe { vcpu.launch() };
     loop {
         let exit_reason = match result {
             Ok(exit_reason) => {
                 let res = handle_exit(&mut vcpu, exit_reason, &mut domain, &mut ctx)
                     .expect("Failed to handle VM exit");
-                // TODO this is a quick fix for the ept.
-                // It does not take into account the locking of the engine.
-                // It updates the ept pointer too often.
-                let ept = get_domain_ept(domain);
-                vcpu.set_ept_ptr(HostPhysAddr::new(ept.as_usize() | EPT_ROOT_FLAGS))
-                    .expect("Unable to update the ept");
+
+                // Apply core-local updates before returning
+                monitor::apply_core_updates(&mut vcpu, &mut domain, &mut ctx, core_id);
+
                 res
             }
             Err(err) => {
@@ -171,27 +167,9 @@ fn handle_exit(
                 }
                 calls::SWITCH => {
                     log::trace!("Switch");
-                    let (mut current_ctx, next_domain, next_ctx, next_context, return_capa) =
-                        monitor::do_switch(*domain, *ctx, LocalCapa::new(arg_1), cpuid())
-                            .expect("TODO");
+                    monitor::do_switch(*domain, *ctx, LocalCapa::new(arg_1), cpuid())
+                        .expect("TODO");
                     vcpu.next_instruction()?;
-
-                    // Save current context
-                    current_ctx.cr3 = vcpu.get_cr(ControlRegister::Cr3);
-                    current_ctx.rip = vcpu.get(Register::Rip) as usize;
-                    current_ctx.rsp = vcpu.get(Register::Rsp) as usize;
-
-                    // Switch domain
-                    vcpu.set_cr(ControlRegister::Cr3, next_context.cr3);
-                    vcpu.set(Register::Rip, next_context.rip as u64);
-                    vcpu.set(Register::Rsp, next_context.rsp as u64);
-
-                    // Set switch return values
-                    vcpu.set(Register::Rax, 0);
-                    vcpu.set(Register::Rdi, return_capa.as_u64());
-
-                    *domain = next_domain;
-                    *ctx = next_ctx;
                     Ok(HandlerResult::Resume)
                 }
                 calls::DEBUG => {

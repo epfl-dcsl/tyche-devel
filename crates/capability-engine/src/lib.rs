@@ -360,7 +360,7 @@ impl CapaEngine {
         ctx: Handle<Context>,
         capa: LocalCapa,
         core_id: usize,
-    ) -> Result<(Handle<Domain>, Handle<Context>, LocalCapa), CapaError> {
+    ) -> Result<(), CapaError> {
         let (next_dom, next_ctx) = self.domains[domain].get(capa)?.as_switch()?;
         let return_capa = insert_capa(
             next_dom,
@@ -372,14 +372,16 @@ impl CapaEngine {
         remove_capa(domain, capa, &mut self.domains).unwrap(); // We already checked the capa
         self.domains[next_dom].execute_on_core(core_id);
         self.domains[domain].remove_from_core(core_id);
+        self.cores[core_id].set_domain(next_dom);
 
         self.updates.push(Update::Switch {
             domain: next_dom,
             context: next_ctx,
+            return_capa,
             core: core_id,
         });
 
-        Ok((next_dom, next_ctx, return_capa))
+        Ok(())
     }
 
     pub fn handle_interrupt(&mut self, domain: Handle<Domain>, _core_id: usize, interrupt: u64) {

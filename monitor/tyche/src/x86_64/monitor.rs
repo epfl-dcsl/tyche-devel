@@ -11,7 +11,7 @@ use spin::{Mutex, MutexGuard};
 use stage_two_abi::Manifest;
 use utils::{GuestPhysAddr, HostPhysAddr};
 use vmx::bitmaps::EptEntryFlags;
-use vmx::ActiveVmcs;
+use vmx::{ActiveVmcs, ControlRegister, Register};
 
 use super::cpuid;
 use crate::allocator::allocator;
@@ -22,16 +22,11 @@ use crate::statics::NB_CORES;
 static CAPA_ENGINE: Mutex<CapaEngine> = Mutex::new(CapaEngine::new());
 static INITIAL_DOMAIN: Mutex<Option<Handle<Domain>>> = Mutex::new(None);
 static DOMAINS: [Mutex<DomainData>; NB_DOMAINS] = [EMPTY_DOMAIN; NB_DOMAINS];
-static CORES: [Mutex<CoreData>; NB_CORES] = [EMPTY_CORE; NB_CORES];
 static CORE_UPDATES: [Mutex<Buffer<CoreUpdate>>; NB_CORES] = [EMPTY_UPDATE_BUFFER; NB_CORES];
 static CONTEXTS: [Mutex<ContextData>; NB_CONTEXTS] = [EMPTY_CONTEXT; NB_CONTEXTS];
 
 pub struct DomainData {
     ept: Option<HostPhysAddr>,
-}
-
-pub struct CoreData {
-    domain: Handle<Domain>,
 }
 
 pub struct ContextData {
@@ -41,15 +36,12 @@ pub struct ContextData {
 }
 
 const EMPTY_DOMAIN: Mutex<DomainData> = Mutex::new(DomainData { ept: None });
-const EMPTY_CORE: Mutex<CoreData> = Mutex::new(CoreData {
-    domain: Handle::new_invalid(),
-});
+const EMPTY_UPDATE_BUFFER: Mutex<Buffer<CoreUpdate>> = Mutex::new(Buffer::new());
 const EMPTY_CONTEXT: Mutex<ContextData> = Mutex::new(ContextData {
     cr3: 0,
     rip: 0,
     rsp: 0,
 });
-const EMPTY_UPDATE_BUFFER: Mutex<Buffer<CoreUpdate>> = Mutex::new(Buffer::new());
 
 // ————————————————————————————— Initialization ————————————————————————————— //
 
@@ -87,8 +79,6 @@ pub fn init_vcpu(vcpu: &mut ActiveVmcs<'static>) -> (Handle<Domain>, Handle<Cont
         domain.ept.unwrap().as_usize() | EPT_ROOT_FLAGS,
     ))
     .expect("Failed to set initial EPT PTR");
-    let mut core = get_core(cpuid);
-    core.domain = initial_domain;
     (initial_domain, ctx)
 }
 
@@ -100,10 +90,6 @@ fn get_domain(domain: Handle<Domain>) -> MutexGuard<'static, DomainData> {
 
 fn get_context(context: Handle<Context>) -> MutexGuard<'static, ContextData> {
     CONTEXTS[context.idx()].lock()
-}
-
-fn get_core(cpuid: usize) -> MutexGuard<'static, CoreData> {
-    CORES[cpuid].lock()
 }
 
 // ————————————————————————————— Monitor Calls —————————————————————————————— //
@@ -190,29 +176,11 @@ pub fn do_switch(
     current_ctx: Handle<Context>,
     capa: LocalCapa,
     cpuid: usize,
-) -> Result<
-    (
-        MutexGuard<'static, ContextData>,
-        Handle<Domain>,
-        Handle<Context>,
-        MutexGuard<'static, ContextData>,
-        LocalCapa,
-    ),
-    CapaError,
-> {
-    // TODO: check that the domain is not already running! Maybe this should be done in the engine?
+) -> Result<(), CapaError> {
     let mut engine = CAPA_ENGINE.lock();
-    let (next_domain, next_context, return_capa) =
-        engine.switch(current, current_ctx, capa, cpuid)?;
-    get_core(cpuid).domain = next_domain;
+    engine.switch(current, current_ctx, capa, cpuid)?;
     apply_updates(&mut engine);
-    Ok((
-        get_context(current_ctx),
-        next_domain,
-        next_context,
-        get_context(next_context),
-        return_capa,
-    ))
+    Ok(())
 }
 
 pub fn do_debug() {
@@ -231,12 +199,6 @@ pub fn do_debug() {
     }
 }
 
-//TODO quick fix, find a better way and only update when needed.
-pub fn get_domain_ept(current: Handle<Domain>) -> HostPhysAddr {
-    let domain = get_domain(current);
-    return domain.ept.expect("No ept in the domain!");
-}
-
 // ———————————————————————————————— Updates ————————————————————————————————— //
 
 /// Per-core updates
@@ -246,9 +208,12 @@ enum CoreUpdate {
     Switch {
         domain: Handle<Domain>,
         context: Handle<Context>,
+        return_capa: LocalCapa,
     },
 }
 
+/// General updates, containing both global updates on the domain's states, and core specific
+/// updates that must be routed to the different cores.
 fn apply_updates(engine: &mut MutexGuard<CapaEngine>) {
     while let Some(update) = engine.pop_update() {
         match update {
@@ -261,14 +226,71 @@ fn apply_updates(engine: &mut MutexGuard<CapaEngine>) {
             capa_engine::Update::Switch {
                 domain,
                 context,
+                return_capa,
                 core,
             } => {
                 let mut core_updates = CORE_UPDATES[core as usize].lock();
-                core_updates.push(CoreUpdate::Switch { domain, context });
+                core_updates.push(CoreUpdate::Switch {
+                    domain,
+                    context,
+                    return_capa,
+                });
             }
             capa_engine::Update::TlbShootdown { core } => {
                 let mut core_updates = CORE_UPDATES[core as usize].lock();
                 core_updates.push(CoreUpdate::TlbShootdown);
+            }
+        }
+    }
+}
+
+/// Updates that must be applied to a given core.
+pub fn apply_core_updates(
+    vcpu: &mut ActiveVmcs<'static>,
+    current_domain: &mut Handle<Domain>,
+    current_context: &mut Handle<Context>,
+    core_id: usize,
+) {
+    let mut update_queue = CORE_UPDATES[core_id].lock();
+    while let Some(update) = update_queue.pop() {
+        match update {
+            CoreUpdate::TlbShootdown => {
+                log::trace!("TLB Shootdown on core {}", core_id);
+
+                // Reload the EPTs
+                let domain = get_domain(*current_domain);
+                vcpu.set_ept_ptr(HostPhysAddr::new(
+                    domain.ept.unwrap().as_usize() | EPT_ROOT_FLAGS,
+                ))
+                .expect("VMX error, failed to set EPT pointer");
+            }
+            CoreUpdate::Switch {
+                domain,
+                context,
+                return_capa,
+            } => {
+                log::trace!("Domain Switch on core {}", core_id);
+
+                let mut current_ctx = get_context(*current_context);
+                let next_ctx = get_context(context);
+
+                // Save current context
+                current_ctx.cr3 = vcpu.get_cr(ControlRegister::Cr3);
+                current_ctx.rip = vcpu.get(Register::Rip) as usize;
+                current_ctx.rsp = vcpu.get(Register::Rsp) as usize;
+
+                // Switch domain
+                vcpu.set_cr(ControlRegister::Cr3, next_ctx.cr3);
+                vcpu.set(Register::Rip, next_ctx.rip as u64);
+                vcpu.set(Register::Rsp, next_ctx.rsp as u64);
+
+                // Set switch return values
+                vcpu.set(Register::Rax, 0);
+                vcpu.set(Register::Rdi, return_capa.as_u64());
+
+                // Update the current domain and context handle
+                *current_domain = domain;
+                *current_context = context;
             }
         }
     }
@@ -339,7 +361,9 @@ impl core::fmt::Display for CoreUpdate {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             CoreUpdate::TlbShootdown => write!(f, "TLB Shootdown"),
-            CoreUpdate::Switch { domain, context } => write!(f, "Switch({}, {})", domain, context),
+            CoreUpdate::Switch {
+                domain, context, ..
+            } => write!(f, "Switch({}, {})", domain, context),
         }
     }
 }
