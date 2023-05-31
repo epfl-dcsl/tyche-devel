@@ -1,4 +1,5 @@
 #include "idt.h"
+#include "gdt.h"
 #include "enclave_rt.h"
 
 static long syscall_handler(
@@ -17,7 +18,8 @@ void trusted_entry(frame_t* frame)
   if (frame == NULL) {
     return;
   }
-  //TODO setup the gdt
+  //Set up the gdt
+  gdt_assemble();
   //Set up idt handler.
   idt_init();
   //TODO set up syscall handler.
