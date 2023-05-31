@@ -9,6 +9,17 @@ static idtr_t idtr;
 
 extern uint64_t isr_stub_table[];
 // ——————————————————————————————— Functions ———————————————————————————————— //
+
+void save_idt(idtr_t* to_save)
+{
+    __asm__ __volatile__("sidt %0" : "=m" (*to_save));
+}
+
+void restore_idt(idtr_t* to_restore)
+{
+    __asm__ __volatile__("lidt %0" : : "m" (*to_restore));
+}
+
 void idt_set_descriptor(
     uint8_t vector,
     uintptr_t isr,

@@ -51,6 +51,8 @@ typedef struct {
   uintptr_t base;
 } __attribute__((packed)) gdtr_t;
 
+void save_gdt(gdtr_t* to_save);
+void restore_gdt(gdtr_t* to_restore);
 void gdt_add_descriptor(uint64_t base, uint16_t limit, uint8_t access, uint8_t granularity);
 void gdt_reload(gdtr_t* gdtr, uint16_t code, uint16_t data);
 uint16_t gdt_install_tss(uint64_t tss);

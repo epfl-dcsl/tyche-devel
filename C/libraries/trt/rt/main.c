@@ -18,12 +18,23 @@ void trusted_entry(frame_t* frame)
   if (frame == NULL) {
     return;
   }
+  // Save the previous values.
+  gdtr_t saved_gdt;
+  idtr_t saved_idt;
+  
+  save_gdt(&saved_gdt);
+  save_idt(&saved_idt);
+
   //Set up the gdt
   gdt_assemble();
   //Set up idt handler.
   idt_init();
   //TODO set up syscall handler.
   //TODO call the user
+
+  // Restore the previous values.
+  restore_gdt(&saved_gdt);
+  restore_idt(&saved_idt);
 }
 
 /*

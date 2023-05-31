@@ -9,6 +9,16 @@ static gdtr_t gdtr;
 
 static uint16_t gindex;
 
+void save_gdt(gdtr_t* to_save)
+{
+    __asm__ __volatile__("sgdt %0" : "=m" (*to_save));
+}
+
+void restore_gdt(gdtr_t* to_restore)
+{
+  __asm__ __volatile__("lgdt %0" : : "m" (*to_restore));
+}
+
 void gdt_assemble() {
     gdtr.limit = (sizeof(gdt_desc_t) * GDT_MAX_DESCRIPTORS) - 1;
     gdtr.base = (uintptr_t)&gdt[0];

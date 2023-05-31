@@ -30,5 +30,6 @@ typedef struct idtr_t {
 
 // ——————————————————————————————— Functions ———————————————————————————————— //
 void idt_init(void);
-
+void save_idt(idtr_t* to_save);
+void restore_idt(idtr_t* to_restore);
 #endif
