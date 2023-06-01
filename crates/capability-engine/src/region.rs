@@ -314,7 +314,7 @@ impl RegionTracker {
             ref_count: region.ref_count,
             next: region.next,
         };
-        let second_half_handle = self.regions.allocate(second_half).ok_or({
+        let second_half_handle = self.regions.allocate(second_half).ok_or_else(|| {
             log::trace!("Unable to allocate new region!");
             CapaError::OutOfMemory
         })?;
@@ -347,7 +347,7 @@ impl RegionTracker {
         let handle = self
             .regions
             .allocate(Region::new(start, end).set_next(region.next))
-            .ok_or({
+            .ok_or_else(|| {
                 log::trace!("Unable to allocate new region!");
                 CapaError::OutOfMemory
             })?;
@@ -367,7 +367,7 @@ impl RegionTracker {
         }
 
         let region = Region::new(start, end).set_next(self.head);
-        let handle = self.regions.allocate(region).ok_or({
+        let handle = self.regions.allocate(region).ok_or_else(|| {
             log::trace!("Unable to allocate new region!");
             CapaError::OutOfMemory
         })?;

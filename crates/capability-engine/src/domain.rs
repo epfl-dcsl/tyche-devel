@@ -362,7 +362,7 @@ pub(crate) fn create_switch(
     domains: &mut DomainPool,
     contexts: &mut ContextPool,
 ) -> Result<LocalCapa, CapaError> {
-    let context = contexts.allocate(Context::new()).ok_or({
+    let context = contexts.allocate(Context::new()).ok_or_else(|| {
         log::trace!("Unable to allocate context for switch!");
         CapaError::OutOfMemory
     })?;

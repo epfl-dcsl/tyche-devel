@@ -118,7 +118,7 @@ impl CapaEngine {
         self.cores[core_id].initialize(domain)?;
         self.domains[domain].execute_on_core(core_id);
 
-        self.contexts.allocate(Context::new()).ok_or({
+        self.contexts.allocate(Context::new()).ok_or_else(|| {
             log::trace!("Unable to allocate context!");
             CapaError::OutOfMemory
         })
@@ -304,7 +304,7 @@ impl CapaEngine {
         capa: LocalCapa,
     ) -> Result<(LocalCapa, Handle<Context>), CapaError> {
         let capa = self.domains[domain].get(capa)?.as_management()?;
-        let context = self.contexts.allocate(Context::new()).ok_or({
+        let context = self.contexts.allocate(Context::new()).ok_or_else(|| {
             log::trace!("Unable to allocate context for seal!");
             CapaError::OutOfMemory
         })?;
