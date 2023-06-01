@@ -46,7 +46,8 @@ void idt_init(void)
     idt_set_descriptor(vector, isr_stub_table[vector], 0x8E, 1); 
   }
   __asm__ volatile("lidt %0" : : "memory"(idtr)); // load the new IDT
-  __asm__ volatile("sti");    
+  //TODO reenable when we want to have interrupts
+  //__asm__ volatile("sti");    
 }
  
 // ———————————————————————————————— Handlers ———————————————————————————————— //

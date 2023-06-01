@@ -1,3 +1,5 @@
 trt
 loader
 *.o
+compile_commands.json
+.cache
