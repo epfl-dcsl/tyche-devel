@@ -216,6 +216,7 @@ enum CoreUpdate {
 /// updates that must be routed to the different cores.
 fn apply_updates(engine: &mut MutexGuard<CapaEngine>) {
     while let Some(update) = engine.pop_update() {
+        log::trace!("Update: {}", update);
         match update {
             // Updates that can be handled locally
             capa_engine::Update::PermissionUpdate { domain } => update_permission(domain, engine),
@@ -253,6 +254,7 @@ pub fn apply_core_updates(
 ) {
     let mut update_queue = CORE_UPDATES[core_id].lock();
     while let Some(update) = update_queue.pop() {
+        log::trace!("Core Update: {}", update);
         match update {
             CoreUpdate::TlbShootdown => {
                 log::trace!("TLB Shootdown on core {}", core_id);
@@ -273,6 +275,7 @@ pub fn apply_core_updates(
 
                 let mut current_ctx = get_context(*current_context);
                 let next_ctx = get_context(context);
+                let next_domain = get_domain(domain);
 
                 // Save current context
                 current_ctx.cr3 = vcpu.get_cr(ControlRegister::Cr3);
@@ -283,6 +286,10 @@ pub fn apply_core_updates(
                 vcpu.set_cr(ControlRegister::Cr3, next_ctx.cr3);
                 vcpu.set(Register::Rip, next_ctx.rip as u64);
                 vcpu.set(Register::Rsp, next_ctx.rsp as u64);
+                vcpu.set_ept_ptr(HostPhysAddr::new(
+                    next_domain.ept.unwrap().as_usize() | EPT_ROOT_FLAGS,
+                ))
+                .expect("Failed to update EPT");
 
                 // Set switch return values
                 vcpu.set(Register::Rax, 0);

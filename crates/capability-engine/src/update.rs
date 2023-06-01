@@ -63,8 +63,6 @@ where
     }
 
     pub fn pop(&mut self) -> Option<U> {
-        log::trace!("Poping");
-
         if self.head == 0 {
             return None;
         }
