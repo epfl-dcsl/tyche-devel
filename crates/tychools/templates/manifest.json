@@ -1,0 +1,5 @@
+{
+  "user_bin": "app",
+  "kern_bin": "trt",
+  "output": "/tmp/instrumented.exe"
+}

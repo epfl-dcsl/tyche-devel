@@ -16,3 +16,5 @@ mmu = { version = "0.1.0", path = "../mmu"}
 xmas-elf = "0.8.0"
 utils = {path = "../utils"}
 object = {version = "0.31.0", features =["write", "std"]}
+serde = { version ="1.0.163", features = ["derive"]}
+serde_json = "1.0.96"

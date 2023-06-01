@@ -6,7 +6,7 @@ use object::{elf, Endianness};
 use utils::{HostPhysAddr, HostVirtAddr};
 
 use crate::allocator::{Allocator, BumpAllocator, DEFAULT_BUMP_SIZE, PAGE_SIZE};
-use crate::elf_modifier::{ModifiedELF, TychePhdrTypes};
+use crate::elf_modifier::{ModifiedELF, ModifiedSegment, TychePhdrTypes};
 
 fn align_address(addr: usize) -> usize {
     if addr % PAGE_SIZE == 0 {
@@ -15,7 +15,7 @@ fn align_address(addr: usize) -> usize {
     (PAGE_SIZE + addr) & !(PAGE_SIZE - 1)
 }
 
-fn translate_flags(flags: u32) -> PtFlag {
+fn translate_flags(flags: u32, segtype: u32) -> PtFlag {
     let mut ptflags: PtFlag = PtFlag::PRESENT;
     if flags & elf::PF_W == elf::PF_W {
         ptflags = ptflags.union(PtFlag::WRITE);
@@ -23,7 +23,9 @@ fn translate_flags(flags: u32) -> PtFlag {
     if flags & elf::PF_X == 0 {
         ptflags = ptflags.union(PtFlag::EXEC_DISABLE);
     }
-    //TODO handle user and kernel.
+    if TychePhdrTypes::is_user(segtype) {
+        ptflags = ptflags.union(PtFlag::USER);
+    }
     ptflags
 }
 
@@ -33,7 +35,7 @@ pub fn generate_page_tables(melf: &ModifiedELF) -> (Vec<u8>, usize) {
     let mut memsz: usize = 0;
     for ph in &melf.segments {
         let segtype = ph.program_header.p_type(Endianness::Little);
-        if segtype != elf::PT_LOAD && segtype != TychePhdrTypes::Shared as u32 {
+        if !ModifiedSegment::is_loadable(segtype) {
             continue;
         }
         let mem = ph.program_header.p_memsz(Endianness::Little) as usize;
@@ -59,14 +61,14 @@ pub fn generate_page_tables(melf: &ModifiedELF) -> (Vec<u8>, usize) {
     let mut curr_phys: usize = 0;
     for ph in &melf.segments {
         let segtype = ph.program_header.p_type(Endianness::Little);
-        if segtype != elf::PT_LOAD && segtype != TychePhdrTypes::Shared as u32 {
+        if !ModifiedSegment::is_loadable(segtype) {
             continue;
         }
         let mem_size = ph.program_header.p_memsz(Endianness::Little) as usize;
         let vaddr = ph.program_header.p_vaddr(Endianness::Little) as usize;
         let virt = HostVirtAddr::new(vaddr);
         let size = align_address(mem_size);
-        let flags = translate_flags(ph.program_header.p_flags(Endianness::Little));
+        let flags = translate_flags(ph.program_header.p_flags(Endianness::Little), segtype);
         mapper.map_range(&allocator, virt, HostPhysAddr::new(curr_phys), size, flags);
         curr_phys += size;
     }

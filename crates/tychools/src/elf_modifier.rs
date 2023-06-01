@@ -1,8 +1,13 @@
-use object::elf::PT_LOAD;
+use std::fs::OpenOptions;
+use std::io::Write;
+use std::path::PathBuf;
+
 use object::read::elf::{FileHeader, ProgramHeader, SectionHeader};
 use object::{elf, Endianness, U16Bytes, U32Bytes, U64Bytes};
+use serde::{Deserialize, Serialize};
 
 use crate::allocator::PAGE_SIZE;
+use crate::page_table_mapper::generate_page_tables;
 
 // —————————————————————————————— Local Enums ——————————————————————————————— //
 
@@ -16,14 +21,46 @@ pub enum ErrorBin {
 
 /// OS-specific segment types.
 /// Shared/Confidential can be combined with segment.p_flags for RWX.
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone, Serialize, Deserialize, PartialEq, PartialOrd)]
 #[allow(dead_code)]
 #[repr(u32)]
 pub enum TychePhdrTypes {
-    PageTables = 0x60000000,
-    EnclStack = 0x60000001,
-    Shared = 0x60000002,
-    Condidential = 0x60000003,
+    /// User stack
+    UserStack = 0x60000001,
+    /// User shared
+    UserShared = 0x60000002,
+    /// User Confidential
+    UserConfidential = 0x60000003,
+    /// Page tables are always kernel.
+    PageTables = 0x60000004,
+    /// Kernel stack
+    KernelStack = 0x60000005,
+    /// Kernel shared
+    KernelShared = 0x60000006,
+    /// Kernel Confidential
+    KernelConfidential = 0x60000007,
+}
+
+impl TychePhdrTypes {
+    pub fn from_u32(val: u32) -> Option<Self> {
+        match val {
+            0x60000001 => Some(TychePhdrTypes::UserStack),
+            0x60000002 => Some(TychePhdrTypes::UserShared),
+            0x60000003 => Some(TychePhdrTypes::UserConfidential),
+            0x60000004 => Some(TychePhdrTypes::PageTables),
+            0x60000005 => Some(TychePhdrTypes::KernelStack),
+            0x60000006 => Some(TychePhdrTypes::KernelShared),
+            0x60000007 => Some(TychePhdrTypes::KernelConfidential),
+            _ => None,
+        }
+    }
+
+    pub fn is_user(val: u32) -> bool {
+        if let Some(tpe) = Self::from_u32(val) {
+            return tpe <= TychePhdrTypes::UserConfidential;
+        }
+        return false;
+    }
 }
 
 // ———————————————————————————— Shorthand types ————————————————————————————— //
@@ -111,7 +148,7 @@ impl ModifiedELF {
             });
 
             // Find the virtual memory boundaries.
-            if seg.p_type(DENDIAN) == PT_LOAD {
+            if ModifiedSegment::is_loadable(seg.p_type(DENDIAN)) {
                 let start = seg.p_vaddr(DENDIAN);
                 let end = start + seg.p_memsz(DENDIAN);
                 if start < melf.layout.min_addr {
@@ -161,9 +198,46 @@ impl ModifiedELF {
         melf
     }
 
+    /// Check if two ELFs overlap.
+    pub fn overlap(&self, other: &ModifiedELF) -> bool {
+        self.layout.max_addr >= other.layout.min_addr
+            && self.layout.min_addr <= other.layout.max_addr
+    }
+
+    /// Change the type of the elf segments.
+    pub fn mark(&mut self, default: TychePhdrTypes) {
+        for seg in &mut self.segments {
+            if seg.program_header.p_type(DENDIAN) != object::elf::PT_LOAD {
+                continue;
+            }
+            seg.program_header.p_type = U32Bytes::<Endianness>::new(DENDIAN, default as u32);
+        }
+    }
+
+    /// Merge the other modified ELF into this one.
+    pub fn merge(&mut self, _other: &ModifiedELF) {
+        //TODO merge the two binaries together.
+        //It's gonna be funky to merge sections if we want them to appear
+        //And to merge the strtab from both ..
+        todo!("Not implemented yet");
+    }
+
+    /// Generate the page tables for this ELF and add them into their own segment.
+    pub fn generate_page_tables(&mut self) {
+        let (pts, nb_pages) = generate_page_tables(self);
+        self.append_data_segment(
+            Some(0),
+            TychePhdrTypes::PageTables as u32,
+            object::elf::PF_R | object::elf::PF_W,
+            nb_pages * PAGE_SIZE,
+            &pts,
+        );
+    }
+
     /// Writes a ModifiedELF into the provided writer.
-    pub fn dump(&mut self, out: &mut object::write::elf::Writer) {
-        log::info!("The computed size is {}", self.len());
+    pub fn dump(&mut self, output: &PathBuf) {
+        let mut out: Vec<u8> = Vec::with_capacity(self.len());
+        let mut writer = object::write::elf::Writer::new(DENDIAN, true, &mut out);
 
         // Do some cleaning, sort segments by vaddr.
         self.segments.sort_by(|a, b| {
@@ -174,19 +248,26 @@ impl ModifiedELF {
 
         //Write the header.
         let hdr_bytes = any_as_u8_slice(&self.header);
-        out.write(hdr_bytes);
+        writer.write(hdr_bytes);
         // Write the program headers.
         for seg in &self.segments {
             let seg_bytes = any_as_u8_slice(&seg.program_header);
-            out.write(seg_bytes);
+            writer.write(seg_bytes);
         }
         // Write program content.
-        out.write(&self.data);
+        writer.write(&self.data);
         // Sections.
         for sec in &self.sections {
             let sec_bytes = any_as_u8_slice(&sec.section_header);
-            out.write(sec_bytes);
+            writer.write(sec_bytes);
         }
+        let mut file = OpenOptions::new()
+            .create(true)
+            .read(true)
+            .write(true)
+            .open(output)
+            .expect("Unable to open output file.");
+        file.write(&*out).expect("Unable to dump the content");
         log::debug!("Done writting the binary");
     }
 
@@ -464,6 +545,17 @@ impl ModifiedSegment {
     /// Returns the length of a program header (segment).
     pub fn len() -> usize {
         std::mem::size_of::<Phdr64>()
+    }
+
+    /// Determines if the segment must be loaded.
+    pub fn is_loadable(value: u32) -> bool {
+        match value {
+            elf::PT_LOAD => true,
+            val => match TychePhdrTypes::from_u32(val) {
+                Some(_) => true,
+                None => false,
+            },
+        }
     }
 }
 
