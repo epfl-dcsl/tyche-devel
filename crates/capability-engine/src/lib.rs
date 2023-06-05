@@ -53,6 +53,7 @@ pub enum CapaError {
     OutOfMemory,
     CouldNotDeserializeInfo,
     InvalidCore,
+    CouldNotHandleInterrupt,
 }
 
 pub struct CapaEngine {
@@ -384,9 +385,27 @@ impl CapaEngine {
         Ok(())
     }
 
-    pub fn handle_interrupt(&mut self, domain: Handle<Domain>, _core_id: usize, interrupt: u64) {
-        let _ = domain::find_interrupt_handler(domain, interrupt, &self.domains);
-        // TODO: generate an appropriate context switch event.
+    pub fn handle_interrupt(
+        &mut self,
+        domain: Handle<Domain>,
+        core_id: usize,
+        interrupt: u64,
+    ) -> Result<(), CapaError> {
+        if self.domains[domain].can_handle(interrupt) {
+            // The interrupt can be handled by the current domain, nothing to do
+            // NOTE/ should we deliver the interrupt in some special way?
+            return Ok(());
+        }
+        let handler_domain = domain::find_interrupt_handler(domain, interrupt, &self.domains)
+            .ok_or(CapaError::CouldNotHandleInterrupt)?;
+        self.updates.push(Update::Switch {
+            domain: handler_domain,
+            context: todo!("Which context to use?"),
+            return_capa: todo!("Do we need to create a return capa?"),
+            core: core_id,
+        });
+
+        Ok(())
     }
 
     pub fn enumerate(
