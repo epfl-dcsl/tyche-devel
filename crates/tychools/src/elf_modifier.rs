@@ -7,7 +7,7 @@ use object::{elf, Endianness, U16Bytes, U32Bytes, U64Bytes};
 use serde::{Deserialize, Serialize};
 
 use crate::allocator::PAGE_SIZE;
-use crate::page_table_mapper::generate_page_tables;
+use crate::page_table_mapper::{align_address, generate_page_tables};
 
 // —————————————————————————————— Local Enums ——————————————————————————————— //
 
@@ -87,6 +87,7 @@ pub struct ModifiedSection {
 pub struct ModifiedSegment {
     pub idx: usize,
     pub program_header: Phdr64,
+    pub data: Vec<u8>,
 }
 
 /// Maintains the minimal and largest virt addr for the bifnary.
@@ -145,6 +146,10 @@ impl ModifiedELF {
             melf.segments.push(ModifiedSegment {
                 idx,
                 program_header: seg.clone(),
+                data: seg
+                    .data(DENDIAN, data)
+                    .expect("Unable to get the data")
+                    .to_vec(),
             });
 
             // Find the virtual memory boundaries.
@@ -155,7 +160,8 @@ impl ModifiedELF {
                     melf.layout.min_addr = start;
                 }
                 if end > melf.layout.max_addr {
-                    melf.layout.max_addr = end;
+                    melf.layout.max_addr = align_address(end as usize) as u64;
+                    assert!(melf.layout.max_addr % 0x1000 == 0);
                 }
             }
         }
@@ -215,11 +221,14 @@ impl ModifiedELF {
     }
 
     /// Merge the other modified ELF into this one.
-    pub fn merge(&mut self, _other: &ModifiedELF) {
+    pub fn merge(&mut self, other: &ModifiedELF) {
         //TODO merge the two binaries together.
         //It's gonna be funky to merge sections if we want them to appear
         //And to merge the strtab from both ..
-        todo!("Not implemented yet");
+        //For the moment, just add the segments.
+        for seg in &other.segments {
+            self.append_other_segment(seg);
+        }
     }
 
     /// Generate the page tables for this ELF and add them into their own segment.
@@ -353,13 +362,24 @@ impl ModifiedELF {
         // Update the max address.
         if addr + size as u64 > self.layout.max_addr {
             self.layout.max_addr = addr + size as u64;
+            assert!(self.layout.max_addr % 0x1000 == 0);
         }
 
         //Create header.
         let phdr = Self::construct_phdr(seg_type, flags, 0, 0, addr, size as u64, PAGE_SIZE as u64);
 
         // Simply add it to the segments.
-        self.add_segment_header(&phdr);
+        self.add_segment_header(&phdr, None);
+    }
+
+    pub fn append_other_segment(&mut self, other: &ModifiedSegment) {
+        self.append_data_segment(
+            Some(other.program_header.p_vaddr(DENDIAN)),
+            other.program_header.p_type(DENDIAN),
+            other.program_header.p_flags(DENDIAN),
+            other.program_header.p_memsz(DENDIAN) as usize,
+            &other.data,
+        );
     }
 
     /// Appends a data segment to the binary.
@@ -374,7 +394,8 @@ impl ModifiedELF {
         size: usize,
         data: &Vec<u8>,
     ) {
-        let foff: u64 = self.data.len() as u64;
+        // offset need to take into account the headers as well.
+        let foff: u64 = (self.data.len() + self.len_hdr() + self.len_phdrs()) as u64;
         let fsize: u64 = data.len() as u64;
         self.data.extend(data);
 
@@ -382,7 +403,8 @@ impl ModifiedELF {
 
         // Update the max address.
         if addr + size as u64 > self.layout.max_addr {
-            self.layout.max_addr = addr + size as u64;
+            self.layout.max_addr = align_address(addr as usize + size) as u64;
+            assert!(self.layout.max_addr % 0x1000 == 0);
         }
 
         // Fix the header.
@@ -400,16 +422,17 @@ impl ModifiedELF {
             PAGE_SIZE as u64,
         );
 
-        self.add_segment_header(&phdr);
+        self.add_segment_header(&phdr, Some(data));
     }
 
     /// Adds a segment header to the binary and patches offsets.
-    pub fn add_segment_header(&mut self, phdr: &Phdr64) {
+    pub fn add_segment_header(&mut self, phdr: &Phdr64, data: Option<&Vec<u8>>) {
         let delta = ModifiedSegment::len() as u64;
         let affected = (self.len_hdr() + self.len_phdrs()) as u64;
         self.segments.push(ModifiedSegment {
             idx: self.segments.len(),
             program_header: phdr.clone(),
+            data: data.unwrap_or(&Vec::new()).clone(),
         });
 
         for seg in &mut self.segments {
@@ -418,7 +441,6 @@ impl ModifiedELF {
         for sec in &mut self.sections {
             sec.patch_offset(delta, affected);
         }
-
         // Patch the header.
         self.header.e_phnum = U16Bytes::new(DENDIAN, self.segments.len() as u16);
         let shoff = self.header.e_shoff(DENDIAN);
@@ -434,6 +456,7 @@ impl ModifiedELF {
         &mut self,
         sec_name: &str,
         seg_type: u32,
+        data: &Vec<u8>,
     ) -> Result<(), ErrorBin> {
         // Find the section with the right name.
         let (sec_start, sec_end, sec_fstart, sec_fend) = {
@@ -460,7 +483,7 @@ impl ModifiedELF {
         };
 
         // Find the segment that contains it.
-        let (seg_start, seg_end, seg_fstart, seg_fend, seg_template) = {
+        let (seg_start, seg_end, seg_fstart, seg_fend, seg_template, seg_data) = {
             let seg: &mut ModifiedSegment = match self.segments.iter_mut().find(|s| {
                 let (start, end) = s.get_vaddr_bounds();
                 start <= sec_start && end >= sec_end
@@ -480,8 +503,19 @@ impl ModifiedELF {
             // Fix addresses.
             seg.program_header.p_vaddr = U64Bytes::new(DENDIAN, sec_start);
             seg.program_header.p_memsz = U64Bytes::new(DENDIAN, sec_end - sec_start);
+            // Data for the segment.
+            let sidx = seg.program_header.p_offset(DENDIAN) as usize;
+            let eidx = sidx + seg.program_header.p_filesz(DENDIAN) as usize;
+            let seg_data = &data[sidx..eidx];
 
-            (seg_start, seg_end, seg_fstart, seg_fend, copy)
+            (
+                seg_start,
+                seg_end,
+                seg_fstart,
+                seg_fend,
+                copy,
+                seg_data.to_vec(),
+            )
         };
 
         // Figure out the split.
@@ -495,7 +529,7 @@ impl ModifiedELF {
             phdr.p_vaddr = U64Bytes::new(DENDIAN, seg_start);
             phdr.p_memsz = U64Bytes::new(DENDIAN, sec_start - seg_start);
             // Add the header, don't worry about sorting for now.
-            self.add_segment_header(&phdr);
+            self.add_segment_header(&phdr, Some(&seg_data));
         }
 
         // right.
@@ -509,7 +543,7 @@ impl ModifiedELF {
             phdr.p_vaddr = U64Bytes::new(DENDIAN, sec_end);
             phdr.p_memsz = U64Bytes::new(DENDIAN, seg_end - sec_end);
             // Add the header, don't worry about sorting for now.
-            self.add_segment_header(&phdr);
+            self.add_segment_header(&phdr, Some(&seg_data));
         }
 
         Ok(())

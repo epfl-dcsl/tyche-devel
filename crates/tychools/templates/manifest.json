@@ -1,5 +1,9 @@
 {
-  "user_bin": "app",
-  "kern_bin": "trt",
+  "user_bin": {
+    "path": "templates/app"
+  },
+  "kern_bin": {
+    "path": "templates/trt"
+  },
   "output": "/tmp/instrumented.exe"
 }

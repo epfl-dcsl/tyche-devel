@@ -1,4 +1,5 @@
 trt
+trt_relocated
 loader
 *.o
 compile_commands.json

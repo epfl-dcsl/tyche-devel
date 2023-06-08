@@ -1,4 +1,4 @@
-all: trt loader
+all: trt loader trt_relocated
 
 
 ## ————————————————————————————————— Paths —————————————————————————————————— ##
@@ -19,6 +19,7 @@ ASM_TRT=$(wildcard rt/*.asm)
 ASO_TRT=$(patsubst %.asm, %_asm.o, $(ASM_TRT))
 CODE_TRT=$(wildcard rt/*.c) $(wildcard rt/*.S) $(ASO_TRT) 
 HDRS_TRT=$(wildcard include/*.h)
+RELOC=linkers/custom.ld
 
 ## —————————————————————— External Sources and Headers —————————————————————— ##
 CODE_RUNTIME=$(wildcard $(SDK)/runtime/*.c) $(wildcard $(SDK)/runtime/*.S)
@@ -60,6 +61,11 @@ trt: $(CODE_TRT) $(CODE_RUNTIME) $(HDRS_TRT) $(HDRS_RUNTIME)
 	gcc -DTYCHE_USER_SPACE=1 -g $(COMMON_INCLUDES) -nostdlib -static -o $@ $(CODE_RUNTIME) $(CODE_TRT)
 	@rm $(ASO_TRT)
 
+trt_relocated: $(CODE_TRT) $(CODE_RUNTIME) $(HDRS_TRT) $(HDRS_RUNTIME) $(RELOC)
+	gcc -DTYCHE_USER_SPACE=1 -T $(RELOC) -g $(COMMON_INCLUDES) -nostdlib -static -o $@ $(CODE_RUNTIME) $(CODE_TRT)
+	@rm $(ASO_TRT)
+
+
 loader: $(CODE_APP) $(HDRS_APP)
 	gcc -DTYCHE_USER_SPACE=1 -g $(APP_INCLUDES) -o $@ $(CODE_APP)
 
@@ -70,4 +76,4 @@ install_disk: all
 .PHONY: clean
 
 clean:
-	rm trt loader
+	rm trt loader trt_relocated

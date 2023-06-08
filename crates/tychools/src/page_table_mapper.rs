@@ -1,14 +1,16 @@
+use std::path::PathBuf;
 use std::process::abort;
 
+use mmu::walker::{Level, WalkNext, Walker};
 use mmu::{FrameAllocator, PtFlag, PtMapper};
 use object::read::elf::ProgramHeader;
 use object::{elf, Endianness};
 use utils::{HostPhysAddr, HostVirtAddr};
 
 use crate::allocator::{Allocator, BumpAllocator, DEFAULT_BUMP_SIZE, PAGE_SIZE};
-use crate::elf_modifier::{ModifiedELF, ModifiedSegment, TychePhdrTypes};
+use crate::elf_modifier::{ModifiedELF, ModifiedSegment, TychePhdrTypes, DENDIAN};
 
-fn align_address(addr: usize) -> usize {
+pub fn align_address(addr: usize) -> usize {
     if addr % PAGE_SIZE == 0 {
         return addr;
     }
@@ -48,7 +50,7 @@ pub fn generate_page_tables(melf: &ModifiedELF) -> (Vec<u8>, usize) {
     let mut bump = BumpAllocator::<DEFAULT_BUMP_SIZE>::new(memsz);
     if bump.get_virt_offset() < memsz {
         log::error!(
-            "The virtual offset is smaller thant he memsz {:x} -- {:x}",
+            "The virtual offset is smaller than the memsz {:x} -- {:x}",
             bump.get_virt_offset(),
             memsz
         );
@@ -83,4 +85,88 @@ pub fn generate_page_tables(melf: &ModifiedELF) -> (Vec<u8>, usize) {
         result.extend(page.to_vec());
     }
     (result, bump.idx)
+}
+
+pub struct Dumper<'a> {
+    offset: usize,
+    pages: &'a Vec<u8>,
+}
+
+unsafe impl Walker for Dumper<'_> {
+    type PhysAddr = HostPhysAddr;
+    type VirtAddr = HostVirtAddr;
+    fn root(&mut self) -> (Self::PhysAddr, mmu::walker::Level) {
+        (HostPhysAddr::new(self.offset), Level::L4)
+    }
+    fn translate(&self, phys_addr: Self::PhysAddr) -> HostVirtAddr {
+        let top = self.pages.as_ptr() as *const u64 as u64;
+        let addr = phys_addr.as_u64() - self.offset as u64 + top;
+        HostVirtAddr::new(addr as usize)
+    }
+}
+
+pub fn print_page_tables(file: &PathBuf) {
+    let data = std::fs::read(PathBuf::from(&file)).expect("Unable to read the binary");
+    let elf = ModifiedELF::new(&data);
+    let mut memsize: usize = 0;
+    let mut pages: Vec<u8> = Vec::new();
+
+    // Find page tables.
+    for seg in &elf.segments {
+        if seg.program_header.p_type(DENDIAN) != TychePhdrTypes::PageTables as u32 {
+            if ModifiedSegment::is_loadable(seg.program_header.p_type(DENDIAN)) {
+                let mem = seg.program_header.p_memsz(Endianness::Little) as usize;
+                let size = align_address(mem);
+                memsize += size;
+            }
+            continue;
+        }
+        pages.extend(
+            &seg.program_header
+                .data(DENDIAN, &*data)
+                .expect("Unable to read the data")
+                .to_vec(),
+        );
+    }
+
+    let mut dumper = Dumper {
+        offset: memsize,
+        pages: &pages,
+    };
+
+    let page_mask: usize = !(0x1000 - 1);
+    unsafe {
+        dumper
+            .walk_range(
+                HostVirtAddr::new(0),
+                HostVirtAddr::new(align_address(elf.layout.max_addr as usize)),
+                &mut |addr, entry, level| {
+                    let flags = PtFlag::from_bits_truncate(*entry);
+                    let phys = *entry & ((1 << 63) - 1) & (page_mask as u64);
+
+                    // Print if present
+                    if flags.contains(PtFlag::PRESENT) {
+                        let padding = match level {
+                            Level::L4 => "",
+                            Level::L3 => "  ",
+                            Level::L2 => "    ",
+                            Level::L1 => "      ",
+                        };
+                        log::info!(
+                            "{}{:?} Virt: 0x{:x} - Phys: 0x{:x} - {:?}\n",
+                            padding,
+                            level,
+                            addr.as_usize(),
+                            phys,
+                            flags
+                        );
+                        WalkNext::Continue
+                    } else {
+                        WalkNext::Leaf
+                    }
+                },
+            )
+            .expect("Failed to dump pts");
+    }
+    log::info!("Survived everything");
 }

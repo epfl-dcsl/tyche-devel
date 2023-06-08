@@ -49,19 +49,20 @@ pub fn modify_binary(src: &PathBuf, dst: &PathBuf) {
     let mut elf = ModifiedELF::new(&*data);
 
     // Move default shared buffer into its own segment.
-    elf.split_segment_at_section(
+    /*elf.split_segment_at_section(
         ".tyche_shared_default_buffer",
         TychePhdrTypes::KernelShared as u32,
+        &data,
     )
-    .expect("Failed to split section into segment");
+    .expect("Failed to split section into segment");*/
 
     // Add the enclave stack as a segment.
-    elf.append_nodata_segment(
+    /*elf.append_nodata_segment(
         None,
         TychePhdrTypes::KernelStack as u32,
         object::elf::PF_R | object::elf::PF_W,
         DEFAULT_STACK_SIZE,
-    );
+    );*/
 
     // TODO we could add a confidential heap here.
     // Or declare it as a section and move it into its own segment.
@@ -110,7 +111,7 @@ pub fn parse_binary(binary: &BinaryInstrumentation) -> Box<ModifiedELF> {
         for op in operations {
             match &op {
                 BinaryOperation::SectionToSegment(section, tpe) => {
-                    elf.split_segment_at_section(section, *tpe as u32)
+                    elf.split_segment_at_section(section, *tpe as u32, &data)
                         .expect("Unable to perform the desired split operation");
                 }
                 BinaryOperation::AddSegment(descr) => {

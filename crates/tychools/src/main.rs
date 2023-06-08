@@ -7,6 +7,7 @@ use std::path::PathBuf;
 
 use clap::{Args, Parser, Subcommand};
 use instrument::{instrument_with_manifest, modify_binary};
+use page_table_mapper::print_page_tables;
 use simple_logger;
 
 #[derive(Parser)]
@@ -20,7 +21,8 @@ struct Cli {
 #[derive(Subcommand)]
 enum Commands {
     TychefyBinary(SrcDestArgs),
-    Instrument(ManifestArg),
+    Instrument(FilePath),
+    PrintPts(FilePath),
 }
 
 #[derive(Args)]
@@ -32,7 +34,7 @@ struct SrcDestArgs {
 }
 
 #[derive(Args)]
-struct ManifestArg {
+struct FilePath {
     #[arg(short, long, value_name = "SRC")]
     src: PathBuf,
 }
@@ -46,6 +48,9 @@ fn main() {
         }
         Commands::Instrument(manifest) => {
             instrument_with_manifest(&manifest.src);
+        }
+        Commands::PrintPts(args) => {
+            print_page_tables(&args.src);
         }
     }
 }
