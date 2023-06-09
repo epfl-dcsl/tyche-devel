@@ -175,3 +175,27 @@ pub fn instrument_binary(manifest: &Manifest) {
 
     panic!("Should never reach");
 }
+
+pub fn print_enum() {
+    let op = BinaryInstrumentation {
+        path: "templates/app".to_string(),
+        ops: Some(vec![
+            BinaryOperation::AddSegment(SegmentDescriptor {
+                start: None,
+                size: 0x2000,
+                tpe: TychePhdrTypes::UserStack,
+                write: true,
+                exec: false,
+            }),
+            BinaryOperation::AddSegment(SegmentDescriptor {
+                start: None,
+                size: 0x2000,
+                tpe: TychePhdrTypes::UserShared,
+                write: true,
+                exec: false,
+            }),
+        ]),
+    };
+    let json = serde_json::to_string(&op).unwrap();
+    log::info!("The generated json {}", json);
+}

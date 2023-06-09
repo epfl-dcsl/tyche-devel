@@ -206,8 +206,18 @@ impl ModifiedELF {
 
     /// Check if two ELFs overlap.
     pub fn overlap(&self, other: &ModifiedELF) -> bool {
-        self.layout.max_addr >= other.layout.min_addr
-            && self.layout.min_addr <= other.layout.max_addr
+        let res = self.layout.max_addr >= other.layout.min_addr
+            && self.layout.min_addr <= other.layout.max_addr;
+        if res {
+            log::error!(
+                "There is an overlap: [{:x};{:x}] and [{:x}:{:x}]",
+                self.layout.min_addr,
+                self.layout.max_addr,
+                other.layout.min_addr,
+                other.layout.max_addr
+            );
+        }
+        res
     }
 
     /// Change the type of the elf segments.

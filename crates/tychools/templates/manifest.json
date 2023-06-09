@@ -1,9 +1,45 @@
 {
   "user_bin": {
-    "path": "templates/app"
-  },
+    "path":"templates/app",
+    "ops": [
+      {
+        "AddSegment":{
+          "size":8192,
+          "tpe":"UserStack",
+          "write":true,
+          "exec":false
+        }
+      },
+      {
+        "AddSegment":{
+          "size":8192,
+          "tpe":"UserShared",
+          "write":true,
+          "exec":false
+        }
+      }
+    ]
+  }
+,
   "kern_bin": {
-    "path": "templates/trt"
+    "path":"templates/trt",
+    "ops":[
+      {
+        "AddSegment":{
+          "size":8192,
+          "tpe":"UserStack",
+          "write":true,"exec":false
+        }
+      },
+      {
+        "AddSegment":{
+          "size":8192,
+          "tpe":"KernelShared",
+          "write":true,
+          "exec":false
+        }
+      }
+    ]
   },
   "output": "/tmp/instrumented.exe"
 }

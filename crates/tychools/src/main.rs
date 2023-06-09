@@ -6,7 +6,7 @@ mod page_table_mapper;
 use std::path::PathBuf;
 
 use clap::{Args, Parser, Subcommand};
-use instrument::{instrument_with_manifest, modify_binary};
+use instrument::{instrument_with_manifest, modify_binary, print_enum};
 use page_table_mapper::print_page_tables;
 use simple_logger;
 
@@ -23,6 +23,7 @@ enum Commands {
     TychefyBinary(SrcDestArgs),
     Instrument(FilePath),
     PrintPts(FilePath),
+    PrintEnum,
 }
 
 #[derive(Args)]
@@ -51,6 +52,9 @@ fn main() {
         }
         Commands::PrintPts(args) => {
             print_page_tables(&args.src);
+        }
+        Commands::PrintEnum => {
+            print_enum();
         }
     }
 }
