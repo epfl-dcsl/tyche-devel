@@ -2,7 +2,7 @@
 
 use core::arch::asm;
 
-use capa_engine::{Context, Domain, Handle, LocalCapa, NextCapaToken};
+use capa_engine::{Domain, Handle, LocalCapa, NextCapaToken};
 use vmx::bitmaps::exit_qualification;
 use vmx::{ActiveVmcs, ControlRegister, Register, VmxExitReason};
 
@@ -17,21 +17,17 @@ pub enum HandlerResult {
     Crash,
 }
 
-pub fn main_loop(
-    mut vcpu: ActiveVmcs<'static>,
-    mut domain: Handle<Domain>,
-    mut ctx: Handle<Context>,
-) {
+pub fn main_loop(mut vcpu: ActiveVmcs<'static>, mut domain: Handle<Domain>) {
     let core_id = cpuid();
     let mut result = unsafe { vcpu.launch() };
     loop {
         let exit_reason = match result {
             Ok(exit_reason) => {
-                let res = handle_exit(&mut vcpu, exit_reason, &mut domain, &mut ctx)
+                let res = handle_exit(&mut vcpu, exit_reason, &mut domain)
                     .expect("Failed to handle VM exit");
 
                 // Apply core-local updates before returning
-                monitor::apply_core_updates(&mut vcpu, &mut domain, &mut ctx, core_id);
+                monitor::apply_core_updates(&mut vcpu, &mut domain, core_id);
 
                 res
             }
@@ -54,7 +50,6 @@ fn handle_exit(
     vcpu: &mut ActiveVmcs<'static>,
     reason: vmx::VmxExitReason,
     domain: &mut Handle<Domain>,
-    ctx: &mut Handle<Context>,
 ) -> Result<HandlerResult, TycheError> {
     let dump = |vcpu: &mut ActiveVmcs| {
         let rip = vcpu.get(Register::Rip);
@@ -167,8 +162,7 @@ fn handle_exit(
                 }
                 calls::SWITCH => {
                     log::trace!("Switch");
-                    monitor::do_switch(*domain, *ctx, LocalCapa::new(arg_1), cpuid())
-                        .expect("TODO");
+                    monitor::do_switch(*domain, LocalCapa::new(arg_1), cpuid()).expect("TODO");
                     vcpu.next_instruction()?;
                     Ok(HandlerResult::Resume)
                 }

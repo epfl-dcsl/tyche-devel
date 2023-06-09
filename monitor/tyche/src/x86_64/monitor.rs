@@ -1,9 +1,9 @@
 //! Architecture specific monitor state, independant of the CapaEngine.
 
-use capa_engine::config::{NB_CONTEXTS, NB_DOMAINS};
+use capa_engine::config::NB_DOMAINS;
 use capa_engine::{
-    permission, AccessRights, Buffer, CapaEngine, CapaError, CapaInfo, Context, Domain, Handle,
-    LocalCapa, NextCapaToken,
+    permission, AccessRights, Buffer, CapaEngine, CapaError, CapaInfo, Domain, Handle, LocalCapa,
+    NextCapaToken,
 };
 use mmu::eptmapper::EPT_ROOT_FLAGS;
 use mmu::{EptMapper, FrameAllocator};
@@ -23,7 +23,7 @@ static CAPA_ENGINE: Mutex<CapaEngine> = Mutex::new(CapaEngine::new());
 static INITIAL_DOMAIN: Mutex<Option<Handle<Domain>>> = Mutex::new(None);
 static DOMAINS: [Mutex<DomainData>; NB_DOMAINS] = [EMPTY_DOMAIN; NB_DOMAINS];
 static CORE_UPDATES: [Mutex<Buffer<CoreUpdate>>; NB_CORES] = [EMPTY_UPDATE_BUFFER; NB_CORES];
-static CONTEXTS: [Mutex<ContextData>; NB_CONTEXTS] = [EMPTY_CONTEXT; NB_CONTEXTS];
+static CONTEXTS: [[Mutex<ContextData>; NB_CORES]; NB_DOMAINS] = [EMPTY_CONTEXT_ARRAY; NB_DOMAINS];
 
 pub struct DomainData {
     ept: Option<HostPhysAddr>,
@@ -42,6 +42,7 @@ const EMPTY_CONTEXT: Mutex<ContextData> = Mutex::new(ContextData {
     rip: 0,
     rsp: 0,
 });
+const EMPTY_CONTEXT_ARRAY: [Mutex<ContextData>; NB_CORES] = [EMPTY_CONTEXT; NB_CORES];
 
 // ————————————————————————————— Initialization ————————————————————————————— //
 
@@ -65,13 +66,13 @@ pub fn init(manifest: &'static Manifest) {
     *initial_domain = Some(domain);
 }
 
-pub fn init_vcpu(vcpu: &mut ActiveVmcs<'static>) -> (Handle<Domain>, Handle<Context>) {
+pub fn init_vcpu(vcpu: &mut ActiveVmcs<'static>) -> Handle<Domain> {
     let cpuid = cpuid();
     let mut engine = CAPA_ENGINE.lock();
     let initial_domain = INITIAL_DOMAIN
         .lock()
         .expect("CapaEngine is not initialized yet");
-    let ctx = engine
+    engine
         .start_domain_on_core(initial_domain, cpuid)
         .expect("Failed to allocate initial domain");
     let domain = get_domain(initial_domain);
@@ -79,7 +80,7 @@ pub fn init_vcpu(vcpu: &mut ActiveVmcs<'static>) -> (Handle<Domain>, Handle<Cont
         domain.ept.unwrap().as_usize() | EPT_ROOT_FLAGS,
     ))
     .expect("Failed to set initial EPT PTR");
-    (initial_domain, ctx)
+    initial_domain
 }
 
 // ———————————————————————————————— Helpers ————————————————————————————————— //
@@ -88,8 +89,8 @@ fn get_domain(domain: Handle<Domain>) -> MutexGuard<'static, DomainData> {
     DOMAINS[domain.idx()].lock()
 }
 
-fn get_context(context: Handle<Context>) -> MutexGuard<'static, ContextData> {
-    CONTEXTS[context.idx()].lock()
+fn get_context(domain: Handle<Domain>, core: usize) -> MutexGuard<'static, ContextData> {
+    CONTEXTS[domain.idx()][core].lock()
 }
 
 // ————————————————————————————— Monitor Calls —————————————————————————————— //
@@ -108,9 +109,13 @@ pub fn do_seal(
     rip: usize,
     rsp: usize,
 ) -> Result<LocalCapa, CapaError> {
+    let core = cpuid();
     let mut engine = CAPA_ENGINE.lock();
-    let (capa, context) = engine.seal(current, domain)?;
-    let mut context = get_context(context);
+    let capa = engine.seal(current, core, domain)?;
+    let new_domain = engine
+        .get_domain_capa(current, domain)
+        .expect("Should be a domain capa");
+    let mut context = get_context(new_domain, core);
     context.cr3 = cr3;
     context.rip = rip;
     context.rsp = rsp;
@@ -171,14 +176,9 @@ pub fn do_duplicate(current: Handle<Domain>, capa: LocalCapa) -> Result<LocalCap
     Ok(new_capa)
 }
 
-pub fn do_switch(
-    current: Handle<Domain>,
-    current_ctx: Handle<Context>,
-    capa: LocalCapa,
-    cpuid: usize,
-) -> Result<(), CapaError> {
+pub fn do_switch(current: Handle<Domain>, capa: LocalCapa, cpuid: usize) -> Result<(), CapaError> {
     let mut engine = CAPA_ENGINE.lock();
-    engine.switch(current, current_ctx, capa, cpuid)?;
+    engine.switch(current, cpuid, capa)?;
     apply_updates(&mut engine);
     Ok(())
 }
@@ -207,7 +207,6 @@ enum CoreUpdate {
     TlbShootdown,
     Switch {
         domain: Handle<Domain>,
-        context: Handle<Context>,
         return_capa: LocalCapa,
     },
 }
@@ -226,14 +225,12 @@ fn apply_updates(engine: &mut MutexGuard<CapaEngine>) {
             // Updates that needs to be routed to some specific cores
             capa_engine::Update::Switch {
                 domain,
-                context,
                 return_capa,
                 core,
             } => {
                 let mut core_updates = CORE_UPDATES[core as usize].lock();
                 core_updates.push(CoreUpdate::Switch {
                     domain,
-                    context,
                     return_capa,
                 });
             }
@@ -249,9 +246,9 @@ fn apply_updates(engine: &mut MutexGuard<CapaEngine>) {
 pub fn apply_core_updates(
     vcpu: &mut ActiveVmcs<'static>,
     current_domain: &mut Handle<Domain>,
-    current_context: &mut Handle<Context>,
     core_id: usize,
 ) {
+    let core = cpuid();
     let mut update_queue = CORE_UPDATES[core_id].lock();
     while let Some(update) = update_queue.pop() {
         log::trace!("Core Update: {}", update);
@@ -268,13 +265,12 @@ pub fn apply_core_updates(
             }
             CoreUpdate::Switch {
                 domain,
-                context,
                 return_capa,
             } => {
                 log::trace!("Domain Switch on core {}", core_id);
 
-                let mut current_ctx = get_context(*current_context);
-                let next_ctx = get_context(context);
+                let mut current_ctx = get_context(*current_domain, core);
+                let next_ctx = get_context(domain, core);
                 let next_domain = get_domain(domain);
 
                 // Save current context
@@ -297,7 +293,6 @@ pub fn apply_core_updates(
 
                 // Update the current domain and context handle
                 *current_domain = domain;
-                *current_context = context;
             }
         }
     }
@@ -368,9 +363,7 @@ impl core::fmt::Display for CoreUpdate {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             CoreUpdate::TlbShootdown => write!(f, "TLB Shootdown"),
-            CoreUpdate::Switch {
-                domain, context, ..
-            } => write!(f, "Switch({}, {})", domain, context),
+            CoreUpdate::Switch { domain, .. } => write!(f, "Switch({})", domain),
         }
     }
 }

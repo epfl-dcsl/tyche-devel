@@ -2,7 +2,6 @@
 
 use core::fmt;
 
-use crate::context::Context;
 use crate::domain::{Domain, DomainPool};
 use crate::gen_arena::Handle;
 use crate::region_capa::{RegionCapa, RegionPool};
@@ -17,7 +16,7 @@ pub enum Capa {
     Channel(Handle<Domain>),
     Switch {
         to: Handle<Domain>,
-        ctx: Handle<Context>,
+        core: usize,
     },
 }
 
@@ -160,9 +159,9 @@ impl Capa {
         }
     }
 
-    pub fn as_switch(self) -> Result<(Handle<Domain>, Handle<Context>), CapaError> {
+    pub fn as_switch(self) -> Result<(Handle<Domain>, usize), CapaError> {
         match self {
-            Capa::Switch { to, ctx } => Ok((to, ctx)),
+            Capa::Switch { to, core } => Ok((to, core)),
             _ => Err(CapaError::WrongCapabilityType),
         }
     }

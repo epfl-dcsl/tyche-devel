@@ -3,7 +3,7 @@
 use core::{fmt, mem};
 
 use crate::config::NB_UPDATES;
-use crate::{Context, Domain, Handle, LocalCapa};
+use crate::{Domain, Handle, LocalCapa};
 
 pub type UpdateBuffer = Buffer<Update>;
 
@@ -23,7 +23,6 @@ pub enum Update {
     },
     Switch {
         domain: Handle<Domain>,
-        context: Handle<Context>,
         return_capa: LocalCapa,
         core: usize,
     },
@@ -90,12 +89,7 @@ impl fmt::Display for Update {
             Update::RevokeDomain { domain } => write!(f, "RevokeDomain({})", domain),
             Update::CreateDomain { domain } => write!(f, "CreateDomain({})", domain),
             Update::TlbShootdown { core } => write!(f, "TlbShootdown({})", core),
-            Update::Switch {
-                domain,
-                context,
-                core,
-                ..
-            } => write!(f, "Switch({}, {}, core {})", domain, context, core),
+            Update::Switch { domain, core, .. } => write!(f, "Switch({}, core {})", domain, core),
         }
     }
 }
