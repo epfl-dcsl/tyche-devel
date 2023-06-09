@@ -49,7 +49,7 @@ pub enum CapaError {
     OutOfMemory,
     CouldNotDeserializeInfo,
     InvalidCore,
-    CouldNotHandleInterrupt,
+    CouldNotHandleTrap,
 }
 
 pub struct CapaEngine {
@@ -353,23 +353,23 @@ impl CapaEngine {
         Ok(())
     }
 
-    pub fn handle_interrupt(
+    pub fn handle_trap(
         &mut self,
         domain: Handle<Domain>,
-        core_id: usize,
-        interrupt: u64,
+        core: usize,
+        trap: u64,
     ) -> Result<(), CapaError> {
-        if self.domains[domain].can_handle(interrupt) {
-            // The interrupt can be handled by the current domain, nothing to do
-            // NOTE/ should we deliver the interrupt in some special way?
+        if self.domains[domain].can_handle(trap) {
+            // The trap can be handled by the current domain, nothing to do
+            // NOTE/ should we deliver the trap in some special way?
             return Ok(());
         }
-        let handler_domain = domain::find_interrupt_handler(domain, interrupt, &self.domains)
-            .ok_or(CapaError::CouldNotHandleInterrupt)?;
-        self.updates.push(Update::Switch {
-            domain: handler_domain,
-            return_capa: todo!("Do we need to create a return capa?"),
-            core: core_id,
+        let manager = domain::find_trap_handler(domain, trap, &self.domains)
+            .ok_or(CapaError::CouldNotHandleTrap)?;
+        self.updates.push(Update::Trap {
+            manager,
+            trap,
+            core,
         });
 
         Ok(())

@@ -26,6 +26,14 @@ pub enum Update {
         return_capa: LocalCapa,
         core: usize,
     },
+    Trap {
+        /// The manager responsible for handling the trap
+        manager: Handle<Domain>,
+        /// the trap to handle
+        trap: u64,
+        /// Core on which the trap happenend
+        core: usize,
+    },
 }
 
 pub struct Buffer<U> {
@@ -90,6 +98,11 @@ impl fmt::Display for Update {
             Update::CreateDomain { domain } => write!(f, "CreateDomain({})", domain),
             Update::TlbShootdown { core } => write!(f, "TlbShootdown({})", core),
             Update::Switch { domain, core, .. } => write!(f, "Switch({}, core {})", domain, core),
+            Update::Trap {
+                manager,
+                trap,
+                core,
+            } => write!(f, "Trap({}, {}, core {})", manager, trap, core),
         }
     }
 }

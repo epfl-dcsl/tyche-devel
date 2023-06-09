@@ -209,6 +209,10 @@ enum CoreUpdate {
         domain: Handle<Domain>,
         return_capa: LocalCapa,
     },
+    Trap {
+        manager: Handle<Domain>,
+        trap: u64,
+    },
 }
 
 /// General updates, containing both global updates on the domain's states, and core specific
@@ -233,6 +237,14 @@ fn apply_updates(engine: &mut MutexGuard<CapaEngine>) {
                     domain,
                     return_capa,
                 });
+            }
+            capa_engine::Update::Trap {
+                manager,
+                trap,
+                core,
+            } => {
+                let mut core_updates = CORE_UPDATES[core as usize].lock();
+                core_updates.push(CoreUpdate::Trap { manager, trap });
             }
             capa_engine::Update::TlbShootdown { core } => {
                 let mut core_updates = CORE_UPDATES[core as usize].lock();
@@ -269,23 +281,10 @@ pub fn apply_core_updates(
             } => {
                 log::trace!("Domain Switch on core {}", core_id);
 
-                let mut current_ctx = get_context(*current_domain, core);
+                let current_ctx = get_context(*current_domain, core);
                 let next_ctx = get_context(domain, core);
                 let next_domain = get_domain(domain);
-
-                // Save current context
-                current_ctx.cr3 = vcpu.get_cr(ControlRegister::Cr3);
-                current_ctx.rip = vcpu.get(Register::Rip) as usize;
-                current_ctx.rsp = vcpu.get(Register::Rsp) as usize;
-
-                // Switch domain
-                vcpu.set_cr(ControlRegister::Cr3, next_ctx.cr3);
-                vcpu.set(Register::Rip, next_ctx.rip as u64);
-                vcpu.set(Register::Rsp, next_ctx.rsp as u64);
-                vcpu.set_ept_ptr(HostPhysAddr::new(
-                    next_domain.ept.unwrap().as_usize() | EPT_ROOT_FLAGS,
-                ))
-                .expect("Failed to update EPT");
+                switch_domain(vcpu, current_ctx, next_ctx, next_domain);
 
                 // Set switch return values
                 vcpu.set(Register::Rax, 0);
@@ -294,8 +293,43 @@ pub fn apply_core_updates(
                 // Update the current domain and context handle
                 *current_domain = domain;
             }
+            CoreUpdate::Trap { manager, trap } => {
+                log::trace!("Trap on core {}", core_id);
+
+                let current_ctx = get_context(*current_domain, core);
+                let next_ctx = get_context(manager, core);
+                let next_domain = get_domain(manager);
+                switch_domain(vcpu, current_ctx, next_ctx, next_domain);
+
+                // Set parameters
+                vcpu.set(Register::Rax, trap);
+
+                // Update the current domain
+                *current_domain = manager;
+            }
         }
     }
+}
+
+fn switch_domain(
+    vcpu: &mut ActiveVmcs<'static>,
+    mut current_ctx: MutexGuard<ContextData>,
+    next_ctx: MutexGuard<ContextData>,
+    next_domain: MutexGuard<DomainData>,
+) {
+    // Save current context
+    current_ctx.cr3 = vcpu.get_cr(ControlRegister::Cr3);
+    current_ctx.rip = vcpu.get(Register::Rip) as usize;
+    current_ctx.rsp = vcpu.get(Register::Rsp) as usize;
+
+    // Switch domain
+    vcpu.set_cr(ControlRegister::Cr3, next_ctx.cr3);
+    vcpu.set(Register::Rip, next_ctx.rip as u64);
+    vcpu.set(Register::Rsp, next_ctx.rsp as u64);
+    vcpu.set_ept_ptr(HostPhysAddr::new(
+        next_domain.ept.unwrap().as_usize() | EPT_ROOT_FLAGS,
+    ))
+    .expect("Failed to update EPT");
 }
 
 fn create_domain(domain: Handle<Domain>) {
@@ -364,6 +398,12 @@ impl core::fmt::Display for CoreUpdate {
         match self {
             CoreUpdate::TlbShootdown => write!(f, "TLB Shootdown"),
             CoreUpdate::Switch { domain, .. } => write!(f, "Switch({})", domain),
+            CoreUpdate::Trap {
+                manager,
+                trap: interrupt,
+            } => {
+                write!(f, "Trap({}, {})", manager, interrupt)
+            }
         }
     }
 }

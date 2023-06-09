@@ -85,8 +85,8 @@ pub struct Domain {
     manager: Option<Handle<Domain>>,
     /// A bitmap of permissions.
     permissions: u64,
-    /// A bitmap of interrupts and exception the domain can handle.
-    interrupts: u64,
+    /// A bitmap of traps the domain can handle.
+    traps: u64,
     /// A bitmap of cores the domain is runing on.
     cores: u64,
     /// Is this domain in the process of being revoked?
@@ -106,7 +106,7 @@ impl Domain {
             regions: RegionTracker::new(),
             manager: None,
             permissions: permission::NONE,
-            interrupts: 0,
+            traps: 0,
             cores: 0,
             is_being_revoked: false,
             is_sealed: false,
@@ -165,9 +165,9 @@ impl Domain {
         self.id
     }
 
-    /// Returns Wether or not this domain can handle the given interrupt.
-    pub fn can_handle(&self, interrupt: u64) -> bool {
-        self.interrupts & interrupt != 0 && self.is_sealed
+    /// Returns Wether or not this domain can handle the given trap
+    pub fn can_handle(&self, trap: u64) -> bool {
+        self.traps & trap != 0 && self.is_sealed
     }
 
     pub fn seal(&mut self) -> Result<(), CapaError> {
@@ -392,20 +392,20 @@ pub(crate) fn deactivate_region(
     Ok(())
 }
 
-// ——————————————————————————— Interrupt Handler ———————————————————————————— //
+// —————————————————————————————— Trap Handler —————————————————————————————— //
 
-/// Find the domain's manager who is responsible for handling the provided interrupt.
+/// Find the domain's manager who is responsible for handling the provided trap.
 ///
 /// The domain itself is assumed to not be authorized to handle the domain.
 /// Return none if no suitable manager exists.
-pub(crate) fn find_interrupt_handler(
+pub(crate) fn find_trap_handler(
     domain: Handle<Domain>,
-    interrupt: u64,
+    trap: u64,
     domains: &DomainPool,
 ) -> Option<Handle<Domain>> {
     let mut handle = domain;
     while let Some(manager) = domains.get(handle) {
-        if manager.interrupts & interrupt != 0 {
+        if manager.traps & trap != 0 {
             return Some(handle);
         }
         let Some(next_handle) = manager.manager else {
