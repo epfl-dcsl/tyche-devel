@@ -61,6 +61,17 @@ impl TychePhdrTypes {
         }
         return false;
     }
+
+    pub fn is_confidential(&self) -> bool {
+        match self {
+            Self::PageTables => true,
+            Self::UserStack => true,
+            Self::UserConfidential => true,
+            Self::KernelStack => true,
+            Self::KernelConfidential => true,
+            _ => false,
+        }
+    }
 }
 
 // ———————————————————————————— Shorthand types ————————————————————————————— //
@@ -251,6 +262,36 @@ impl ModifiedELF {
             nb_pages * PAGE_SIZE,
             &pts,
         );
+    }
+
+    /// Adds offset to all non-empty entries in the page table.
+    /// This is used by the loader at run time.
+    pub fn fix_page_tables(&mut self, offset: u64) {
+        let mut page_seg: Option<&mut ModifiedSegment> = None;
+        {
+            for seg in &mut self.segments {
+                if let Some(tpe) = TychePhdrTypes::from_u32(seg.program_header.p_type(DENDIAN)) {
+                    if tpe == TychePhdrTypes::PageTables {
+                        page_seg = Some(seg);
+                        break;
+                    }
+                }
+            }
+            if page_seg.is_none() {
+                panic!("Unable to find the page tables for this ELF!");
+            }
+        };
+
+        let tables: &mut [u64] = unsafe {
+            let slice_bytes: &[u8] = page_seg.unwrap().data.as_mut_slice();
+            std::slice::from_raw_parts_mut(slice_bytes.as_ptr() as *mut u64, slice_bytes.len() / 8)
+        };
+        // TODO(aghosn) I am lazy, is it correct to do a simple add?
+        for entry in tables.iter_mut() {
+            if *entry != 0 {
+                *entry += offset;
+            }
+        }
     }
 
     /// Writes a ModifiedELF into the provided writer.

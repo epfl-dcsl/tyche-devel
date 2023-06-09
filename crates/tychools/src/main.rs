@@ -1,6 +1,7 @@
 mod allocator;
 mod elf_modifier;
 mod instrument;
+mod loader;
 mod page_table_mapper;
 
 use std::path::PathBuf;
