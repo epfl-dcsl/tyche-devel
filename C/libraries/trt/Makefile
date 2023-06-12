@@ -59,11 +59,11 @@ DISK_PATH ?= /tmp/mount/tyche/programs
 
 trt: $(CODE_TRT) $(CODE_RUNTIME) $(HDRS_TRT) $(HDRS_RUNTIME)
 	gcc -DTYCHE_USER_SPACE=1 -g $(COMMON_INCLUDES) -nostdlib -static -o $@ $(CODE_RUNTIME) $(CODE_TRT)
-	@rm $(ASO_TRT)
+	#@rm $(ASO_TRT)
 
 trt_relocated: $(CODE_TRT) $(CODE_RUNTIME) $(HDRS_TRT) $(HDRS_RUNTIME) $(RELOC)
 	gcc -DTYCHE_USER_SPACE=1 -T $(RELOC) -g $(COMMON_INCLUDES) -nostdlib -static -o $@ $(CODE_RUNTIME) $(CODE_TRT)
-	@rm $(ASO_TRT)
+	#@rm $(ASO_TRT)
 
 
 loader: $(CODE_APP) $(HDRS_APP)

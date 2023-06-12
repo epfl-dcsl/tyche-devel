@@ -1,10 +1,11 @@
 use core::slice;
 use std::fs::File;
 use std::num::NonZeroUsize;
-use std::os::fd::AsRawFd;
+use std::os::fd::{AsRawFd, RawFd};
 use std::path::PathBuf;
 
-use nix::ioctl_read;
+use ioctl_sys::{ior, iorw, iow};
+use libc::ioctl;
 use nix::sys::mman::{MapFlags, ProtFlags};
 use object::elf;
 use object::read::elf::{FileHeader, ProgramHeader};
@@ -15,9 +16,9 @@ use crate::page_table_mapper::align_address;
 // ————————————————————————— Constant declarations —————————————————————————— //
 const TYCHE_DRIVER: &str = "/dev/tyche";
 
-ioctl_read!(getphysoffset, b'a', b'c', MsgEnclaveInfo);
-ioctl_read!(mprotect_enclave, b'a', b'e', MsgEnclaveProtect);
-ioctl_read!(commit_enclave, b'a', b'd', MsgCommitEnclave);
+const ENCLAVE_GETPHYSOFFSET: u64 = ior!(b'a', b'c', 8) as u64;
+const ENCLAVE_MPROTECT: u64 = iow!(b'a', b'e', 8) as u64;
+const ENCLAVE_COMMIT: u64 = iorw!(b'a', b'd', 8) as u64;
 
 // ————————————————————————————————— Types —————————————————————————————————— //
 
@@ -81,6 +82,7 @@ pub fn parse_and_run(file: &PathBuf) {
         cr3: 0,
         fd: File::options()
             .read(true)
+            .write(true)
             .open(TYCHE_DRIVER)
             .expect("Unable to open tyche driver"),
         phys_offset: 0,
@@ -115,18 +117,23 @@ pub fn load(encl: &mut Enclave) {
         .expect("Unable to allocate domain bytes")
     };
 
+    log::debug!(
+        "The loader mapped {:x} bytes at {:x}",
+        memsize,
+        domain_memory as u64
+    );
+
     // Get the physoffset to patch the page tables.
     let mut msg = MsgEnclaveInfo {
         virtaddr: 0,
         physoffset: 0,
     };
-    unsafe {
-        getphysoffset(encl.fd.as_raw_fd(), &mut msg).expect("Unable to get physoffset");
-    }
+    getphysoffset(encl.fd.as_raw_fd(), &mut msg);
     log::debug!("The physoffset is {:x}", msg.physoffset);
 
     // Let's fix the page tables now.
     encl.elf.fix_page_tables(msg.physoffset as u64);
+    log::debug!("Fixed page tables with offset {:x}", msg.physoffset);
 
     // Set the cr3 in the enclave.
     encl.cr3 = {
@@ -171,7 +178,7 @@ pub fn load(encl: &mut Enclave) {
         if !ModifiedSegment::is_loadable(seg.program_header.p_type(DENDIAN)) {
             continue;
         }
-        let sz = seg.program_header.p_memsz(DENDIAN);
+        let sz = align_address(seg.program_header.p_memsz(DENDIAN) as usize) as u64;
         let mut args = MsgEnclaveProtect {
             start: curr_va,
             size: sz as usize,
@@ -181,11 +188,11 @@ pub fn load(encl: &mut Enclave) {
                 seg.program_header.p_type(DENDIAN),
             ),
         };
-        unsafe {
-            mprotect_enclave(encl.fd.as_raw_fd(), &mut args).unwrap();
-        }
+        log::debug!("mprotect: {:x} -- {:x}", args.start, args.size);
+        mprotect_enclave(encl.fd.as_raw_fd(), &mut args);
         curr_va += sz as usize;
     }
+    log::debug!("Done performing the mprotect");
 
     // Ready to commit!
     let mut commit = MsgCommitEnclave {
@@ -193,8 +200,46 @@ pub fn load(encl: &mut Enclave) {
         stack: encl.stack as usize,
         pts: encl.cr3 as usize,
     };
-    unsafe {
-        commit_enclave(encl.fd.as_raw_fd(), &mut commit).unwrap();
+    commit_enclave(encl.fd.as_raw_fd(), &mut commit);
+    log::debug!("Done committing the enclave");
+}
+
+fn getphysoffset(fd: RawFd, msg: &mut MsgEnclaveInfo) {
+    let res = unsafe {
+        ioctl(
+            fd,
+            ENCLAVE_GETPHYSOFFSET,
+            msg as *mut MsgEnclaveInfo as *mut libc::c_void,
+        )
+    };
+    if res < 0 {
+        panic!("Unable to perform the getphysoffset");
+    }
+}
+
+fn mprotect_enclave(fd: RawFd, msg: &mut MsgEnclaveProtect) {
+    let res = unsafe {
+        ioctl(
+            fd,
+            ENCLAVE_MPROTECT,
+            msg as *mut MsgEnclaveProtect as *mut libc::c_void,
+        )
+    };
+    if res < 0 {
+        panic!("Unable to perform the mprotect enclave");
+    }
+}
+
+fn commit_enclave(fd: RawFd, msg: &mut MsgCommitEnclave) {
+    let res = unsafe {
+        ioctl(
+            fd,
+            ENCLAVE_COMMIT,
+            msg as *mut MsgCommitEnclave as *mut libc::c_void,
+        )
+    };
+    if res < 0 {
+        panic!("Unable to perform the commit call");
     }
 }
 

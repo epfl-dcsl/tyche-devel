@@ -27,7 +27,7 @@
       {
         "AddSegment":{
           "size":8192,
-          "tpe":"UserStack",
+          "tpe":"KernelStack",
           "write":true,"exec":false
         }
       },

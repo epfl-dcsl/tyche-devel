@@ -372,6 +372,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "ioctl-sys"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8bd11f3a29434026f5ff98c730b668ba74b1033637b8817940b54d040696133c"
+
+[[package]]
 name = "is-terminal"
 version = "0.4.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1005,6 +1011,7 @@ dependencies = [
  "elf",
  "elfloader",
  "goblin",
+ "ioctl-sys",
  "libc",
  "log",
  "mmu",
