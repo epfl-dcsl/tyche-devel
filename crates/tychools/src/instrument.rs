@@ -8,8 +8,6 @@ use crate::allocator::PAGE_SIZE;
 use crate::elf_modifier::{ModifiedELF, TychePhdrTypes};
 use crate::page_table_mapper::generate_page_tables;
 
-pub const DEFAULT_STACK_SIZE: usize = 0x5000;
-
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SegmentDescriptor {
     start: Option<u64>,
@@ -68,9 +66,9 @@ pub fn modify_binary(src: &PathBuf, dst: &PathBuf) {
     // Or declare it as a section and move it into its own segment.
 
     // Create page tables.
-    let (pts, nb_pages) = generate_page_tables(&*elf);
+    let (pts, nb_pages, cr3) = generate_page_tables(&*elf);
     elf.append_data_segment(
-        Some(0),
+        Some(cr3 as u64),
         TychePhdrTypes::PageTables as u32,
         object::elf::PF_R | object::elf::PF_W,
         nb_pages * PAGE_SIZE,

@@ -250,18 +250,33 @@ impl ModifiedELF {
         for seg in &other.segments {
             self.append_other_segment(seg);
         }
+        // Replace the entry point of the current.
+        self.header.e_entry = other.header.e_entry;
     }
 
     /// Generate the page tables for this ELF and add them into their own segment.
     pub fn generate_page_tables(&mut self) {
-        let (pts, nb_pages) = generate_page_tables(self);
+        let (pts, nb_pages, cr3) = generate_page_tables(self);
         self.append_data_segment(
-            Some(0),
+            Some(cr3 as u64),
             TychePhdrTypes::PageTables as u32,
             object::elf::PF_R | object::elf::PF_W,
             nb_pages * PAGE_SIZE,
             &pts,
         );
+    }
+
+    /// Returns all segments of a given type.
+    pub fn find_segments(&self, segtype: TychePhdrTypes) -> Vec<&ModifiedSegment> {
+        let mut res = Vec::new();
+        for seg in &self.segments {
+            if let Some(tpe) = TychePhdrTypes::from_u32(seg.program_header.p_type(DENDIAN)) {
+                if tpe == segtype {
+                    res.push(seg);
+                }
+            }
+        }
+        return res;
     }
 
     /// Adds offset to all non-empty entries in the page table.

@@ -2,11 +2,12 @@ use core::slice;
 use std::fs::File;
 use std::num::NonZeroUsize;
 use std::os::fd::AsRawFd;
+use std::path::PathBuf;
 
+use nix::ioctl_read;
 use nix::sys::mman::{MapFlags, ProtFlags};
-use nix::{ioctl_read, ioctl_readwrite};
 use object::elf;
-use object::read::elf::ProgramHeader;
+use object::read::elf::{FileHeader, ProgramHeader};
 
 use crate::elf_modifier::{ModifiedELF, ModifiedSegment, TychePhdrTypes, DENDIAN};
 use crate::page_table_mapper::align_address;
@@ -53,19 +54,47 @@ pub enum EnclaveSegmentType {
 
 #[repr(C)]
 pub enum MemoryAccessRights {
-    MemActive = 1 << 0,
-    MemConfidential = 1 << 1,
+    //MemActive = 1 << 0,
+    //MemConfidential = 1 << 1,
     MemRead = 1 << 2,
     MemWrite = 1 << 3,
     MemExec = 1 << 4,
     MemSuper = 1 << 5,
 }
 
+/// Represents the enclave at load-time.
+pub struct Enclave {
+    pub elf: Box<ModifiedELF>,
+    pub stack: u64,
+    pub cr3: u64,
+    pub fd: File,
+    pub phys_offset: u64,
+}
+
 // ——————————————————————————————— Functions ———————————————————————————————— //
+
+pub fn parse_and_run(file: &PathBuf) {
+    let data = std::fs::read(file).expect("Unable to read source file");
+    let mut enclave = Enclave {
+        elf: ModifiedELF::new(&data),
+        stack: 0,
+        cr3: 0,
+        fd: File::options()
+            .read(true)
+            .open(TYCHE_DRIVER)
+            .expect("Unable to open tyche driver"),
+        phys_offset: 0,
+    };
+    // Load the enclave.
+    load(&mut enclave);
+
+    //TODO run the enclave
+}
+
 /// load an instrumented binary.
-pub fn load(elf: &mut ModifiedELF) {
+pub fn load(encl: &mut Enclave) {
     let mut memsize: usize = usize::MIN;
-    for seg in &elf.segments {
+    for seg in &encl.elf.segments {
         if !ModifiedSegment::is_loadable(seg.program_header.p_type(DENDIAN)) {
             continue;
         }
@@ -73,18 +102,14 @@ pub fn load(elf: &mut ModifiedELF) {
     }
     log::debug!("The memory size to load is {:x}", memsize);
 
-    // Open the driver to create a domain.
-    let domain = File::options()
-        .read(true)
-        .open(TYCHE_DRIVER)
-        .expect("Unable to open the driver");
+    // Register the enclave memory.
     let domain_memory = unsafe {
         nix::sys::mman::mmap(
             None,
             NonZeroUsize::new(memsize).unwrap(),
             ProtFlags::PROT_READ | ProtFlags::PROT_WRITE,
             MapFlags::MAP_SHARED | MapFlags::MAP_POPULATE,
-            domain.as_raw_fd(),
+            encl.fd.as_raw_fd(),
             0,
         )
         .expect("Unable to allocate domain bytes")
@@ -96,12 +121,33 @@ pub fn load(elf: &mut ModifiedELF) {
         physoffset: 0,
     };
     unsafe {
-        getphysoffset(domain.as_raw_fd(), &mut msg).expect("Unable to get physoffset");
+        getphysoffset(encl.fd.as_raw_fd(), &mut msg).expect("Unable to get physoffset");
     }
     log::debug!("The physoffset is {:x}", msg.physoffset);
 
     // Let's fix the page tables now.
-    elf.fix_page_tables(msg.physoffset as u64);
+    encl.elf.fix_page_tables(msg.physoffset as u64);
+
+    // Set the cr3 in the enclave.
+    encl.cr3 = {
+        let seg_pages = encl.elf.find_segments(TychePhdrTypes::PageTables);
+        // It does not make sense for now to have two segments for page tables.
+        assert!(seg_pages.len() == 1);
+        seg_pages[0].program_header.p_vaddr(DENDIAN) + msg.physoffset as u64
+    };
+
+    // Finding the stack.
+    encl.stack = {
+        let kern_stack = encl.elf.find_segments(TychePhdrTypes::KernelStack);
+        let user_stack = encl.elf.find_segments(TychePhdrTypes::UserStack);
+        assert!(kern_stack.len() == 0 || kern_stack.len() == 1);
+        assert!(user_stack.len() == 0 || user_stack.len() == 1);
+        if kern_stack.len() == 1 {
+            kern_stack[0].program_header.p_vaddr(DENDIAN)
+        } else {
+            user_stack[0].program_header.p_vaddr(DENDIAN)
+        }
+    };
 
     // Load each segment data.
     let content = {
@@ -109,7 +155,7 @@ pub fn load(elf: &mut ModifiedELF) {
         unsafe { slice::from_raw_parts_mut(byte_ptr, memsize) }
     };
     let mut curr_offset: usize = 0;
-    for seg in &elf.segments {
+    for seg in &encl.elf.segments {
         if !ModifiedSegment::is_loadable(seg.program_header.p_type(DENDIAN)) {
             continue;
         }
@@ -121,7 +167,7 @@ pub fn load(elf: &mut ModifiedELF) {
 
     // Do the calls to mprotect now.
     let mut curr_va = domain_memory as usize;
-    for seg in &elf.segments {
+    for seg in &encl.elf.segments {
         if !ModifiedSegment::is_loadable(seg.program_header.p_type(DENDIAN)) {
             continue;
         }
@@ -136,20 +182,19 @@ pub fn load(elf: &mut ModifiedELF) {
             ),
         };
         unsafe {
-            mprotect_enclave(domain.as_raw_fd(), &mut args).unwrap();
+            mprotect_enclave(encl.fd.as_raw_fd(), &mut args).unwrap();
         }
         curr_va += sz as usize;
     }
 
     // Ready to commit!
-    // TODO(aghosn) fix this if we merge.
     let mut commit = MsgCommitEnclave {
-        start: 0,
-        stack: 0,
-        pts: 0,
+        start: encl.elf.header.e_entry(DENDIAN) as usize,
+        stack: encl.stack as usize,
+        pts: encl.cr3 as usize,
     };
     unsafe {
-        commit_enclave(domain.as_raw_fd(), &mut commit).unwrap();
+        commit_enclave(encl.fd.as_raw_fd(), &mut commit).unwrap();
     }
 }
 

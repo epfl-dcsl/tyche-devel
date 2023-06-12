@@ -32,7 +32,7 @@ fn translate_flags(flags: u32, segtype: u32) -> PtFlag {
 }
 
 #[allow(dead_code)]
-pub fn generate_page_tables(melf: &ModifiedELF) -> (Vec<u8>, usize) {
+pub fn generate_page_tables(melf: &ModifiedELF) -> (Vec<u8>, usize, usize) {
     // Compute the overall memory required for the binary.
     let mut memsz: usize = 0;
     for ph in &melf.segments {
@@ -84,7 +84,7 @@ pub fn generate_page_tables(melf: &ModifiedELF) -> (Vec<u8>, usize) {
         let page = &bump.pages[i].data;
         result.extend(page.to_vec());
     }
-    (result, bump.idx)
+    (result, bump.idx, memsz)
 }
 
 pub struct Dumper<'a> {
