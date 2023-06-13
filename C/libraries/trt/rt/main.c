@@ -32,6 +32,16 @@ void trusted_entry(frame_t* frame)
   syscall_init();
   //TODO call the user
 
+  asm volatile (
+      "sti\n\t"
+      "mov $0, %%ebx\n\t"
+      "div %%ebx\n\t"
+      :
+      :
+      :);
+
+  asm volatile("cli\n\t" : : : );
+
   // Restore the previous values.
   restore_gdt(&saved_gdt);
   //restore_segments(&ds, &es, &ss); // TODO still have a problem here.

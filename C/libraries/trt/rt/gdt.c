@@ -7,7 +7,9 @@ gdt_desc_t gdt[GDT_MAX_DESCRIPTORS];
 
 static gdtr_t gdtr;
 
-static uint16_t gindex;
+static uint16_t gindex = 0;
+
+static uint64_t mbase = 0x400000;
 
 void save_gdt(gdtr_t* to_save)
 {
@@ -24,8 +26,8 @@ void gdt_assemble() {
     gdtr.base = (uintptr_t)&gdt[0];
 
     gdt_add_descriptor(0, 0, 0, 0);
-    gdt_add_descriptor(0, 0, GDT_BASIC_DESCRIPTOR | GDT_DESCRIPTOR_EXECUTABLE, GDT_BASIC_GRANULARITY);
-    gdt_add_descriptor(0, 0, GDT_BASIC_DESCRIPTOR, GDT_BASIC_GRANULARITY);
+    gdt_add_descriptor(0, 0xFFFF, GDT_BASIC_DESCRIPTOR | GDT_DESCRIPTOR_EXECUTABLE, GDT_BASIC_GRANULARITY);
+    gdt_add_descriptor(0, 0xFFFF, GDT_BASIC_DESCRIPTOR, GDT_BASIC_GRANULARITY);
     gdt_add_descriptor(0, 0, GDT_BASIC_DESCRIPTOR | GDT_DESCRIPTOR_DPL, GDT_BASIC_GRANULARITY);
     gdt_add_descriptor(0, 0, GDT_BASIC_DESCRIPTOR | GDT_DESCRIPTOR_DPL | GDT_DESCRIPTOR_EXECUTABLE, GDT_BASIC_GRANULARITY);
     gdt_add_descriptor(0, 0, 0, 0);

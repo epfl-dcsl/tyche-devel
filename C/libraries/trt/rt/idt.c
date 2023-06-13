@@ -29,7 +29,7 @@ void idt_set_descriptor(
   //TODO check the offset.
   idt_desc_t* descriptor = &idt[vector];
   descriptor->isr_low = isr & MASK_ISR_LOW; 
-  descriptor->kernel_cs = 0x0; //TODO 
+  descriptor->kernel_cs = 0x8; //TODO 
   descriptor->ist = ist; 
   descriptor->attributes = flags;
   descriptor->isr_mid = (isr >> SHIFT_ISR_MID) & MASK_ISR_LOW;
@@ -43,7 +43,7 @@ void idt_init(void)
   idtr.limit = (uint16_t) (sizeof(idt_desc_t) * IDT_MAX_DESCRIPTORS -1);
 
   for (uint8_t vector = 0; vector < 32; vector++) {
-    idt_set_descriptor(vector, isr_stub_table[vector], 0x8E, 1); 
+    idt_set_descriptor(vector, (uintptr_t) exception_handler, 0x8E, 0); 
   }
   __asm__ volatile("lidt %0" : : "memory"(idtr)); // load the new IDT
   //TODO reenable when we want to have interrupts
@@ -52,7 +52,6 @@ void idt_init(void)
  
 // ———————————————————————————————— Handlers ———————————————————————————————— //
 __attribute__((noreturn))
-void exception_handler(void);
 void exception_handler() {
     __asm__ volatile ("cli; hlt"); // Completely hangs the computer
 }

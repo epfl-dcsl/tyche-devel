@@ -6,12 +6,12 @@ gdt_reload:
     pushfq
     lgdt [rdi]
     popfq
-    ;mov ds, ax
-    ;mov es, ax
-    ;mov ss, ax
+    mov ds, ax
+    mov es, ax
+    mov ss, ax
     pop rbp
-    ;pop rax
-    ;push rsi
-    ;push rax
+    pop rax
+    push rsi
+    push rax
     xor rax, rax
-    ret
+    o64 retf
