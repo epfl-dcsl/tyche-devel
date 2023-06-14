@@ -607,7 +607,7 @@ impl<'vmx> ActiveVmcs<'vmx> {
     }
     /// Gets the exception bitmap.
     pub fn get_exception_bitmap(&self) -> Result<ExceptionBitmap, VmxError> {
-        let bitmap = unsafe { fields::Ctrl32::VmEntryCtrls.vmread()? };
+        let bitmap = unsafe { fields::Ctrl32::ExceptionBitmap.vmread()? };
         Ok(ExceptionBitmap::from_bits_truncate(bitmap))
     }
 
