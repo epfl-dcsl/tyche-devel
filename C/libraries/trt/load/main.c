@@ -7,8 +7,8 @@ int main(void)
 {
   enclave_t enclave;
   LOG("Loading enclave");
-
-  if (init_enclave(&enclave, ENCLAVE_PATH) != SUCCESS) {
+  /// Disable divide by zero exception.
+  if (init_enclave_with_cores_traps(&enclave, ENCLAVE_PATH, NO_CORES, ALL_TRAPS -1) != SUCCESS) {
     ERROR("Unable to parse the enclave: %s", ENCLAVE_PATH);
     goto failure;
   }
