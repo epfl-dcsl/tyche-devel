@@ -80,6 +80,7 @@ pub const ALLOW_ALL_TRAPS: u64 = !ALLOW_NO_TRAPS;
 /// Disallow the domain from running on any core.
 pub const ALLOW_NO_CORES: u64 = 0;
 /// Allow the domain to run on all cores.
+#[allow(dead_code)]
 pub const ALLOW_ALL_CORES: u64 = !ALLOW_NO_CORES;
 
 pub struct Domain {
@@ -117,7 +118,7 @@ impl Domain {
             manager: None,
             permissions: permission::NONE,
             traps: ALLOW_ALL_TRAPS,
-            cores: 0,
+            cores: ALLOW_NO_CORES,
             is_being_revoked: false,
             is_sealed: false,
         }
