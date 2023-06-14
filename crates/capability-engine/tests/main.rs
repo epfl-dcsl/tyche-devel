@@ -131,7 +131,7 @@ fn scenario_2() {
 
     // Create an initial domain with range 0x0 to 0x1000
     let domain = engine.create_manager_domain(permission::ALL).unwrap();
-    let ctx = engine.start_domain_on_core(domain, core).unwrap();
+    engine.start_domain_on_core(domain, core).unwrap();
     let region = engine
         .create_root_region(
             domain,
@@ -193,17 +193,18 @@ fn scenario_2() {
     );
 
     // Seal domain
-    let (switch, _) = engine.seal(domain, dom2).unwrap();
+    let switch = engine.seal(domain, core, dom2).unwrap();
     // Second seal should fail
-    assert!(engine.seal(domain, dom2).is_err());
+    assert!(engine.seal(domain, core, dom2).is_err());
 
     // Switch
-    engine.switch(domain, ctx, switch, core).unwrap();
+    engine.switch(domain, core, switch).unwrap();
 }
 
 #[test]
 fn scenario_3() {
     let mut engine = CapaEngine::new();
+    let core = 0;
 
     // Create initial domain and range memory 0x0 to 0x10000.
     let domain = engine.create_manager_domain(permission::ALL).unwrap();
@@ -267,7 +268,7 @@ fn scenario_3() {
     engine.send(domain, reg_to_give, encl).unwrap();
 
     // Seal domain.
-    let (_, _) = engine.seal(domain, encl).unwrap();
+    let _ = engine.seal(domain, core, encl).unwrap();
     snap!("{[0x1000, 0x2000 | 1]}", regions(enclave, &engine));
     // Now delete the enclaves' region.
     engine.revoke(domain, reg1).unwrap();
