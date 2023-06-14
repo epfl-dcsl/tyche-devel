@@ -162,6 +162,38 @@ fail:
   return FAILURE;
 }
 
+int set_domain_traps(domain_id_t id, usize traps)
+{
+  child_domain_t *child = find_child(id);
+  if (child == NULL) {
+    ERROR("Child not found");
+    goto failure;
+  }
+  if (tyche_set_traps(child->management->local_id, traps) != SUCCESS) {
+    ERROR("Unable to set the traps with a vmcall.");
+    goto failure;
+  }
+  return SUCCESS;
+failure:
+  return FAILURE;
+}
+
+int set_domain_cores(domain_id_t id, usize cores)
+{
+  child_domain_t *child = find_child(id);
+  if (child == NULL) {
+    ERROR("Child not found");
+    goto failure;
+  }
+  if (tyche_set_cores(child->management->local_id, cores) != SUCCESS) {
+    ERROR("Unable to set the cores with a vmcall.");
+    goto failure;
+  }
+  return SUCCESS;
+failure:
+  return FAILURE;
+}
+
 int seal_domain(domain_id_t id, usize core_map, usize cr3, usize rip,
                 usize rsp) {
   child_domain_t *child = NULL;

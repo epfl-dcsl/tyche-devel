@@ -12,6 +12,11 @@
 #define PAGE_SIZE ((uint64_t)(0x1000))
 #define ENTRIES_PER_PAGE (512)
 
+#define ALL_CORES (~(usize)(0))
+#define NO_CORES ((usize)(0))
+#define ALL_TRAPS (~(usize)(0))
+#define NO_TRAPS ((usize)(0))
+
 // ————————————————————————————————— Types —————————————————————————————————— //
 
 /// The fd that represents an enclave.
@@ -127,12 +132,26 @@ typedef struct {
 
   /// The memory layout of the enclave.
   enclave_map_t map;
+
+  /// The enclave's core map.
+  usize core_map;
+
+  /// The enclave's trap bitmap.
+  usize traps;
 } enclave_t;
 
 // —————————————————————————————————— API ——————————————————————————————————— //
 
 /// Combines parse and load enclave into one call.
+/// Specifies default values for the traps and cores.
 int init_enclave(enclave_t* enclave, const char* file);
+
+/// Similar init_enclave but allows to specify cores and traps.
+int init_enclave_with_cores_traps(
+    enclave_t* enclave,
+    const char* file,
+    usize cores,
+    usize traps);
 
 /// Parse the ELF and compute the page tables (still need to be patched).
 int parse_enclave(enclave_t* enclave, const char* file);

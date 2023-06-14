@@ -12,6 +12,7 @@
 #include "enclaves.h"
 #include "dbg_addresses.h"
 #include "tyche_capabilities.h"
+#include "tyche_enclave.h"
 
 // ———————————————————————————————— Globals ————————————————————————————————— //
 
@@ -225,6 +226,32 @@ failure:
   return FAILURE;
 }
 
+int set_traps(enclave_handle_t handle, usize traps)
+{
+  enclave_t* encl = find_enclave(handle);
+  if (encl == NULL) {
+    ERROR("Unable to find the enclave");
+    goto failure;
+  }
+  encl->traps = traps;
+  return SUCCESS;
+failure: 
+  return FAILURE;
+}
+
+int set_cores(enclave_handle_t handle, usize core_map)
+{
+  enclave_t* encl = find_enclave(handle);
+  if (encl == NULL) {
+    ERROR("Unable to find the enclave");
+    goto failure;
+  }
+  encl->cores = core_map;
+  return SUCCESS;
+failure: 
+  return FAILURE;
+}
+
 int commit_enclave(enclave_handle_t handle, usize cr3, usize rip, usize rsp)
 {
   usize vbase = 0;
@@ -299,6 +326,16 @@ int commit_enclave(enclave_handle_t handle, usize cr3, usize rip, usize rsp)
     }
     DEBUG("Registered segment with tyche: %llx -- %llx [%x]",
         paddr, paddr + segment->size, segment->tpe);
+  }
+
+  // Set the cores and traps.
+  if (set_domain_traps(encl->domain_id, encl->traps) != SUCCESS) {
+    ERROR("Unable to set the traps for the enclave.");
+    goto delete_fail;
+  }
+  if (set_domain_cores(encl->domain_id, encl->cores) != SUCCESS) {
+    ERROR("Unable to set the cores for the enclave");
+    goto delete_fail;
   }
 
   // Commit the enclave.

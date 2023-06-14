@@ -46,16 +46,28 @@ static enclave_segment_type_t get_section_tpe_from_name(char* name)
 
 int init_enclave(enclave_t* enclave, const char* file)
 {
+  //TODO fix the core issue
+  return init_enclave_with_cores_traps(enclave, file, NO_CORES, NO_TRAPS); 
+}
+
+int init_enclave_with_cores_traps(
+    enclave_t* enclave,
+    const char*file,
+    usize cores,
+    usize traps)
+{
   if (parse_enclave(enclave, file) != SUCCESS) {
     ERROR("Failure to parse the enclave");
     goto failure;
   }
+  enclave->core_map = cores;
+  enclave->traps = traps;
   if (load_enclave(enclave) != SUCCESS) {
     ERROR("Failure to load the enclave %s", file);
     goto failure;
   }
   return SUCCESS;
-failure:
+failure: 
   return FAILURE;
 }
 
@@ -292,6 +304,17 @@ int load_enclave(enclave_t* enclave)
     }
     DEBUG("Done mprotecting enclave %lld's pages", enclave->handle);
   } while(0);
+
+  // Set the cores and traps.
+  if (ioctl_set_traps(enclave->handle, enclave->traps) != SUCCESS) {
+    ERROR("Unable to set the traps for the enclave %lld", enclave->handle);
+    goto failure;
+  }
+
+  if (ioctl_set_cores(enclave->handle, enclave->core_map) != SUCCESS) {
+    ERROR("Unable to set the cores for the enclave %lld", enclave->handle);
+    goto failure;
+  }
 
   // Commit the enclave.
   if (ioctl_commit_enclave(

@@ -15,6 +15,8 @@ typedef enum tyche_monitor_call_t {
   TYCHE_ENUMERATE = 8,
   TYCHE_SWITCH = 9,
   TYCHE_EXIT = 10,
+  TYCHE_SET_TRAPS = 12,
+  TYCHE_SET_CORES = 13,
 } tyche_monitor_call_t;
 
 #define TYCHE_CAPA_NULL ((capa_index_t)0)
@@ -49,6 +51,10 @@ typedef struct vmcall_frame_t {
 int tyche_call(vmcall_frame_t* frame);
 
 int tyche_create_domain(capa_index_t* management);
+
+int tyche_set_cores(capa_index_t management, usize cores);
+
+int tyche_set_traps(capa_index_t management, usize traps);
 
 int tyche_seal(
     capa_index_t* transition,

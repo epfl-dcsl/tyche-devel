@@ -20,4 +20,6 @@ int ioctl_mprotect_enclave(
     enclave_segment_type_t tpe);
 int ioctl_mmap(handle_t handle, usize size, usize* virtoffset);
 int ioctl_switch_enclave(handle_t handle, void* args);
+int ioctl_set_cores(handle_t handle, usize cores);
+int ioctl_set_traps(handle_t handle, usize traps);
 #endif /*__LOADER_DRIVER_IOCTL_H__*/

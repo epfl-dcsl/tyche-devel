@@ -69,6 +69,11 @@ typedef struct {
   void* args;
 } msg_enclave_switch_t;
 
+/// Structure to set permissions, i.e., traps or cores.
+typedef struct {
+  usize value;
+} msg_set_perm_t;
+
 // ——————————————————————————— Tyche Enclave IOCTL API —————————————————————— //
 // @deprecated, use open.
 //#define TYCHE_ENCLAVE_CREATE _IOR('a', 'b', msg_enclave_info_t*)
@@ -79,5 +84,7 @@ typedef struct {
 // @deprecate, use close
 //#define TYCHE_ENCLAVE_DELETE _IOR('a', 'g', msg_enclave_info_t*)
 #define TYCHE_DEBUG_ADDR _IOWR('a', 'h', msg_enclave_info_t*)
+#define TYCHE_ENCLAVE_SET_TRAPS _IOWR('a', 'i', msg_set_perm_t)
+#define TYCHE_ENCLAVE_SET_CORES _IOWR('a', 'j', msg_set_perm_t)
 
 #endif

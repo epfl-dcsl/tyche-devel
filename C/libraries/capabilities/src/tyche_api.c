@@ -49,6 +49,36 @@ fail:
   return FAILURE;
 }
 
+int tyche_set_traps(capa_index_t management, usize traps)
+{
+  vmcall_frame_t frame = {
+    .vmcall = TYCHE_SET_TRAPS,
+    .arg_1 = management,
+    .arg_2 = traps,
+  };
+  if (tyche_call(&frame) != SUCCESS) {
+    goto failure;
+  }
+  return SUCCESS;
+failure:
+  return FAILURE;
+}
+
+int tyche_set_cores(capa_index_t management, usize cores)
+{
+  vmcall_frame_t frame = {
+    .vmcall = TYCHE_SET_CORES,
+    .arg_1 = management,
+    .arg_2 = cores,
+  };
+  if (tyche_call(&frame) != SUCCESS) {
+    goto failure;
+  }
+  return SUCCESS;
+failure:
+  return FAILURE;
+}
+
 int tyche_seal(
     capa_index_t* transition, 
     capa_index_t management,

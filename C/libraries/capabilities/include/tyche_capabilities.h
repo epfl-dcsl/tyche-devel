@@ -60,4 +60,12 @@ int switch_domain(domain_id_t id, void* args);
 /// This function goes through all the capabilities in the domain and revokes them.
 int revoke_domain(domain_id_t id);
 
+/// Set the core map for a domain.
+/// The domain should not be sealed and the map must be a subset of the parent.
+int set_domain_cores(domain_id_t id, usize cores);
+
+/// Set the trap bitmap for a domain.
+/// The domain should not be sealed and the bitmap must be a subset of the parent.
+int set_domain_traps(domain_id_t id, usize traps);
+
 #endif

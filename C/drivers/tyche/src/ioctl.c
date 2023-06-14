@@ -122,6 +122,7 @@ long tyche_ioctl(struct file* handle, unsigned int cmd, unsigned long arg)
   msg_enclave_commit_t commit = {0, 0, 0};
   msg_enclave_mprotect_t mprotect = {0, 0, 0, 0};
   msg_enclave_switch_t transition = {0};
+  msg_set_perm_t perm = {0};
   switch(cmd) {
     case TYCHE_ENCLAVE_GET_PHYSOFFSET:
       if (get_physoffset_enclave(handle, &info.physoffset) != SUCCESS) {
@@ -150,6 +151,36 @@ long tyche_ioctl(struct file* handle, unsigned int cmd, unsigned long arg)
             commit.entry,
             commit.stack) != SUCCESS) {
         ERROR("Commit failed for enclave %p", handle);
+        goto failure;
+      }
+      break;
+    case TYCHE_ENCLAVE_SET_TRAPS:
+        if (copy_from_user(
+            &perm,
+            (msg_set_perm_t*) arg,
+            sizeof(msg_set_perm_t))) {
+        ERROR("Unable to copy perm arguments from user.");
+        goto failure;
+      }
+      if (set_traps(
+            handle,
+            perm.value) != SUCCESS) {
+        ERROR("Setting traps failed for enclave %p", handle);
+        goto failure;
+      }
+      break;
+   case TYCHE_ENCLAVE_SET_CORES:
+        if (copy_from_user(
+            &perm,
+            (msg_set_perm_t*) arg,
+            sizeof(msg_set_perm_t))) {
+        ERROR("Unable to copy perm arguments from user.");
+        goto failure;
+      }
+      if (set_cores(
+            handle,
+            perm.value) != SUCCESS) {
+        ERROR("Setting cores failed for enclave %p", handle);
         goto failure;
       }
       break;

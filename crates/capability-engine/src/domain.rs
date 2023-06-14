@@ -77,6 +77,11 @@ pub const ALLOW_NO_TRAPS: u64 = 0;
 /// Allow all traps from a domain.
 pub const ALLOW_ALL_TRAPS: u64 = !ALLOW_NO_TRAPS;
 
+/// Disallow the domain from running on any core.
+pub const ALLOW_NO_CORES: u64 = 0;
+/// Allow the domain to run on all cores.
+pub const ALLOW_ALL_CORES: u64 = !ALLOW_NO_CORES;
+
 pub struct Domain {
     /// Unique domain ID.
     id: usize,

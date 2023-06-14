@@ -4,6 +4,7 @@
 #include <sys/errno.h>
 #include "driver_ioctl.h"
 #include "common.h"
+#include "tyche_enclave.h"
 
 
 int ioctl_getphysoffset_enclave(
@@ -36,6 +37,28 @@ int ioctl_commit_enclave(
     ERROR("Failed to commit enclave %d.", handle);
     goto failure;
   }
+  return SUCCESS;
+failure:
+  return FAILURE;
+}
+
+int ioctl_set_traps(handle_t handle, usize traps) {
+  msg_set_perm_t perm = {traps}; 
+  if (ioctl(handle, TYCHE_ENCLAVE_SET_TRAPS, &perm) != SUCCESS) {
+      ERROR("Failed to set traps for the enclave %d", handle);
+      goto failure;
+    }
+  return SUCCESS;
+failure:
+  return FAILURE;
+}
+
+int ioctl_set_cores(handle_t handle, usize cores) {
+  msg_set_perm_t perm = {cores}; 
+  if (ioctl(handle, TYCHE_ENCLAVE_SET_CORES, &perm) != SUCCESS) {
+      ERROR("Failed to set traps for the enclave %d", handle);
+      goto failure;
+    }
   return SUCCESS;
 failure:
   return FAILURE;

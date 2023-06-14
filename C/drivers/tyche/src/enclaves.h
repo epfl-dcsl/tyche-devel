@@ -54,6 +54,12 @@ typedef struct enclave_t {
   /// The size of the enclave's contiguous memory region.
   usize size;
 
+  /// The enclave's traps.
+  usize traps;
+
+  /// The enclave's core map.
+  usize cores;
+
   /// The segments for the enclave.
   dll_list(enclave_segment_t, segments);
 
@@ -84,6 +90,10 @@ int mprotect_enclave(
     usize size,
     memory_access_right_t flags,
     enclave_segment_type_t tpe);
+/// Register the trap bitmap for the enclave.
+int set_traps(enclave_handle_t handle, usize traps);
+/// Register the core map for the enclave.
+int set_cores(enclave_handle_t handle, usize core_map);
 /// Commits the enclave. This is where the capability operations are done.
 int commit_enclave(enclave_handle_t handle, usize cr3, usize rip, usize rsp);
 /// Implements the transition into an enclave.
