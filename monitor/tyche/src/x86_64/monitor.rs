@@ -10,7 +10,7 @@ use mmu::{EptMapper, FrameAllocator};
 use spin::{Mutex, MutexGuard};
 use stage_two_abi::Manifest;
 use utils::{GuestPhysAddr, HostPhysAddr};
-use vmx::bitmaps::EptEntryFlags;
+use vmx::bitmaps::{EptEntryFlags, ExceptionBitmap};
 use vmx::{ActiveVmcs, ControlRegister, Register};
 
 use super::cpuid;
@@ -100,6 +100,25 @@ pub fn do_create_domain(current: Handle<Domain>) -> Result<LocalCapa, CapaError>
     let management_capa = engine.create_domain(current)?;
     apply_updates(&mut engine);
     Ok(management_capa)
+}
+
+pub fn do_set_cores(
+    current: Handle<Domain>,
+    domain: LocalCapa,
+    core_map: usize,
+) -> Result<(), CapaError> {
+    let mut engine = CAPA_ENGINE.lock();
+    engine.set_domain_cores(current, domain, core_map)?;
+    return Ok(());
+}
+
+pub fn do_set_traps(
+    current: Handle<Domain>,
+    domain: LocalCapa,
+    traps: usize,
+) -> Result<(), CapaError> {
+    let mut engine = CAPA_ENGINE.lock();
+    engine.set_domain_traps(current, domain, traps)
 }
 
 pub fn do_seal(
@@ -213,6 +232,9 @@ enum CoreUpdate {
         manager: Handle<Domain>,
         trap: u64,
     },
+    UpdateTrap {
+        bitmap: u64,
+    },
 }
 
 /// General updates, containing both global updates on the domain's states, and core specific
@@ -249,6 +271,10 @@ fn apply_updates(engine: &mut MutexGuard<CapaEngine>) {
             capa_engine::Update::TlbShootdown { core } => {
                 let mut core_updates = CORE_UPDATES[core as usize].lock();
                 core_updates.push(CoreUpdate::TlbShootdown);
+            }
+            capa_engine::Update::UpdateTraps { trap, core } => {
+                let mut core_updates = CORE_UPDATES[core as usize].lock();
+                core_updates.push(CoreUpdate::UpdateTrap { bitmap: !trap });
             }
         }
     }
@@ -306,6 +332,16 @@ pub fn apply_core_updates(
 
                 // Update the current domain
                 *current_domain = manager;
+            }
+            CoreUpdate::UpdateTrap { bitmap } => {
+                log::trace!("Updating trap bitmap on core {} to {:b}", core_id, bitmap);
+                let value = bitmap as u32;
+                //TODO: for the moment we only offer interposition on the hardware cpu exception
+                //interrupts (first 32 values).
+                //By instrumenting APIC and virtualizing it, we might manage to do better in the
+                //future.
+                vcpu.set_exception_bitmap(ExceptionBitmap::from_bits_truncate(value))
+                    .expect("Error setting the exception bitmap");
             }
         }
     }
@@ -403,6 +439,9 @@ impl core::fmt::Display for CoreUpdate {
                 trap: interrupt,
             } => {
                 write!(f, "Trap({}, {})", manager, interrupt)
+            }
+            CoreUpdate::UpdateTrap { bitmap } => {
+                write!(f, "UpdateTrap({:b})", bitmap)
             }
         }
     }

@@ -87,6 +87,30 @@ fn handle_exit(
                     vcpu.next_instruction()?;
                     Ok(HandlerResult::Resume)
                 }
+                calls::SET_CORES => {
+                    log::trace!("Set cores");
+                    match monitor::do_set_cores(*domain, LocalCapa::new(arg_1), arg_2) {
+                        Ok(()) => vcpu.set(Register::Rax, 0),
+                        Err(e) => {
+                            log::debug!("Set cores failed {:?}", e);
+                            vcpu.set(Register::Rax, 1);
+                        }
+                    }
+                    vcpu.next_instruction()?;
+                    Ok(HandlerResult::Resume)
+                }
+                calls::SET_TRAPS => {
+                    log::trace!("Set traps");
+                    match monitor::do_set_traps(*domain, LocalCapa::new(arg_1), arg_2) {
+                        Ok(()) => vcpu.set(Register::Rax, 0),
+                        Err(e) => {
+                            log::debug!("Set traps error: {:?}", e);
+                            vcpu.set(Register::Rax, 1);
+                        }
+                    }
+                    vcpu.next_instruction()?;
+                    Ok(HandlerResult::Resume)
+                }
                 calls::SEAL_DOMAIN => {
                     log::trace!("Seal Domain");
                     let capa =

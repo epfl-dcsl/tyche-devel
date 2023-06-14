@@ -278,6 +278,35 @@ impl CapaEngine {
         domain::set_permissions(domain, &mut self.domains, permissions)
     }
 
+    pub fn set_domain_cores(
+        &mut self,
+        manager: Handle<Domain>,
+        capa: LocalCapa,
+        core_map: usize,
+    ) -> Result<(), CapaError> {
+        if (!self.domains[manager].cores()) & (core_map as u64) != 0 {
+            log::debug!("Attempted to increase core_map rights: {:b}", core_map);
+            return Err(CapaError::InsufficientPermissions);
+        }
+        let domain = self.domains[manager].get(capa)?.as_management()?;
+        domain::set_cores(domain, &mut self.domains, core_map as u64)
+    }
+
+    pub fn set_domain_traps(
+        &mut self,
+        manager: Handle<Domain>,
+        capa: LocalCapa,
+        traps: usize,
+    ) -> Result<(), CapaError> {
+        // Check that we are not granting more rights than what the manager has:
+        if (!self.domains[manager].traps()) & (traps as u64) != 0 {
+            log::debug!("Attempted to increase trap rights {:b}", traps);
+            return Err(CapaError::InsufficientPermissions);
+        }
+        let domain = self.domains[manager].get(capa)?.as_management()?;
+        domain::set_traps(domain, &mut self.domains, traps as u64)
+    }
+
     /// Seal a domain and return a switch handle for that domain.
     pub fn seal(
         &mut self,
@@ -347,6 +376,10 @@ impl CapaEngine {
         self.updates.push(Update::Switch {
             domain: next_dom,
             return_capa,
+            core,
+        });
+        self.updates.push(Update::UpdateTraps {
+            trap: self.domains[next_dom].traps(),
             core,
         });
 

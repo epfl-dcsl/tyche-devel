@@ -72,6 +72,11 @@ impl NextCapaToken {
 
 // ————————————————————————————————— Domain ————————————————————————————————— //
 
+/// Disallow traps for a domain.
+pub const ALLOW_NO_TRAPS: u64 = 0;
+/// Allow all traps from a domain.
+pub const ALLOW_ALL_TRAPS: u64 = !ALLOW_NO_TRAPS;
+
 pub struct Domain {
     /// Unique domain ID.
     id: usize,
@@ -106,7 +111,7 @@ impl Domain {
             regions: RegionTracker::new(),
             manager: None,
             permissions: permission::NONE,
-            traps: 0,
+            traps: ALLOW_ALL_TRAPS,
             cores: 0,
             is_being_revoked: false,
             is_sealed: false,
@@ -163,6 +168,14 @@ impl Domain {
 
     pub fn id(&self) -> usize {
         self.id
+    }
+
+    pub fn traps(&self) -> u64 {
+        self.traps
+    }
+
+    pub fn cores(&self) -> u64 {
+        self.cores
     }
 
     /// Returns Wether or not this domain can handle the given trap
@@ -298,6 +311,32 @@ pub(crate) fn set_permissions(
         domain.permissions = permissions;
         Ok(())
     }
+}
+
+pub(crate) fn set_cores(
+    domain: Handle<Domain>,
+    domains: &mut DomainPool,
+    core_map: u64,
+) -> Result<(), CapaError> {
+    let domain = &mut domains[domain];
+    if domain.is_sealed() {
+        return Err(CapaError::AlreadySealed);
+    }
+    domain.cores = core_map;
+    Ok(())
+}
+
+pub(crate) fn set_traps(
+    domain: Handle<Domain>,
+    domains: &mut DomainPool,
+    traps: u64,
+) -> Result<(), CapaError> {
+    let domain = &mut domains[domain];
+    if domain.is_sealed() {
+        return Err(CapaError::AlreadySealed);
+    }
+    domain.traps = traps;
+    Ok(())
 }
 
 // —————————————————————————————————— Send —————————————————————————————————— //
