@@ -26,14 +26,16 @@ Whether a page fault (exception with vector 14) causes a VM exit is determined b
 See Section 26.2 for details.
 ```
 
-(Worth noting, the same seems to exists for the I/O-bitmap exceptions.)
-
-The plan is to look into how this can be implemented in Tyche.  
-I already have a runtime that consistently triggers a divide by zero exception.
-For the moment, it handles the exception inside the VM (by reconfiguring the IDT and GDT).
-I will try to re-configure the VCPU to catch that exception.
 
 The exception bitmap is part of the tertiary processor base VM execution controls.
 It is located [here](https://github.com/CharlyCst/vmxvmm/blob/main/crates/vmx/src/lib.rs#L604) in our implementation.
+
+We update the switch operation to setup the exception bitmap according to the domain's configuration.
+
+When an unallowed exception arises in a domain, the monitor finds the manager responsible for handling it and reinjects the fault into the CPU after switching to the manager domain. 
+
+For the moment, we only handle the first 32 interrupts.
+Support for other ones will be added once we figure out APIC.
+
 
 
