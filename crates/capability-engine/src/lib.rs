@@ -50,6 +50,7 @@ pub enum CapaError {
     CouldNotDeserializeInfo,
     InvalidCore,
     CouldNotHandleTrap,
+    ValidTrapCausedExit,
 }
 
 pub struct CapaEngine {
@@ -393,9 +394,8 @@ impl CapaEngine {
         trap: u64,
     ) -> Result<(), CapaError> {
         if self.domains[domain].can_handle(trap) {
-            // The trap can be handled by the current domain, nothing to do
-            // NOTE/ should we deliver the trap in some special way?
-            return Ok(());
+            log::error!("The domain is able to handle its own trap, why did we exit?");
+            return Err(CapaError::ValidTrapCausedExit);
         }
         let manager = domain::find_trap_handler(domain, trap, &self.domains)
             .ok_or(CapaError::CouldNotHandleTrap)?;

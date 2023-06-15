@@ -335,7 +335,24 @@ fn handle_exit(
         VmxExitReason::Exception => {
             match vcpu.interrupt_info() {
                 Ok(Some(exit)) => {
-                    log::info!("Exception: {:?}", vcpu.interrupt_info());
+                    // The domain exited, so it shouldn't be able to handle it.
+                    match monitor::handle_trap(*domain, cpuid(), 1 << (exit.vector as u64)) {
+                        Ok(()) => {
+                            log::debug!("Received exception {}, re-routing it", exit.vector);
+                            Ok(HandlerResult::Resume)
+                        }
+                        Err(e) => {
+                            log::error!(
+                                "Unable to handle the exception {}, capa error:{:?}",
+                                exit.vector,
+                                e
+                            );
+                            log::error!("{:?}", vcpu);
+                            Ok(HandlerResult::Crash)
+                        }
+                    }
+
+                    /*log::info!("Exception: {:?}", exit);
                     if exit.int_type == vmx::InterruptionType::HardwareException
                         && exit.vector == 14
                     {
@@ -349,7 +366,7 @@ fn handle_exit(
                     }
                     log::error!("VM received an exception");
                     log::info!("{:?}", vcpu);
-                    Ok(HandlerResult::Crash)
+                    Ok(HandlerResult::Crash)*/
                     // Inject the fault back into the guest.
                     // let injection = exit.as_injectable_u32();
                     // vcpu.set_vm_entry_interruption_information(injection)?;

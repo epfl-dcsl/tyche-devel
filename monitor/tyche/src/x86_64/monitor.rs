@@ -217,6 +217,14 @@ pub fn do_debug() {
         log::info!("{}", engine[domain].regions());
     }
 }
+// —————————————————————— Interrupt Handling functions —————————————————————— //
+
+pub fn handle_trap(current: Handle<Domain>, core: usize, trap: u64) -> Result<(), CapaError> {
+    let mut engine = CAPA_ENGINE.lock();
+    engine.handle_trap(current, core, trap)?;
+    apply_updates(&mut engine);
+    Ok(())
+}
 
 // ———————————————————————————————— Updates ————————————————————————————————— //
 
@@ -326,6 +334,12 @@ pub fn apply_core_updates(
                 let next_ctx = get_context(manager, core);
                 let next_domain = get_domain(manager);
                 switch_domain(vcpu, current_ctx, next_ctx, next_domain);
+
+                log::debug!(
+                    "Exception triggers switch from {:?} to {:?}",
+                    current_domain,
+                    manager
+                );
 
                 // Set parameters
                 vcpu.set(Register::Rax, trap);

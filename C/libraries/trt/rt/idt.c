@@ -41,8 +41,12 @@ void idt_init(void)
 {
   idtr.base = (uintptr_t)&idt[0]; 
   idtr.limit = (uint16_t) (sizeof(idt_desc_t) * IDT_MAX_DESCRIPTORS -1);
+  
+  
+  // Special handler for divide by zero.
+  idt_set_descriptor(0, (uintptr_t) divide_zero_handler, 0x8E, 0);
 
-  for (uint8_t vector = 0; vector < 32; vector++) {
+  for (uint8_t vector = 1; vector < 32; vector++) {
     idt_set_descriptor(vector, (uintptr_t) exception_handler, 0x8E, 0); 
   }
   __asm__ volatile("lidt %0" : : "memory"(idtr)); // load the new IDT
@@ -54,4 +58,9 @@ void idt_init(void)
 __attribute__((noreturn))
 void exception_handler() {
     __asm__ volatile ("cli; hlt"); // Completely hangs the computer
+}
+
+__attribute__((noreturn))
+void divide_zero_handler() {
+  __asm__ volatile ("cli; hlt");
 }
