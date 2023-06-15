@@ -404,6 +404,11 @@ impl CapaEngine {
             trap,
             core,
         });
+        // Also update the bitmap.
+        self.updates.push(Update::UpdateTraps {
+            trap: self.domains[manager].traps(),
+            core,
+        });
 
         Ok(())
     }

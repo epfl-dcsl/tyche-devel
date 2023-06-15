@@ -330,6 +330,10 @@ pub fn apply_core_updates(
             }
             CoreUpdate::Trap { manager, trap } => {
                 log::trace!("Trap {} on core {}", trap, core_id);
+                log::debug!(
+                    "Exception Bitmap is {:b}",
+                    vcpu.get_exception_bitmap().expect("Failed to read bitmpap")
+                );
 
                 let current_ctx = get_context(*current_domain, core);
                 let next_ctx = get_context(manager, core);
@@ -337,17 +341,18 @@ pub fn apply_core_updates(
                 switch_domain(vcpu, current_ctx, next_ctx, next_domain);
 
                 log::debug!(
-                    "Exception {} triggers switch from {:?} to {:?}",
+                    "Exception {} (bit shift {}) triggers switch from {:?} to {:?}",
                     trap,
+                    Trapnr::from_u64(trap),
                     current_domain,
                     manager
                 );
 
-                // Inject as breakpoint for now.
+                // Inject exception now.
                 // The problem is that the call is in the driver, and thus the kernel module fails.
                 // Once we manage to move it to the lib instead, we'll be good.
                 let interrupt = VmExitInterrupt {
-                    vector: Trapnr::Breakpoint as u8,
+                    vector: Trapnr::from_u64(trap),
                     int_type: vmx::InterruptionType::HardwareException,
                     error_code: None,
                 };

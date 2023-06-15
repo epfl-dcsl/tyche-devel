@@ -538,4 +538,14 @@ impl Trapnr {
     pub fn as_u8(self) -> u8 {
         return self as u8;
     }
+
+    pub fn from_u64(trap: u64) -> u8 {
+        let mut value = 0;
+        let mut trapnr = trap;
+        while trapnr > 1 {
+            value += 1;
+            trapnr = trapnr >> 1;
+        }
+        value
+    }
 }
