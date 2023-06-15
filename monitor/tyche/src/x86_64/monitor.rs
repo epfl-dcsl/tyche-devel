@@ -11,7 +11,8 @@ use spin::{Mutex, MutexGuard};
 use stage_two_abi::Manifest;
 use utils::{GuestPhysAddr, HostPhysAddr};
 use vmx::bitmaps::{EptEntryFlags, ExceptionBitmap};
-use vmx::{ActiveVmcs, ControlRegister, Register};
+use vmx::errors::Trapnr;
+use vmx::{ActiveVmcs, ControlRegister, Register, VmExitInterrupt};
 
 use super::cpuid;
 use crate::allocator::allocator;
@@ -328,7 +329,7 @@ pub fn apply_core_updates(
                 *current_domain = domain;
             }
             CoreUpdate::Trap { manager, trap } => {
-                log::trace!("Trap on core {}", core_id);
+                log::trace!("Trap {} on core {}", trap, core_id);
 
                 let current_ctx = get_context(*current_domain, core);
                 let next_ctx = get_context(manager, core);
@@ -336,13 +337,26 @@ pub fn apply_core_updates(
                 switch_domain(vcpu, current_ctx, next_ctx, next_domain);
 
                 log::debug!(
-                    "Exception triggers switch from {:?} to {:?}",
+                    "Exception {} triggers switch from {:?} to {:?}",
+                    trap,
                     current_domain,
                     manager
                 );
 
+                // Inject as breakpoint for now.
+                // The problem is that the call is in the driver, and thus the kernel module fails.
+                // Once we manage to move it to the lib instead, we'll be good.
+                let interrupt = VmExitInterrupt {
+                    vector: Trapnr::Breakpoint as u8,
+                    int_type: vmx::InterruptionType::HardwareException,
+                    error_code: None,
+                };
+                let flags = interrupt.as_injectable_u32(false);
+                vcpu.set_vm_entry_interruption_information(flags)
+                    .expect("Unable to inject an exception");
+
                 // Set parameters
-                vcpu.set(Register::Rax, trap);
+                //vcpu.set(Register::Rax, trap);
 
                 // Update the current domain
                 *current_domain = manager;
