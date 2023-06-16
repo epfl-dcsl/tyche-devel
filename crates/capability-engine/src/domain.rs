@@ -361,6 +361,12 @@ pub(crate) fn send_management(
     to: Handle<Domain>,
 ) -> Result<(), CapaError> {
     // Update manager
+    if (!domains[to].core_map()) & domains[capa].core_map() != 0 {
+        log::debug!("Sending management to a domain with less cores on its map.");
+        log::debug!("manager cores: {:b}", domains[to].core_map());
+        log::debug!("domain  cores: {:b}", domains[capa].core_map());
+        return Err(CapaError::InsufficientPermissions);
+    }
     domains[capa].set_manager(to);
     Ok(())
 }

@@ -238,6 +238,8 @@ impl CapaEngine {
         // Enforce permissions
         domain::has_permission(domain, &self.domains, permission::SEND)?;
 
+        //TODO(all) as some code might fail below, we should not remove the capa
+        // first.
         let to = self.domains[domain].get(to)?.as_channel()?;
         let capa = remove_capa(domain, capa, &mut self.domains)?;
         match capa {
