@@ -121,6 +121,7 @@ pub struct ModifiedELF {
     pub sections: Vec<ModifiedSection>,
     pub layout: MemoryLayout,
     pub data: Vec<u8>,
+    pub secret_data: Vec<u8>,
 }
 
 /// Helper function to convert a T into raw bytes.
@@ -149,6 +150,7 @@ impl ModifiedELF {
                 max_addr: u64::MIN,
             },
             data: Vec::new(),
+            secret_data: Vec::new(),
         });
 
         // Parse the segments.
@@ -197,8 +199,8 @@ impl ModifiedELF {
             .expect("Unable to convert the string bytes");
 
             melf.sections.push(ModifiedSection {
-                idx: idx,
-                name: name,
+                idx,
+                name,
                 section_header: sec.clone(),
             });
         }
@@ -353,6 +355,8 @@ impl ModifiedELF {
             let sec_bytes = any_as_u8_slice(&sec.section_header);
             writer.write(sec_bytes);
         }
+        // Write secret data too.
+        writer.write(&self.secret_data);
         out
     }
 
@@ -372,7 +376,8 @@ impl ModifiedELF {
         let prog_headers: usize = self.len_phdrs();
         let data = self.data.len();
         let secs: usize = ModifiedSection::len() * self.sections.len();
-        return header + prog_headers + data + secs;
+        let secret: usize = self.secret_data.len();
+        return header + prog_headers + data + secs + secret;
     }
 
     /// Helper to construct a new program header (segment).
@@ -398,8 +403,7 @@ impl ModifiedELF {
     }
 
     /// Helper to construct a new section header.
-    #[allow(dead_code)]
-    fn construct_shdr(
+    pub fn construct_shdr(
         name: u32,
         sec_type: u32,
         flags: u64,
@@ -499,6 +503,15 @@ impl ModifiedELF {
         );
 
         self.add_segment_header(&phdr, Some(data));
+    }
+
+    pub fn add_section_header(&mut self, shdr: &Shdr64) {
+        self.sections.push(ModifiedSection {
+            idx: self.sections.len(),
+            name: "Special".to_string(),
+            section_header: *shdr,
+        });
+        self.header.e_shnum.set(DENDIAN, self.sections.len() as u16);
     }
 
     /// Adds a segment header to the binary and patches offsets.

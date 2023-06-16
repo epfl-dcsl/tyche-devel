@@ -50,7 +50,7 @@ int extract_enclave(const char* self, const char* destf)
   FILE* encl_file = NULL;
   void* dest = NULL;
   parser_t self_parser;
-  Elf64_Phdr* enclave_elf = NULL; 
+  Elf64_Shdr* enclave_elf = NULL; 
   if (self == NULL || destf == NULL) {
     ERROR("Null argument: self(%p), destf(%p)", self, destf);
     goto failure;
@@ -65,49 +65,48 @@ int extract_enclave(const char* self, const char* destf)
   // Read the header.
   read_elf64_header(self_parser.fd, &(self_parser.header));
   
-  // Read the segments.
-  read_elf64_segments(self_parser.fd, self_parser.header, &(self_parser.segments));
+  // Read the sections.
+  read_elf64_sections(self_parser.fd, self_parser.header, &(self_parser.sections));
 
-  // Find the segment for the enclave.
-  enclave_elf = &self_parser.segments[self_parser.header.e_phentsize-1];
-  if (enclave_elf->p_type != TYCHEPHDR_ENCLAVE_ELF) {
-    ERROR("Wrong segment type for enclave");
+  // Find the section for the enclave.
+  enclave_elf = &self_parser.sections[self_parser.header.e_shnum-1];
+  if (enclave_elf->sh_type != SHT_NOTE) {
+    ERROR("Wrong section type for enclave");
     goto failure_free_seg;
   } 
   if (enclave_elf == NULL) {
-    ERROR("Unable to find the enclave ELF segment.");
+    ERROR("Unable to find the enclave ELF section.");
     goto failure_free_seg;
   }
   
-  // Allocate memory for the segment content.
-  dest = mmap(NULL, enclave_elf->p_filesz,
-      PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
-  if (dest == MAP_FAILED) {
+  // Now load the section.
+  dest = read_section64(self_parser.fd, *enclave_elf); 
+  if (dest == NULL) {
     ERROR("Unable to mmap memory for the enclave ELF");
     goto failure_free_seg;
   }
 
-  // Now load the segment.
-  load_elf64_segment(self_parser.fd, dest, *enclave_elf); 
-
   // Then dump it into the destination file.
   encl_file = fopen(destf, "wb");
   if (encl_file != NULL) {
-    size_t written = fwrite(dest, 1, enclave_elf->p_filesz, encl_file);
-    if (written != enclave_elf->p_filesz) {
+    size_t written = fwrite(dest, 1, enclave_elf->sh_size, encl_file);
+    if (written != enclave_elf->sh_size) {
       ERROR("Failed to write all the enclave ELF bytes");
       goto failure_close;
     } 
   } else {
     ERROR("Failed to open destf(%s)", destf);
-    goto failure_free_seg;
+    goto failure_free;
   }
   // Cleanup.
   free(self_parser.segments);
   fclose(encl_file);
+  free(dest);
   return SUCCESS;
 failure_close:
   fclose(encl_file);
+failure_free:
+  free(dest);
 failure_free_seg:
   free(self_parser.segments);
 failure:

@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use serde_json;
 
 use crate::allocator::PAGE_SIZE;
-use crate::elf_modifier::{ModifiedELF, TychePhdrTypes};
+use crate::elf_modifier::{ModifiedELF, ModifiedSection, TychePhdrTypes};
 use crate::page_table_mapper::generate_page_tables;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -191,15 +191,20 @@ pub fn instrument_binary(manifest: &Manifest) {
         panic!("We had nothing to instrument");
     };
 
-    let (final_output, sort_phdrs) = if let Some(bin) = &mut untrusted_elf {
+    let (final_output, sort_phdrs) = if let Some(ref mut bin) = &mut untrusted_elf {
         let conf_content = main_conf.dump(manifest.sort_phdrs);
-        bin.append_data_segment(
-            None,
-            TychePhdrTypes::EnclaveELF as u32,
+        let size_so_far = bin.len();
+        bin.add_section_header(&ModifiedELF::construct_shdr(
             0,
-            conf_content.len(),
-            &conf_content,
-        );
+            object::elf::SHT_NOTE,
+            object::elf::SHF_MASKOS as u64,
+            size_so_far as u64 + ModifiedSection::len() as u64,
+            conf_content.len() as u64,
+            0,
+            conf_content.len() as u64,
+            0,
+        ));
+        bin.secret_data.extend(conf_content);
         (&mut (**bin), false)
     } else {
         (main_conf, true)
