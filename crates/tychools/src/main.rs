@@ -1,4 +1,5 @@
 mod allocator;
+mod attestation;
 mod elf_modifier;
 mod instrument;
 mod loader;
@@ -6,7 +7,9 @@ mod page_table_mapper;
 
 use std::path::PathBuf;
 
+use attestation::attest;
 use clap::{Args, Parser, Subcommand};
+use clap_num::maybe_hex;
 use instrument::{instrument_with_manifest, modify_binary, print_enum};
 use loader::parse_and_run;
 use page_table_mapper::print_page_tables;
@@ -27,6 +30,7 @@ enum Commands {
     PrintPts(FilePath),
     Run(FilePath),
     PrintEnum,
+    Hash(FileAndOffset),
 }
 
 #[derive(Args)]
@@ -41,6 +45,14 @@ struct SrcDestArgs {
 struct FilePath {
     #[arg(short, long, value_name = "SRC")]
     src: PathBuf,
+}
+
+#[derive(Args)]
+struct FileAndOffset {
+    #[arg(short, long, value_name = "SRC")]
+    src: PathBuf,
+    #[arg(short, long, value_name = "OFFSET", value_parser=maybe_hex::<u64>)]
+    offset: u64,
 }
 
 fn main() {
@@ -62,5 +74,6 @@ fn main() {
         Commands::PrintEnum => {
             print_enum();
         }
+        Commands::Hash(args) => attest(&args.src, args.offset),
     }
 }

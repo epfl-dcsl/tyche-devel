@@ -22,3 +22,5 @@ nix = { version = "0.26.2", features = ["ioctl"]}
 num = "0.4.0"
 libc = "0.2.146"
 ioctl-sys = "0.8.0"
+sha2 = "0.10.7"
+clap-num = "1.0.2"
