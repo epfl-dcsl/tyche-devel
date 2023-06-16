@@ -47,7 +47,7 @@ static enclave_segment_type_t get_section_tpe_from_name(char* name)
 int init_enclave(enclave_t* enclave, const char* file)
 {
   //TODO fix the core issue
-  return init_enclave_with_cores_traps(enclave, file, NO_CORES, NO_TRAPS); 
+  return init_enclave_with_cores_traps(enclave, file, ALL_CORES, NO_TRAPS); 
 }
 
 int init_enclave_with_cores_traps(

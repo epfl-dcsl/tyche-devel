@@ -24,6 +24,8 @@ use region_capa::{RegionCapa, RegionPool};
 use update::UpdateBuffer;
 pub use update::{Buffer, Update};
 
+use crate::domain::{ALLOW_ALL_CORES, ALLOW_ALL_TRAPS};
+
 /// Configuration for the static Capa Engine size.
 pub mod config {
     pub const NB_DOMAINS: usize = 32;
@@ -83,6 +85,8 @@ impl CapaEngine {
         match self.domains.allocate(Domain::new(id)) {
             Some(handle) => {
                 domain::set_permissions(handle, &mut self.domains, permissions)?;
+                domain::set_core_map(handle, &mut self.domains, ALLOW_ALL_CORES)?;
+                domain::set_traps(handle, &mut self.domains, ALLOW_ALL_TRAPS)?;
                 self.domains[handle].seal()?;
                 self.updates.push(Update::CreateDomain { domain: handle });
                 Ok(handle)
@@ -285,12 +289,14 @@ impl CapaEngine {
         capa: LocalCapa,
         core_map: usize,
     ) -> Result<(), CapaError> {
-        if (!self.domains[manager].cores()) & (core_map as u64) != 0 {
-            log::debug!("Attempted to increase core_map rights: {:b}", core_map);
+        if (!self.domains[manager].core_map()) & (core_map as u64) != 0 {
+            log::debug!("Attempted to increase core_map rights");
+            log::debug!("allowed: {:b}", self.domains[manager].core_map());
+            log::debug!("request: {:b}", core_map);
             return Err(CapaError::InsufficientPermissions);
         }
         let domain = self.domains[manager].get(capa)?.as_management()?;
-        domain::set_cores(domain, &mut self.domains, core_map as u64)
+        domain::set_core_map(domain, &mut self.domains, core_map as u64)
     }
 
     pub fn set_domain_traps(
@@ -362,6 +368,13 @@ impl CapaEngine {
         core: usize,
         capa: LocalCapa,
     ) -> Result<(), CapaError> {
+        // Check the domain can be scheduled on the core.
+        if (1 << core) & self.domains[domain].core_map() == 0 {
+            log::debug!("Attempt to schedule domain on unallowed core {}", core);
+            log::debug!("allowed: {:b}", self.domains[domain].core_map());
+            log::debug!("request: {:b}", 1 << core);
+            return Err(CapaError::InvalidCore);
+        }
         let (next_dom, _) = self.domains[domain].get(capa)?.as_switch()?;
         let return_capa = insert_capa(
             next_dom,

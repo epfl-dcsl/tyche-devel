@@ -82,6 +82,8 @@ pub const ALLOW_NO_CORES: u64 = 0;
 /// Allow the domain to run on all cores.
 #[allow(dead_code)]
 pub const ALLOW_ALL_CORES: u64 = !ALLOW_NO_CORES;
+/// The default core for domain initialization.
+pub const DEFAULT_CORE: u64 = 0;
 
 pub struct Domain {
     /// Unique domain ID.
@@ -100,6 +102,8 @@ pub struct Domain {
     traps: u64,
     /// A bitmap of cores the domain is runing on.
     cores: u64,
+    /// A bitmap of cores the domain is **allowed** to run on.
+    core_map: u64,
     /// Is this domain in the process of being revoked?
     is_being_revoked: bool,
     /// Is the domain sealed?
@@ -117,8 +121,9 @@ impl Domain {
             regions: RegionTracker::new(),
             manager: None,
             permissions: permission::NONE,
-            traps: ALLOW_ALL_TRAPS,
-            cores: ALLOW_NO_CORES,
+            traps: ALLOW_NO_TRAPS,
+            cores: DEFAULT_CORE,
+            core_map: ALLOW_NO_CORES,
             is_being_revoked: false,
             is_sealed: false,
         }
@@ -182,6 +187,9 @@ impl Domain {
 
     pub fn cores(&self) -> u64 {
         self.cores
+    }
+    pub fn core_map(&self) -> u64 {
+        self.core_map
     }
 
     /// Returns Wether or not this domain can handle the given trap
@@ -319,7 +327,7 @@ pub(crate) fn set_permissions(
     }
 }
 
-pub(crate) fn set_cores(
+pub(crate) fn set_core_map(
     domain: Handle<Domain>,
     domains: &mut DomainPool,
     core_map: u64,
@@ -328,7 +336,7 @@ pub(crate) fn set_cores(
     if domain.is_sealed() {
         return Err(CapaError::AlreadySealed);
     }
-    domain.cores = core_map;
+    domain.core_map = core_map;
     Ok(())
 }
 
