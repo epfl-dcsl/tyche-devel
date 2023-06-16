@@ -68,13 +68,12 @@ int extract_enclave(const char* self, const char* destf)
   // Read the segments.
   read_elf64_segments(self_parser.fd, self_parser.header, &(self_parser.segments));
 
-  // Find the segment for the enclave. 
-  for (int i = 0; i < self_parser.header.e_phentsize; i++) {
-    if (self_parser.segments[i].p_type == TYCHEPHDR_ENCLAVE_ELF) {
-      enclave_elf = &self_parser.segments[i];
-      break;
-    } 
-  }
+  // Find the segment for the enclave.
+  enclave_elf = &self_parser.segments[self_parser.header.e_phentsize-1];
+  if (enclave_elf->p_type != TYCHEPHDR_ENCLAVE_ELF) {
+    ERROR("Wrong segment type for enclave");
+    goto failure_free_seg;
+  } 
   if (enclave_elf == NULL) {
     ERROR("Unable to find the enclave ELF segment.");
     goto failure_free_seg;

@@ -40,7 +40,7 @@ pub enum TychePhdrTypes {
     /// Kernel Confidential
     KernelConfidential = 0x60000007,
     /// Full enclave ELF embedded in application.
-    EnclaveELF = 0x60000008,
+    EnclaveELF = object::elf::PT_NOTE,
 }
 
 impl TychePhdrTypes {

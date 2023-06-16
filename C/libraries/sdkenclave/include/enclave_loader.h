@@ -17,7 +17,7 @@
 #define ALL_TRAPS (~(usize)(0))
 #define NO_TRAPS ((usize)(0))
 
-#define TYCHEPHDR_ENCLAVE_ELF ((Elf64_Word)0x60000008)
+#define TYCHEPHDR_ENCLAVE_ELF ((Elf64_Word)4)
 
 // ————————————————————————————————— Types —————————————————————————————————— //
 
