@@ -33,12 +33,24 @@ pub struct BinaryInstrumentation {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Manifest {
+    /// Untrusted part of the application.
+    untrusted_bin: Option<BinaryInstrumentation>,
     /// User binary
     user_bin: Option<BinaryInstrumentation>,
     /// Kernel binary
     kern_bin: Option<BinaryInstrumentation>,
+    /// Should we generate page tables.
+    #[serde(default = "default_ops")]
+    generate_pts: bool,
+    /// Should we sort Phdrs
+    #[serde(default = "default_ops")]
+    sort_phdrs: bool,
     /// Destination ELF file.
     output: String,
+}
+
+fn default_ops() -> bool {
+    true
 }
 
 pub fn modify_binary(src: &PathBuf, dst: &PathBuf) {
@@ -78,7 +90,7 @@ pub fn modify_binary(src: &PathBuf, dst: &PathBuf) {
     // Let's write that thing out.
     //let mut out: Vec<u8> = Vec::with_capacity(elf.len());
     //let mut writer = object::write::elf::Writer::new(Endianness::Little, true, &mut out);
-    elf.dump(dst);
+    elf.dump_to_file(dst, true);
 
     /*let mut file = OpenOptions::new()
         .create(true)
@@ -129,6 +141,13 @@ pub fn parse_binary(binary: &BinaryInstrumentation) -> Box<ModifiedELF> {
 }
 
 pub fn instrument_binary(manifest: &Manifest) {
+    // Parse the untrusted part of the application.
+    let mut untrusted_elf = if let Some(untrusted) = &manifest.untrusted_bin {
+        let bin = parse_binary(untrusted);
+        Some(bin)
+    } else {
+        None
+    };
     // Parse the user binary if present.
     let mut user_elf = if let Some(user) = &manifest.user_bin {
         let mut bin = parse_binary(user);
@@ -138,7 +157,7 @@ pub fn instrument_binary(manifest: &Manifest) {
         None
     };
     // Parse the kernel binary if present.
-    let kern_elf = if let Some(kern) = &manifest.kern_bin {
+    let mut kern_elf = if let Some(kern) = &manifest.kern_bin {
         let mut bin = parse_binary(kern);
         bin.mark(TychePhdrTypes::KernelConfidential);
         Some(bin)
@@ -147,31 +166,47 @@ pub fn instrument_binary(manifest: &Manifest) {
     };
 
     // Complex case.
-    if let (Some(ref mut user), Some(kern)) = (&mut user_elf, &kern_elf) {
+    let main_conf = if let (Some(ref mut user), Some(kern)) = (&mut user_elf, &kern_elf) {
         let user = user.as_mut();
         let kern = kern.as_ref();
         if user.overlap(kern) {
             panic!("The two binaries overlap");
         }
         user.merge(kern);
-        user.generate_page_tables();
-        user.dump(&PathBuf::from(&manifest.output));
-        return;
-    }
-    // Simpler cases
-    if let Some(mut user) = user_elf {
-        user.generate_page_tables();
-        user.dump(&PathBuf::from(&manifest.output));
-        return;
-    }
+        if manifest.generate_pts {
+            user.generate_page_tables();
+        }
+        user
+    } else if let Some(ref mut user) = &mut user_elf {
+        if manifest.generate_pts {
+            user.generate_page_tables();
+        }
+        user
+    } else if let Some(ref mut kern) = &mut kern_elf {
+        if manifest.generate_pts {
+            kern.generate_page_tables();
+        }
+        kern
+    } else {
+        panic!("We had nothing to instrument");
+    };
 
-    if let Some(mut kern) = kern_elf {
-        kern.generate_page_tables();
-        kern.dump(&PathBuf::from(&manifest.output));
-        return;
-    }
+    let (final_output, sort_phdrs) = if let Some(bin) = &mut untrusted_elf {
+        let conf_content = main_conf.dump(manifest.sort_phdrs);
+        bin.append_data_segment(
+            None,
+            TychePhdrTypes::EnclaveELF as u32,
+            0,
+            conf_content.len(),
+            &conf_content,
+        );
+        (&mut (**bin), false)
+    } else {
+        (main_conf, true)
+    };
 
-    panic!("Should never reach");
+    // Finally write the content to the provided file.
+    final_output.dump_to_file(&PathBuf::from(&manifest.output), sort_phdrs);
 }
 
 pub fn print_enum() {

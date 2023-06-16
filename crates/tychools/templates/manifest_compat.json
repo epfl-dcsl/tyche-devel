@@ -1,0 +1,10 @@
+{
+  "untrusted_bin": {
+    "path":"templates/untrusted"
+  },
+  "kern_bin": {
+    "path":"templates/enclave"
+    },
+  "generate_pts":false,
+  "output": "/tmp/app-selector"
+}

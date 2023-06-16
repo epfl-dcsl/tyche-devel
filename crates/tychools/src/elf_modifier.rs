@@ -39,6 +39,8 @@ pub enum TychePhdrTypes {
     KernelShared = 0x60000006,
     /// Kernel Confidential
     KernelConfidential = 0x60000007,
+    /// Full enclave ELF embedded in application.
+    EnclaveELF = 0x60000008,
 }
 
 impl TychePhdrTypes {
@@ -51,6 +53,7 @@ impl TychePhdrTypes {
             0x60000005 => Some(TychePhdrTypes::KernelStack),
             0x60000006 => Some(TychePhdrTypes::KernelShared),
             0x60000007 => Some(TychePhdrTypes::KernelConfidential),
+            0x60000008 => Some(TychePhdrTypes::EnclaveELF),
             _ => None,
         }
     }
@@ -309,17 +312,31 @@ impl ModifiedELF {
         }
     }
 
-    /// Writes a ModifiedELF into the provided writer.
-    pub fn dump(&mut self, output: &PathBuf) {
+    /// Dumps the content of the ELF into a file.
+    pub fn dump_to_file(&mut self, output: &PathBuf, sort: bool) {
+        let content = self.dump(sort);
+        let mut file = OpenOptions::new()
+            .create(true)
+            .read(true)
+            .write(true)
+            .open(output)
+            .expect("Unable to open output file.");
+        file.write(&*content).expect("Unable to dump the content");
+        log::debug!("Done writting the binary");
+    }
+    /// Writes a ModifiedELF into a vector of bytes and returns it.
+    pub fn dump(&mut self, sort: bool) -> Vec<u8> {
         let mut out: Vec<u8> = Vec::with_capacity(self.len());
         let mut writer = object::write::elf::Writer::new(DENDIAN, true, &mut out);
 
         // Do some cleaning, sort segments by vaddr.
-        self.segments.sort_by(|a, b| {
-            let a_addr = a.program_header.p_vaddr(DENDIAN);
-            let b_addr = b.program_header.p_vaddr(DENDIAN);
-            a_addr.cmp(&b_addr)
-        });
+        if sort {
+            self.segments.sort_by(|a, b| {
+                let a_addr = a.program_header.p_vaddr(DENDIAN);
+                let b_addr = b.program_header.p_vaddr(DENDIAN);
+                a_addr.cmp(&b_addr)
+            });
+        }
 
         //Write the header.
         let hdr_bytes = any_as_u8_slice(&self.header);
@@ -336,14 +353,7 @@ impl ModifiedELF {
             let sec_bytes = any_as_u8_slice(&sec.section_header);
             writer.write(sec_bytes);
         }
-        let mut file = OpenOptions::new()
-            .create(true)
-            .read(true)
-            .write(true)
-            .open(output)
-            .expect("Unable to open output file.");
-        file.write(&*out).expect("Unable to dump the content");
-        log::debug!("Done writting the binary");
+        out
     }
 
     /// Returns the length of an ELF header.
@@ -652,7 +662,7 @@ impl ModifiedSegment {
         match value {
             elf::PT_LOAD => true,
             val => match TychePhdrTypes::from_u32(val) {
-                Some(_) => true,
+                Some(tpe) => tpe != TychePhdrTypes::EnclaveELF,
                 None => false,
             },
         }
