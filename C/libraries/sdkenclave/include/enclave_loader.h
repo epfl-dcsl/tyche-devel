@@ -17,6 +17,8 @@
 #define ALL_TRAPS (~(usize)(0))
 #define NO_TRAPS ((usize)(0))
 
+#define TYCHEPHDR_ENCLAVE_ELF ((Elf64_Word)0x60000008)
+
 // ————————————————————————————————— Types —————————————————————————————————— //
 
 /// The fd that represents an enclave.
@@ -141,6 +143,10 @@ typedef struct {
 } enclave_t;
 
 // —————————————————————————————————— API ——————————————————————————————————— //
+
+/// Look for the enclave binary inside the current program's binary.
+/// If found, it extracts it and writes in into the dest file.
+int extract_enclave(const char* self, const char* dest);
 
 /// Combines parse and load enclave into one call.
 /// Specifies default values for the traps and cores.

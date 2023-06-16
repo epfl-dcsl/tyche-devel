@@ -2,7 +2,12 @@
 #define __INCLUDE_ENCLAVE_APP_H__
 
 /// Environment variable to select the application.
-#define ENV_VARIABLE ("APP")
+#define ENV_APP ("APP")
+
+/// Environment variable for destination enclave.
+/// This means that the binary already contains an enclave in a segment.
+/// This will be extracted and written to dest_encl.
+#define ENV_DEST_ENCL ("DEST_ENCL")
 
 /// Transition benchmark loop bounds.
 #define OUTER_LOOP_NB (10)

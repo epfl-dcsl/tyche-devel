@@ -1,6 +1,7 @@
 #include <elf.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <stdio.h>
 #include <string.h>
 #include <sys/mman.h>
 #include <unistd.h>
@@ -43,6 +44,76 @@ static enclave_segment_type_t get_section_tpe_from_name(char* name)
 }
 
 // ——————————————————————————————— Functions ———————————————————————————————— //
+
+int extract_enclave(const char* self, const char* destf)
+{
+  FILE* encl_file = NULL;
+  void* dest = NULL;
+  parser_t self_parser;
+  Elf64_Phdr* enclave_elf = NULL; 
+  if (self == NULL || destf == NULL) {
+    ERROR("Null argument: self(%p), destf(%p)", self, destf);
+    goto failure;
+  }
+  memset(&self_parser, 0, sizeof(parser_t));
+
+  self_parser.fd = open(self, O_RDONLY); 
+  if (self_parser.fd < 0) {
+    ERROR("Failed to read self(%s)", self);
+    goto failure;
+  }
+  // Read the header.
+  read_elf64_header(self_parser.fd, &(self_parser.header));
+  
+  // Read the segments.
+  read_elf64_segments(self_parser.fd, self_parser.header, &(self_parser.segments));
+
+  // Find the segment for the enclave. 
+  for (int i = 0; i < self_parser.header.e_phentsize; i++) {
+    if (self_parser.segments[i].p_type == TYCHEPHDR_ENCLAVE_ELF) {
+      enclave_elf = &self_parser.segments[i];
+      break;
+    } 
+  }
+  if (enclave_elf == NULL) {
+    ERROR("Unable to find the enclave ELF segment.");
+    goto failure_free_seg;
+  }
+  
+  // Allocate memory for the segment content.
+  dest = mmap(NULL, enclave_elf->p_filesz,
+      PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
+  if (dest == MAP_FAILED) {
+    ERROR("Unable to mmap memory for the enclave ELF");
+    goto failure_free_seg;
+  }
+
+  // Now load the segment.
+  load_elf64_segment(self_parser.fd, dest, *enclave_elf); 
+
+  // Then dump it into the destination file.
+  encl_file = fopen(destf, "wb");
+  if (encl_file != NULL) {
+    size_t written = fwrite(dest, 1, enclave_elf->p_filesz, encl_file);
+    if (written != enclave_elf->p_filesz) {
+      ERROR("Failed to write all the enclave ELF bytes");
+      goto failure_close;
+    } 
+  } else {
+    ERROR("Failed to open destf(%s)", destf);
+    goto failure_free_seg;
+  }
+  // Cleanup.
+  free(self_parser.segments);
+  fclose(encl_file);
+  return SUCCESS;
+failure_close:
+  fclose(encl_file);
+failure_free_seg:
+  free(self_parser.segments);
+failure:
+  return FAILURE;
+}
 
 int init_enclave(enclave_t* enclave, const char* file)
 {

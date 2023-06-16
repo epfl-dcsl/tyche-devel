@@ -12,7 +12,8 @@
 
 // ——————————————————————————————— Constants ———————————————————————————————— //
 
-const char* ENCLAVE_PATH = "enclave";
+char* const DEFAULT_ENCLAVE_PATH = "enclave";
+char* enclave_path = DEFAULT_ENCLAVE_PATH; 
 
 // ———————————————————————————— Local Variables ————————————————————————————— //
 
@@ -94,9 +95,19 @@ void breakpoint_handler(int signal)
 
 /// Parse environment variable to select the correct application.
 /// We default to HELLO_WORLD if the environment variable is not defined.
-static application_e parse_application()
+static application_e parse_application(const char* self)
 {
-  char * app = getenv(ENV_VARIABLE);
+  char * app = getenv(ENV_APP);
+  char * dest_encl = getenv(ENV_DEST_ENCL);
+  
+  if (dest_encl != NULL) {
+    enclave_path = dest_encl;
+    if (extract_enclave(self, enclave_path) != SUCCESS) {
+      ERROR("Error extracting the enclave");
+      exit(1);
+    }
+  }
+
   if (app == NULL) {
     goto default_app;
   }
@@ -269,26 +280,26 @@ application_tpe dispatcher[] = {
 };
 
 // —————————————————————————————————— Main —————————————————————————————————— //
-int main(void) {
+int main(int argc, char *argv[]) {
   // Allocate the enclave.
   enclave = malloc(sizeof(enclave_t));
   if (enclave == NULL) {
     ERROR("Unable to allocate enclave structure");
     goto failure;
   }
-  application_e application = parse_application();
+  application_e application = parse_application(argv[0]);
 
   // Init the enclave.
-  LOG("Let's load the binary '%s'!", ENCLAVE_PATH);
+  LOG("Let's load the binary '%s'!", enclave_path);
   // Special configuration of the traps, removing breakpoint one.
   if (application == BREAKPOINT) {
-      if (init_enclave_with_cores_traps(enclave, ENCLAVE_PATH, NO_CORES, ALL_TRAPS - (1 << 3)) != SUCCESS) {
-      ERROR("Unable to parse the enclave: %s", ENCLAVE_PATH);
+      if (init_enclave_with_cores_traps(enclave, enclave_path, NO_CORES, ALL_TRAPS - (1 << 3)) != SUCCESS) {
+      ERROR("Unable to parse the enclave: %s", enclave_path);
       goto failure;
     }
   } else {
-    if (init_enclave(enclave, ENCLAVE_PATH) != SUCCESS) {
-      ERROR("Unable to parse the enclave '%s'", ENCLAVE_PATH);
+    if (init_enclave(enclave, enclave_path) != SUCCESS) {
+      ERROR("Unable to parse the enclave '%s'", enclave_path);
       goto failure;
     }
   }
