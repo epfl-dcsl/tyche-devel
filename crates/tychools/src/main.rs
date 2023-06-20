@@ -11,7 +11,7 @@ use attestation::attest;
 use clap::{Args, Parser, Subcommand};
 use clap_num::maybe_hex;
 use instrument::{instrument_with_manifest, modify_binary, print_enum};
-use loader::parse_and_run;
+use loader::{extract_bin, parse_and_run};
 use page_table_mapper::print_page_tables;
 use simple_logger;
 
@@ -31,6 +31,7 @@ enum Commands {
     Run(FilePath),
     PrintEnum,
     Hash(FileAndOffset),
+    Extract(SrcDestArgs),
 }
 
 #[derive(Args)]
@@ -75,5 +76,8 @@ fn main() {
             print_enum();
         }
         Commands::Hash(args) => attest(&args.src, args.offset),
+        Commands::Extract(args) => {
+            extract_bin(&args.src, &args.dst);
+        }
     }
 }

@@ -1,5 +1,6 @@
 use core::slice;
 use std::fs::File;
+use std::io::Write;
 use std::num::NonZeroUsize;
 use std::os::fd::{AsRawFd, RawFd};
 use std::path::PathBuf;
@@ -8,7 +9,7 @@ use ioctl_sys::{ior, iorw, iow};
 use libc::ioctl;
 use nix::sys::mman::{MapFlags, ProtFlags};
 use object::elf;
-use object::read::elf::{FileHeader, ProgramHeader};
+use object::read::elf::{FileHeader, ProgramHeader, SectionHeader};
 
 use crate::elf_modifier::{ModifiedELF, ModifiedSegment, TychePhdrTypes, DENDIAN};
 use crate::page_table_mapper::align_address;
@@ -73,6 +74,37 @@ pub struct Enclave {
 }
 
 // ——————————————————————————————— Functions ———————————————————————————————— //
+
+/// Extracts an enclave from a binary if there is one.
+pub fn extract_bin(src: &PathBuf, dst: &PathBuf) {
+    let data = std::fs::read(src).expect("Unable to read source file");
+    let elf = ModifiedELF::new(&data);
+    let encl_section = elf.sections.last().unwrap();
+    if encl_section.section_header.sh_type(DENDIAN) != object::elf::SHT_NOTE
+        || encl_section.section_header.sh_flags(DENDIAN) != object::elf::SHF_MASKOS as u64
+    {
+        log::error!("No enclave inside this file!");
+        return;
+    }
+    let offset = encl_section.section_header.sh_offset(DENDIAN) as usize;
+    if offset >= data.len() {
+        log::error!("The offset off({}) >= data.len({})", offset, data.len());
+        return;
+    }
+    let to_write = &data[offset..];
+    let mut file = File::options()
+        .create(true)
+        .write(true)
+        .open(dst)
+        .expect("Unable to open the output file");
+    file.write_all(to_write)
+        .expect("Unable to write bytes in output");
+    log::info!(
+        "Done extracting the enclave from {} into {}",
+        src.display(),
+        dst.display()
+    );
+}
 
 pub fn parse_and_run(file: &PathBuf) {
     let data = std::fs::read(file).expect("Unable to read source file");

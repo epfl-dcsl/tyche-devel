@@ -1,4 +1,4 @@
-all: app enclave
+all: app enclave instrument
 
 
 ## ————————————————————————————————— Paths —————————————————————————————————— ##
@@ -67,8 +67,9 @@ enclave: $(CODE_ENCLAVE) $(HDRS_ENCLAVE)
 instrument: app enclave
 	cargo -C $(TYCHOOLS_PATH) install --path .
 	tychools instrument -s manifests/default.json 
+	chmod +x app_instrumented
 
-install_disk: all instrument
+install_disk: all 
 	mkdir -p $(DISK_PATH)
 	cp -t $(DISK_PATH) app enclave app_instrumented
 
