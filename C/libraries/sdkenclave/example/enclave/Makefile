@@ -53,6 +53,8 @@ APP_INCLUDES = $(COMMON_INCLUDES) -I$(ELF64)/include -I$(PTS)/include -I$(DRIVER
 ## ————————————————————— Configuration for the install —————————————————————— ##
 DISK_PATH ?= /tmp/mount/tyche/programs 
 
+TYCHOOLS_PATH ?= ../../../../../crates/tychools/ 
+
 ## ———————————————————————————————— Targets ————————————————————————————————— ##
 
 app: $(CODE_APP) $(HDRS_APP) 
@@ -61,12 +63,17 @@ app: $(CODE_APP) $(HDRS_APP)
 enclave: $(CODE_ENCLAVE) $(HDRS_ENCLAVE)
 	gcc -DTYCHE_USER_SPACE=1 -g $(COMMON_INCLUDES) -nostdlib -static -o $@ $(CODE_ENCLAVE) 
 
-install_disk: all
+
+instrument: app enclave
+	cargo -C $(TYCHOOLS_PATH) install --path .
+	tychools instrument -s manifests/default.json 
+
+install_disk: all instrument
 	mkdir -p $(DISK_PATH)
-	cp -t $(DISK_PATH) app enclave
+	cp -t $(DISK_PATH) app enclave app_instrumented
 
 
 .PHONY: clean
 
 clean:
-	rm app enclave
+	rm app enclave app_instrumented

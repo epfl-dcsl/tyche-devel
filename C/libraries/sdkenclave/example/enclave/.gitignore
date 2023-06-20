@@ -1,3 +1,4 @@
 app
 enclave
+app_instrumented
 libs/*

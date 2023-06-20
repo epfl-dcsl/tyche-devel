@@ -1,0 +1,27 @@
+{
+  "untrusted_bin": {
+    "path": "app"
+  },
+  "kern_bin": {
+    "path":"enclave",
+    "ops":[
+      {
+        "AddSegment":{
+          "size":8192,
+          "tpe":"KernelStack",
+          "write":true,"exec":false
+        }
+      },
+      {
+        "AddSegment":{
+          "size":8192,
+          "tpe":"KernelShared",
+          "write":true,
+          "exec":false
+        }
+      }
+    ]
+  },
+  "generate_pts": true,
+  "output": "app_instrumented"
+}
