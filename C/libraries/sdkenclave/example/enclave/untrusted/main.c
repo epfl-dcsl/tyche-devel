@@ -9,6 +9,7 @@
 #include "enclave_rt.h"
 #include "enclave_loader.h"
 #include "enclave_app.h"
+#include "tychools.h"
 
 // ——————————————————————————————— Constants ———————————————————————————————— //
 
@@ -28,25 +29,25 @@ config_t* shared = NULL;
 /// Looks up for the shared memory region with the enclave.
 static void* find_default_shared(enclave_t* enclave)
 {
-  enclave_shared_section_t* shared_sec = NULL;
+  enclave_shared_memory_t* shared_sec = NULL;
   if (enclave == NULL) {
     ERROR("Supplied enclave is null.");
     goto failure;
   }
-    // Find the shared region.
+  // Find the shared region.
   dll_foreach(&(enclave->config.shared_sections), shared_sec, list) {
-    if (strncmp(
+    if (shared_sec->tpe == TYCHE_SHARED_SECTION) {
+      if (strncmp(
           DEFAULT_SHARED_BUFFER_SECTION_NAME, 
-          shared_sec->section->sh_name + enclave->parser.strings,
+          shared_sec->shared.section->sh_name + enclave->parser.strings,
           strlen(DEFAULT_SHARED_BUFFER_SECTION_NAME)) == 0) {
-      break;
+        return (void*)(shared_sec->untrusted_vaddr);
+      }
+    } else if (shared_sec->shared.segment->p_type == KERNEL_SHARED) {
+      return (void*)(shared_sec->untrusted_vaddr);
     }
   }
-  if (shared_sec == NULL) {
-    ERROR("Unable to find the shared buffer for the enclave!");
-    goto failure;
-  }
-  return (void*)(shared_sec->untrusted_vaddr);
+  ERROR("Unable to find the shared buffer for the enclave!");
 failure:
   return NULL;
 }

@@ -5,6 +5,7 @@
 #include "pts_api.h"
 #include "tyche_enclave.h"
 
+#include <elf.h>
 #include <stdint.h>
 
 // ——————————————————————————————— Constants ———————————————————————————————— //
@@ -17,7 +18,8 @@
 #define ALL_TRAPS (~(usize)(0))
 #define NO_TRAPS ((usize)(0))
 
-#define TYCHEPHDR_ENCLAVE_ELF ((Elf64_Word)4)
+#define ENCLAVE_DRIVER ("/dev/tyche")
+#define SHARED_PREFIX (".tyche_shared")
 
 // ————————————————————————————————— Types —————————————————————————————————— //
 
@@ -95,15 +97,25 @@ typedef struct {
   usize size;
 } enclave_map_t;
 
+/// Describes the type of shared memory: segment or section.
+typedef enum {
+  TYCHE_SHARED_SECTION = 0,
+  TYCHE_SHARED_SEGMENT = 1,
+} shared_memory_t;
+
 /// Quick access to shared sections.
-typedef struct enclave_shared_section_t {
-  /// Reference to the section.
-  Elf64_Shdr* section;
+typedef struct enclave_shared_memory_t {
+  shared_memory_t tpe;
+  /// Reference to the shared segment or section.
+  union {
+    Elf64_Shdr* section;
+    Elf64_Phdr* segment;
+  } shared;
   /// The address in the untrusted user space.
   usize untrusted_vaddr;
   /// Stored as a list.
-  dll_elem(struct enclave_shared_section_t, list);
-} enclave_shared_section_t;
+  dll_elem(struct enclave_shared_memory_t, list);
+} enclave_shared_memory_t;
 
 /// Configuration for the enclave, necessary for proper commit.
 typedef struct {
@@ -116,8 +128,11 @@ typedef struct {
   /// The stack pointer for the enclave, parsed from the binary.
   usize stack;
 
+  /// User stack configuration.
+  usize user_stack;
+
   /// List of shared sections.
-  dll_list(enclave_shared_section_t, shared_sections);
+  dll_list(enclave_shared_memory_t, shared_sections);
 
 } enclave_config_t;
 
@@ -170,5 +185,19 @@ int call_enclave(enclave_t* enclave, void* args);
 
 /// Delete the enclave.
 int delete_enclave(enclave_t* enclave);
+
+/// Translate ELF flags into tyche memory access rights.
+memory_access_right_t translate_flags_to_tyche(Elf64_Word flags);
+
+// ———————————————————————— Tychools compatible API ————————————————————————— //
+
+/// Parses an ELF binary created by tychools.
+/// All the segments for the enclave should have OS-specific types.
+/// The page tables must be present, as well as the stacks and shared regions.
+int tychools_parse_enclave(enclave_t* enclave, const char* file);
+
+/// Loads an enclave created with tychools.
+/// It patches the page tables that should be located inside one of the segments.
+int tychools_load_enclave(enclave_t* enclave);
 
 #endif /*__INCLUDE_ENCLAVE_LOADER_H__*/

@@ -14,12 +14,8 @@
 #include "enclave_loader.h"
 #include "enclave_rt.h"
 
-// ——————————————————————————————— Constants ———————————————————————————————— //
-const char* ENCLAVE_DRIVER = "/dev/tyche"; 
-const char* SHARED_PREFIX = ".tyche_shared";
-
 // ———————————————————————————— Local Functions ————————————————————————————— //
-static memory_access_right_t translate_flags(Elf64_Word flags) {
+memory_access_right_t translate_flags_to_tyche(Elf64_Word flags) {
   memory_access_right_t rights = 0;
   if ((flags & PF_R) == PF_R) {
     rights |= MEM_READ;
@@ -180,13 +176,14 @@ int parse_enclave(enclave_t* enclave, const char* file)
     // Look for shared sections.
     if (get_section_tpe_from_name(
           section.sh_name + enclave->parser.strings) == SHARED) {
-      enclave_shared_section_t* shared = malloc(sizeof(enclave_shared_section_t));
+      enclave_shared_memory_t* shared = malloc(sizeof(enclave_shared_memory_t));
       if (shared == NULL) {
         ERROR("Unable to malloc enclave_shared_section.");
         goto failure;
       }
-      memset(shared, 0, sizeof(enclave_shared_section_t));
-      shared->section = &(enclave->parser.sections[i]);
+      memset(shared, 0, sizeof(enclave_shared_memory_t));
+      shared->tpe = TYCHE_SHARED_SECTION;
+      shared->shared.section = &(enclave->parser.sections[i]);
       dll_init_elem(shared, list);
       dll_add(&(enclave->config.shared_sections), shared, list);
       DEBUG("We found a shared region: %llx - %llx ",
@@ -288,21 +285,21 @@ int load_enclave(enclave_t* enclave)
   // Copy the enclave's content.
   phys_size = 0;
   for (int i = 0; i < enclave->parser.header.e_phnum; i++) {
-    enclave_shared_section_t* shared_sect = NULL;
+    enclave_shared_memory_t* shared_sect = NULL;
     Elf64_Phdr seg = enclave->parser.segments[i];
     if (seg.p_type != PT_LOAD) {
       continue;
     }
     addr_t dest = enclave->map.virtoffset + phys_size;
     addr_t size = align_up(seg.p_memsz);
-    memory_access_right_t flags = translate_flags(seg.p_flags);
+    memory_access_right_t flags = translate_flags_to_tyche(seg.p_flags);
     load_elf64_segment(enclave->parser.fd, (void*) dest, seg);
     addr_t curr_va = seg.p_vaddr;
     usize local_size = 0;
 
     // Check if we have shared sections in this segment.
     dll_foreach(&(enclave->config.shared_sections), shared_sect, list) {
-      Elf64_Shdr* section = shared_sect->section;
+      Elf64_Shdr* section = shared_sect->shared.section;
       usize virt_addr = dest + local_size; 
       if (section->sh_addr >= curr_va && section->sh_addr <= curr_va + size) {
         if (curr_va != section->sh_addr) {
@@ -431,7 +428,7 @@ int delete_enclave(enclave_t* enclave)
   // Now collect everything else.
   // The config.
   while (!dll_is_empty(&(enclave->config.shared_sections))) {
-    enclave_shared_section_t* sec = enclave->config.shared_sections.head;
+    enclave_shared_memory_t* sec = enclave->config.shared_sections.head;
     dll_remove(&(enclave->config.shared_sections), sec, list);
     free(sec);
   }
