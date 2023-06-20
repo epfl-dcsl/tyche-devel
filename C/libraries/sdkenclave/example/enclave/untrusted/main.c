@@ -10,6 +10,7 @@
 #include "enclave_loader.h"
 #include "enclave_app.h"
 #include "tychools.h"
+#include "sdk_app.h"
 
 // ——————————————————————————————— Constants ———————————————————————————————— //
 
@@ -96,18 +97,9 @@ void breakpoint_handler(int signal)
 
 /// Parse environment variable to select the correct application.
 /// We default to HELLO_WORLD if the environment variable is not defined.
-static application_e parse_application(const char* self)
+static application_e parse_application()
 {
   char * app = getenv(ENV_APP);
-  char * dest_encl = getenv(ENV_DEST_ENCL);
-  
-  if (dest_encl != NULL) {
-    enclave_path = dest_encl;
-    if (extract_enclave(self, enclave_path) != SUCCESS) {
-      ERROR("Error extracting the enclave");
-      exit(1);
-    }
-  }
 
   if (app == NULL) {
     goto default_app;
@@ -288,22 +280,26 @@ int main(int argc, char *argv[]) {
     ERROR("Unable to allocate enclave structure");
     goto failure;
   }
-  application_e application = parse_application(argv[0]);
+  application_e application = parse_application();
+  char* loaded_enclave = NULL;
 
   // Init the enclave.
-  LOG("Let's load the binary '%s'!", enclave_path);
-  // Special configuration of the traps, removing breakpoint one.
   if (application == BREAKPOINT) {
-      if (init_enclave_with_cores_traps(enclave, enclave_path, NO_CORES, ALL_TRAPS - (1 << 3)) != SUCCESS) {
+      if (sdk_create_enclave(
+            enclave, enclave_path, argv[0], &loaded_enclave,
+            ALL_CORES, ALL_TRAPS - (1 << 3)) != SUCCESS) {
       ERROR("Unable to parse the enclave: %s", enclave_path);
       goto failure;
     }
   } else {
-    if (init_enclave(enclave, enclave_path) != SUCCESS) {
+    if (sdk_create_enclave(
+          enclave, enclave_path, argv[0], &loaded_enclave,
+          ALL_CORES, ALL_TRAPS) != SUCCESS) {
       ERROR("Unable to parse the enclave '%s'", enclave_path);
       goto failure;
     }
   }
+  LOG("The binary '%s' has been loaded!", loaded_enclave);
 
   // Find the shared region.
   shared = (config_t*) find_default_shared(enclave);

@@ -191,6 +191,13 @@ memory_access_right_t translate_flags_to_tyche(Elf64_Word flags);
 
 // ———————————————————————— Tychools compatible API ————————————————————————— //
 
+/// Calls both parse and load enclave pointed by the file.
+int tychools_init_enclave_with_cores_traps(
+    enclave_t* enclave,
+    const char* file,
+    usize cores,
+    usize traps);
+
 /// Parses an ELF binary created by tychools.
 /// All the segments for the enclave should have OS-specific types.
 /// The page tables must be present, as well as the stacks and shared regions.

@@ -50,6 +50,32 @@ int is_loadable(tyche_phdr_t tpe)
 
 // ————————————— Loader functions from include/enclave_loader.h ————————————— //
 
+int tychools_init_enclave_with_cores_traps(
+    enclave_t* enclave,
+    const char* file,
+    usize cores,
+    usize traps)
+{
+  if (enclave == NULL || file == NULL) {
+    ERROR("Null argument provided: encl(%s), file(%s)", enclave, file);
+    goto failure;
+  }
+  enclave->traps = traps;
+  enclave->core_map = cores;
+  if (tychools_parse_enclave(enclave, file) != SUCCESS) {
+    ERROR("Unable to parse the enclave %s.", file);
+    goto failure;
+  }
+  if (tychools_load_enclave(enclave) != SUCCESS) {
+    ERROR("Unable to load the enclave %s", file);
+    goto failure;
+  }
+  // All done!
+  return SUCCESS;
+failure:
+  return FAILURE;
+}
+
 int tychools_parse_enclave(enclave_t* enclave, const char* file)
 {
   size_t segments_size = 0;
