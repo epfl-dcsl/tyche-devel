@@ -10,3 +10,7 @@ OVMF-pure-efi.fd
 
 # Disk images
 *.qcow2
+
+# Byproducts
+*compile_commands.json
+*.cache/
