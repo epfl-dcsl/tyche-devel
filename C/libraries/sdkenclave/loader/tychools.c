@@ -42,7 +42,7 @@ int is_confidential(tyche_phdr_t tpe)
 
 int is_loadable(tyche_phdr_t tpe)
 {
-    if (tpe < USER_STACK && tpe > KERNEL_CONFIDENTIAL) {
+    if (tpe < USER_STACK || tpe > KERNEL_CONFIDENTIAL) {
       return 0;
     }
     return 1;
@@ -62,10 +62,12 @@ int tychools_init_enclave_with_cores_traps(
   }
   enclave->traps = traps;
   enclave->core_map = cores;
+  LOG("parsing enclave %s", file);
   if (tychools_parse_enclave(enclave, file) != SUCCESS) {
     ERROR("Unable to parse the enclave %s.", file);
     goto failure;
   }
+  LOG("loading enclave %s", file);
   if (tychools_load_enclave(enclave) != SUCCESS) {
     ERROR("Unable to load the enclave %s", file);
     goto failure;
@@ -155,6 +157,7 @@ int tychools_parse_enclave(enclave_t* enclave, const char* file)
   enclave->map.size = segments_size;
   
   // We are done for now, next step is to load the enclave.
+  LOG("Parsed tychools binary %s", file);
   return SUCCESS;
 close_failure:
   close(enclave->parser.fd);
@@ -190,7 +193,7 @@ int tychools_load_enclave(enclave_t* enclave)
         &(enclave->map.virtoffset)) != SUCCESS) {
     goto failure;
   }
-
+  
   // Get the physoffset.
   if (ioctl_getphysoffset_enclave(
         enclave->handle,
@@ -227,28 +230,16 @@ int tychools_load_enclave(enclave_t* enclave)
     }
 
     // Now map the segment.
-    if (is_confidential(seg.p_type) && 
-        ioctl_mprotect_enclave(
+    int conf_or_shared = is_confidential(seg.p_type)? CONFIDENTIAL : SHARED; 
+    if (ioctl_mprotect_enclave(
           enclave->handle,
           dest,
           size,
           flags,
-          CONFIDENTIAL) != SUCCESS) {
-      ERROR("Unable to map confidential segment for enclave %lld at %llx",
+          conf_or_shared) != SUCCESS) {
+      ERROR("Unable to map segment for enclave %lld at %llx",
           enclave->handle, dest);
       goto failure;
-    } else if (ioctl_mprotect_enclave(
-        enclave->handle,
-        dest,
-        size,
-        flags,
-        SHARED) != SUCCESS) {
-      ERROR("Unable to map shared segment for enclave %lld at %llx",
-          enclave->handle, dest);
-      goto failure;
-    } else {
-      ERROR("Unhandled mprotect case.");
-      abort();
     }
     // Update the current size.
     phys_size+= size;

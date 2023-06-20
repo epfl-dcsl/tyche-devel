@@ -40,17 +40,21 @@ pub struct Manifest {
     /// Kernel binary
     kern_bin: Option<BinaryInstrumentation>,
     /// Should we generate page tables.
-    #[serde(default = "default_ops")]
+    #[serde(default = "default_ops_true")]
     generate_pts: bool,
     /// Should we sort Phdrs
-    #[serde(default = "default_ops")]
+    #[serde(default = "default_ops_false")]
     sort_phdrs: bool,
     /// Destination ELF file.
     output: String,
 }
 
-fn default_ops() -> bool {
+fn default_ops_true() -> bool {
     true
+}
+
+fn default_ops_false() -> bool {
+    false
 }
 
 pub fn modify_binary(src: &PathBuf, dst: &PathBuf) {
@@ -205,9 +209,9 @@ pub fn instrument_binary(manifest: &Manifest) {
             0,
         ));
         bin.secret_data.extend(conf_content);
-        (&mut (**bin), false)
+        (&mut (**bin), manifest.sort_phdrs)
     } else {
-        (main_conf, true)
+        (main_conf, manifest.sort_phdrs)
     };
 
     // Finally write the content to the provided file.

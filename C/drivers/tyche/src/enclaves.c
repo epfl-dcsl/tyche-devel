@@ -189,13 +189,13 @@ int mprotect_enclave(
   }
   // Check the mprotect has the correct bounds.
   if (dll_is_empty(&(encl->segments)) && vstart != encl->virt_start) {
-    ERROR("Out of order specification of segment");
+    ERROR("Out of order specification of segment: wrong start");
     ERROR("Expected: %llx, got: %llx", encl->virt_start, vstart);
     goto failure;
   }
   if (!dll_is_empty(&(encl->segments)) 
       && (encl->segments.tail->vstart + encl->segments.tail->size) != vstart) {
-    ERROR("Out of order specification of segment.");
+    ERROR("Out of order specification of segment: non-contiguous.");
     ERROR("Expected %llx, got: %llx",
         (encl->segments.tail->vstart + encl->segments.tail->size), vstart);
     goto failure;

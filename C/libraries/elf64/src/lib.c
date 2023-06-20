@@ -53,6 +53,10 @@ size_t read_elf64_segments(int fd, Elf64_Ehdr eh, Elf64_Phdr** segments)
 void load_elf64_segment(int fd, void* dest, Elf64_Phdr segment)
 {
   TEST(dest != NULL);
+  // Avoid abort on platforms where ready 0 fails.
+  if (segment.p_filesz == 0) {
+    return;
+  }
   TEST(lseek(fd, segment.p_offset, SEEK_SET) == segment.p_offset);
   TEST(read(fd, dest, segment.p_filesz));
 }

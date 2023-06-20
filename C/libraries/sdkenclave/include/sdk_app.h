@@ -18,6 +18,12 @@
 
 // ——————————————— Helper functions to configure the loading ———————————————— //
 
+/// Creates an enclave by parsing environment variables.
+/// It checks whether the binary is included (ENCL_INCL=X), if it is already
+/// instrumented (TYCHOOLS=X), and if so, extracts it into ENCL_BIN.
+/// Otherwise, it uses the default_path for the enclave.
+/// The loaded_enclave, if not NULL, is set to the enclave file selected after
+/// parsing the environment variables.
 int sdk_create_enclave(
     enclave_t* encl,
     char* default_path,

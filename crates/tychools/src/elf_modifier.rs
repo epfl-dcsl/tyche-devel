@@ -1,3 +1,4 @@
+use std::cmp::Ordering;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::PathBuf;
@@ -336,7 +337,13 @@ impl ModifiedELF {
             self.segments.sort_by(|a, b| {
                 let a_addr = a.program_header.p_vaddr(DENDIAN);
                 let b_addr = b.program_header.p_vaddr(DENDIAN);
-                a_addr.cmp(&b_addr)
+                if a.program_header.p_type(DENDIAN) == TychePhdrTypes::PageTables as u32 {
+                    Ordering::Greater
+                } else if b.program_header.p_type(DENDIAN) == TychePhdrTypes::PageTables as u32 {
+                    Ordering::Less
+                } else {
+                    a_addr.cmp(&b_addr)
+                }
             });
         }
 
