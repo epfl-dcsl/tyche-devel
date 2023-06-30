@@ -6,14 +6,19 @@ It then performs an `mmap` call to the driver to allocate the necessary physical
 The enclave layout in physical memory is as follows:
 
 ````
-| ---------- segment 1 ---------- |
-| ---------- segment 2 ---------- |
+| ---------- segment 1 ---------- | phys: X
+| ---------- segment 2 ---------- | phys: X + align(size(segment 1))
 ...
-| ------------ cr3 -------------- |
-| ---------- page entry---------- |
+| ------------ cr3 -------------- | phys: sum[align(size(segment i) for i in segments] == cr3_addr
+| ---------- page entry---------- | phys: cr3_addr + 0x1000
 ...
 
 ````
+
+The page tables are generated when the value of X, the physical offset, is unknown and thus set to 0.
+The `fix_page_tables` function get the X value from the driver once physical memory is allocated.
+The segments are copied starting with segment 1 at X, etc.
+The page table entries are then patched by adding X to all the non-empty entries.
 
 ## Building applications
 
