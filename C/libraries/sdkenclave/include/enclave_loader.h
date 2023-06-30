@@ -117,8 +117,18 @@ typedef struct enclave_shared_memory_t {
   dll_elem(struct enclave_shared_memory_t, list);
 } enclave_shared_memory_t;
 
+/// In the first case, we use the bump allocator and generate page tables.
+/// In the second case, pages are already instrumented.
+typedef enum {
+  LEGACY_LOADER = 0,
+  TYCHOOL_LOADER = 1,
+} tyche_config_t;
+
 /// Configuration for the enclave, necessary for proper commit.
 typedef struct {
+  /// Determine the loader type.
+  tyche_config_t loader_type;
+
   /// The root page table for the enclave.
   usize cr3;
 

@@ -60,8 +60,10 @@ int tychools_init_enclave_with_cores_traps(
     ERROR("Null argument provided: encl(%s), file(%s)", enclave, file);
     goto failure;
   }
+  memset(enclave, 0, sizeof(enclave_t));
   enclave->traps = traps;
   enclave->core_map = cores;
+  enclave->config.loader_type = TYCHOOL_LOADER;
   LOG("parsing enclave %s", file);
   if (tychools_parse_enclave(enclave, file) != SUCCESS) {
     ERROR("Unable to parse the enclave %s.", file);
@@ -90,7 +92,6 @@ int tychools_parse_enclave(enclave_t* enclave, const char* file)
     ERROR("Enclave structure is null."); 
     goto failure;
   }
-  memset(enclave, 0, sizeof(enclave_t));
   dll_init_list(&(enclave->config.shared_sections));
   
   // Open the enclave file.
@@ -120,7 +121,7 @@ int tychools_parse_enclave(enclave_t* enclave, const char* file)
     if (segment->p_type == KERNEL_STACK) {
       enclave->config.stack = segment->p_vaddr + segment->p_memsz - STACK_OFFSET_TOP;
     }
-    // Found a shared regions.
+    // Found a shared segment.
     if (segment->p_type == KERNEL_SHARED || segment->p_type == USER_SHARED) {
       enclave_shared_memory_t *shared = malloc(sizeof(enclave_shared_memory_t));
       if (shared == NULL) {
@@ -218,6 +219,15 @@ int tychools_load_enclave(enclave_t* enclave)
     memory_access_right_t flags = translate_flags_to_tyche(seg.p_flags);
     load_elf64_segment(enclave->parser.fd, (void*) dest, seg);
 
+    // If segment is shared, fix it in the shared_segments.
+    // For now, do it in a non-efficient way.
+    enclave_shared_memory_t* shared =  NULL;
+    dll_foreach(&(enclave->config.shared_sections), shared, list) {
+      if (shared->tpe == TYCHE_SHARED_SEGMENT && shared->shared.segment->p_vaddr == seg.p_vaddr) {
+          shared->untrusted_vaddr = dest;
+      }
+    }
+
     // Fix the page tables here.
     if (seg.p_type == PAGE_TABLES) {
       uint64_t* start = (uint64_t*) dest;
@@ -251,7 +261,7 @@ int tychools_load_enclave(enclave_t* enclave)
     ERROR("Unable to set the traps for the enclave %lld", enclave->handle);
     goto failure;
   }
-
+ 
   if (ioctl_set_cores(enclave->handle, enclave->core_map) != SUCCESS) {
     ERROR("Unable to set the cores for the enclave %lld", enclave->handle);
     goto failure;

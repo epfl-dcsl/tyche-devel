@@ -3,7 +3,7 @@
     "path": "app"
   },
   "kern_bin": {
-    "path":"enclave",
+    "path":"enclave_tychools",
     "ops":[
       {
         "AddSegment":{
@@ -14,6 +14,7 @@
       },
       {
         "AddSegment":{
+          "start": 3145728, 
           "size":8192,
           "tpe":"KernelShared",
           "write":true,

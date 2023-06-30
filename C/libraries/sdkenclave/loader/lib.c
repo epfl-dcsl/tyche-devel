@@ -111,7 +111,6 @@ failure:
 
 int init_enclave(enclave_t* enclave, const char* file)
 {
-  //TODO fix the core issue
   return init_enclave_with_cores_traps(enclave, file, ALL_CORES, NO_TRAPS); 
 }
 
@@ -127,6 +126,7 @@ int init_enclave_with_cores_traps(
   }
   enclave->core_map = cores;
   enclave->traps = traps;
+  enclave->config.loader_type = LEGACY_LOADER;
   if (load_enclave(enclave) != SUCCESS) {
     ERROR("Failure to load the enclave %s", file);
     goto failure;
@@ -432,8 +432,9 @@ int delete_enclave(enclave_t* enclave)
     dll_remove(&(enclave->config.shared_sections), sec, list);
     free(sec);
   }
-  // The parser.
-  if (unmap_parser(&(enclave->parser.bump)) != SUCCESS) {
+  // The parser: the bump is only deleted if the enclave was in legacy mode.
+  if (enclave->config.loader_type == LEGACY_LOADER && 
+      unmap_parser(&(enclave->parser.bump)) != SUCCESS) {
     ERROR("Unable to munmap the bump for enclave %lld", enclave->handle);
     goto failure;
   }

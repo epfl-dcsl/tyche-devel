@@ -2,6 +2,11 @@
 #include "enclave_rt.h"
 // ———————————————————————————— Enclave sections ———————————————————————————— //
 
+
+#ifdef TYCHOOLS
+/// This is introduced by tychools.
+char *shared_buffer = (char*) 0x300000; 
+#else
 ///@warn these string constants must be the same as in enclave_rt.h
 __attribute__((section(".tyche_shared_default_buffer")))
 __attribute__ ((aligned (0x1000)))
@@ -10,6 +15,7 @@ char shared_buffer[DEFAULT_SHARED_BUFFER_SIZE];
 __attribute__((section(".tyche_enclave_stack")))
 __attribute__ ((aligned (0x1000)))
 char enclave_stack[DEFAULT_STACK_SIZE];
+#endif
 
 // ————————————————————————————————— Hooks —————————————————————————————————— //
 /// Entry point defined by the application.

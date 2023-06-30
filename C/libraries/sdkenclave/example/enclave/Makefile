@@ -1,4 +1,4 @@
-all: app enclave instrument
+all: app enclave enclave_tychools instrument
 
 
 ## ————————————————————————————————— Paths —————————————————————————————————— ##
@@ -63,8 +63,10 @@ app: $(CODE_APP) $(HDRS_APP)
 enclave: $(CODE_ENCLAVE) $(HDRS_ENCLAVE)
 	gcc -DTYCHE_USER_SPACE=1 -g $(COMMON_INCLUDES) -nostdlib -static -o $@ $(CODE_ENCLAVE) 
 
+enclave_tychools: $(CODE_ENCLAVE) $(HDRS_ENCLAVE)
+	gcc -DTYCHE_USER_SPACE=1 -DTYCHOOLS=1 -g $(COMMON_INCLUDES) -nostdlib -static -o $@ $(CODE_ENCLAVE)
 
-instrument: app enclave
+instrument: app enclave_tychools
 	cargo -C $(TYCHOOLS_PATH) install --path .
 	tychools instrument -s manifests/default.json 
 	chmod +x app_instrumented

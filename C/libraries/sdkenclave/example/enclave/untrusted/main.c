@@ -44,8 +44,10 @@ static void* find_default_shared(enclave_t* enclave)
           strlen(DEFAULT_SHARED_BUFFER_SECTION_NAME)) == 0) {
         return (void*)(shared_sec->untrusted_vaddr);
       }
-    } else if (shared_sec->shared.segment->p_type == KERNEL_SHARED) {
-      return (void*)(shared_sec->untrusted_vaddr);
+    } else if(shared_sec->tpe == TYCHE_SHARED_SEGMENT) {
+      if (shared_sec->shared.segment->p_type == KERNEL_SHARED) {
+        return (void*)(shared_sec->untrusted_vaddr);
+      }
     }
   }
   ERROR("Unable to find the shared buffer for the enclave!");
