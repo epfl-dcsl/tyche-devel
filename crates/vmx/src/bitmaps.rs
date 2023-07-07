@@ -208,6 +208,8 @@ bitflags! {
     pub struct EntryInterruptionInformationField: u32 {
         /// Deliver error code (0 = do not deliver, 1 = deliver)
         const DELIVER   = 1 << 11;
+        /// NMI unblocking due to iret
+        const NMI_UNBLOCKING = 1 << 12;
         /// Valid
         const VALID     = 1 << 31;
     }

@@ -59,7 +59,7 @@ failure:
 /// It survives the illegal access and skips the instruction.
 void malicious_handler(int signo, siginfo_t *info, void *uap)
 {
-  LOG("Handler called for address %llx", info->si_addr);
+  LOG("Handler called for address %llx and signo %d", info->si_addr, signo);
   ucontext_t *context = uap;
   //context->uc_mcontext.gregs[REG_RIP] += 6;
   has_faulted = SUCCESS;
@@ -207,10 +207,10 @@ int malicious()
   struct sigaction action;
   action.sa_flags = SA_SIGINFO;
   action.sa_sigaction = malicious_handler;
-  if (sigaction(SIGSEGV, &action, NULL) == -1) {
+  /*if (sigaction(SIGSEGV, &action, NULL) == -1) {
     ERROR("Unable to register handler");
     goto failure;
-  }
+  }*/
   if (sigaction(SIGTRAP, &action, NULL) == -1) {
     ERROR("Unable to register second handler");
     goto failure;
@@ -245,7 +245,7 @@ int breakpoint()
   LOG("Setting a handler for BREAKPOINT");
   struct sigaction sa;
   sa.sa_handler = breakpoint_handler;
-  sigemptyset(&sa.sa_mask);
+  //sigemptyset(&sa.sa_mask);
   sa.sa_flags = SA_SIGINFO;
   if (sigaction(SIGTRAP, &sa, NULL) == -1) {
     ERROR("Unable to register handler");

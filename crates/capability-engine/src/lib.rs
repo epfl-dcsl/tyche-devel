@@ -407,6 +407,7 @@ impl CapaEngine {
         domain: Handle<Domain>,
         core: usize,
         trap: u64,
+        info: u64,
     ) -> Result<(), CapaError> {
         if self.domains[domain].can_handle(trap) {
             log::error!("The domain is able to handle its own trap, why did we exit?");
@@ -417,6 +418,7 @@ impl CapaEngine {
         self.updates.push(Update::Trap {
             manager,
             trap,
+            info,
             core,
         });
         // Also update the bitmap.

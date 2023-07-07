@@ -29,8 +29,10 @@ pub enum Update {
     Trap {
         /// The manager responsible for handling the trap
         manager: Handle<Domain>,
-        /// the trap to handle
+        /// The trap to handle
         trap: u64,
+        /// Trap information
+        info: u64,
         /// Core on which the trap happenend
         core: usize,
     },
@@ -105,8 +107,13 @@ impl fmt::Display for Update {
             Update::Trap {
                 manager,
                 trap,
+                info: _,
                 core,
-            } => write!(f, "Trap({}, {}, core {})", manager, trap, core),
+            } => write!(
+                f,
+                "Trap(manager: {}, trap: {}, core: {})",
+                manager, trap, core
+            ),
             Update::UpdateTraps { trap, core } => {
                 write!(f, "UpdateTrap(bitmap {}, core {})", trap, core)
             }

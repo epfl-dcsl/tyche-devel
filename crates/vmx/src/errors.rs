@@ -1,6 +1,7 @@
 //! VMX Errors
 
-use super::bitmaps::EntryInterruptionInformationField;
+use crate::bitmaps::EntryInterruptionInformationField;
+use crate::{msr, ActiveVmcs};
 
 /// An error that occured during VMX operations.
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
@@ -186,14 +187,14 @@ pub enum VmxFieldError {
     Unknown,
 }
 
+// See Intel SDM volume 3, chapter 28.2.2
+// There are cases (such as NMI) that are not yet handled below.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct VmExitInterrupt {
-    /// Vector ID of interrupt or exception.
-    pub vector: u8,
-    /// Interruption type
-    pub int_type: InterruptionType,
-    /// Error code, if defined for the interrupt.
-    pub error_code: Option<u32>,
+    /// Raw value of the interrupt information.
+    _raw: u32,
+    /// Associated error code if it is present.
+    _error_code: u32,
 }
 
 /// Transforms a VmExitInterrupt into a valid VmEntryIntInfoField for event injection.
@@ -201,17 +202,116 @@ pub struct VmExitInterrupt {
 /// @warn apparently setting the deliver bit results in invalid ctrls fields
 /// upon a vmresume.
 impl VmExitInterrupt {
-    pub fn as_injectable_u32(&self, deliver: bool) -> u32 {
-        let mut res: u32 = 0;
-        res |= self.vector as u32;
-        res |= (self.int_type as u32) << 8;
-        // TODO: I am not sure how deliver works.
-        // It is required for PageFault, but should not be provided for breakpoint.
-        if deliver {
+    pub fn from_u32(value: u32) -> Self {
+        Self {
+            _raw: value,
+            _error_code: 0,
+        }
+    }
+
+    /// Sets the error code value.
+    /// Returns the previous value of _raw.error_code_valid.
+    pub fn set_error_code(&mut self, value: u32) -> bool {
+        let prev = self.error_code_valid();
+        self._error_code = value;
+        self.set_error_code_valid(true);
+        prev
+    }
+
+    pub fn from_info(info: u64) -> Self {
+        Self {
+            _raw: info as u32,
+            _error_code: (info >> 32) as u32,
+        }
+    }
+
+    /// Returns vector of interrupt or exception: bits 0:7.
+    pub fn vector(&self) -> u8 {
+        self._raw as u8
+    }
+
+    /// Returns Interruption type: bits 8:10
+    pub fn interrupt_type(&self) -> InterruptionType {
+        InterruptionType::from_raw(self._raw)
+    }
+
+    pub fn set_interrupt_type(&mut self, tpe: InterruptionType) {
+        let value: u32 = tpe.as_u32() << 8;
+        let mask: u32 = !((0b111) << 8);
+        self._raw &= mask;
+        self._raw |= value;
+    }
+
+    /// Returns the error code valid field: 11.
+    pub fn error_code_valid(&self) -> bool {
+        self._raw & (1 << EntryInterruptionInformationField::DELIVER.bits()) == 1
+    }
+
+    pub fn set_error_code_valid(&mut self, value: bool) {
+        let mask: u32 = !(1 << EntryInterruptionInformationField::DELIVER.bits());
+        let n_val: u32 = if value {
+            1 << EntryInterruptionInformationField::DELIVER.bits()
+        } else {
+            0
+        };
+        self._raw &= mask;
+        self._raw |= n_val;
+    }
+
+    /// Returns the NMI unblocking due to iret: 12
+    pub fn nmi_unblocking(&self) -> bool {
+        self._raw & (1 << EntryInterruptionInformationField::NMI_UNBLOCKING.bits()) == 1
+    }
+
+    /// Returns the valid bit: 31
+    pub fn valid(&self) -> bool {
+        self._raw & (1 << EntryInterruptionInformationField::VALID.bits()) == 1
+    }
+
+    /// get raw value.
+    pub fn as_u32(&self) -> u32 {
+        self._raw
+    }
+
+    /// Returns the trap number for this interrupt frame.
+    pub fn get_trap_number(&self) -> u64 {
+        let bit: u64 = self.vector() as u64;
+        1 << bit
+    }
+
+    /// Encodes the entire trap as a u64
+    pub fn as_info(&self) -> u64 {
+        ((self._error_code as u64) << 32) | (self._raw as u64)
+    }
+
+    // Create a valid injectable interrupt information.
+    pub fn create(
+        vector: Trapnr,
+        itype: InterruptionType,
+        code: Option<u32>,
+        vcpu: &ActiveVmcs<'static>,
+    ) -> VmExitInterrupt {
+        let mut res: u32 = vector.as_u8() as u32;
+        res |= itype.as_u32() << 8;
+        if code.is_some()
+            && itype == InterruptionType::HardwareException
+            && (vcpu.get_cr(crate::ControlRegister::Cr0) & 1 == 1)
+            && unsafe { msr::VMX_BASIC.read() & (1 << 56) == 0 }
+            && (vector == Trapnr::DoubleFault
+                || vector == Trapnr::InvalidTSS
+                || vector == Trapnr::SegmentNotPresentFault
+                || vector == Trapnr::StackSegmentFault
+                || vector == Trapnr::GeneralProtectionFault
+                || vector == Trapnr::PageFault
+                || vector == Trapnr::AlignmentCheck)
+        {
             res |= EntryInterruptionInformationField::DELIVER.bits();
         }
         res |= EntryInterruptionInformationField::VALID.bits();
-        return res;
+        Self {
+            _raw: res,
+            _error_code: code.unwrap_or(0),
+        }
     }
 }
 
@@ -224,6 +324,7 @@ pub enum InterruptionType {
     Reserved,
     NonMaskableInterrupt,
     HardwareException,
+    Reserved1,
     PrivilegedSoftwareException,
     SoftwareException,
     Unknown,
@@ -241,6 +342,19 @@ impl InterruptionType {
             4 => Self::PrivilegedSoftwareException,
             6 => Self::SoftwareException,
             _ => Self::Unknown,
+        }
+    }
+
+    pub fn as_u32(self) -> u32 {
+        match self {
+            Self::ExternalInterrupt => 0,
+            Self::Reserved => 1,
+            Self::NonMaskableInterrupt => 2,
+            Self::HardwareException => 3,
+            Self::Reserved1 => 4,
+            Self::PrivilegedSoftwareException => 5,
+            Self::SoftwareException => 6,
+            Self::Unknown => 7,
         }
     }
 }

@@ -402,23 +402,22 @@ impl<'vmx> ActiveVmcs<'vmx> {
     }
 
     pub fn interrupt_info(&self) -> Result<Option<VmExitInterrupt>, VmxError> {
-        let info = unsafe { fields::GuestState32Ro::VmExitInterruptInfo.vmread()? };
-        if (info & (1 << 31)) == 0 {
+        let mut info = VmExitInterrupt::from_u32(unsafe {
+            fields::GuestState32Ro::VmExitInterruptInfo.vmread()?
+        });
+        if !info.valid() {
             return Ok(None);
         }
 
-        let vector = (info & 0xFF) as u8;
-        let int_type = InterruptionType::from_raw(info);
-        let error_code = if (info & (1 << 11)) != 0 {
-            Some(unsafe { fields::GuestState32Ro::VmExitInterruptErrCode.vmread()? })
-        } else {
-            None
-        };
-        Ok(Some(VmExitInterrupt {
-            vector,
-            int_type,
-            error_code,
-        }))
+        if info.error_code_valid() {
+            _ = info.set_error_code(unsafe {
+                {
+                    fields::GuestState32Ro::VmExitInterruptErrCode.vmread()?
+                }
+            });
+        }
+
+        Ok(Some(info))
     }
 
     /// Initializes the MSR bitmaps, default to deny all reads and writes.

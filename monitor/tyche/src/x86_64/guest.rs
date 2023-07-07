@@ -273,13 +273,18 @@ fn handle_exit(
 
             //TODO: replace this with proper handler for interrupts.
             if domain.idx() == 0 {
-                let interrupt = VmExitInterrupt {
-                    vector: Trapnr::Breakpoint.as_u8(),
-                    int_type: InterruptionType::HardwareException,
-                    error_code: None,
-                };
-                let flags = interrupt.as_injectable_u32(false);
-                vcpu.set_vm_entry_interruption_information(flags)
+                let interrupt = VmExitInterrupt::create(
+                    Trapnr::Breakpoint,
+                    InterruptionType::HardwareException,
+                    None,
+                    vcpu,
+                );
+                // Inject the interrupt.
+                log::debug!(
+                    "Replace EPT violation with exception: {:b}",
+                    interrupt.as_u32()
+                );
+                vcpu.set_vm_entry_interruption_information(interrupt.as_u32())
                     .expect("Unable to inject an exception");
                 return Ok(HandlerResult::Resume);
             }
@@ -336,41 +341,27 @@ fn handle_exit(
             match vcpu.interrupt_info() {
                 Ok(Some(exit)) => {
                     // The domain exited, so it shouldn't be able to handle it.
-                    match monitor::handle_trap(*domain, cpuid(), 1 << (exit.vector as u64)) {
+                    log::debug!(
+                        "EXCEPTION RECEIVED {:b}, vector: {:?}, type: {:?}",
+                        exit.as_u32(),
+                        exit.vector(),
+                        exit.interrupt_type()
+                    );
+                    match monitor::handle_trap(*domain, cpuid(), exit) {
                         Ok(()) => {
-                            log::debug!("Received exception {}, re-routing it", exit.vector);
+                            log::debug!("Received exception {}, re-routing it", exit.vector());
                             Ok(HandlerResult::Resume)
                         }
                         Err(e) => {
                             log::error!(
                                 "Unable to handle the exception {}, capa error:{:?}",
-                                exit.vector,
+                                exit.vector(),
                                 e
                             );
                             log::error!("{:?}", vcpu);
                             Ok(HandlerResult::Crash)
                         }
                     }
-
-                    /*log::info!("Exception: {:?}", exit);
-                    if exit.int_type == vmx::InterruptionType::HardwareException
-                        && exit.vector == 14
-                    {
-                        // This is a page fault
-                        log::info!(
-                            "    Page fault at 0x{:x}",
-                            vcpu.exit_qualification()
-                                .expect("Missing VM Exit qualification")
-                                .raw
-                        );
-                    }
-                    log::error!("VM received an exception");
-                    log::info!("{:?}", vcpu);
-                    Ok(HandlerResult::Crash)*/
-                    // Inject the fault back into the guest.
-                    // let injection = exit.as_injectable_u32();
-                    // vcpu.set_vm_entry_interruption_information(injection)?;
-                    // Ok(HandlerResult::Resume)
                 }
                 _ => {
                     log::error!("VM received an exception");

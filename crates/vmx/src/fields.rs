@@ -188,7 +188,7 @@ pub enum Ctrl32 {
     VmEntryMsrLoadCount           = 0x00004014,
     VmEntryIntInfoField           = 0x00004016,
     VmEntryExceptErrCode          = 0x00004018,
-    VmEntryInstrLenght            = 0x0000401A,
+    VmEntryInstrLength            = 0x0000401A,
     TprThreshold                  = 0x0000401C,
     SecondaryProcBasedVmExecCtrls = 0x0000401E,
     PleGap                        = 0x00004020,

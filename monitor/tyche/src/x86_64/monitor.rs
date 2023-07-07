@@ -220,9 +220,13 @@ pub fn do_debug() {
 }
 // —————————————————————— Interrupt Handling functions —————————————————————— //
 
-pub fn handle_trap(current: Handle<Domain>, core: usize, trap: u64) -> Result<(), CapaError> {
+pub fn handle_trap(
+    current: Handle<Domain>,
+    core: usize,
+    trap: VmExitInterrupt,
+) -> Result<(), CapaError> {
     let mut engine = CAPA_ENGINE.lock();
-    engine.handle_trap(current, core, trap)?;
+    engine.handle_trap(current, core, trap.get_trap_number(), trap.as_info())?;
     apply_updates(&mut engine);
     Ok(())
 }
@@ -240,6 +244,7 @@ enum CoreUpdate {
     Trap {
         manager: Handle<Domain>,
         trap: u64,
+        info: u64,
     },
     UpdateTrap {
         bitmap: u64,
@@ -272,10 +277,15 @@ fn apply_updates(engine: &mut MutexGuard<CapaEngine>) {
             capa_engine::Update::Trap {
                 manager,
                 trap,
+                info,
                 core,
             } => {
                 let mut core_updates = CORE_UPDATES[core as usize].lock();
-                core_updates.push(CoreUpdate::Trap { manager, trap });
+                core_updates.push(CoreUpdate::Trap {
+                    manager,
+                    trap,
+                    info,
+                });
             }
             capa_engine::Update::TlbShootdown { core } => {
                 let mut core_updates = CORE_UPDATES[core as usize].lock();
@@ -328,7 +338,11 @@ pub fn apply_core_updates(
                 // Update the current domain and context handle
                 *current_domain = domain;
             }
-            CoreUpdate::Trap { manager, trap } => {
+            CoreUpdate::Trap {
+                manager,
+                trap,
+                info,
+            } => {
                 log::trace!("Trap {} on core {}", trap, core_id);
                 log::debug!(
                     "Exception Bitmap is {:b}",
@@ -349,18 +363,18 @@ pub fn apply_core_updates(
                 );
 
                 // Inject exception now.
-                // The problem is that the call is in the driver, and thus the kernel module fails.
-                // Once we manage to move it to the lib instead, we'll be good.
-                let interrupt = VmExitInterrupt {
-                    vector: Trapnr::from_u64(trap),
-                    int_type: vmx::InterruptionType::HardwareException,
-                    error_code: None,
-                };
-                let flags = interrupt.as_injectable_u32(false);
-                vcpu.set_vm_entry_interruption_information(flags)
+                let mut interrupt = VmExitInterrupt::from_info(info);
+                log::debug!("The info to inject: {:b}", interrupt.as_u32(),);
+
+                //TODO  For the moment apparenlty we can't reinject the error as is.
+                //Figure out how to solve this.
+                interrupt.set_interrupt_type(vmx::InterruptionType::HardwareException);
+                // We rewrite the value because it is cleared on every VM exit.
+                vcpu.set_vm_entry_interruption_information(interrupt.as_u32())
                     .expect("Unable to inject an exception");
 
                 // Set parameters
+                // TODO this could be a way to signal an error.
                 //vcpu.set(Register::Rax, trap);
 
                 // Update the current domain
@@ -470,8 +484,9 @@ impl core::fmt::Display for CoreUpdate {
             CoreUpdate::Trap {
                 manager,
                 trap: interrupt,
+                info: inf,
             } => {
-                write!(f, "Trap({}, {})", manager, interrupt)
+                write!(f, "Trap({}, {} | {:b})", manager, interrupt, inf)
             }
             CoreUpdate::UpdateTrap { bitmap } => {
                 write!(f, "UpdateTrap({:b})", bitmap)
