@@ -8,6 +8,7 @@ use capa_engine::{Domain, Handle};
 use stage_two_abi::{GuestInfo, Manifest};
 pub use vmx::{ActiveVmcs, ControlRegister, VmxError as BackendError};
 
+use super::guest::VmxState;
 use super::{arch, cpuid, launch_guest, monitor, vmx_helper};
 use crate::allocator;
 use crate::debug::qemu;
@@ -53,10 +54,10 @@ pub fn arch_entry_point(log_level: log::LevelFilter) -> ! {
         BSP_READY.store(true, Ordering::SeqCst);
 
         // SAFETY: only called once on the BSP
-        let (vcpu, domain) = unsafe { create_vcpu(&manifest.info) };
+        let (vmx_state, domain) = unsafe { create_vcpu(&manifest.info) };
 
         // Launch guest and exit
-        launch_guest(manifest, vcpu, domain);
+        launch_guest(manifest, vmx_state, domain);
         qemu::exit(qemu::ExitCode::Success);
     }
     // The APs spin until the manifest is fetched, and then initialize the second stage
@@ -80,14 +81,14 @@ pub fn arch_entry_point(log_level: log::LevelFilter) -> ! {
         log::info!("CPU{}: Waiting on mailbox", cpuid);
 
         // SAFETY: only called once on the BSP
-        let (vcpu, domain) = unsafe {
-            let (mut vcpu, domain) = create_vcpu(&manifest.info);
-            wait_on_mailbox(manifest, &mut vcpu, cpuid);
-            (vcpu, domain)
+        let (vmx_state, domain) = unsafe {
+            let (mut vmx_state, domain) = create_vcpu(&manifest.info);
+            wait_on_mailbox(manifest, &mut vmx_state.vcpu, cpuid);
+            (vmx_state, domain)
         };
 
         // Launch guest and exit
-        launch_guest(manifest, vcpu, domain);
+        launch_guest(manifest, vmx_state, domain);
         qemu::exit(qemu::ExitCode::Success);
     }
 }
@@ -161,7 +162,7 @@ unsafe fn wait_on_mailbox(manifest: &Manifest, vcpu: &mut ActiveVmcs<'static>, c
 // —————————————————————————————————— VCPU —————————————————————————————————— //
 
 /// SAFETY: should only be called once per physical core
-unsafe fn create_vcpu(info: &GuestInfo) -> (vmx::ActiveVmcs<'static>, Handle<Domain>) {
+unsafe fn create_vcpu(info: &GuestInfo) -> (VmxState, Handle<Domain>) {
     let allocator = allocator::allocator();
     let vmxon_frame = allocator
         .allocate_frame()
@@ -179,5 +180,5 @@ unsafe fn create_vcpu(info: &GuestInfo) -> (vmx::ActiveVmcs<'static>, Handle<Dom
     drop(allocator);
     vmx_helper::init_vcpu(&mut vcpu, info);
     let domain = monitor::init_vcpu(&mut vcpu);
-    (vcpu, domain)
+    (VmxState { vcpu, vmxon }, domain)
 }

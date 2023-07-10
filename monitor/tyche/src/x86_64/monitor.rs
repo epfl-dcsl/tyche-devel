@@ -15,6 +15,7 @@ use vmx::errors::Trapnr;
 use vmx::{ActiveVmcs, ControlRegister, Register, VmExitInterrupt};
 
 use super::cpuid;
+use super::guest::VmxState;
 use crate::allocator::allocator;
 use crate::statics::NB_CORES;
 
@@ -301,11 +302,12 @@ fn apply_updates(engine: &mut MutexGuard<CapaEngine>) {
 
 /// Updates that must be applied to a given core.
 pub fn apply_core_updates(
-    vcpu: &mut ActiveVmcs<'static>,
+    vmx_state: &mut VmxState,
     current_domain: &mut Handle<Domain>,
     core_id: usize,
 ) {
     let core = cpuid();
+    let vcpu = &mut vmx_state.vcpu;
     let mut update_queue = CORE_UPDATES[core_id].lock();
     while let Some(update) = update_queue.pop() {
         log::trace!("Core Update: {}", update);

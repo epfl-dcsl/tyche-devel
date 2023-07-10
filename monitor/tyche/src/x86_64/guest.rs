@@ -6,7 +6,7 @@ use capa_engine::{Domain, Handle, LocalCapa, NextCapaToken};
 use vmx::bitmaps::exit_qualification;
 use vmx::errors::Trapnr;
 use vmx::{
-    ActiveVmcs, ControlRegister, InterruptionType, Register, VmExitInterrupt, VmxExitReason,
+    ActiveVmcs, ControlRegister, InterruptionType, Register, VmExitInterrupt, VmxExitReason, Vmxon,
 };
 
 use super::{cpuid, monitor};
@@ -20,17 +20,25 @@ pub enum HandlerResult {
     Crash,
 }
 
-pub fn main_loop(mut vcpu: ActiveVmcs<'static>, mut domain: Handle<Domain>) {
+/// VMXState encapsulates the vmxon and current vcpu.
+/// The vcpu is subject to changes, but the vmxon remains the same
+/// for the entire execution.
+pub struct VmxState {
+    pub vcpu: ActiveVmcs<'static>,
+    pub vmxon: Vmxon,
+}
+
+pub fn main_loop(mut vmx_state: VmxState, mut domain: Handle<Domain>) {
     let core_id = cpuid();
-    let mut result = unsafe { vcpu.launch() };
+    let mut result = unsafe { vmx_state.vcpu.launch() };
     loop {
         let exit_reason = match result {
             Ok(exit_reason) => {
-                let res = handle_exit(&mut vcpu, exit_reason, &mut domain)
+                let res = handle_exit(&mut vmx_state, exit_reason, &mut domain)
                     .expect("Failed to handle VM exit");
 
                 // Apply core-local updates before returning
-                monitor::apply_core_updates(&mut vcpu, &mut domain, core_id);
+                monitor::apply_core_updates(&mut vmx_state, &mut domain, core_id);
 
                 res
             }
@@ -45,15 +53,16 @@ pub fn main_loop(mut vcpu: ActiveVmcs<'static>, mut domain: Handle<Domain>) {
             break;
         }
         // Resume VM
-        result = unsafe { vcpu.resume() };
+        result = unsafe { vmx_state.vcpu.resume() };
     }
 }
 
 fn handle_exit(
-    vcpu: &mut ActiveVmcs<'static>,
+    vmx_state: &mut VmxState,
     reason: vmx::VmxExitReason,
     domain: &mut Handle<Domain>,
 ) -> Result<HandlerResult, TycheError> {
+    let vcpu = &mut vmx_state.vcpu;
     let dump = |vcpu: &mut ActiveVmcs| {
         let rip = vcpu.get(Register::Rip);
         let rax = vcpu.get(Register::Rax);

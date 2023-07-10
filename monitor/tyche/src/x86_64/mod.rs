@@ -13,23 +13,20 @@ pub use init::arch_entry_point;
 use stage_two_abi::Manifest;
 pub use vmx::{ActiveVmcs, VmxError as BackendError};
 
+use self::guest::VmxState;
 use crate::debug::qemu;
 use crate::debug::qemu::ExitCode;
 
 // —————————————————————————————— x86_64 Arch ——————————————————————————————— //
 
-pub fn launch_guest(
-    manifest: &'static Manifest,
-    vcpu: ActiveVmcs<'static>,
-    domain: Handle<Domain>,
-) {
+pub fn launch_guest(manifest: &'static Manifest, vmx_state: VmxState, domain: Handle<Domain>) {
     if !manifest.info.loaded {
         log::warn!("No guest found, exiting");
         return;
     }
 
     log::info!("Starting main loop");
-    guest::main_loop(vcpu, domain);
+    guest::main_loop(vmx_state, domain);
 
     qemu::exit(qemu::ExitCode::Success);
 }
