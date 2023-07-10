@@ -275,7 +275,7 @@ fn handle_exit(
             if domain.idx() == 0 {
                 let interrupt = VmExitInterrupt::create(
                     Trapnr::Breakpoint,
-                    InterruptionType::HardwareException,
+                    InterruptionType::SoftwareException,
                     None,
                     vcpu,
                 );
@@ -284,7 +284,7 @@ fn handle_exit(
                     "Replace EPT violation with exception: {:b}",
                     interrupt.as_u32()
                 );
-                vcpu.set_vm_entry_interruption_information(interrupt.as_u32())
+                vcpu.inject_interrupt(interrupt)
                     .expect("Unable to inject an exception");
                 return Ok(HandlerResult::Resume);
             }

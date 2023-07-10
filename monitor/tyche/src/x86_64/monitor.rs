@@ -363,14 +363,11 @@ pub fn apply_core_updates(
                 );
 
                 // Inject exception now.
-                let mut interrupt = VmExitInterrupt::from_info(info);
+                let interrupt = VmExitInterrupt::from_info(info);
                 log::debug!("The info to inject: {:b}", interrupt.as_u32(),);
 
-                //TODO  For the moment apparenlty we can't reinject the error as is.
-                //Figure out how to solve this.
-                interrupt.set_interrupt_type(vmx::InterruptionType::HardwareException);
                 // We rewrite the value because it is cleared on every VM exit.
-                vcpu.set_vm_entry_interruption_information(interrupt.as_u32())
+                vcpu.inject_interrupt(interrupt)
                     .expect("Unable to inject an exception");
 
                 // Set parameters

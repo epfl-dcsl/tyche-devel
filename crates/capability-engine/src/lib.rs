@@ -36,7 +36,7 @@ pub mod config {
     pub const NB_CORES: usize = 64; // NOTE: Can't be greater than 64 as we use 64 bits bitmaps.
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CapaError {
     CannotDuplicate,
     InvalidDuplicate,

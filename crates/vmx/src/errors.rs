@@ -258,6 +258,10 @@ impl VmExitInterrupt {
         self._raw |= n_val;
     }
 
+    pub fn error_code(&self) -> u32 {
+        self._error_code
+    }
+
     /// Returns the NMI unblocking due to iret: 12
     pub fn nmi_unblocking(&self) -> bool {
         self._raw & (1 << EntryInterruptionInformationField::NMI_UNBLOCKING.bits()) == 1
@@ -324,7 +328,7 @@ pub enum InterruptionType {
     Reserved,
     NonMaskableInterrupt,
     HardwareException,
-    Reserved1,
+    SoftwareInterrupt,
     PrivilegedSoftwareException,
     SoftwareException,
     Unknown,
@@ -339,7 +343,8 @@ impl InterruptionType {
             1 => Self::Reserved,
             2 => Self::NonMaskableInterrupt,
             3 => Self::HardwareException,
-            4 => Self::PrivilegedSoftwareException,
+            4 => Self::SoftwareInterrupt,
+            5 => Self::PrivilegedSoftwareException,
             6 => Self::SoftwareException,
             _ => Self::Unknown,
         }
@@ -351,7 +356,7 @@ impl InterruptionType {
             Self::Reserved => 1,
             Self::NonMaskableInterrupt => 2,
             Self::HardwareException => 3,
-            Self::Reserved1 => 4,
+            Self::SoftwareInterrupt => 4,
             Self::PrivilegedSoftwareException => 5,
             Self::SoftwareException => 6,
             Self::Unknown => 7,

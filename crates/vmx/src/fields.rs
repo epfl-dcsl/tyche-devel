@@ -374,7 +374,7 @@ pub enum GuestState32Ro {
     VmExitInterruptErrCode  = 0x00004406,
     IdtVecoringInfoField    = 0x00004408,
     IdtVectoringErrCode     = 0x0000440A,
-    VmExitInstructionLenght = 0x0000440C,
+    VmExitInstructionLength = 0x0000440C,
     VmExitInstructionInfo   = 0x0000440E,
 }
 

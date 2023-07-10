@@ -23,6 +23,7 @@ use bitmaps::{
     PrimaryControls, SecondaryControls,
 };
 use fields::traits::*;
+use fields::GuestState32Ro;
 pub use utils::{Frame, GuestPhysAddr, GuestVirtAddr, HostPhysAddr, HostVirtAddr};
 
 pub use crate::errors::{
@@ -366,7 +367,7 @@ impl<'vmx> ActiveVmcs<'vmx> {
     /// lenght is not updated until VM exits again.
     pub fn next_instruction(&mut self) -> Result<(), VmxError> {
         // TODO: Chech that instr-len is availlable on all CPU, remove Result if that's the case.
-        let instr_len = unsafe { fields::GuestState32Ro::VmExitInstructionLenght.vmread()? as u64 };
+        let instr_len = unsafe { fields::GuestState32Ro::VmExitInstructionLength.vmread()? as u64 };
         let rip = self.get(Register::Rip);
         Ok(self.set(Register::Rip, rip + instr_len))
     }
@@ -571,6 +572,27 @@ impl<'vmx> ActiveVmcs<'vmx> {
                 .vmwrite(flags)
                 .map_err(|err| err.set_field(VmxFieldError::VmEntryIntInfoField))
         }
+    }
+
+    pub fn inject_interrupt(&mut self, interrupt: VmExitInterrupt) -> Result<(), VmxError> {
+        if !interrupt.valid() {
+            log::debug!("called inject_interrupt on non-valid interrupt");
+            return Ok(());
+        }
+        self.set_vm_entry_interruption_information(interrupt.as_u32())?;
+        // According to the documentation we need to write the instruction length.
+        unsafe {
+            let instr_len = GuestState32Ro::VmExitInstructionLength.vmread()?;
+            fields::Ctrl32::VmEntryInstrLength.vmwrite(instr_len)?;
+        }
+
+        // Check if we need to set an error code.
+        if interrupt.error_code_valid() {
+            unsafe {
+                fields::Ctrl32::VmEntryExceptErrCode.vmwrite(interrupt.error_code())?;
+            }
+        }
+        Ok(())
     }
 
     /// Sets the Cr0 guest/host mask.
