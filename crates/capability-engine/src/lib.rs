@@ -16,7 +16,7 @@ use capa::Capa;
 pub use capa::{capa_type, CapaInfo};
 use cores::{Core, CoreList};
 use domain::{insert_capa, remove_capa, DomainHandle, DomainPool};
-pub use domain::{permission, Domain, LocalCapa, NextCapaToken};
+pub use domain::{permission, Domain, LocalCapa, NextCapaToken, VcpuType};
 use gen_arena::GenArena;
 pub use gen_arena::Handle;
 pub use region::{AccessRights, RegionTracker};
@@ -54,6 +54,7 @@ pub enum CapaError {
     CouldNotHandleTrap,
     ValidTrapCausedExit,
     InvalidSwitch,
+    InvalidVcpuType,
 }
 
 pub struct CapaEngine {
@@ -121,7 +122,11 @@ impl CapaEngine {
         Ok(())
     }
 
-    pub fn create_domain(&mut self, manager: Handle<Domain>) -> Result<LocalCapa, CapaError> {
+    pub fn create_domain(
+        &mut self,
+        manager: Handle<Domain>,
+        security: VcpuType,
+    ) -> Result<LocalCapa, CapaError> {
         log::trace!("Create new domain");
 
         // Enforce permissions
@@ -131,6 +136,7 @@ impl CapaEngine {
         match self.domains.allocate(Domain::new(id)) {
             Some(handle) => {
                 self.domains[handle].set_manager(manager);
+                self.domains[handle].set_vcpu_type(security);
                 let capa = insert_capa(
                     manager,
                     Capa::management(handle),
@@ -336,7 +342,7 @@ impl CapaEngine {
         self.updates.push(Update::SealUpdate {
             domain: target,
             core: core,
-            is_vm: self.domains[target].is_vm(),
+            vcpu: self.domains[target].get_vcpu_type(),
         });
         Ok(capa)
     }

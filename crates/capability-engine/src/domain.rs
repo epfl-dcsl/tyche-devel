@@ -85,6 +85,25 @@ pub const ALLOW_ALL_CORES: u64 = !ALLOW_NO_CORES;
 /// The default core for domain initialization.
 pub const DEFAULT_CORE: u64 = 0;
 
+#[derive(Debug, Clone, Copy)]
+#[repr(u8)]
+pub enum VcpuType {
+    Shared = 0,
+    Copied = 1,
+    Fresh = 2,
+}
+
+impl VcpuType {
+    pub fn from_usize(val: usize) -> Result<Self, CapaError> {
+        match val {
+            0 => Ok(Self::Shared),
+            1 => Ok(Self::Copied),
+            2 => Ok(Self::Fresh),
+            _ => Err(CapaError::InvalidVcpuType),
+        }
+    }
+}
+
 pub struct Domain {
     /// Unique domain ID.
     id: usize,
@@ -108,8 +127,8 @@ pub struct Domain {
     is_being_revoked: bool,
     /// Is the domain sealed?
     is_sealed: bool,
-    /// Is the domain vcpu-isolated?
-    is_vm: bool,
+    /// type of vcpu
+    vcpu_type: VcpuType,
 }
 
 impl Domain {
@@ -128,12 +147,16 @@ impl Domain {
             core_map: ALLOW_NO_CORES,
             is_being_revoked: false,
             is_sealed: false,
-            is_vm: false,
+            vcpu_type: VcpuType::Copied,
         }
     }
 
     pub(crate) fn set_manager(&mut self, manager: Handle<Domain>) {
         self.manager = Some(manager);
+    }
+
+    pub(crate) fn set_vcpu_type(&mut self, tpe: VcpuType) {
+        self.vcpu_type = tpe;
     }
 
     /// Get a capability from a domain.
@@ -213,8 +236,8 @@ impl Domain {
         self.is_sealed
     }
 
-    pub fn is_vm(&self) -> bool {
-        self.is_vm
+    pub fn get_vcpu_type(&self) -> VcpuType {
+        self.vcpu_type
     }
 
     fn is_valid(&self, idx: usize, regions: &RegionPool, domains: &DomainPool) -> bool {

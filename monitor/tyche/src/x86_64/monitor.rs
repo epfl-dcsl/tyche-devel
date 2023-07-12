@@ -3,7 +3,7 @@
 use capa_engine::config::NB_DOMAINS;
 use capa_engine::{
     permission, AccessRights, Buffer, CapaEngine, CapaError, CapaInfo, Domain, Handle, LocalCapa,
-    NextCapaToken,
+    NextCapaToken, VcpuType,
 };
 use mmu::eptmapper::EPT_ROOT_FLAGS;
 use mmu::{EptMapper, FrameAllocator};
@@ -102,9 +102,10 @@ fn get_context(domain: Handle<Domain>, core: usize) -> MutexGuard<'static, Conte
 
 // ————————————————————————————— Monitor Calls —————————————————————————————— //
 
-pub fn do_create_domain(current: Handle<Domain>) -> Result<LocalCapa, CapaError> {
+pub fn do_create_domain(current: Handle<Domain>, security: usize) -> Result<LocalCapa, CapaError> {
+    let security = VcpuType::from_usize(security)?;
     let mut engine = CAPA_ENGINE.lock();
-    let management_capa = engine.create_domain(current)?;
+    let management_capa = engine.create_domain(current, security)?;
     apply_updates(&mut engine);
     Ok(management_capa)
 }
@@ -255,7 +256,7 @@ enum CoreUpdate {
     TlbShootdown,
     SealUpdate {
         domain: Handle<Domain>,
-        is_vm: bool,
+        vcpu_type: VcpuType,
     },
     Switch {
         domain: Handle<Domain>,
@@ -279,13 +280,12 @@ fn apply_updates(engine: &mut MutexGuard<CapaEngine>) {
         match update {
             // Updates that can be handled locally
             capa_engine::Update::PermissionUpdate { domain } => update_permission(domain, engine),
-            capa_engine::Update::SealUpdate {
-                domain,
-                core,
-                is_vm,
-            } => {
+            capa_engine::Update::SealUpdate { domain, core, vcpu } => {
                 let mut core_updates = CORE_UPDATES[core].lock();
-                core_updates.push(CoreUpdate::SealUpdate { domain, is_vm });
+                core_updates.push(CoreUpdate::SealUpdate {
+                    domain,
+                    vcpu_type: vcpu,
+                });
             }
             capa_engine::Update::RevokeDomain { domain } => revoke_domain(domain),
             capa_engine::Update::CreateDomain { domain } => create_domain(domain),
@@ -349,7 +349,7 @@ pub fn apply_core_updates(
                 ))
                 .expect("VMX error, failed to set EPT pointer");
             }
-            CoreUpdate::SealUpdate { domain, is_vm } => {
+            CoreUpdate::SealUpdate { domain, vcpu_type } => {
                 let mut dom_ctxt = get_context(domain, core);
                 let allocator = allocator();
                 let vmcs = allocator
@@ -357,12 +357,13 @@ pub fn apply_core_updates(
                     .expect("Unable to allocate a vmcs")
                     .zeroed();
                 dom_ctxt.vmcs = Some(vmcs);
-                if is_vm {
-                    //TODO make the code better.
-                    vmx_state.vmxon.init_frame(vmcs)
-                } else {
-                    // Just copy the current vmcs into the new one.
-                    vcpu.copy_into(vmcs);
+                match vcpu_type {
+                    VcpuType::Fresh => vmx_state.vmxon.init_frame(vmcs),
+                    VcpuType::Copied => {
+                        // Just copy the current vmcs.
+                        vcpu.copy_into(vmcs);
+                    }
+                    _ => {}
                 }
             }
             CoreUpdate::Switch {
@@ -540,13 +541,13 @@ impl core::fmt::Display for CoreUpdate {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             CoreUpdate::TlbShootdown => write!(f, "TLB Shootdown"),
-            CoreUpdate::SealUpdate { domain, is_vm } => {
+            CoreUpdate::SealUpdate { domain, vcpu_type } => {
                 write!(
                     f,
-                    "SealUpdate({}, core {}, is_vm {})",
+                    "SealUpdate({}, core {}, vcpu_type {:?})",
                     domain,
                     cpuid(),
-                    is_vm
+                    vcpu_type
                 )
             }
             CoreUpdate::Switch { domain, .. } => write!(f, "Switch({})", domain),
