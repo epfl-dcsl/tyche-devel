@@ -34,12 +34,13 @@ int tyche_call(vmcall_frame_t* frame)
   return (int)result;
 } 
 
-int tyche_create_domain(capa_index_t* management) {
+int tyche_create_domain(capa_index_t* management, security_vcpu_t security) {
   vmcall_frame_t frame;
   if (management == NULL) {
     goto fail;
   }
   frame.vmcall = TYCHE_CREATE_DOMAIN;
+  frame.arg_1 = security;
   if (tyche_call(&frame) != SUCCESS) {
     goto fail;
   }

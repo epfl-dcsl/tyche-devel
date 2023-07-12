@@ -37,12 +37,14 @@ typedef enum domain_status_t {
 } domain_status_t;
 
 /// Type of security domain.
-typedef enum security_domain_t {
-  /// This is useful for confidential VMs.
-  FreshVCPU = 0,
-  /// This is useful for enclaves and compartments.
+typedef enum security_vcpu_t {
+  /// Reference the same vcpu.
+  SameVCPU = 0,
+  /// New VCPU, copy state.
   CopyVCPU = 1,
-} security_domain_t;
+  /// New VCPU, raw (for VMs).
+  FreshVCPU = 2,
+} security_vcpu_t;
 
 /// Region Access Rights
 typedef enum memory_access_right_t {

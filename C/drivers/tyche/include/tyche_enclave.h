@@ -86,5 +86,6 @@ typedef struct {
 #define TYCHE_DEBUG_ADDR _IOWR('a', 'h', msg_enclave_info_t*)
 #define TYCHE_ENCLAVE_SET_TRAPS _IOWR('a', 'i', msg_set_perm_t)
 #define TYCHE_ENCLAVE_SET_CORES _IOWR('a', 'j', msg_set_perm_t)
+#define TYCHE_ENCLAVE_SET_SECURITY _IOWR('a', 'k', msg_set_perm_t)
 
 #endif

@@ -184,6 +184,23 @@ long tyche_ioctl(struct file* handle, unsigned int cmd, unsigned long arg)
         goto failure;
       }
       break;
+    case TYCHE_ENCLAVE_SET_SECURITY:
+      if (copy_from_user(
+            &perm,
+            (msg_set_perm_t*) arg,
+            sizeof(msg_set_perm_t))) {
+            ERROR("Unable to copy perm arguments from user");
+            goto failure;
+          }
+      if (perm.value < SameVCPU || perm.value > FreshVCPU) {
+        ERROR("Invalid vcpu security value.");
+        goto failure;
+      }
+      if (set_security(handle, perm.value) != SUCCESS) {
+        ERROR("Setting security vcpu failed for enclave %p", handle);
+        goto failure;
+      }
+      break;
     case TYCHE_ENCLAVE_MPROTECT:
       if (copy_from_user(
             &mprotect,

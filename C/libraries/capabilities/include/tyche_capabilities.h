@@ -17,7 +17,7 @@ int init(capa_alloc_t allocator, capa_dealloc_t deallocator);
 
 /// Creates a new domain.
 /// Sets the result inside the provided id handle.
-int create_domain(domain_id_t* id);
+int create_domain(domain_id_t* id, security_vcpu_t security);
 
 /// Seal the domain.
 /// This function first creates a channel for the child domain and then seals it.

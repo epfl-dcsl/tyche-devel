@@ -45,6 +45,9 @@ typedef struct enclave_t {
   /// The enclave's domain id.
   domain_id_t domain_id;
 
+  /// The security level of the vcpu for the enclave.
+  security_vcpu_t security;
+
   /// The start of the enclave's physical contiguous memory region.
   usize phys_start;
 
@@ -94,6 +97,8 @@ int mprotect_enclave(
 int set_traps(enclave_handle_t handle, usize traps);
 /// Register the core map for the enclave.
 int set_cores(enclave_handle_t handle, usize core_map);
+/// Change the security level of the enclave.
+int set_security(enclave_handle_t handle, security_vcpu_t security);
 /// Commits the enclave. This is where the capability operations are done.
 int commit_enclave(enclave_handle_t handle, usize cr3, usize rip, usize rsp);
 /// Implements the transition into an enclave.

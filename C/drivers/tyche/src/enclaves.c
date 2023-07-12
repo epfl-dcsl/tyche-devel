@@ -12,6 +12,7 @@
 #include "enclaves.h"
 #include "dbg_addresses.h"
 #include "tyche_capabilities.h"
+#include "tyche_capabilities_types.h"
 #include "tyche_enclave.h"
 
 // ———————————————————————————————— Globals ————————————————————————————————— //
@@ -71,6 +72,8 @@ int create_enclave(enclave_handle_t handle)
   encl->phys_start = UNINIT_USIZE;
   encl->virt_start = UNINIT_USIZE;
   encl->size = UNINIT_USIZE;
+  // Default security level: copy the vcpu.
+  encl->security = CopyVCPU;
   dll_init_list(&(encl->segments));
   dll_init_elem(encl, list);
 
@@ -252,6 +255,19 @@ failure:
   return FAILURE;
 }
 
+int set_security(enclave_handle_t handle, security_vcpu_t security)
+{
+  enclave_t* encl = find_enclave(handle);
+  if (encl == NULL) {
+    ERROR("Unable to find the enclave");
+    goto failure;
+  }
+  encl->security = security;
+  return SUCCESS;
+failure:
+  return FAILURE;
+}
+
 int commit_enclave(enclave_handle_t handle, usize cr3, usize rip, usize rsp)
 {
   usize vbase = 0;
@@ -287,7 +303,7 @@ int commit_enclave(enclave_handle_t handle, usize cr3, usize rip, usize rsp)
   }
 
   // All checks are done, call into the capability library.
-  if (create_domain(&(encl->domain_id)) != SUCCESS) {
+  if (create_domain(&(encl->domain_id), encl->security) != SUCCESS) {
     ERROR("Monitor rejected the creation of a domain for enclave %p", handle);
     goto failure;
   }
