@@ -1,7 +1,7 @@
 use std::fmt::Write;
 
 use capa_engine::{
-    permission, AccessRights, CapaEngine, Domain, Handle, NextCapaToken, RegionTracker,
+    permission, AccessRights, CapaEngine, Domain, Handle, NextCapaToken, RegionTracker, VcpuType,
 };
 
 /// Snapshot testing
@@ -90,7 +90,7 @@ fn scenario_1() {
     snap!("{}", updates(&mut engine));
 
     // Create a new domain and send the inactive region there
-    let dom2 = engine.create_domain(domain).unwrap();
+    let dom2 = engine.create_domain(domain, VcpuType::Shared).unwrap();
     let domain2 = engine.get_domain_capa(domain, dom2).unwrap();
     engine.send(domain, reg2, dom2).unwrap();
     snap!(
@@ -177,7 +177,7 @@ fn scenario_2() {
     );
 
     // Create a new domain and send a region there
-    let dom2 = engine.create_domain(domain).unwrap();
+    let dom2 = engine.create_domain(domain, VcpuType::Shared).unwrap();
     let domain2 = engine.get_domain_capa(domain, dom2).unwrap();
     engine.send(domain, reg2, dom2).unwrap();
     snap!("{[0x300, 0x1000 | 1]}", regions(domain, &engine),);
@@ -263,7 +263,7 @@ fn scenario_3() {
         )
         .unwrap();
     // Create a new domain and send the region.
-    let encl = engine.create_domain(domain).unwrap();
+    let encl = engine.create_domain(domain, VcpuType::Shared).unwrap();
     let enclave = engine.get_domain_capa(domain, encl).unwrap();
     engine.send(domain, reg_to_give, encl).unwrap();
 

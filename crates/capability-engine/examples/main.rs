@@ -1,4 +1,4 @@
-use capa_engine::{permission, AccessRights, CapaEngine, Domain, Handle};
+use capa_engine::{permission, AccessRights, CapaEngine, Domain, Handle, VcpuType};
 use simple_logger::SimpleLogger;
 
 fn main() {
@@ -76,7 +76,7 @@ fn foo() {
     display(&engine);
     display_domain(domain, &engine);
 
-    let dom2 = engine.create_domain(domain).unwrap();
+    let dom2 = engine.create_domain(domain, VcpuType::Shared).unwrap();
     engine.set_permissions(domain, dom2, permission::SPAWN);
     let domain2 = engine.get_domain_capa(domain, dom2).unwrap();
     engine.send(domain, reg2, dom2);
@@ -84,7 +84,7 @@ fn foo() {
     display_domain(domain, &engine);
     display_domain(domain2, &engine);
 
-    engine.create_domain(domain2).unwrap();
+    engine.create_domain(domain2, VcpuType::Shared).unwrap();
     engine.revoke_domain(domain2);
     display(&engine);
     display_domain(domain, &engine);
