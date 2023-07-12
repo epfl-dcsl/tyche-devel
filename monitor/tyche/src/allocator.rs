@@ -70,7 +70,7 @@ impl<const N: usize> FreeListAllocator<N> {
     /// prior to allocation. Otherwise, the Frame will contain an invalid physical address.
     pub unsafe fn allocate_frame(&mut self) -> Option<Frame> {
         let page_index = self.free_list.allocate()?;
-        let frame = &mut self.pages[page_index].data as *mut u8;
+        let frame = &mut self.pages[page_index].data as *mut u8 as u64;
         Some(Frame {
             phys_addr: HostPhysAddr::new(frame as usize - self.virt_offset),
             virt_addr: frame,

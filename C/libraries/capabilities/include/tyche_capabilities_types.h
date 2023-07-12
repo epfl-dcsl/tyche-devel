@@ -36,6 +36,14 @@ typedef enum domain_status_t {
   Sealed = 2,
 } domain_status_t;
 
+/// Type of security domain.
+typedef enum security_domain_t {
+  /// This is useful for confidential VMs.
+  FreshVCPU = 0,
+  /// This is useful for enclaves and compartments.
+  CopyVCPU = 1,
+} security_domain_t;
+
 /// Region Access Rights
 typedef enum memory_access_right_t {
   MEM_ACTIVE = 1 << 0,

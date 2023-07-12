@@ -9,7 +9,7 @@ use mmu::eptmapper::EPT_ROOT_FLAGS;
 use mmu::{EptMapper, FrameAllocator};
 use spin::{Mutex, MutexGuard};
 use stage_two_abi::Manifest;
-use utils::{GuestPhysAddr, HostPhysAddr};
+use utils::{Frame, GuestPhysAddr, HostPhysAddr};
 use vmx::bitmaps::{EptEntryFlags, ExceptionBitmap};
 use vmx::errors::Trapnr;
 use vmx::{ActiveVmcs, ControlRegister, Register, VmExitInterrupt};
@@ -35,6 +35,8 @@ pub struct ContextData {
     pub cr3: usize,
     pub rip: usize,
     pub rsp: usize,
+    /// Vcpu for this core.
+    pub vmcs: Option<Frame>,
 }
 
 const EMPTY_DOMAIN: Mutex<DomainData> = Mutex::new(DomainData { ept: None });
@@ -43,6 +45,7 @@ const EMPTY_CONTEXT: Mutex<ContextData> = Mutex::new(ContextData {
     cr3: 0,
     rip: 0,
     rsp: 0,
+    vmcs: None,
 });
 const EMPTY_CONTEXT_ARRAY: [Mutex<ContextData>; NB_CORES] = [EMPTY_CONTEXT; NB_CORES];
 
@@ -78,6 +81,8 @@ pub fn init_vcpu(vcpu: &mut ActiveVmcs<'static>) -> Handle<Domain> {
         .start_domain_on_core(initial_domain, cpuid)
         .expect("Failed to allocate initial domain");
     let domain = get_domain(initial_domain);
+    let mut ctxt = get_context(initial_domain, cpuid);
+    ctxt.vmcs = Some(*vcpu.frame());
     vcpu.set_ept_ptr(HostPhysAddr::new(
         domain.ept.unwrap().as_usize() | EPT_ROOT_FLAGS,
     ))
@@ -123,6 +128,7 @@ pub fn do_set_traps(
     engine.set_domain_traps(current, domain, traps)
 }
 
+/// TODO(aghosn) do we need to seal on all cores?
 pub fn do_seal(
     current: Handle<Domain>,
     domain: LocalCapa,
@@ -140,6 +146,15 @@ pub fn do_seal(
     context.cr3 = cr3;
     context.rip = rip;
     context.rsp = rsp;
+    let allocator = allocator();
+    if let Some(vmcs) = context.vmcs {
+        unsafe {
+            allocator
+                .free_frame(vmcs.phys_addr)
+                .expect("Unable to free frame")
+        };
+    }
+    context.vmcs = None;
     apply_updates(&mut engine);
     Ok(capa)
 }
@@ -238,6 +253,10 @@ pub fn handle_trap(
 #[derive(Debug, Clone, Copy)]
 enum CoreUpdate {
     TlbShootdown,
+    SealUpdate {
+        domain: Handle<Domain>,
+        is_vm: bool,
+    },
     Switch {
         domain: Handle<Domain>,
         return_capa: LocalCapa,
@@ -260,6 +279,14 @@ fn apply_updates(engine: &mut MutexGuard<CapaEngine>) {
         match update {
             // Updates that can be handled locally
             capa_engine::Update::PermissionUpdate { domain } => update_permission(domain, engine),
+            capa_engine::Update::SealUpdate {
+                domain,
+                core,
+                is_vm,
+            } => {
+                let mut core_updates = CORE_UPDATES[core].lock();
+                core_updates.push(CoreUpdate::SealUpdate { domain, is_vm });
+            }
             capa_engine::Update::RevokeDomain { domain } => revoke_domain(domain),
             capa_engine::Update::CreateDomain { domain } => create_domain(domain),
 
@@ -322,6 +349,22 @@ pub fn apply_core_updates(
                 ))
                 .expect("VMX error, failed to set EPT pointer");
             }
+            CoreUpdate::SealUpdate { domain, is_vm } => {
+                let mut dom_ctxt = get_context(domain, core);
+                let allocator = allocator();
+                let vmcs = allocator
+                    .allocate_frame()
+                    .expect("Unable to allocate a vmcs")
+                    .zeroed();
+                dom_ctxt.vmcs = Some(vmcs);
+                if is_vm {
+                    //TODO make the code better.
+                    vmx_state.vmxon.init_frame(vmcs)
+                } else {
+                    // Just copy the current vmcs into the new one.
+                    vcpu.copy_into(vmcs);
+                }
+            }
             CoreUpdate::Switch {
                 domain,
                 return_capa,
@@ -331,7 +374,8 @@ pub fn apply_core_updates(
                 let current_ctx = get_context(*current_domain, core);
                 let next_ctx = get_context(domain, core);
                 let next_domain = get_domain(domain);
-                switch_domain(vcpu, current_ctx, next_ctx, next_domain);
+                switch_domain(vcpu, current_ctx, next_ctx, next_domain)
+                    .expect("Failed to perform the switch");
 
                 // Set switch return values
                 vcpu.set(Register::Rax, 0);
@@ -354,7 +398,8 @@ pub fn apply_core_updates(
                 let current_ctx = get_context(*current_domain, core);
                 let next_ctx = get_context(manager, core);
                 let next_domain = get_domain(manager);
-                switch_domain(vcpu, current_ctx, next_ctx, next_domain);
+                switch_domain(vcpu, current_ctx, next_ctx, next_domain)
+                    .expect("Failed to perform switch for trap");
 
                 log::debug!(
                     "Exception {} (bit shift {}) triggers switch from {:?} to {:?}",
@@ -398,11 +443,26 @@ fn switch_domain(
     mut current_ctx: MutexGuard<ContextData>,
     next_ctx: MutexGuard<ContextData>,
     next_domain: MutexGuard<DomainData>,
-) {
+) -> Result<(), CapaError> {
+    // Safety check that both contexts have a valid vmcs.
+    if current_ctx.vmcs.is_none() || next_ctx.vmcs.is_none() {
+        log::error!(
+            "VMCS are none during switch: curr:{:?}, next:{:?}",
+            current_ctx.vmcs.is_some(),
+            next_ctx.vmcs.is_some()
+        );
+        return Err(CapaError::InvalidSwitch);
+    }
     // Save current context
     current_ctx.cr3 = vcpu.get_cr(ControlRegister::Cr3);
     current_ctx.rip = vcpu.get(Register::Rip) as usize;
     current_ctx.rsp = vcpu.get(Register::Rsp) as usize;
+
+    // We need to save the current vmcs and load the new one.
+    if current_ctx.vmcs.unwrap().phys_addr.as_u64() != next_ctx.vmcs.unwrap().phys_addr.as_u64() {
+        vcpu.switch_frame(&mut next_ctx.vmcs.unwrap())
+            .expect("Unable to switch frame");
+    }
 
     // Switch domain
     vcpu.set_cr(ControlRegister::Cr3, next_ctx.cr3);
@@ -412,6 +472,7 @@ fn switch_domain(
         next_domain.ept.unwrap().as_usize() | EPT_ROOT_FLAGS,
     ))
     .expect("Failed to update EPT");
+    Ok(())
 }
 
 fn create_domain(domain: Handle<Domain>) {
@@ -479,6 +540,15 @@ impl core::fmt::Display for CoreUpdate {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             CoreUpdate::TlbShootdown => write!(f, "TLB Shootdown"),
+            CoreUpdate::SealUpdate { domain, is_vm } => {
+                write!(
+                    f,
+                    "SealUpdate({}, core {}, is_vm {})",
+                    domain,
+                    cpuid(),
+                    is_vm
+                )
+            }
             CoreUpdate::Switch { domain, .. } => write!(f, "Switch({})", domain),
             CoreUpdate::Trap {
                 manager,

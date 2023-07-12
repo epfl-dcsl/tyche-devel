@@ -235,6 +235,14 @@ impl Vmxon {
             _not_sync: PhantomData,
         })
     }
+
+    pub fn init_frame(&self, mut frame: Frame) {
+        unsafe {
+            let vmcs_info = get_vmx_info();
+            frame.zero_out();
+            frame.as_mut()[0..4].copy_from_slice(&vmcs_info.revision.to_le_bytes());
+        }
+    }
 }
 
 // —————————————————————————————————— VMCS —————————————————————————————————— //
@@ -256,6 +264,7 @@ pub struct VmcsRegion<'vmx> {
 
 /// The active Vmcs. Writting to vmcs using assembly or raw wrappers will write to this structures.
 pub struct ActiveVmcs<'vmx> {
+    launched: bool,
     region: VmcsRegion<'vmx>,
 }
 
@@ -264,7 +273,18 @@ impl<'vmx> VmcsRegion<'vmx> {
     //  TODO: Enforce that only a single region can be active at any time.
     pub fn set_as_active(self: Self) -> Result<ActiveVmcs<'vmx>, VmxError> {
         unsafe { raw::vmptrld(self.frame.phys_addr.as_u64())? };
-        Ok(ActiveVmcs { region: self })
+        Ok(ActiveVmcs {
+            launched: false,
+            region: self,
+        })
+    }
+
+    pub fn frame(&self) -> &Frame {
+        &self.frame
+    }
+
+    pub fn set_frame(&mut self, frame: &mut Frame) {
+        self.frame = *frame;
     }
 }
 
@@ -273,6 +293,33 @@ impl<'vmx> ActiveVmcs<'vmx> {
     pub fn deactivate(self) -> Result<VmcsRegion<'vmx>, VmxError> {
         unsafe { raw::vmclear(self.region.frame.phys_addr.as_u64())? };
         Ok(self.region)
+    }
+
+    pub fn copy_into(&mut self, mut dest: Frame) {
+        // Dump the current state.
+        unsafe {
+            raw::vmclear(self.region.frame.phys_addr.as_u64()).expect("Unable to perform a clear");
+        };
+        // Write the VMCS back.
+        unsafe {
+            raw::vmptrld(self.region.frame.phys_addr.as_u64()).expect("Unable to reset the vmptr");
+        }
+        dest.as_mut().copy_from_slice(self.region.frame().as_ref());
+        self.launched = false;
+    }
+
+    pub fn frame(&self) -> &Frame {
+        self.region.frame()
+    }
+
+    pub fn switch_frame(&mut self, dest: &mut Frame) -> Result<(), VmxError> {
+        // Save the state of the current VM.
+        unsafe { raw::vmclear(self.region.frame.phys_addr.as_u64())? };
+        self.copy_into(*dest);
+        self.region.set_frame(dest);
+        unsafe { raw::vmptrld(self.region.frame().phys_addr.as_u64())? };
+        self.launched = false;
+        Ok(())
     }
 
     /// Returns a given register.
@@ -455,6 +502,7 @@ impl<'vmx> ActiveVmcs<'vmx> {
     /// sensible environment. A simple way of ensuring that is to save the current environment as
     /// host state.
     pub unsafe fn launch(&mut self) -> Result<VmxExitReason, VmxError> {
+        self.launched = true;
         raw::vmlaunch(self)?;
         self.exit_reason()
     }
@@ -467,6 +515,14 @@ impl<'vmx> ActiveVmcs<'vmx> {
     pub unsafe fn resume(&mut self) -> Result<VmxExitReason, VmxError> {
         raw::vmresume(self)?;
         self.exit_reason()
+    }
+
+    pub unsafe fn run(&mut self) -> Result<VmxExitReason, VmxError> {
+        if self.launched {
+            self.resume()
+        } else {
+            self.launch()
+        }
     }
 
     /// Sets the pin-based controls.

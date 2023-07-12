@@ -62,6 +62,16 @@ pub unsafe fn vmptrld(addr: u64) -> Result<(), VmxError> {
     vmx_capture_status()
 }
 
+pub unsafe fn vmptrst() -> Result<u64, VmxError> {
+    let value: u64 = 0;
+    asm!(
+        "vmptrst ({0})",       // Read vmptr into rax register
+        in(reg) &value ,     // Output constraint for vmptr
+        options(att_syntax)
+    );
+    vmx_capture_status().and(Ok(value))
+}
+
 /// Save host state, restore guest state and executes VMLAUNCH.
 ///
 /// On success, this will switch to non-root mode and load guest state from current VMCS and return

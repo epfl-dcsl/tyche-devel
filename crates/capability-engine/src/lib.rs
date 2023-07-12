@@ -53,6 +53,7 @@ pub enum CapaError {
     InvalidCore,
     CouldNotHandleTrap,
     ValidTrapCausedExit,
+    InvalidSwitch,
 }
 
 pub struct CapaEngine {
@@ -325,12 +326,18 @@ impl CapaEngine {
     ) -> Result<LocalCapa, CapaError> {
         let capa = self.domains[domain].get(capa)?.as_management()?;
         self.domains[capa].seal()?;
+        let target = capa;
         let capa = insert_capa(
             domain,
             Capa::Switch { to: capa, core },
             &mut self.regions,
             &mut self.domains,
         )?;
+        self.updates.push(Update::SealUpdate {
+            domain: target,
+            core: core,
+            is_vm: self.domains[target].is_vm(),
+        });
         Ok(capa)
     }
 

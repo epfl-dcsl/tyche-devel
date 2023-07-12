@@ -86,7 +86,7 @@ unsafe fn allocate_code_section(
     // Backup the frame before writing to it.
     // The frame might be use by the bootloader, for e.g. page tables or other resources.
     // We need to restore it as soon as possible.
-    let backup = core::slice::from_raw_parts_mut(backup_frame.virt_addr, PAGE_SIZE);
+    let backup = core::slice::from_raw_parts_mut(backup_frame.virt_addr as *mut u8, PAGE_SIZE);
     let trampoline = core::slice::from_raw_parts(CODE_PADDR as usize as *mut u8, PAGE_SIZE);
     backup.copy_from_slice(trampoline);
 
@@ -110,7 +110,7 @@ unsafe fn allocate_code_section(
 /// This might be needed as there is no guarantee the page wasn't used by the bootloader for system
 /// resources (e.g. page tables).
 unsafe fn restore_code_section(backup_frame: vmx::Frame) {
-    let backup = core::slice::from_raw_parts(backup_frame.virt_addr, PAGE_SIZE);
+    let backup = core::slice::from_raw_parts(backup_frame.virt_addr as *mut u8, PAGE_SIZE);
     let trampoline = core::slice::from_raw_parts_mut(CODE_PADDR as usize as *mut u8, PAGE_SIZE);
     trampoline.copy_from_slice(backup);
 }

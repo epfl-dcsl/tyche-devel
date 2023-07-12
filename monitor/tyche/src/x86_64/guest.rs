@@ -30,7 +30,7 @@ pub struct VmxState {
 
 pub fn main_loop(mut vmx_state: VmxState, mut domain: Handle<Domain>) {
     let core_id = cpuid();
-    let mut result = unsafe { vmx_state.vcpu.launch() };
+    let mut result = unsafe { vmx_state.vcpu.run() };
     loop {
         let exit_reason = match result {
             Ok(exit_reason) => {
@@ -44,25 +44,29 @@ pub fn main_loop(mut vmx_state: VmxState, mut domain: Handle<Domain>) {
             }
             Err(err) => {
                 log::error!("Guest crash: {:?}", err);
+                log::error!("Vcpu: {:x?}", vmx_state.vcpu);
                 HandlerResult::Crash
             }
         };
 
-        if exit_reason != HandlerResult::Resume {
-            log::info!("Exiting guest: {:?}", exit_reason);
-            break;
+        match exit_reason {
+            HandlerResult::Resume => {
+                result = unsafe { vmx_state.vcpu.run() };
+            }
+            _ => {
+                log::info!("Exiting guest: {:?}", exit_reason);
+                break;
+            }
         }
-        // Resume VM
-        result = unsafe { vmx_state.vcpu.resume() };
     }
 }
 
 fn handle_exit(
-    vmx_state: &mut VmxState,
+    vs: &mut VmxState,
     reason: vmx::VmxExitReason,
     domain: &mut Handle<Domain>,
 ) -> Result<HandlerResult, TycheError> {
-    let vcpu = &mut vmx_state.vcpu;
+    //let vcpu = &mut vmx_state.vcpu;
     let dump = |vcpu: &mut ActiveVmcs| {
         let rip = vcpu.get(Register::Rip);
         let rax = vcpu.get(Register::Rax);
@@ -80,44 +84,44 @@ fn handle_exit(
 
     match reason {
         VmxExitReason::Vmcall => {
-            let vmcall = vcpu.get(Register::Rax) as usize;
-            let arg_1 = vcpu.get(Register::Rdi) as usize;
-            let arg_2 = vcpu.get(Register::Rsi) as usize;
-            let arg_3 = vcpu.get(Register::Rdx) as usize;
-            let arg_4 = vcpu.get(Register::Rcx) as usize;
-            let arg_5 = vcpu.get(Register::R8) as usize;
-            let arg_6 = vcpu.get(Register::R9) as usize;
+            let vmcall = vs.vcpu.get(Register::Rax) as usize;
+            let arg_1 = vs.vcpu.get(Register::Rdi) as usize;
+            let arg_2 = vs.vcpu.get(Register::Rsi) as usize;
+            let arg_3 = vs.vcpu.get(Register::Rdx) as usize;
+            let arg_4 = vs.vcpu.get(Register::Rcx) as usize;
+            let arg_5 = vs.vcpu.get(Register::R8) as usize;
+            let arg_6 = vs.vcpu.get(Register::R9) as usize;
             match vmcall {
                 calls::CREATE_DOMAIN => {
                     log::trace!("Create Domain");
                     let capa = monitor::do_create_domain(*domain).expect("TODO");
-                    vcpu.set(Register::Rdi, capa.as_u64());
-                    vcpu.set(Register::Rax, 0);
-                    vcpu.next_instruction()?;
+                    vs.vcpu.set(Register::Rdi, capa.as_u64());
+                    vs.vcpu.set(Register::Rax, 0);
+                    vs.vcpu.next_instruction()?;
                     Ok(HandlerResult::Resume)
                 }
                 calls::SET_CORES => {
                     log::trace!("Set cores");
                     match monitor::do_set_cores(*domain, LocalCapa::new(arg_1), arg_2) {
-                        Ok(()) => vcpu.set(Register::Rax, 0),
+                        Ok(()) => vs.vcpu.set(Register::Rax, 0),
                         Err(e) => {
                             log::debug!("Set cores failed {:?}", e);
-                            vcpu.set(Register::Rax, 1);
+                            vs.vcpu.set(Register::Rax, 1);
                         }
                     }
-                    vcpu.next_instruction()?;
+                    vs.vcpu.next_instruction()?;
                     Ok(HandlerResult::Resume)
                 }
                 calls::SET_TRAPS => {
                     log::trace!("Set traps");
                     match monitor::do_set_traps(*domain, LocalCapa::new(arg_1), arg_2) {
-                        Ok(()) => vcpu.set(Register::Rax, 0),
+                        Ok(()) => vs.vcpu.set(Register::Rax, 0),
                         Err(e) => {
                             log::debug!("Set traps error: {:?}", e);
-                            vcpu.set(Register::Rax, 1);
+                            vs.vcpu.set(Register::Rax, 1);
                         }
                     }
-                    vcpu.next_instruction()?;
+                    vs.vcpu.next_instruction()?;
                     Ok(HandlerResult::Resume)
                 }
                 calls::SEAL_DOMAIN => {
@@ -125,23 +129,23 @@ fn handle_exit(
                     let capa =
                         monitor::do_seal(*domain, LocalCapa::new(arg_1), arg_2, arg_3, arg_4)
                             .expect("TODO");
-                    vcpu.set(Register::Rdi, capa.as_u64());
-                    vcpu.set(Register::Rax, 0);
-                    vcpu.next_instruction()?;
+                    vs.vcpu.set(Register::Rdi, capa.as_u64());
+                    vs.vcpu.set(Register::Rax, 0);
+                    vs.vcpu.next_instruction()?;
                     Ok(HandlerResult::Resume)
                 }
                 calls::SHARE => {
                     log::trace!("Share");
                     log::warn!("Share is NOT IMPLEMENTED in v3");
-                    vcpu.next_instruction()?;
+                    vs.vcpu.next_instruction()?;
                     Ok(HandlerResult::Resume)
                 }
                 calls::SEND => {
                     log::trace!("Send");
                     monitor::do_send(*domain, LocalCapa::new(arg_1), LocalCapa::new(arg_2))
                         .expect("TODO");
-                    vcpu.set(Register::Rax, 0);
-                    vcpu.next_instruction()?;
+                    vs.vcpu.set(Register::Rax, 0);
+                    vs.vcpu.next_instruction()?;
                     Ok(HandlerResult::Resume)
                 }
                 calls::SEGMENT_REGION => {
@@ -157,25 +161,25 @@ fn handle_exit(
                         (arg_6 << 32) >> 32, // prot2
                     )
                     .expect("TODO");
-                    vcpu.set(Register::Rdi, left.as_u64());
-                    vcpu.set(Register::Rsi, right.as_u64());
-                    vcpu.set(Register::Rax, 0);
-                    vcpu.next_instruction()?;
+                    vs.vcpu.set(Register::Rdi, left.as_u64());
+                    vs.vcpu.set(Register::Rsi, right.as_u64());
+                    vs.vcpu.set(Register::Rax, 0);
+                    vs.vcpu.next_instruction()?;
                     Ok(HandlerResult::Resume)
                 }
                 calls::REVOKE => {
                     log::trace!("Revoke");
                     monitor::do_revoke(*domain, LocalCapa::new(arg_1)).expect("TODO");
-                    vcpu.set(Register::Rax, 0);
-                    vcpu.next_instruction()?;
+                    vs.vcpu.set(Register::Rax, 0);
+                    vs.vcpu.next_instruction()?;
                     Ok(HandlerResult::Resume)
                 }
                 calls::DUPLICATE => {
                     log::trace!("Duplicate");
                     let capa = monitor::do_duplicate(*domain, LocalCapa::new(arg_1)).expect("TODO");
-                    vcpu.set(Register::Rdi, capa.as_u64());
-                    vcpu.set(Register::Rax, 0);
-                    vcpu.next_instruction()?;
+                    vs.vcpu.set(Register::Rdi, capa.as_u64());
+                    vs.vcpu.set(Register::Rax, 0);
+                    vs.vcpu.next_instruction()?;
                     Ok(HandlerResult::Resume)
                 }
                 calls::ENUMERATE => {
@@ -184,34 +188,34 @@ fn handle_exit(
                         monitor::do_enumerate(*domain, NextCapaToken::from_usize(arg_1))
                     {
                         let (v1, v2, v3) = info.serialize();
-                        vcpu.set(Register::Rdi, v1 as u64);
-                        vcpu.set(Register::Rsi, v2 as u64);
-                        vcpu.set(Register::Rdx, v3 as u64);
-                        vcpu.set(Register::Rcx, next.as_u64());
+                        vs.vcpu.set(Register::Rdi, v1 as u64);
+                        vs.vcpu.set(Register::Rsi, v2 as u64);
+                        vs.vcpu.set(Register::Rdx, v3 as u64);
+                        vs.vcpu.set(Register::Rcx, next.as_u64());
                     } else {
                         // For now, this marks the end
-                        vcpu.set(Register::Rcx, 0);
+                        vs.vcpu.set(Register::Rcx, 0);
                     }
-                    vcpu.set(Register::Rax, 0);
-                    vcpu.next_instruction()?;
+                    vs.vcpu.set(Register::Rax, 0);
+                    vs.vcpu.next_instruction()?;
                     Ok(HandlerResult::Resume)
                 }
                 calls::SWITCH => {
                     log::trace!("Switch");
                     monitor::do_switch(*domain, LocalCapa::new(arg_1), cpuid()).expect("TODO");
-                    vcpu.next_instruction()?;
+                    vs.vcpu.next_instruction()?;
                     Ok(HandlerResult::Resume)
                 }
                 calls::DEBUG => {
                     log::trace!("Debug");
                     monitor::do_debug();
-                    vcpu.set(Register::Rax, 0);
-                    vcpu.next_instruction()?;
+                    vs.vcpu.set(Register::Rax, 0);
+                    vs.vcpu.next_instruction()?;
                     Ok(HandlerResult::Resume)
                 }
                 calls::EXIT => {
                     log::info!("MonCall: exit");
-                    dump(vcpu);
+                    dump(&mut vs.vcpu);
                     Ok(HandlerResult::Exit)
                 }
                 _ => {
@@ -221,8 +225,8 @@ fn handle_exit(
             }
         }
         VmxExitReason::Cpuid => {
-            let input_eax = vcpu.get(Register::Rax);
-            let input_ecx = vcpu.get(Register::Rcx);
+            let input_eax = vs.vcpu.get(Register::Rax);
+            let input_ecx = vs.vcpu.get(Register::Rcx);
             let eax: u64;
             let ebx: u64;
             let ecx: u64;
@@ -244,41 +248,42 @@ fn handle_exit(
                 )
             }
 
-            vcpu.set(Register::Rax, eax);
-            vcpu.set(Register::Rbx, ebx);
-            vcpu.set(Register::Rcx, ecx);
-            vcpu.set(Register::Rdx, edx);
-            vcpu.next_instruction()?;
+            vs.vcpu.set(Register::Rax, eax);
+            vs.vcpu.set(Register::Rbx, ebx);
+            vs.vcpu.set(Register::Rcx, ecx);
+            vs.vcpu.set(Register::Rdx, edx);
+            vs.vcpu.next_instruction()?;
             Ok(HandlerResult::Resume)
         }
         VmxExitReason::ControlRegisterAccesses => {
-            let qualification = vcpu.exit_qualification()?.control_register_accesses();
+            let qualification = vs.vcpu.exit_qualification()?.control_register_accesses();
             match qualification {
                 exit_qualification::ControlRegisterAccesses::MovToCr(cr, reg) => {
                     if cr != ControlRegister::Cr4 {
                         todo!("Handle {:?}", cr);
                     }
-                    let value = vcpu.get(reg) as usize;
-                    vcpu.set_cr4_shadow(value)?;
+                    let value = vs.vcpu.get(reg) as usize;
+                    vs.vcpu.set_cr4_shadow(value)?;
                     let real_value = value | (1 << 13); // VMXE
-                    vcpu.set_cr(cr, real_value);
+                    vs.vcpu.set_cr(cr, real_value);
 
-                    vcpu.next_instruction()?;
+                    vs.vcpu.next_instruction()?;
                 }
                 _ => todo!("Emulation not yet implemented for {:?}", qualification),
             };
             Ok(HandlerResult::Resume)
         }
         VmxExitReason::EptViolation => {
-            let addr = vcpu.guest_phys_addr()?;
+            let addr = vs.vcpu.guest_phys_addr()?;
             log::error!(
                 "EPT Violation! virt: 0x{:x}, phys: 0x{:x}",
-                vcpu.guest_linear_addr()
+                vs.vcpu
+                    .guest_linear_addr()
                     .expect("unable to get the virt addr")
                     .as_u64(),
                 addr.as_u64(),
             );
-            log::info!("The vcpu {:x?}", vcpu);
+            log::info!("The vcpu {:x?}", vs.vcpu);
 
             //TODO: replace this with proper handler for interrupts.
             if domain.idx() == 0 {
@@ -293,16 +298,17 @@ fn handle_exit(
                     "Replace EPT violation with exception: {:b}",
                     interrupt.as_u32()
                 );
-                vcpu.inject_interrupt(interrupt)
+                vs.vcpu
+                    .inject_interrupt(interrupt)
                     .expect("Unable to inject an exception");
                 return Ok(HandlerResult::Resume);
             }
             Ok(HandlerResult::Crash)
         }
         VmxExitReason::Xsetbv => {
-            let ecx = vcpu.get(Register::Rcx);
-            let eax = vcpu.get(Register::Rax);
-            let edx = vcpu.get(Register::Rdx);
+            let ecx = vs.vcpu.get(Register::Rcx);
+            let eax = vs.vcpu.get(Register::Rax);
+            let edx = vs.vcpu.get(Register::Rdx);
 
             let xrc_id = ecx & 0xFFFFFFFF; // Ignore 32 high-order bits
             if xrc_id != 0 {
@@ -319,16 +325,16 @@ fn handle_exit(
                 );
             }
 
-            vcpu.next_instruction()?;
+            vs.vcpu.next_instruction()?;
             Ok(HandlerResult::Resume)
         }
         VmxExitReason::Wrmsr => {
-            let ecx = vcpu.get(Register::Rcx);
+            let ecx = vs.vcpu.get(Register::Rcx);
             if ecx >= 0x4B564D00 && ecx <= 0x4B564DFF {
                 // Custom MSR range, used by KVM
                 // See https://docs.kernel.org/virt/kvm/x86/msr.html
                 // TODO: just ignore them for now, should add support in the future
-                vcpu.next_instruction()?;
+                vs.vcpu.next_instruction()?;
                 Ok(HandlerResult::Resume)
             } else {
                 log::error!("Unknown MSR: 0x{:x}", ecx);
@@ -336,10 +342,10 @@ fn handle_exit(
             }
         }
         VmxExitReason::Rdmsr => {
-            let ecx = vcpu.get(Register::Rcx);
+            let ecx = vs.vcpu.get(Register::Rcx);
             if ecx == 0xc0011029 {
                 // Reading an AMD specifig register, just ignore it
-                vcpu.next_instruction()?;
+                vs.vcpu.next_instruction()?;
                 Ok(HandlerResult::Resume)
             } else {
                 log::error!("Unexpected rdmsr number: {:#x}", ecx);
@@ -347,7 +353,7 @@ fn handle_exit(
             }
         }
         VmxExitReason::Exception => {
-            match vcpu.interrupt_info() {
+            match vs.vcpu.interrupt_info() {
                 Ok(Some(exit)) => {
                     // The domain exited, so it shouldn't be able to handle it.
                     log::debug!(
@@ -367,14 +373,14 @@ fn handle_exit(
                                 exit.vector(),
                                 e
                             );
-                            log::error!("{:?}", vcpu);
+                            log::error!("{:?}", vs.vcpu);
                             Ok(HandlerResult::Crash)
                         }
                     }
                 }
                 _ => {
                     log::error!("VM received an exception");
-                    log::info!("{:?}", vcpu);
+                    log::info!("{:?}", vs.vcpu);
                     Ok(HandlerResult::Crash)
                 }
             }
@@ -384,7 +390,7 @@ fn handle_exit(
                 "Emulation is not yet implemented for exit reason: {:?}",
                 reason
             );
-            log::info!("{:?}", vcpu);
+            log::info!("{:?}", vs.vcpu);
             Ok(HandlerResult::Crash)
         }
     }

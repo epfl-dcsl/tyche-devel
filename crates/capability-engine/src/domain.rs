@@ -108,6 +108,8 @@ pub struct Domain {
     is_being_revoked: bool,
     /// Is the domain sealed?
     is_sealed: bool,
+    /// Is the domain vcpu-isolated?
+    is_vm: bool,
 }
 
 impl Domain {
@@ -126,6 +128,7 @@ impl Domain {
             core_map: ALLOW_NO_CORES,
             is_being_revoked: false,
             is_sealed: false,
+            is_vm: false,
         }
     }
 
@@ -208,6 +211,10 @@ impl Domain {
 
     pub fn is_sealed(&self) -> bool {
         self.is_sealed
+    }
+
+    pub fn is_vm(&self) -> bool {
+        self.is_vm
     }
 
     fn is_valid(&self, idx: usize, regions: &RegionPool, domains: &DomainPool) -> bool {

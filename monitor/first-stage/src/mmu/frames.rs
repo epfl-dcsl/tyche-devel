@@ -253,8 +253,7 @@ unsafe impl FrameAllocator for SharedFrameAllocator {
 
         Some(vmx::Frame {
             phys_addr: vmx::HostPhysAddr::new(frame.start_address().as_u64() as usize),
-            virt_addr: (frame.start_address().as_u64() + self.physical_memory_offset.as_u64())
-                as *mut u8,
+            virt_addr: (frame.start_address().as_u64() + self.physical_memory_offset.as_u64()),
         })
     }
 
@@ -315,7 +314,7 @@ unsafe impl FrameAllocator for RangeFrameAllocator {
             self.cursor.set(cursor + PAGE_SIZE as u64);
             Some(vmx::Frame {
                 phys_addr: vmx::HostPhysAddr::new(cursor.as_u64() as usize),
-                virt_addr: (cursor.as_u64() + self.physical_memory_offset.as_u64()) as *mut u8,
+                virt_addr: (cursor.as_u64() + self.physical_memory_offset.as_u64()),
             })
         } else {
             None

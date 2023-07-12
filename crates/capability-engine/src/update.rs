@@ -12,6 +12,11 @@ pub enum Update {
     PermissionUpdate {
         domain: Handle<Domain>,
     },
+    SealUpdate {
+        domain: Handle<Domain>,
+        core: usize,
+        is_vm: bool,
+    },
     TlbShootdown {
         core: usize,
     },
@@ -100,6 +105,13 @@ impl fmt::Display for Update {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Update::PermissionUpdate { domain } => write!(f, "PermissionUpdate({})", domain),
+            Update::SealUpdate {
+                domain,
+                core,
+                is_vm,
+            } => {
+                write!(f, "SealUpdate({}, core {}, is_vm {})", domain, core, is_vm)
+            }
             Update::RevokeDomain { domain } => write!(f, "RevokeDomain({})", domain),
             Update::CreateDomain { domain } => write!(f, "CreateDomain({})", domain),
             Update::TlbShootdown { core } => write!(f, "TlbShootdown({})", core),
