@@ -283,8 +283,8 @@ impl<'vmx> VmcsRegion<'vmx> {
         &self.frame
     }
 
-    pub fn set_frame(&mut self, frame: &mut Frame) {
-        self.frame = *frame;
+    pub fn set_frame(&mut self, frame: Frame) {
+        self.frame = frame;
     }
 }
 
@@ -312,10 +312,10 @@ impl<'vmx> ActiveVmcs<'vmx> {
         self.region.frame()
     }
 
-    pub fn switch_frame(&mut self, dest: &mut Frame) -> Result<(), VmxError> {
+    pub fn switch_frame(&mut self, dest: Frame) -> Result<(), VmxError> {
         // Save the state of the current VM.
         unsafe { raw::vmclear(self.region.frame.phys_addr.as_u64())? };
-        self.copy_into(*dest);
+        self.copy_into(dest);
         self.region.set_frame(dest);
         unsafe { raw::vmptrld(self.region.frame().phys_addr.as_u64())? };
         self.launched = false;

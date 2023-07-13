@@ -2,14 +2,14 @@
 
 use capa_engine::config::NB_DOMAINS;
 use capa_engine::{
-    permission, AccessRights, Buffer, CapaEngine, CapaError, CapaInfo, Domain, Handle, LocalCapa,
-    NextCapaToken, VcpuType,
+    permission, AccessRights, Buffer, CapaEngine, CapaError, CapaInfo, Domain, GenArena, Handle,
+    LocalCapa, NextCapaToken, VcpuType,
 };
 use mmu::eptmapper::EPT_ROOT_FLAGS;
 use mmu::{EptMapper, FrameAllocator};
 use spin::{Mutex, MutexGuard};
 use stage_two_abi::Manifest;
-use utils::{Frame, GuestPhysAddr, HostPhysAddr};
+use utils::{GuestPhysAddr, HostPhysAddr};
 use vmx::bitmaps::{EptEntryFlags, ExceptionBitmap};
 use vmx::errors::Trapnr;
 use vmx::{ActiveVmcs, ControlRegister, Register, VmExitInterrupt};
@@ -17,6 +17,7 @@ use vmx::{ActiveVmcs, ControlRegister, Register, VmExitInterrupt};
 use super::cpuid;
 use super::guest::VmxState;
 use crate::allocator::allocator;
+use crate::rcframe::{drop_rc, RCFrame, RCFramePool, EMPTY_RCFRAME};
 use crate::statics::NB_CORES;
 
 // ————————————————————————— Statics & Backend Data ————————————————————————— //
@@ -26,6 +27,8 @@ static INITIAL_DOMAIN: Mutex<Option<Handle<Domain>>> = Mutex::new(None);
 static DOMAINS: [Mutex<DomainData>; NB_DOMAINS] = [EMPTY_DOMAIN; NB_DOMAINS];
 static CORE_UPDATES: [Mutex<Buffer<CoreUpdate>>; NB_CORES] = [EMPTY_UPDATE_BUFFER; NB_CORES];
 static CONTEXTS: [[Mutex<ContextData>; NB_CORES]; NB_DOMAINS] = [EMPTY_CONTEXT_ARRAY; NB_DOMAINS];
+static RC_VMCS: Mutex<RCFramePool> =
+    Mutex::new(GenArena::new([EMPTY_RCFRAME; { NB_DOMAINS * NB_CORES }]));
 
 pub struct DomainData {
     ept: Option<HostPhysAddr>,
@@ -36,7 +39,7 @@ pub struct ContextData {
     pub rip: usize,
     pub rsp: usize,
     /// Vcpu for this core.
-    pub vmcs: Option<Frame>,
+    pub vmcs: Handle<RCFrame>,
 }
 
 const EMPTY_DOMAIN: Mutex<DomainData> = Mutex::new(DomainData { ept: None });
@@ -45,7 +48,7 @@ const EMPTY_CONTEXT: Mutex<ContextData> = Mutex::new(ContextData {
     cr3: 0,
     rip: 0,
     rsp: 0,
-    vmcs: None,
+    vmcs: Handle::<RCFrame>::new_invalid(),
 });
 const EMPTY_CONTEXT_ARRAY: [Mutex<ContextData>; NB_CORES] = [EMPTY_CONTEXT; NB_CORES];
 
@@ -82,7 +85,11 @@ pub fn init_vcpu(vcpu: &mut ActiveVmcs<'static>) -> Handle<Domain> {
         .expect("Failed to allocate initial domain");
     let domain = get_domain(initial_domain);
     let mut ctxt = get_context(initial_domain, cpuid);
-    ctxt.vmcs = Some(*vcpu.frame());
+    let rcframe = RC_VMCS
+        .lock()
+        .allocate(RCFrame::new(*vcpu.frame()))
+        .expect("Unable to allocate rcframe");
+    ctxt.vmcs = rcframe;
     vcpu.set_ept_ptr(HostPhysAddr::new(
         domain.ept.unwrap().as_usize() | EPT_ROOT_FLAGS,
     ))
@@ -147,15 +154,9 @@ pub fn do_seal(
     context.cr3 = cr3;
     context.rip = rip;
     context.rsp = rsp;
-    let allocator = allocator();
-    if let Some(vmcs) = context.vmcs {
-        unsafe {
-            allocator
-                .free_frame(vmcs.phys_addr)
-                .expect("Unable to free frame")
-        };
-    }
-    context.vmcs = None;
+    let mut guard = RC_VMCS.lock();
+    drop_rc(&mut guard, context.vmcs);
+    context.vmcs = Handle::new_invalid();
     apply_updates(&mut engine);
     Ok(capa)
 }
@@ -356,14 +357,38 @@ pub fn apply_core_updates(
                     .allocate_frame()
                     .expect("Unable to allocate a vmcs")
                     .zeroed();
-                dom_ctxt.vmcs = Some(vmcs);
+
                 match vcpu_type {
-                    VcpuType::Fresh => vmx_state.vmxon.init_frame(vmcs),
-                    VcpuType::Copied => {
-                        // Just copy the current vmcs.
-                        vcpu.copy_into(vmcs);
+                    VcpuType::Shared => {
+                        let current_ctxt = get_context(*current_domain, core_id);
+                        // Increase the reference on the current vmcs.
+                        // TODO safety checks in case of error?
+                        RC_VMCS.lock().get_mut(current_ctxt.vmcs).unwrap().acquire();
+                        dom_ctxt.vmcs = current_ctxt.vmcs;
                     }
-                    _ => {}
+                    VcpuType::Fresh => {
+                        let frame = allocator
+                            .allocate_frame()
+                            .expect("Unable to allocate a vmcs")
+                            .zeroed();
+                        vmx_state.vmxon.init_frame(frame);
+                        let rc = RCFrame::new(frame);
+                        dom_ctxt.vmcs = RC_VMCS
+                            .lock()
+                            .allocate(rc)
+                            .expect("Unable to allocate new rc frame");
+                    }
+                    VcpuType::Copied => {
+                        let frame = allocator
+                            .allocate_frame()
+                            .expect("Unable to allocate a vmcs");
+                        vcpu.copy_into(vmcs);
+                        let rc = RCFrame::new(frame);
+                        dom_ctxt.vmcs = RC_VMCS
+                            .lock()
+                            .allocate(rc)
+                            .expect("Unable to allocator a new rc frame");
+                    }
                 }
             }
             CoreUpdate::Switch {
@@ -446,11 +471,11 @@ fn switch_domain(
     next_domain: MutexGuard<DomainData>,
 ) -> Result<(), CapaError> {
     // Safety check that both contexts have a valid vmcs.
-    if current_ctx.vmcs.is_none() || next_ctx.vmcs.is_none() {
+    if current_ctx.vmcs.is_invalid() || next_ctx.vmcs.is_invalid() {
         log::error!(
             "VMCS are none during switch: curr:{:?}, next:{:?}",
-            current_ctx.vmcs.is_some(),
-            next_ctx.vmcs.is_some()
+            current_ctx.vmcs.is_invalid(),
+            next_ctx.vmcs.is_invalid()
         );
         return Err(CapaError::InvalidSwitch);
     }
@@ -460,8 +485,10 @@ fn switch_domain(
     current_ctx.rsp = vcpu.get(Register::Rsp) as usize;
 
     // We need to save the current vmcs and load the new one.
-    if current_ctx.vmcs.unwrap().phys_addr.as_u64() != next_ctx.vmcs.unwrap().phys_addr.as_u64() {
-        vcpu.switch_frame(&mut next_ctx.vmcs.unwrap())
+    if current_ctx.vmcs != next_ctx.vmcs {
+        let rcvmcs = RC_VMCS.lock();
+        let next_vmcs = rcvmcs.get(next_ctx.vmcs).unwrap();
+        vcpu.switch_frame(next_vmcs.frame)
             .expect("Unable to switch frame");
     }
 

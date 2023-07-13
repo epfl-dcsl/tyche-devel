@@ -17,8 +17,7 @@ pub use capa::{capa_type, CapaInfo};
 use cores::{Core, CoreList};
 use domain::{insert_capa, remove_capa, DomainHandle, DomainPool};
 pub use domain::{permission, Domain, LocalCapa, NextCapaToken, VcpuType};
-use gen_arena::GenArena;
-pub use gen_arena::Handle;
+pub use gen_arena::{GenArena, Handle};
 pub use region::{AccessRights, RegionTracker};
 use region_capa::{RegionCapa, RegionPool};
 use update::UpdateBuffer;
@@ -55,6 +54,7 @@ pub enum CapaError {
     ValidTrapCausedExit,
     InvalidSwitch,
     InvalidVcpuType,
+    InvalidOperation,
 }
 
 pub struct CapaEngine {

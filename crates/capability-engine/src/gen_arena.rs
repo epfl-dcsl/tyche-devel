@@ -8,7 +8,7 @@ use super::free_list::{FreeList, FreeListIterator};
 // ——————————————————————————— Generational Arena ——————————————————————————— //
 
 /// A generational arena.
-pub(crate) struct GenArena<T, const N: usize> {
+pub struct GenArena<T, const N: usize> {
     /// The baking store from which objects are allocated.
     store: [T; N],
 
@@ -143,7 +143,7 @@ impl<T> Eq for Handle<T> {}
 
 // ———————————————————————————————— Iterator ———————————————————————————————— //
 
-pub(crate) struct ArenaIterator<'a, T, const N: usize> {
+pub struct ArenaIterator<'a, T, const N: usize> {
     arena: &'a GenArena<T, N>,
     iterator: FreeListIterator<'a, N>,
 }
