@@ -73,7 +73,7 @@ int create_enclave(enclave_handle_t handle)
   encl->virt_start = UNINIT_USIZE;
   encl->size = UNINIT_USIZE;
   // Default security level: copy the vcpu.
-  encl->security = CopyVCPU;
+  encl->security = SameVCPU;
   dll_init_list(&(encl->segments));
   dll_init_elem(encl, list);
 
