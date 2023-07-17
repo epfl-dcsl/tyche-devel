@@ -34,13 +34,12 @@ int tyche_call(vmcall_frame_t* frame)
   return (int)result;
 } 
 
-int tyche_create_domain(capa_index_t* management, security_vcpu_t security) {
+int tyche_create_domain(capa_index_t* management) {
   vmcall_frame_t frame;
   if (management == NULL) {
     goto fail;
   }
   frame.vmcall = TYCHE_CREATE_DOMAIN;
-  frame.arg_1 = security;
   if (tyche_call(&frame) != SUCCESS) {
     goto fail;
   }
@@ -53,9 +52,10 @@ fail:
 int tyche_set_traps(capa_index_t management, usize traps)
 {
   vmcall_frame_t frame = {
-    .vmcall = TYCHE_SET_TRAPS,
-    .arg_1 = management,
-    .arg_2 = traps,
+    .vmcall = TYCHE_CONFIGURE,
+    .arg_1 = TYCHE_CONFIG_TRAPS,
+    .arg_2 = management,
+    .arg_3 = traps,
   };
   if (tyche_call(&frame) != SUCCESS) {
     goto failure;
@@ -68,9 +68,10 @@ failure:
 int tyche_set_cores(capa_index_t management, usize cores)
 {
   vmcall_frame_t frame = {
-    .vmcall = TYCHE_SET_CORES,
-    .arg_1 = management,
-    .arg_2 = cores,
+    .vmcall = TYCHE_CONFIGURE,
+    .arg_1 = TYCHE_CONFIG_CORES,
+    .arg_2 = management,
+    .arg_3 = cores,
   };
   if (tyche_call(&frame) != SUCCESS) {
     goto failure;
@@ -80,19 +81,67 @@ failure:
   return FAILURE;
 }
 
-int tyche_seal(
-    capa_index_t* transition, 
+int tyche_set_perm(capa_index_t management, usize perm)
+{
+  vmcall_frame_t frame = {
+    .vmcall = TYCHE_CONFIGURE,
+    .arg_1 = TYCHE_CONFIG_PERMISSIONS,
+    .arg_2 = management,
+    .arg_3 = perm,
+  };
+  if (tyche_call(&frame) != SUCCESS) {
+    goto failure;
+  }
+  return SUCCESS;
+failure:
+  return FAILURE;
+}
+
+int tyche_set_switch(capa_index_t management, usize swtype)
+{
+  vmcall_frame_t frame = {
+    .vmcall = TYCHE_CONFIGURE,
+    .arg_1 = TYCHE_CONFIG_SWITCH,
+    .arg_2 = management,
+    .arg_3 = swtype,
+  };
+  if (tyche_call(&frame) != SUCCESS) {
+    goto failure;
+  }
+  return SUCCESS;
+failure:
+  return FAILURE;
+}
+
+int tyche_set_entry(
     capa_index_t management,
+    usize core,
     usize cr3,
-    usize rip, 
+    usize rip,
     usize rsp)
+{
+
+  vmcall_frame_t frame = {
+    .vmcall = TYCHE_SET_ENTRY_ON_CORE,
+    .arg_1 = management,
+    .arg_2 = core,
+    .arg_3 = cr3,
+    .arg_4 = rip,
+    .arg_5 = rsp,
+  };
+  if (tyche_call(&frame) != SUCCESS) {
+    goto failure;
+  }
+  return SUCCESS;
+failure:
+  return FAILURE;
+}
+
+int tyche_seal(capa_index_t* transition, capa_index_t management)
 {
   vmcall_frame_t frame = {
     .vmcall = TYCHE_SEAL_DOMAIN,
     .arg_1 = management,
-    .arg_2 = cr3, 
-    .arg_3 = rip,
-    .arg_4 = rsp,
   };
   if (transition == NULL) {
     goto failure;

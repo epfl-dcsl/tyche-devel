@@ -2,7 +2,7 @@
 
 use core::arch::asm;
 
-use capa_engine::{Domain, Handle, LocalCapa, NextCapaToken};
+use capa_engine::{Bitmaps, Domain, Handle, LocalCapa, NextCapaToken};
 use vmx::bitmaps::exit_qualification;
 use vmx::errors::Trapnr;
 use vmx::{
@@ -94,30 +94,63 @@ fn handle_exit(
             match vmcall {
                 calls::CREATE_DOMAIN => {
                     log::trace!("Create Domain");
-                    let capa = monitor::do_create_domain(*domain, arg_1).expect("TODO");
+                    let capa = monitor::do_create_domain(*domain).expect("TODO");
                     vs.vcpu.set(Register::Rdi, capa.as_u64());
                     vs.vcpu.set(Register::Rax, 0);
                     vs.vcpu.next_instruction()?;
                     Ok(HandlerResult::Resume)
                 }
-                calls::SET_CORES => {
-                    log::trace!("Set cores");
-                    match monitor::do_set_cores(*domain, LocalCapa::new(arg_1), arg_2) {
-                        Ok(()) => vs.vcpu.set(Register::Rax, 0),
-                        Err(e) => {
-                            log::debug!("Set cores failed {:?}", e);
-                            vs.vcpu.set(Register::Rax, 1);
+                calls::CONFIGURE => {
+                    log::trace!("Configure");
+                    if let Ok(bitmap) = Bitmaps::from_usize(arg_1) {
+                        match monitor::do_set_config(
+                            *domain,
+                            LocalCapa::new(arg_2),
+                            bitmap,
+                            arg_3 as u64,
+                        ) {
+                            Ok(_) => {
+                                // Check if we need to initialize context.
+                                if bitmap == Bitmaps::SWITCH {
+                                    monitor::do_init_child_contexts(
+                                        *domain,
+                                        LocalCapa::new(arg_2),
+                                        &mut vs.vcpu,
+                                    )
+                                }
+                                vs.vcpu.set(Register::Rax, 0);
+                            }
+                            Err(e) => {
+                                log::error!("Configuration error: {:?}", e);
+                                vs.vcpu.set(Register::Rax, 1);
+                            }
                         }
+                    } else {
+                        log::error!("Invalid configuration target");
+                        vs.vcpu.set(Register::Rax, 1);
                     }
                     vs.vcpu.next_instruction()?;
                     Ok(HandlerResult::Resume)
                 }
-                calls::SET_TRAPS => {
-                    log::trace!("Set traps");
-                    match monitor::do_set_traps(*domain, LocalCapa::new(arg_1), arg_2) {
+                calls::SET_ENTRY_ON_CORE => {
+                    log::trace!(
+                        "Set entry on core {}, cr3 {:x}, rip {:x}, rsp {:x}",
+                        arg_2,
+                        arg_3,
+                        arg_4,
+                        arg_5
+                    );
+                    match monitor::do_set_entry(
+                        *domain,
+                        LocalCapa::new(arg_1),
+                        arg_2, // core
+                        arg_3, // cr3
+                        arg_4, // rip
+                        arg_5, // rsp
+                    ) {
                         Ok(()) => vs.vcpu.set(Register::Rax, 0),
                         Err(e) => {
-                            log::debug!("Set traps error: {:?}", e);
+                            log::error!("Unable to set entry: {:?}", e);
                             vs.vcpu.set(Register::Rax, 1);
                         }
                     }
@@ -126,9 +159,7 @@ fn handle_exit(
                 }
                 calls::SEAL_DOMAIN => {
                     log::trace!("Seal Domain");
-                    let capa =
-                        monitor::do_seal(*domain, LocalCapa::new(arg_1), arg_2, arg_3, arg_4)
-                            .expect("TODO");
+                    let capa = monitor::do_seal(*domain, LocalCapa::new(arg_1)).expect("TODO");
                     vs.vcpu.set(Register::Rdi, capa.as_u64());
                     vs.vcpu.set(Register::Rax, 0);
                     vs.vcpu.next_instruction()?;

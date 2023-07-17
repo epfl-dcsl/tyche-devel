@@ -267,12 +267,33 @@ int tychools_load_enclave(enclave_t* enclave)
     goto failure;
   }
 
-  // Commit the enclave.
-  if (ioctl_commit_enclave(
+  // TODO(aghosn) expose this through the SDK.
+  // I don't do it now because I'll need some time to refactor libraries to avoid
+  // having so many layers of forwarding. It's becoming really annoying.
+  if (ioctl_set_perms(enclave->handle, DEFAULT_PERM) != SUCCESS) {
+    ERROR("Unable to set the permission on enclave %lld", enclave->handle);
+    goto failure;
+  }
+
+  // TODO(aghosn) same as above.
+  if (ioctl_set_switch(enclave->handle, SharedVCPU) != SUCCESS) {
+      ERROR("Unable to set the switch type.");
+      goto failure;
+  } 
+
+  // TODO(aghosn) same as above as well.
+  if (ioctl_set_entry_on_core(
         enclave->handle,
+        0,
         enclave->config.cr3,
         enclave->config.entry,
-        enclave->config.stack)!= SUCCESS) {
+        enclave->config.stack) != SUCCESS) {
+      ERROR("Unable to set the entry on core 0");
+      goto failure;
+  }
+
+  // Commit the enclave.
+  if (ioctl_commit_enclave(enclave->handle)!= SUCCESS) {
     ERROR("Unable to commit the enclave %lld", enclave->handle);
     goto failure;
   } 

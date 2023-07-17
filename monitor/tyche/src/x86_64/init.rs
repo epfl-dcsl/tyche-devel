@@ -25,7 +25,7 @@ static ENTRY_BARRIER: AtomicBool = AtomicBool::new(false);
 
 const FALSE: AtomicBool = AtomicBool::new(false);
 static BSP_READY: AtomicBool = FALSE;
-static NB_BOOTED_CORES: AtomicUsize = AtomicUsize::new(0);
+pub static NB_BOOTED_CORES: AtomicUsize = AtomicUsize::new(0);
 static mut MANIFEST: Option<&'static Manifest> = None;
 
 pub fn arch_entry_point(log_level: log::LevelFilter) -> ! {

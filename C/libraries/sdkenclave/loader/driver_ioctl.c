@@ -26,14 +26,9 @@ failure:
   return FAILURE;
 }
 
-int ioctl_commit_enclave(
-    handle_t handle,
-    usize cr3,
-    usize entry,
-    usize stack)
+int ioctl_commit_enclave(handle_t handle)
 {
-  msg_enclave_commit_t commit = {stack, entry, cr3};
-  if (ioctl(handle, TYCHE_ENCLAVE_COMMIT, &commit) != SUCCESS) {
+  if (ioctl(handle, TYCHE_ENCLAVE_COMMIT, NULL) != SUCCESS) {
     ERROR("Failed to commit enclave %d.", handle);
     goto failure;
   }
@@ -56,9 +51,48 @@ failure:
 int ioctl_set_cores(handle_t handle, usize cores) {
   msg_set_perm_t perm = {cores}; 
   if (ioctl(handle, TYCHE_ENCLAVE_SET_CORES, &perm) != SUCCESS) {
-      ERROR("Failed to set traps for the enclave %d", handle);
+      ERROR("Failed to set cores for the enclave %d", handle);
       goto failure;
     }
+  return SUCCESS;
+failure:
+  return FAILURE;
+}
+
+int ioctl_set_perms(handle_t handle, usize perms) {
+  msg_set_perm_t perm = {perms}; 
+  if (ioctl(handle, TYCHE_ENCLAVE_SET_PERM, &perm) != SUCCESS) {
+      ERROR("Failed to set perms for the enclave %d", handle);
+      goto failure;
+    }
+  return SUCCESS;
+failure:
+  return FAILURE;
+}
+
+int ioctl_set_switch(handle_t handle, usize sw) {
+  msg_set_perm_t perm = {sw}; 
+  if (ioctl(handle, TYCHE_ENCLAVE_SET_SWITCH, &perm) != SUCCESS) {
+      ERROR("Failed to set switch for the enclave %d", handle);
+      goto failure;
+    }
+  return SUCCESS;
+failure:
+  return FAILURE;
+}
+
+int ioctl_set_entry_on_core(
+    handle_t handle,
+    usize core,
+    usize cr3,
+    usize rip,
+    usize rsp)
+{
+  msg_entry_on_core_t entry = {.core = core, .stack = rsp, .entry = rip, .page_tables = cr3};
+  if (ioctl(handle, TYCHE_ENCLAVE_SET_ENTRY_POINT, &entry) != SUCCESS) {
+      ERROR("Failed to set entry for the enclave %d", handle);
+      goto failure;
+  }
   return SUCCESS;
 failure:
   return FAILURE;

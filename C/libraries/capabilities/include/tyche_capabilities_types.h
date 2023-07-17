@@ -36,14 +36,14 @@ typedef enum domain_status_t {
   Sealed = 2,
 } domain_status_t;
 
-/// Type of security domain.
-typedef enum security_vcpu_t {
+/// Define what should be private to a domain.
+typedef enum switch_save_t {
   /// Reference the same vcpu.
-  SameVCPU = 0,
+  SharedVCPU = 1,
   /// New VCPU, copy state.
-  CopyVCPU = 1,
+  CopyVCPU = 2,
   /// New VCPU, raw (for VMs).
-  FreshVCPU = 2,
+  FreshVCPU = 3,
 } security_vcpu_t;
 
 /// Region Access Rights

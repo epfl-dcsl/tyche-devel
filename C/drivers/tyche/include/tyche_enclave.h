@@ -53,6 +53,9 @@ typedef struct {
 
 /// Structure of the commit message.
 typedef struct {
+  /// The core
+  usize core;
+
   /// The pointer to the stack.
   usize stack;
 
@@ -61,7 +64,7 @@ typedef struct {
 
   /// The page tables.
   usize page_tables;
-} msg_enclave_commit_t;
+} msg_entry_on_core_t;
 
 /// Structure to perform a transition.
 typedef struct {
@@ -78,7 +81,7 @@ typedef struct {
 // @deprecated, use open.
 //#define TYCHE_ENCLAVE_CREATE _IOR('a', 'b', msg_enclave_info_t*)
 #define TYCHE_ENCLAVE_GET_PHYSOFFSET _IOR('a', 'c', msg_enclave_info_t*)
-#define TYCHE_ENCLAVE_COMMIT _IOWR('a', 'd', msg_enclave_commit_t*)
+#define TYCHE_ENCLAVE_COMMIT _IOWR('a', 'd', void*)
 #define TYCHE_ENCLAVE_MPROTECT _IOW('a', 'e', msg_enclave_mprotect_t*)
 #define TYCHE_TRANSITION _IOR('a', 'f', msg_enclave_switch_t*)
 // @deprecate, use close
@@ -86,6 +89,8 @@ typedef struct {
 #define TYCHE_DEBUG_ADDR _IOWR('a', 'h', msg_enclave_info_t*)
 #define TYCHE_ENCLAVE_SET_TRAPS _IOWR('a', 'i', msg_set_perm_t)
 #define TYCHE_ENCLAVE_SET_CORES _IOWR('a', 'j', msg_set_perm_t)
-#define TYCHE_ENCLAVE_SET_SECURITY _IOWR('a', 'k', msg_set_perm_t)
+#define TYCHE_ENCLAVE_SET_PERM _IOWR('a', 'k', msg_set_perm_t)
+#define TYCHE_ENCLAVE_SET_SWITCH _IOWR('a', 'l', msg_set_perm_t)
+#define TYCHE_ENCLAVE_SET_ENTRY_POINT _IOWR('a', 'm', msg_entry_on_core_t*)
 
 #endif

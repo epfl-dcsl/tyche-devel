@@ -15,9 +15,16 @@ typedef enum tyche_monitor_call_t {
   TYCHE_ENUMERATE = 8,
   TYCHE_SWITCH = 9,
   TYCHE_EXIT = 10,
-  TYCHE_SET_TRAPS = 12,
-  TYCHE_SET_CORES = 13,
+  TYCHE_CONFIGURE = 12,
+  TYCHE_SET_ENTRY_ON_CORE = 13,
 } tyche_monitor_call_t;
+
+typedef enum tyche_configurations_t {
+  TYCHE_CONFIG_PERMISSIONS = 0,
+  TYCHE_CONFIG_TRAPS = 1,
+  TYCHE_CONFIG_CORES = 2,
+  TYCHE_CONFIG_SWITCH = 3,
+} tyche_configurations_t;
 
 #define TYCHE_CAPA_NULL ((capa_index_t)0)
 
@@ -50,18 +57,19 @@ typedef struct vmcall_frame_t {
 
 int tyche_call(vmcall_frame_t* frame);
 
-int tyche_create_domain(capa_index_t* management, security_vcpu_t security);
+int tyche_create_domain(capa_index_t* management);
 
 int tyche_set_cores(capa_index_t management, usize cores);
 
 int tyche_set_traps(capa_index_t management, usize traps);
 
-int tyche_seal(
-    capa_index_t* transition,
-    capa_index_t management,
-    usize cr3,
-    usize rip,
-    usize rsp);
+int tyche_set_perm(capa_index_t management, usize perm);
+
+int tyche_set_switch(capa_index_t management, usize swtype);
+
+int tyche_set_entry(capa_index_t management, usize core, usize cr3, usize rip, usize rsp);
+
+int tyche_seal(capa_index_t* transition, capa_index_t management);
 
 int tyche_segment_region(
     capa_index_t capa,

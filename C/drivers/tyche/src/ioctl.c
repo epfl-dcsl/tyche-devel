@@ -119,7 +119,7 @@ failure:
 long tyche_ioctl(struct file* handle, unsigned int cmd, unsigned long arg)
 {
   msg_enclave_info_t info = {UNINIT_USIZE, UNINIT_USIZE}; 
-  msg_enclave_commit_t commit = {0, 0, 0};
+  msg_entry_on_core_t commit = {0, 0, 0, 0};
   msg_enclave_mprotect_t mprotect = {0, 0, 0, 0};
   msg_enclave_switch_t transition = {0};
   msg_set_perm_t perm = {0};
@@ -138,18 +138,7 @@ long tyche_ioctl(struct file* handle, unsigned int cmd, unsigned long arg)
       }
       break;
     case TYCHE_ENCLAVE_COMMIT:
-      if (copy_from_user(
-            &commit,
-            (msg_enclave_commit_t*) arg,
-            sizeof(msg_enclave_commit_t))) {
-        ERROR("Unable to copy commit arguments from user.");
-        goto failure;
-      }
-      if (commit_enclave(
-            handle,
-            commit.page_tables,
-            commit.entry,
-            commit.stack) != SUCCESS) {
+      if (commit_enclave(handle) != SUCCESS) {
         ERROR("Commit failed for enclave %p", handle);
         goto failure;
       }
@@ -184,20 +173,52 @@ long tyche_ioctl(struct file* handle, unsigned int cmd, unsigned long arg)
         goto failure;
       }
       break;
-    case TYCHE_ENCLAVE_SET_SECURITY:
-      if (copy_from_user(
+   case TYCHE_ENCLAVE_SET_PERM:
+        if (copy_from_user(
             &perm,
             (msg_set_perm_t*) arg,
             sizeof(msg_set_perm_t))) {
-            ERROR("Unable to copy perm arguments from user");
-            goto failure;
-          }
-      if (perm.value < SameVCPU || perm.value > FreshVCPU) {
-        ERROR("Invalid vcpu security value.");
+        ERROR("Unable to copy perm arguments from user.");
         goto failure;
       }
-      if (set_security(handle, perm.value) != SUCCESS) {
-        ERROR("Setting security vcpu failed for enclave %p", handle);
+      if (set_perm(
+            handle,
+            perm.value) != SUCCESS) {
+        ERROR("Setting perm failed for enclave %p", handle);
+        goto failure;
+      }
+      break;
+   case TYCHE_ENCLAVE_SET_SWITCH:
+        if (copy_from_user(
+            &perm,
+            (msg_set_perm_t*) arg,
+            sizeof(msg_set_perm_t))) {
+        ERROR("Unable to copy perm arguments from user.");
+        goto failure;
+      }
+        LOG("In set switch!");
+      if (set_switch(
+            handle,
+            perm.value) != SUCCESS) {
+        ERROR("Setting perm failed for enclave %p", handle);
+        goto failure;
+      }
+      break;
+   case TYCHE_ENCLAVE_SET_ENTRY_POINT:
+        if (copy_from_user(
+            &commit,
+            (msg_entry_on_core_t*) arg,
+            sizeof(msg_entry_on_core_t))) {
+        ERROR("Unable to copy perm arguments from user.");
+        goto failure;
+      }
+      if (set_entry_on_core(
+            handle,
+            commit.core,
+            commit.page_tables,
+            commit.entry,
+            commit.stack) != SUCCESS) {
+        ERROR("Setting perm failed for enclave %p", handle);
         goto failure;
       }
       break;

@@ -33,6 +33,21 @@ typedef struct enclave_segment_t {
   dll_elem(struct enclave_segment_t, list);
 } enclave_segment_t;
 
+/// An entry point on a core for the enclave.
+typedef struct enclave_entry_t {
+  usize cr3;
+  usize rip;
+  usize rsp;
+} enclave_entry_t;
+
+/// All entry points for the enclave.
+typedef struct enclave_entries_t {
+  /// One entry per core, total number of entries.
+  size_t size;
+  /// The entries dynamically allocated.
+  enclave_entry_t* entries;
+} enclave_entries_t;
+
 /// Describes an enclave.
 typedef struct enclave_t {
   /// The creator task's pid.
@@ -44,9 +59,6 @@ typedef struct enclave_t {
 
   /// The enclave's domain id.
   domain_id_t domain_id;
-
-  /// The security level of the vcpu for the enclave.
-  security_vcpu_t security;
 
   /// The start of the enclave's physical contiguous memory region.
   usize phys_start;
@@ -62,6 +74,15 @@ typedef struct enclave_t {
 
   /// The enclave's core map.
   usize cores;
+
+  /// The enclave's permission.
+  usize perm;
+
+  /// The enclave's switch value.
+  usize switch_type;
+
+  /// The enclave's entry points per core.
+  enclave_entries_t entries;
 
   /// The segments for the enclave.
   dll_list(enclave_segment_t, segments);
@@ -97,10 +118,19 @@ int mprotect_enclave(
 int set_traps(enclave_handle_t handle, usize traps);
 /// Register the core map for the enclave.
 int set_cores(enclave_handle_t handle, usize core_map);
-/// Change the security level of the enclave.
-int set_security(enclave_handle_t handle, security_vcpu_t security);
+/// Register the perm for the enclave.
+int set_perm(enclave_handle_t handle, usize perm);
+/// Register the switch_type for the enclave.
+int set_switch(enclave_handle_t handle, usize sw);
+/// Set the entry point on a core.
+int set_entry_on_core(
+    enclave_handle_t handle,
+    usize core,
+    usize cr3,
+    usize rip,
+    usize rsp);
 /// Commits the enclave. This is where the capability operations are done.
-int commit_enclave(enclave_handle_t handle, usize cr3, usize rip, usize rsp);
+int commit_enclave(enclave_handle_t handle);
 /// Implements the transition into an enclave.
 int switch_enclave(enclave_handle_t handle, void* args);
 /// Delete the enclave and revoke the capabilities.

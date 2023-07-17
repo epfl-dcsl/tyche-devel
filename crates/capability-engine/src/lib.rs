@@ -16,14 +16,14 @@ use capa::Capa;
 pub use capa::{capa_type, CapaInfo};
 use cores::{Core, CoreList};
 use domain::{insert_capa, remove_capa, DomainHandle, DomainPool};
-pub use domain::{permission, Domain, LocalCapa, NextCapaToken, VcpuType};
+pub use domain::{permission, Bitmaps, Domain, LocalCapa, NextCapaToken};
 pub use gen_arena::{GenArena, Handle};
 pub use region::{AccessRights, RegionTracker};
 use region_capa::{RegionCapa, RegionPool};
 use update::UpdateBuffer;
 pub use update::{Buffer, Update};
 
-use crate::domain::{ALLOW_ALL_CORES, ALLOW_ALL_TRAPS};
+use crate::domain::{core_bits, switch_bits, trap_bits};
 
 /// Configuration for the static Capa Engine size.
 pub mod config {
@@ -55,6 +55,7 @@ pub enum CapaError {
     InvalidSwitch,
     InvalidVcpuType,
     InvalidOperation,
+    InvalidValue,
 }
 
 pub struct CapaEngine {
@@ -86,9 +87,31 @@ impl CapaEngine {
         let id = self.domain_id();
         match self.domains.allocate(Domain::new(id)) {
             Some(handle) => {
-                domain::set_permissions(handle, &mut self.domains, permissions)?;
-                domain::set_core_map(handle, &mut self.domains, ALLOW_ALL_CORES)?;
-                domain::set_traps(handle, &mut self.domains, ALLOW_ALL_TRAPS)?;
+                domain::set_config(
+                    handle,
+                    &mut self.domains,
+                    domain::Bitmaps::PERMISSION,
+                    permissions,
+                )?;
+                domain::set_config(
+                    handle,
+                    &mut self.domains,
+                    domain::Bitmaps::CORE,
+                    core_bits::ALL,
+                )?;
+                domain::set_config(
+                    handle,
+                    &mut self.domains,
+                    domain::Bitmaps::TRAP,
+                    trap_bits::ALL,
+                )?;
+                domain::set_config(
+                    handle,
+                    &mut self.domains,
+                    domain::Bitmaps::SWITCH,
+                    switch_bits::ALL,
+                )?;
+                log::info!("About to seal");
                 self.domains[handle].seal()?;
                 self.updates.push(Update::CreateDomain { domain: handle });
                 Ok(handle)
@@ -122,21 +145,21 @@ impl CapaEngine {
         Ok(())
     }
 
-    pub fn create_domain(
-        &mut self,
-        manager: Handle<Domain>,
-        security: VcpuType,
-    ) -> Result<LocalCapa, CapaError> {
+    pub fn create_domain(&mut self, manager: Handle<Domain>) -> Result<LocalCapa, CapaError> {
         log::trace!("Create new domain");
 
         // Enforce permissions
-        domain::has_permission(manager, &self.domains, permission::SPAWN)?;
+        domain::has_config(
+            manager,
+            &self.domains,
+            domain::Bitmaps::PERMISSION,
+            permission::SPAWN,
+        )?;
 
         let id = self.domain_id();
         match self.domains.allocate(Domain::new(id)) {
             Some(handle) => {
                 self.domains[handle].set_manager(manager);
-                self.domains[handle].set_vcpu_type(security);
                 let capa = insert_capa(
                     manager,
                     Capa::management(handle),
@@ -212,7 +235,12 @@ impl CapaEngine {
         access_right: AccessRights,
     ) -> Result<(LocalCapa, LocalCapa), CapaError> {
         // Enforce permissions
-        domain::has_permission(domain, &self.domains, permission::DUPLICATE)?;
+        domain::has_config(
+            domain,
+            &self.domains,
+            domain::Bitmaps::PERMISSION,
+            permission::DUPLICATE,
+        )?;
 
         let region = self.domains[domain].get(region)?.as_region()?;
         let handles = region_capa::duplicate(
@@ -232,7 +260,12 @@ impl CapaEngine {
         capa: LocalCapa,
     ) -> Result<LocalCapa, CapaError> {
         // Enforce permissions
-        domain::has_permission(domain, &self.domains, permission::DUPLICATE)?;
+        domain::has_config(
+            domain,
+            &self.domains,
+            domain::Bitmaps::PERMISSION,
+            permission::DUPLICATE,
+        )?;
         domain::duplicate_capa(domain, capa, &mut self.regions, &mut self.domains)
     }
 
@@ -243,7 +276,12 @@ impl CapaEngine {
         to: LocalCapa,
     ) -> Result<(), CapaError> {
         // Enforce permissions
-        domain::has_permission(domain, &self.domains, permission::SEND)?;
+        domain::has_config(
+            domain,
+            &self.domains,
+            domain::Bitmaps::PERMISSION,
+            permission::SEND,
+        )?;
 
         //TODO(all) as some code might fail below, we should not remove the capa
         // first.
@@ -282,45 +320,22 @@ impl CapaEngine {
         Ok(())
     }
 
-    pub fn set_permissions(
+    pub fn set_child_config(
         &mut self,
         manager: Handle<Domain>,
         capa: LocalCapa,
-        permissions: u64,
+        bitmap: Bitmaps,
+        value: u64,
     ) -> Result<(), CapaError> {
+        domain::has_config(manager, &self.domains, bitmap, value)?;
         let domain = self.domains[manager].get(capa)?.as_management()?;
-        domain::set_permissions(domain, &mut self.domains, permissions)
+        domain::set_config(domain, &mut self.domains, bitmap, value)?;
+        Ok(())
     }
 
-    pub fn set_domain_cores(
-        &mut self,
-        manager: Handle<Domain>,
-        capa: LocalCapa,
-        core_map: usize,
-    ) -> Result<(), CapaError> {
-        if (!self.domains[manager].core_map()) & (core_map as u64) != 0 {
-            log::debug!("Attempted to increase core_map rights");
-            log::debug!("allowed: {:b}", self.domains[manager].core_map());
-            log::debug!("request: {:b}", core_map);
-            return Err(CapaError::InsufficientPermissions);
-        }
-        let domain = self.domains[manager].get(capa)?.as_management()?;
-        domain::set_core_map(domain, &mut self.domains, core_map as u64)
-    }
-
-    pub fn set_domain_traps(
-        &mut self,
-        manager: Handle<Domain>,
-        capa: LocalCapa,
-        traps: usize,
-    ) -> Result<(), CapaError> {
-        // Check that we are not granting more rights than what the manager has:
-        if (!self.domains[manager].traps()) & (traps as u64) != 0 {
-            log::debug!("Attempted to increase trap rights {:b}", traps);
-            return Err(CapaError::InsufficientPermissions);
-        }
-        let domain = self.domains[manager].get(capa)?.as_management()?;
-        domain::set_traps(domain, &mut self.domains, traps as u64)
+    pub fn get_domain_config(&mut self, domain: Handle<Domain>, bitmap: Bitmaps) -> u64 {
+        let domain = &self.domains[domain];
+        domain.get_config(bitmap)
     }
 
     /// Seal a domain and return a switch handle for that domain.
@@ -332,18 +347,12 @@ impl CapaEngine {
     ) -> Result<LocalCapa, CapaError> {
         let capa = self.domains[domain].get(capa)?.as_management()?;
         self.domains[capa].seal()?;
-        let target = capa;
         let capa = insert_capa(
             domain,
             Capa::Switch { to: capa, core },
             &mut self.regions,
             &mut self.domains,
         )?;
-        self.updates.push(Update::SealUpdate {
-            domain: target,
-            core: core,
-            vcpu: self.domains[target].get_vcpu_type(),
-        });
         Ok(capa)
     }
 

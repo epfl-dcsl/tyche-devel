@@ -3,7 +3,6 @@
 use core::{fmt, mem};
 
 use crate::config::NB_UPDATES;
-use crate::domain::VcpuType;
 use crate::{Domain, Handle, LocalCapa};
 
 pub type UpdateBuffer = Buffer<Update>;
@@ -12,11 +11,6 @@ pub type UpdateBuffer = Buffer<Update>;
 pub enum Update {
     PermissionUpdate {
         domain: Handle<Domain>,
-    },
-    SealUpdate {
-        domain: Handle<Domain>,
-        core: usize,
-        vcpu: VcpuType,
     },
     TlbShootdown {
         core: usize,
@@ -106,9 +100,6 @@ impl fmt::Display for Update {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Update::PermissionUpdate { domain } => write!(f, "PermissionUpdate({})", domain),
-            Update::SealUpdate { domain, core, vcpu } => {
-                write!(f, "SealUpdate({}, core {}, vcpu {:?})", domain, core, vcpu)
-            }
             Update::RevokeDomain { domain } => write!(f, "RevokeDomain({})", domain),
             Update::CreateDomain { domain } => write!(f, "CreateDomain({})", domain),
             Update::TlbShootdown { core } => write!(f, "TlbShootdown({})", core),

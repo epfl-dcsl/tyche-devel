@@ -2,8 +2,8 @@
 
 use capa_engine::config::NB_DOMAINS;
 use capa_engine::{
-    permission, AccessRights, Buffer, CapaEngine, CapaError, CapaInfo, Domain, GenArena, Handle,
-    LocalCapa, NextCapaToken, VcpuType,
+    permission, AccessRights, Bitmaps, Buffer, CapaEngine, CapaError, CapaInfo, Domain, GenArena,
+    Handle, LocalCapa, NextCapaToken,
 };
 use mmu::eptmapper::EPT_ROOT_FLAGS;
 use mmu::{EptMapper, FrameAllocator};
@@ -16,6 +16,7 @@ use vmx::{ActiveVmcs, ControlRegister, Register, VmExitInterrupt};
 
 use super::cpuid;
 use super::guest::VmxState;
+use super::init::NB_BOOTED_CORES;
 use crate::allocator::allocator;
 use crate::rcframe::{drop_rc, RCFrame, RCFramePool, EMPTY_RCFRAME};
 use crate::statics::NB_CORES;
@@ -42,12 +43,30 @@ pub struct ContextData {
     pub vmcs: Handle<RCFrame>,
 }
 
+#[repr(u64)]
+pub enum InitVMCS {
+    Shared = 1,
+    Copy = 2,
+    Fresh = 3,
+}
+
+impl InitVMCS {
+    pub fn from_u64(v: u64) -> Result<Self, CapaError> {
+        match v {
+            1 => Ok(Self::Shared),
+            2 => Ok(Self::Copy),
+            3 => Ok(Self::Fresh),
+            _ => Err(CapaError::InvalidOperation),
+        }
+    }
+}
+
 const EMPTY_DOMAIN: Mutex<DomainData> = Mutex::new(DomainData { ept: None });
 const EMPTY_UPDATE_BUFFER: Mutex<Buffer<CoreUpdate>> = Mutex::new(Buffer::new());
 const EMPTY_CONTEXT: Mutex<ContextData> = Mutex::new(ContextData {
-    cr3: 0,
-    rip: 0,
-    rsp: 0,
+    cr3: usize::max_value(),
+    rip: usize::max_value(),
+    rsp: usize::max_value(),
     vmcs: Handle::<RCFrame>::new_invalid(),
 });
 const EMPTY_CONTEXT_ARRAY: [Mutex<ContextData>; NB_CORES] = [EMPTY_CONTEXT; NB_CORES];
@@ -109,54 +128,133 @@ fn get_context(domain: Handle<Domain>, core: usize) -> MutexGuard<'static, Conte
 
 // ————————————————————————————— Monitor Calls —————————————————————————————— //
 
-pub fn do_create_domain(current: Handle<Domain>, security: usize) -> Result<LocalCapa, CapaError> {
-    let security = VcpuType::from_usize(security)?;
+pub fn do_create_domain(current: Handle<Domain>) -> Result<LocalCapa, CapaError> {
     let mut engine = CAPA_ENGINE.lock();
-    let management_capa = engine.create_domain(current, security)?;
+    let management_capa = engine.create_domain(current)?;
     apply_updates(&mut engine);
     Ok(management_capa)
 }
 
-pub fn do_set_cores(
+pub fn do_set_config(
     current: Handle<Domain>,
     domain: LocalCapa,
-    core_map: usize,
+    bitmap: Bitmaps,
+    value: u64,
 ) -> Result<(), CapaError> {
     let mut engine = CAPA_ENGINE.lock();
-    engine.set_domain_cores(current, domain, core_map)?;
-    return Ok(());
+    engine.set_child_config(current, domain, bitmap, value)?;
+    apply_updates(&mut engine);
+    Ok(())
 }
 
-pub fn do_set_traps(
+pub fn do_init_child_contexts(
     current: Handle<Domain>,
     domain: LocalCapa,
-    traps: usize,
-) -> Result<(), CapaError> {
+    vcpu: &mut ActiveVmcs<'static>,
+) {
     let mut engine = CAPA_ENGINE.lock();
-    engine.set_domain_traps(current, domain, traps)
+    let domain = engine
+        .get_domain_capa(current, domain)
+        .expect("Unable to access child");
+    let value = engine.get_domain_config(domain, Bitmaps::SWITCH);
+    let value = InitVMCS::from_u64(value).unwrap();
+    let allocator = allocator();
+    // Init on all the cores.
+    let cpus = 0..(NB_BOOTED_CORES.load(core::sync::atomic::Ordering::SeqCst) + 1);
+    let mut rcvmcs = RC_VMCS.lock();
+    let cores = engine.get_domain_config(domain, Bitmaps::CORE);
+    match value {
+        InitVMCS::Shared => {
+            // Easy case, increase ref on all cores shared by the two domains.
+            for c in cpus {
+                if (1 << c) & cores == 0 {
+                    continue;
+                }
+                let orig = get_context(current, c);
+                let dest = &mut get_context(domain, c);
+                rcvmcs
+                    .get_mut(orig.vmcs)
+                    .expect("No vmcs on original")
+                    .acquire();
+                if !dest.vmcs.is_invalid() {
+                    drop_rc(&mut rcvmcs, dest.vmcs);
+                }
+                dest.vmcs = orig.vmcs;
+            }
+        }
+        InitVMCS::Copy => {
+            // Flush the current vcpu.
+            for c in cpus {
+                if (1 << c) & cores == 0 {
+                    continue;
+                }
+                let dest = &mut get_context(domain, c);
+                let frame = allocator
+                    .allocate_frame()
+                    .expect("Unable to allocate frame");
+                let rc = RCFrame::new(frame);
+                dest.vmcs = rcvmcs.allocate(rc).expect("Unable to allocate rc frame");
+                vcpu.copy_into(frame);
+            }
+        }
+        InitVMCS::Fresh => {
+            for c in cpus {
+                if (1 << c) & cores == 0 {
+                    continue;
+                }
+                let dest = &mut get_context(domain, c);
+                let frame = allocator
+                    .allocate_frame()
+                    .expect("Unable to allocate frame");
+                let rc = RCFrame::new(frame);
+                //TODO do an init;
+                dest.vmcs = rcvmcs.allocate(rc).expect("Unable to allocate rc frame");
+            }
+        }
+    }
 }
 
-/// TODO(aghosn) do we need to seal on all cores?
-pub fn do_seal(
+pub fn do_set_entry(
     current: Handle<Domain>,
     domain: LocalCapa,
+    core: usize,
     cr3: usize,
     rip: usize,
     rsp: usize,
-) -> Result<LocalCapa, CapaError> {
+) -> Result<(), CapaError> {
+    let mut engine = CAPA_ENGINE.lock();
+    let domain = engine.get_domain_capa(current, domain)?;
+    let cores = engine.get_domain_config(domain, Bitmaps::CORE);
+    if (1 << core) & cores == 0 {
+        return Err(CapaError::InvalidCore);
+    }
+    let context = &mut get_context(domain, core);
+    if context.vmcs.is_invalid() {
+        log::error!("Set the switch type first!");
+        return Err(CapaError::InvalidOperation);
+    }
+    context.cr3 = cr3;
+    context.rip = rip;
+    context.rsp = rsp;
+    Ok(())
+}
+
+/// TODO(aghosn) do we need to seal on all cores?
+pub fn do_seal(current: Handle<Domain>, domain: LocalCapa) -> Result<LocalCapa, CapaError> {
     let core = cpuid();
     let mut engine = CAPA_ENGINE.lock();
     let capa = engine.seal(current, core, domain)?;
-    let new_domain = engine
+    /*let new_domain = engine
         .get_domain_capa(current, domain)
         .expect("Should be a domain capa");
     let mut context = get_context(new_domain, core);
+    //TODO do it on all the cores.
     context.cr3 = cr3;
     context.rip = rip;
     context.rsp = rsp;
     let mut guard = RC_VMCS.lock();
     drop_rc(&mut guard, context.vmcs);
-    context.vmcs = Handle::new_invalid();
+    context.vmcs = Handle::new_invalid();*/
     apply_updates(&mut engine);
     Ok(capa)
 }
@@ -255,10 +353,6 @@ pub fn handle_trap(
 #[derive(Debug, Clone, Copy)]
 enum CoreUpdate {
     TlbShootdown,
-    SealUpdate {
-        domain: Handle<Domain>,
-        vcpu_type: VcpuType,
-    },
     Switch {
         domain: Handle<Domain>,
         return_capa: LocalCapa,
@@ -281,13 +375,6 @@ fn apply_updates(engine: &mut MutexGuard<CapaEngine>) {
         match update {
             // Updates that can be handled locally
             capa_engine::Update::PermissionUpdate { domain } => update_permission(domain, engine),
-            capa_engine::Update::SealUpdate { domain, core, vcpu } => {
-                let mut core_updates = CORE_UPDATES[core].lock();
-                core_updates.push(CoreUpdate::SealUpdate {
-                    domain,
-                    vcpu_type: vcpu,
-                });
-            }
             capa_engine::Update::RevokeDomain { domain } => revoke_domain(domain),
             capa_engine::Update::CreateDomain { domain } => create_domain(domain),
 
@@ -349,47 +436,6 @@ pub fn apply_core_updates(
                     domain.ept.unwrap().as_usize() | EPT_ROOT_FLAGS,
                 ))
                 .expect("VMX error, failed to set EPT pointer");
-            }
-            CoreUpdate::SealUpdate { domain, vcpu_type } => {
-                let mut dom_ctxt = get_context(domain, core);
-                let allocator = allocator();
-                let vmcs = allocator
-                    .allocate_frame()
-                    .expect("Unable to allocate a vmcs")
-                    .zeroed();
-
-                match vcpu_type {
-                    VcpuType::Shared => {
-                        let current_ctxt = get_context(*current_domain, core_id);
-                        // Increase the reference on the current vmcs.
-                        // TODO safety checks in case of error?
-                        RC_VMCS.lock().get_mut(current_ctxt.vmcs).unwrap().acquire();
-                        dom_ctxt.vmcs = current_ctxt.vmcs;
-                    }
-                    VcpuType::Fresh => {
-                        let frame = allocator
-                            .allocate_frame()
-                            .expect("Unable to allocate a vmcs")
-                            .zeroed();
-                        vmx_state.vmxon.init_frame(frame);
-                        let rc = RCFrame::new(frame);
-                        dom_ctxt.vmcs = RC_VMCS
-                            .lock()
-                            .allocate(rc)
-                            .expect("Unable to allocate new rc frame");
-                    }
-                    VcpuType::Copied => {
-                        let frame = allocator
-                            .allocate_frame()
-                            .expect("Unable to allocate a vmcs");
-                        vcpu.copy_into(vmcs);
-                        let rc = RCFrame::new(frame);
-                        dom_ctxt.vmcs = RC_VMCS
-                            .lock()
-                            .allocate(rc)
-                            .expect("Unable to allocator a new rc frame");
-                    }
-                }
             }
             CoreUpdate::Switch {
                 domain,
@@ -568,15 +614,6 @@ impl core::fmt::Display for CoreUpdate {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             CoreUpdate::TlbShootdown => write!(f, "TLB Shootdown"),
-            CoreUpdate::SealUpdate { domain, vcpu_type } => {
-                write!(
-                    f,
-                    "SealUpdate({}, core {}, vcpu_type {:?})",
-                    domain,
-                    cpuid(),
-                    vcpu_type
-                )
-            }
             CoreUpdate::Switch { domain, .. } => write!(f, "Switch({})", domain),
             CoreUpdate::Trap {
                 manager,

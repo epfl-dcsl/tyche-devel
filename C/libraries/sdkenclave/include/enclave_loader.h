@@ -14,9 +14,11 @@
 #define ENTRIES_PER_PAGE (512)
 
 #define ALL_CORES (~(usize)(0))
+#define DEFAULT_CORES ((usize)1)
 #define NO_CORES ((usize)(0))
 #define ALL_TRAPS (~(usize)(0))
 #define NO_TRAPS ((usize)(0))
+#define DEFAULT_PERM ((usize)0)
 
 #define ENCLAVE_DRIVER ("/dev/tyche")
 #define SHARED_PREFIX (".tyche_shared")

@@ -11,6 +11,5 @@ update_disk:
 	sudo chown --recursive $(shell whoami) /tmp/mount/tyche
 	make -B -C drivers/tyche install_disk
 	make -B -C libraries/sdkenclave/example/enclave install_disk
-	make -B -C libraries/sdkenclave/example/debug install_disk
 	make -B -C libraries/trt install_disk
 	cp scripts/install_drivers.sh /tmp/mount/tyche

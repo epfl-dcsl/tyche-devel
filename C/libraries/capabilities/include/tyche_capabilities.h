@@ -17,16 +17,11 @@ int init(capa_alloc_t allocator, capa_dealloc_t deallocator);
 
 /// Creates a new domain.
 /// Sets the result inside the provided id handle.
-int create_domain(domain_id_t* id, security_vcpu_t security);
+int create_domain(domain_id_t* id);
 
 /// Seal the domain.
 /// This function first creates a channel for the child domain and then seals it.
-int seal_domain(
-    domain_id_t id,
-    usize core_map,
-    usize cr3,
-    usize rip,
-    usize rsp);
+int seal_domain(domain_id_t id);
 
 /// Duplicate capability.
 int segment_region_capa(
@@ -67,5 +62,16 @@ int set_domain_cores(domain_id_t id, usize cores);
 /// Set the trap bitmap for a domain.
 /// The domain should not be sealed and the bitmap must be a subset of the parent.
 int set_domain_traps(domain_id_t id, usize traps);
+
+/// Set the permissions for the domain.
+/// The domain should not be sealed and the bitmap must be a subset of the parent.
+int set_domain_perm(domain_id_t id, usize perm);
+
+/// Set the switch type for the domain.
+/// The domain should not be sealed and the value must be defined for the current platform.
+int set_domain_switch(domain_id_t id, usize swtype);
+
+/// Set the domain's entry point of the selected core.
+int set_domain_entry_on_core(domain_id_t id, usize core, usize cr3, usize rip, usize rsp);
 
 #endif

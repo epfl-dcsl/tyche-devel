@@ -87,7 +87,7 @@ fail:
   return FAILURE;
 }
 
-int create_domain(domain_id_t *id, security_vcpu_t security) {
+int create_domain(domain_id_t *id) {
   capa_index_t child_idx = -1;
   capability_t *child_capa = NULL;
   child_domain_t *child = NULL;
@@ -112,7 +112,7 @@ int create_domain(domain_id_t *id, security_vcpu_t security) {
   }
 
   // Create the domain.
-  if (tyche_create_domain(&child_idx, security) != SUCCESS) {
+  if (tyche_create_domain(&child_idx) != SUCCESS) {
     ERROR("Failed to create domain.");
     goto fail_child_capa;
   }
@@ -194,8 +194,61 @@ failure:
   return FAILURE;
 }
 
-int seal_domain(domain_id_t id, usize core_map, usize cr3, usize rip,
-                usize rsp) {
+int set_domain_perm(domain_id_t id, usize perm)
+{
+  child_domain_t *child = find_child(id);
+  if (child == NULL) {
+    ERROR("Child not found");
+    goto failure;
+  }
+  if (tyche_set_perm(child->management->local_id, perm) != SUCCESS) {
+    ERROR("Unable to set the perm with a vmcall.");
+    goto failure;
+  }
+  return SUCCESS;
+failure:
+  return FAILURE;
+}
+
+int set_domain_switch(domain_id_t id, usize swtype)
+{
+  child_domain_t *child = find_child(id);
+  if (child == NULL) {
+    ERROR("Child not found");
+    goto failure;
+  }
+  if (tyche_set_switch(child->management->local_id, swtype) != SUCCESS) {
+    ERROR("Unable to set the switch with a vmcall.");
+    goto failure;
+  }
+  return SUCCESS;
+failure:
+  return FAILURE;
+}
+
+
+int set_domain_entry_on_core(
+    domain_id_t id,
+    usize core,
+    usize cr3,
+    usize rip,
+    usize rsp)
+{
+  child_domain_t *child = find_child(id);
+  if (child == NULL) {
+    ERROR("Child not found");
+    goto failure;
+  }
+  if (tyche_set_entry(child->management->local_id, core, cr3, rip, rsp) != SUCCESS) {
+    ERROR("Unable to set the entry point with a vmcall.");
+    goto failure;
+  }
+  return SUCCESS;
+failure:
+  return FAILURE;
+}
+
+int seal_domain(domain_id_t id) {
   child_domain_t *child = NULL;
   capability_t *transition = NULL;
   transition_t *trans_wrapper = NULL;
@@ -236,7 +289,7 @@ int seal_domain(domain_id_t id, usize core_map, usize cr3, usize rip,
     goto failure_dealloc;
   }
 
-  if (tyche_seal(&(transition->local_id), child->management->local_id, cr3, rip, rsp) != SUCCESS) {
+  if (tyche_seal(&(transition->local_id), child->management->local_id) != SUCCESS) {
     ERROR("Unable to create a channel.");
     goto failure_dealloc;
   }

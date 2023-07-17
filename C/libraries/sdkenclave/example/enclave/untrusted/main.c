@@ -289,14 +289,14 @@ int main(int argc, char *argv[]) {
   if (application == BREAKPOINT) {
       if (sdk_create_enclave(
             enclave, enclave_path, argv[0], &loaded_enclave,
-            ALL_CORES, ALL_TRAPS - (1 << 3)) != SUCCESS) {
+            DEFAULT_CORES, ALL_TRAPS - (1 << 3)) != SUCCESS) {
       ERROR("Unable to parse the enclave: %s", enclave_path);
       goto failure;
     }
   } else {
     if (sdk_create_enclave(
           enclave, enclave_path, argv[0], &loaded_enclave,
-          ALL_CORES, ALL_TRAPS) != SUCCESS) {
+          DEFAULT_CORES, ALL_TRAPS) != SUCCESS) {
       ERROR("Unable to parse the enclave '%s'", enclave_path);
       goto failure;
     }

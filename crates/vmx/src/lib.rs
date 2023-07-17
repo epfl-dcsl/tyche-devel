@@ -295,17 +295,23 @@ impl<'vmx> ActiveVmcs<'vmx> {
         Ok(self.region)
     }
 
-    pub fn copy_into(&mut self, mut dest: Frame) {
+    pub fn flush(&mut self) {
         // Dump the current state.
         unsafe {
             raw::vmclear(self.region.frame.phys_addr.as_u64()).expect("Unable to perform a clear");
         };
+        self.launched = false;
+    }
+
+    pub fn copy_into(&mut self, mut dest: Frame) {
+        if !self.launched {
+            self.flush();
+        }
         // Write the VMCS back.
         unsafe {
             raw::vmptrld(self.region.frame.phys_addr.as_u64()).expect("Unable to reset the vmptr");
         }
         dest.as_mut().copy_from_slice(self.region.frame().as_ref());
-        self.launched = false;
     }
 
     pub fn frame(&self) -> &Frame {

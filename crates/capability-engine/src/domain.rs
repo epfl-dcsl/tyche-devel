@@ -24,6 +24,35 @@ pub mod permission {
     pub const NONE: u64 = 0;
 }
 
+// ————————————————————————————————— Traps —————————————————————————————————— //
+
+pub mod trap_bits {
+    /// No trap can be handled by the domain.
+    pub const NONE: u64 = 0;
+
+    /// All traps can be handled by the domain.
+    pub const ALL: u64 = !(NONE);
+}
+
+// ——————————————————————————————— Core Bits ———————————————————————————————— //
+pub mod core_bits {
+    /// No core.
+    pub const NONE: u64 = 0;
+
+    /// All cores.
+    pub const ALL: u64 = !(NONE);
+}
+// —————————————————————————— Switch configuration —————————————————————————— //
+
+#[allow(dead_code)]
+pub mod switch_bits {
+    /// Default none value.
+    pub const NONE: u64 = 0;
+
+    /// Default all value.
+    pub const ALL: u64 = !(NONE);
+}
+
 // —————————————————————————— Domain Capabilities ——————————————————————————— //
 
 /// An index into the capability table of a domain.
@@ -72,35 +101,47 @@ impl NextCapaToken {
 
 // ————————————————————————————————— Domain ————————————————————————————————— //
 
-/// Disallow traps for a domain.
-pub const ALLOW_NO_TRAPS: u64 = 0;
-/// Allow all traps from a domain.
-pub const ALLOW_ALL_TRAPS: u64 = !ALLOW_NO_TRAPS;
-
-/// Disallow the domain from running on any core.
-pub const ALLOW_NO_CORES: u64 = 0;
-/// Allow the domain to run on all cores.
-#[allow(dead_code)]
-pub const ALLOW_ALL_CORES: u64 = !ALLOW_NO_CORES;
-/// The default core for domain initialization.
-pub const DEFAULT_CORE: u64 = 0;
-
-#[derive(Debug, Clone, Copy)]
-#[repr(u8)]
-pub enum VcpuType {
-    Shared = 0,
-    Copied = 1,
-    Fresh = 2,
+/// Valid indices in the configuration.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(usize)]
+pub enum Bitmaps {
+    PERMISSION = 0,
+    TRAP = 1,
+    CORE = 2,
+    SWITCH = 3,
+    _SIZE = 4,
 }
 
-impl VcpuType {
-    pub fn from_usize(val: usize) -> Result<Self, CapaError> {
-        match val {
-            0 => Ok(Self::Shared),
-            1 => Ok(Self::Copied),
-            2 => Ok(Self::Fresh),
-            _ => Err(CapaError::InvalidVcpuType),
+impl Bitmaps {
+    pub fn from_usize(v: usize) -> Result<Self, CapaError> {
+        match v {
+            0 => Ok(Self::PERMISSION),
+            1 => Ok(Self::TRAP),
+            2 => Ok(Self::CORE),
+            3 => Ok(Self::SWITCH),
+            _ => Err(CapaError::InvalidValue),
         }
+    }
+}
+
+/// Domain configuration bitmaps.
+pub struct Configuration {
+    /// Values for the domain for each bitmap.
+    values: [u64; Bitmaps::_SIZE as usize],
+    /// Mask of valid bits for the bitmaps.
+    valid_masks: [u64; Bitmaps::_SIZE as usize],
+    /// Keeps track initialization of the bitmaps.
+    initialized: [bool; Bitmaps::_SIZE as usize],
+}
+
+impl Configuration {
+    pub fn is_inited(&self) -> bool {
+        for i in self.initialized.iter() {
+            if !i {
+                return false;
+            }
+        }
+        return true;
     }
 }
 
@@ -115,20 +156,14 @@ pub struct Domain {
     regions: RegionTracker,
     /// The (optional) manager of this domain.
     manager: Option<Handle<Domain>>,
-    /// A bitmap of permissions.
-    permissions: u64,
-    /// A bitmap of traps the domain can handle.
-    traps: u64,
-    /// A bitmap of cores the domain is runing on.
+    /// Configuration bitmaps for the domain.
+    config: Configuration,
+    /// A bitmap of cores the domain runs on.
     cores: u64,
-    /// A bitmap of cores the domain is **allowed** to run on.
-    core_map: u64,
     /// Is this domain in the process of being revoked?
     is_being_revoked: bool,
     /// Is the domain sealed?
     is_sealed: bool,
-    /// type of vcpu
-    vcpu_type: VcpuType,
 }
 
 impl Domain {
@@ -141,22 +176,45 @@ impl Domain {
             free_list: FreeList::new(),
             regions: RegionTracker::new(),
             manager: None,
-            permissions: permission::NONE,
-            traps: ALLOW_NO_TRAPS,
-            cores: DEFAULT_CORE,
-            core_map: ALLOW_NO_CORES,
+            config: Configuration {
+                values: [
+                    permission::NONE,
+                    trap_bits::NONE,
+                    core_bits::NONE,
+                    switch_bits::NONE,
+                ],
+                valid_masks: [
+                    permission::ALL,
+                    trap_bits::ALL,
+                    core_bits::ALL,
+                    switch_bits::ALL,
+                ],
+                initialized: [false; Bitmaps::_SIZE as usize],
+            },
+            cores: core_bits::NONE,
             is_being_revoked: false,
             is_sealed: false,
-            vcpu_type: VcpuType::Copied,
         }
+    }
+
+    pub fn get_config(&self, bitmap: Bitmaps) -> u64 {
+        self.config.values[bitmap as usize]
+    }
+
+    pub fn set_config(&mut self, bitmap: Bitmaps, value: u64) -> Result<(), CapaError> {
+        if self.is_sealed() {
+            return Err(CapaError::AlreadySealed);
+        }
+        if value & !self.config.valid_masks[bitmap as usize] != 0 {
+            return Err(CapaError::InvalidOperation);
+        }
+        self.config.values[bitmap as usize] = value;
+        self.config.initialized[bitmap as usize] = true;
+        Ok(())
     }
 
     pub(crate) fn set_manager(&mut self, manager: Handle<Domain>) {
         self.manager = Some(manager);
-    }
-
-    pub(crate) fn set_vcpu_type(&mut self, tpe: VcpuType) {
-        self.vcpu_type = tpe;
     }
 
     /// Get a capability from a domain.
@@ -208,24 +266,30 @@ impl Domain {
     }
 
     pub fn traps(&self) -> u64 {
-        self.traps
+        self.get_config(Bitmaps::TRAP)
     }
 
     pub fn cores(&self) -> u64 {
         self.cores
     }
+
     pub fn core_map(&self) -> u64 {
-        self.core_map
+        self.get_config(Bitmaps::CORE)
     }
 
+    pub fn permissions(&self) -> u64 {
+        self.get_config(Bitmaps::PERMISSION)
+    }
     /// Returns Wether or not this domain can handle the given trap
     pub fn can_handle(&self, trap: u64) -> bool {
-        self.traps & trap != 0 && self.is_sealed
+        self.traps() & trap != 0 && self.is_sealed
     }
 
     pub fn seal(&mut self) -> Result<(), CapaError> {
         if self.is_sealed {
             Err(CapaError::AlreadySealed)
+        } else if !self.config.is_inited() {
+            Err(CapaError::InvalidOperation)
         } else {
             self.is_sealed = true;
             Ok(())
@@ -234,10 +298,6 @@ impl Domain {
 
     pub fn is_sealed(&self) -> bool {
         self.is_sealed
-    }
-
-    pub fn get_vcpu_type(&self) -> VcpuType {
-        self.vcpu_type
     }
 
     fn is_valid(&self, idx: usize, regions: &RegionPool, domains: &DomainPool) -> bool {
@@ -322,65 +382,28 @@ fn free_invalid_capas(domain: Handle<Domain>, regions: &mut RegionPool, domains:
 // —————————————————————————————— Permissions ——————————————————————————————— //
 
 /// Check wether a given domain has the expected subset of permissions.
-pub(crate) fn has_permission(
+pub(crate) fn has_config(
     domain: Handle<Domain>,
     domains: &DomainPool,
-    permission: u64,
+    bitmap: Bitmaps,
+    value: u64,
 ) -> Result<(), CapaError> {
-    if permission | permission::ALL != permission::ALL {
-        // There are some undefined bits!
-        return Err(CapaError::InvalidPermissions);
-    }
-    let domain_perms = domains[domain].permissions;
-    if domain_perms & permission == permission {
+    let domain = &domains[domain];
+    if domain.get_config(bitmap) & value == value {
         Ok(())
     } else {
         Err(CapaError::InsufficientPermissions)
     }
 }
 
-pub(crate) fn set_permissions(
+pub(crate) fn set_config(
     domain: Handle<Domain>,
     domains: &mut DomainPool,
-    permissions: u64,
-) -> Result<(), CapaError> {
-    if permissions & !permission::ALL != 0 {
-        return Err(CapaError::InvalidPermissions);
-    }
-
-    let domain = &mut domains[domain];
-    if domain.is_sealed {
-        return Err(CapaError::AlreadySealed);
-    } else {
-        domain.permissions = permissions;
-        Ok(())
-    }
-}
-
-pub(crate) fn set_core_map(
-    domain: Handle<Domain>,
-    domains: &mut DomainPool,
-    core_map: u64,
+    bitmap: Bitmaps,
+    value: u64,
 ) -> Result<(), CapaError> {
     let domain = &mut domains[domain];
-    if domain.is_sealed() {
-        return Err(CapaError::AlreadySealed);
-    }
-    domain.core_map = core_map;
-    Ok(())
-}
-
-pub(crate) fn set_traps(
-    domain: Handle<Domain>,
-    domains: &mut DomainPool,
-    traps: u64,
-) -> Result<(), CapaError> {
-    let domain = &mut domains[domain];
-    if domain.is_sealed() {
-        return Err(CapaError::AlreadySealed);
-    }
-    domain.traps = traps;
-    Ok(())
+    domain.set_config(bitmap, value)
 }
 
 // —————————————————————————————————— Send —————————————————————————————————— //
@@ -494,7 +517,7 @@ pub(crate) fn find_trap_handler(
 ) -> Option<Handle<Domain>> {
     let mut handle = domain;
     while let Some(manager) = domains.get(handle) {
-        if manager.traps & trap != 0 {
+        if manager.traps() & trap != 0 {
             return Some(handle);
         }
         let Some(next_handle) = manager.manager else {

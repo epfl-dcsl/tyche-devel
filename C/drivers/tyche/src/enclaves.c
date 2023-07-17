@@ -72,8 +72,13 @@ int create_enclave(enclave_handle_t handle)
   encl->phys_start = UNINIT_USIZE;
   encl->virt_start = UNINIT_USIZE;
   encl->size = UNINIT_USIZE;
-  // Default security level: copy the vcpu.
-  encl->security = SameVCPU;
+  // Init bitmaps. 
+  encl->perm = 0;
+  encl->cores = 0;
+  encl->traps = 0;
+  // Setup the entries.
+  encl->entries.size = 0;
+  encl->entries.entries = NULL;
   dll_init_list(&(encl->segments));
   dll_init_elem(encl, list);
 
@@ -250,25 +255,76 @@ int set_cores(enclave_handle_t handle, usize core_map)
     goto failure;
   }
   encl->cores = core_map;
+
+  // Allocate the array.
+  // TODO we could be less generous with the allocation.
+  encl->entries.size = 64;
+  encl->entries.entries = kcalloc(sizeof(enclave_entry_t), 64, GFP_KERNEL);
+  if (encl->entries.entries == NULL) {
+    ERROR("Unable to allocate the enclave entry array.");
+    goto failure;
+  }
   return SUCCESS;
 failure: 
   return FAILURE;
 }
 
-int set_security(enclave_handle_t handle, security_vcpu_t security)
+int set_perm(enclave_handle_t handle, usize perm)
 {
   enclave_t* encl = find_enclave(handle);
   if (encl == NULL) {
     ERROR("Unable to find the enclave");
     goto failure;
   }
-  encl->security = security;
+  encl->perm = perm;
+  return SUCCESS;
+failure: 
+  return FAILURE;
+}
+
+int set_switch(enclave_handle_t handle, usize sw)
+{
+  enclave_t* encl = find_enclave(handle);
+  if (encl == NULL) {
+    ERROR("Unable to find the enclave");
+    goto failure;
+  }
+  encl->switch_type = sw;
+  return SUCCESS;
+failure: 
+  return FAILURE;
+}
+
+int set_entry_on_core(
+    enclave_handle_t handle,
+    usize core,
+    usize cr3,
+    usize rip,
+    usize rsp)
+{
+  enclave_t* encl = find_enclave(handle);
+  if (encl == NULL) {
+    ERROR("Unable to find the enclave");
+    goto failure;
+  }
+  if ((encl->cores & (1 << core)) == 0) {
+    ERROR("Trying to set entry point on unallowed core");
+    goto failure;
+  }
+
+  if (core >= encl->entries.size) {
+    ERROR("The supplied core is greater than the number of supported cores");
+  }
+
+  encl->entries.entries[core].cr3 = cr3;
+  encl->entries.entries[core].rip = rip;
+  encl->entries.entries[core].rsp = rsp;
   return SUCCESS;
 failure:
   return FAILURE;
 }
 
-int commit_enclave(enclave_handle_t handle, usize cr3, usize rip, usize rsp)
+int commit_enclave(enclave_handle_t handle)
 {
   usize vbase = 0;
   usize poffset = 0;
@@ -302,8 +358,13 @@ int commit_enclave(enclave_handle_t handle, usize cr3, usize rip, usize rsp)
     goto failure;
   }
 
+  if (encl->entries.entries == NULL) {
+    ERROR("The entries should have been initialized.");
+    goto failure;
+  }
+
   // All checks are done, call into the capability library.
-  if (create_domain(&(encl->domain_id), encl->security) != SUCCESS) {
+  if (create_domain(&(encl->domain_id)) != SUCCESS) {
     ERROR("Monitor rejected the creation of a domain for enclave %p", handle);
     goto failure;
   }
@@ -354,8 +415,38 @@ int commit_enclave(enclave_handle_t handle, usize cr3, usize rip, usize rsp)
     goto delete_fail;
   }
 
+  if (set_domain_perm(encl->domain_id, encl->perm) != SUCCESS) {
+    ERROR("Unable to set the permissions for the enclave.");
+    goto delete_fail;
+  }
+
+  if (set_domain_switch(encl->domain_id, encl->switch_type) != SUCCESS) {
+    ERROR("Unable to set the enclave's switch type.");
+    goto delete_fail;
+  }
+
+  // Set the entries for all the cores of the enclave.
+  do {
+    usize value = encl->cores, counter = 0;
+    while (value > 0) {
+      if ((value & 1) != 0) {
+        if (set_domain_entry_on_core(
+          encl->domain_id,
+          counter,
+          encl->entries.entries[counter].cr3,
+          encl->entries.entries[counter].rip,
+          encl->entries.entries[counter].rsp) != SUCCESS) {
+          ERROR("Unable to set the entry point on core %lld, for %llx", counter, encl->cores);
+          goto delete_fail;
+        } 
+      }
+      counter++;
+      value >>= 1;
+    }
+  } while(0);
+
   // Commit the enclave.
-  if (seal_domain(encl->domain_id, ALL_CORES_MAP, cr3, rip, rsp) != SUCCESS) {
+  if (seal_domain(encl->domain_id) != SUCCESS) {
     ERROR("Unable to seal enclave %p", handle);
     goto delete_fail;
   }
@@ -422,6 +513,7 @@ delete_encl_struct:
   // Delete the enclave memory region.
   free_pages_exact(phys_to_virt((phys_addr_t)(encl->phys_start)), encl->size);
   dll_remove(&enclaves, encl, list);
+  kfree(encl->entries.entries);
   kfree(encl);
   return SUCCESS;
 failure:
