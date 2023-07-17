@@ -196,7 +196,6 @@ long tyche_ioctl(struct file* handle, unsigned int cmd, unsigned long arg)
         ERROR("Unable to copy perm arguments from user.");
         goto failure;
       }
-        LOG("In set switch!");
       if (set_switch(
             handle,
             perm.value) != SUCCESS) {

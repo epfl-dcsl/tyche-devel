@@ -77,7 +77,12 @@ fn foo() {
     display_domain(domain, &engine);
 
     let dom2 = engine.create_domain(domain).unwrap();
-    engine.set_permissions(domain, dom2, permission::SPAWN);
+    engine.set_child_config(
+        domain,
+        dom2,
+        capa_engine::Bitmaps::PERMISSION,
+        permission::SPAWN,
+    );
     let domain2 = engine.get_domain_capa(domain, dom2).unwrap();
     engine.send(domain, reg2, dom2);
     display(&engine);

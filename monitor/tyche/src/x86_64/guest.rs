@@ -322,7 +322,7 @@ fn handle_exit(
                     Trapnr::Breakpoint,
                     InterruptionType::SoftwareException,
                     None,
-                    vcpu,
+                    &vs.vcpu,
                 );
                 // Inject the interrupt.
                 log::debug!(

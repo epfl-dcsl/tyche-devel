@@ -333,6 +333,16 @@ impl CapaEngine {
         Ok(())
     }
 
+    pub fn set_domain_config(
+        &mut self,
+        domain: Handle<Domain>,
+        bitmap: Bitmaps,
+        value: u64,
+    ) -> Result<(), CapaError> {
+        let domain = &mut self.domains[domain];
+        domain.set_config(bitmap, value)
+    }
+
     pub fn get_domain_config(&mut self, domain: Handle<Domain>, bitmap: Bitmaps) -> u64 {
         let domain = &self.domains[domain];
         domain.get_config(bitmap)
@@ -347,6 +357,7 @@ impl CapaEngine {
     ) -> Result<LocalCapa, CapaError> {
         let capa = self.domains[domain].get(capa)?.as_management()?;
         self.domains[capa].seal()?;
+        //TODO(aghosn)(Charly) we should create a switch capa for all cores?
         let capa = insert_capa(
             domain,
             Capa::Switch { to: capa, core },

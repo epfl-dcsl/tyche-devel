@@ -193,6 +193,19 @@ fn scenario_2() {
     );
 
     // Seal domain
+    engine
+        .set_child_config(domain, dom2, capa_engine::Bitmaps::TRAP, 0)
+        .unwrap();
+    engine
+        .set_child_config(domain, dom2, capa_engine::Bitmaps::PERMISSION, 0)
+        .unwrap();
+    engine
+        .set_child_config(domain, dom2, capa_engine::Bitmaps::CORE, 1)
+        .unwrap();
+    engine
+        .set_child_config(domain, dom2, capa_engine::Bitmaps::SWITCH, 0)
+        .unwrap();
+
     let switch = engine.seal(domain, core, dom2).unwrap();
     // Second seal should fail
     assert!(engine.seal(domain, core, dom2).is_err());
@@ -268,6 +281,18 @@ fn scenario_3() {
     engine.send(domain, reg_to_give, encl).unwrap();
 
     // Seal domain.
+    engine
+        .set_child_config(domain, encl, capa_engine::Bitmaps::TRAP, 0)
+        .unwrap();
+    engine
+        .set_child_config(domain, encl, capa_engine::Bitmaps::PERMISSION, 0)
+        .unwrap();
+    engine
+        .set_child_config(domain, encl, capa_engine::Bitmaps::CORE, 1)
+        .unwrap();
+    engine
+        .set_child_config(domain, encl, capa_engine::Bitmaps::SWITCH, 0)
+        .unwrap();
     let _ = engine.seal(domain, core, encl).unwrap();
     snap!("{[0x1000, 0x2000 | 1]}", regions(enclave, &engine));
     // Now delete the enclaves' region.
