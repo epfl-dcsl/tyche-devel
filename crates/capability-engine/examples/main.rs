@@ -1,4 +1,4 @@
-use capa_engine::{permission, AccessRights, CapaEngine, Domain, Handle};
+use capa_engine::{permission, AccessRights, CapaEngine, Domain, Handle, MemOps};
 use simple_logger::SimpleLogger;
 
 fn main() {
@@ -37,6 +37,7 @@ fn foo() {
             AccessRights {
                 start: 0,
                 end: 0x1000,
+                ops: MemOps::NONE,
             },
         )
         .unwrap();
@@ -50,10 +51,12 @@ fn foo() {
             AccessRights {
                 start: 0,
                 end: 0x200,
+                ops: MemOps::NONE,
             },
             AccessRights {
                 start: 0x300,
                 end: 0x1000,
+                ops: MemOps::NONE,
             },
         )
         .unwrap();
@@ -66,10 +69,12 @@ fn foo() {
             AccessRights {
                 start: 0,
                 end: 0x50,
+                ops: MemOps::NONE,
             },
             AccessRights {
                 start: 0x50,
                 end: 0x200,
+                ops: MemOps::NONE,
             },
         )
         .unwrap();

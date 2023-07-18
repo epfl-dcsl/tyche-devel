@@ -1,7 +1,7 @@
 use crate::config::NB_REGIONS;
 use crate::domain::{insert_capa, Domain, DomainPool, LocalCapa};
 use crate::gen_arena::{GenArena, Handle};
-use crate::region::AccessRights;
+use crate::region::{AccessRights, MemOps};
 use crate::update::UpdateBuffer;
 use crate::{domain, CapaError};
 
@@ -23,7 +23,11 @@ impl RegionCapa {
             right: None,
             is_active: false,
             is_confidential: false,
-            access: AccessRights { start: 0, end: 0 },
+            access: AccessRights {
+                start: 0,
+                end: 0,
+                ops: MemOps::NONE,
+            },
         }
     }
 
@@ -259,7 +263,10 @@ fn apply_uninstall(
 }
 
 fn is_valid_duplicate(region: &RegionCapa, left: AccessRights, right: AccessRights) -> bool {
-    contains(region, left) && contains(region, right)
+    contains(region, left)
+        && contains(region, right)
+        && region.access.ops.contains(left.ops)
+        && region.access.ops.contains(right.ops)
 }
 
 fn contains(region: &RegionCapa, access: AccessRights) -> bool {
@@ -275,32 +282,81 @@ fn overlap(left: AccessRights, right: AccessRights) -> bool {
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::region::MemOps;
 
     #[test]
     fn test_overlap() {
         assert!(overlap(
-            AccessRights { start: 2, end: 3 },
-            AccessRights { start: 1, end: 4 }
+            AccessRights {
+                start: 2,
+                end: 3,
+                ops: MemOps::NONE
+            },
+            AccessRights {
+                start: 1,
+                end: 4,
+                ops: MemOps::NONE
+            }
         ));
         assert!(overlap(
-            AccessRights { start: 1, end: 4 },
-            AccessRights { start: 2, end: 3 }
+            AccessRights {
+                start: 1,
+                end: 4,
+                ops: MemOps::NONE,
+            },
+            AccessRights {
+                start: 2,
+                end: 3,
+                ops: MemOps::NONE,
+            }
         ));
         assert!(overlap(
-            AccessRights { start: 1, end: 3 },
-            AccessRights { start: 2, end: 4 }
+            AccessRights {
+                start: 1,
+                end: 3,
+                ops: MemOps::NONE,
+            },
+            AccessRights {
+                start: 2,
+                end: 4,
+                ops: MemOps::NONE,
+            }
         ));
         assert!(overlap(
-            AccessRights { start: 2, end: 4 },
-            AccessRights { start: 1, end: 3 }
+            AccessRights {
+                start: 2,
+                end: 4,
+                ops: MemOps::NONE,
+            },
+            AccessRights {
+                start: 1,
+                end: 3,
+                ops: MemOps::NONE,
+            }
         ));
         assert!(!overlap(
-            AccessRights { start: 1, end: 3 },
-            AccessRights { start: 4, end: 6 }
+            AccessRights {
+                start: 1,
+                end: 3,
+                ops: MemOps::NONE,
+            },
+            AccessRights {
+                start: 4,
+                end: 6,
+                ops: MemOps::NONE,
+            }
         ));
         assert!(!overlap(
-            AccessRights { start: 4, end: 6 },
-            AccessRights { start: 1, end: 3 }
+            AccessRights {
+                start: 4,
+                end: 6,
+                ops: MemOps::NONE,
+            },
+            AccessRights {
+                start: 1,
+                end: 3,
+                ops: MemOps::NONE,
+            }
         ));
     }
 }

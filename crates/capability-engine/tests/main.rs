@@ -1,7 +1,7 @@
 use std::fmt::Write;
 
 use capa_engine::{
-    permission, AccessRights, CapaEngine, Domain, Handle, NextCapaToken, RegionTracker,
+    permission, AccessRights, CapaEngine, Domain, Handle, MemOps, NextCapaToken, RegionTracker,
 };
 
 /// Snapshot testing
@@ -29,6 +29,7 @@ fn scenario_1() {
             AccessRights {
                 start: 0,
                 end: 0x1000,
+                ops: MemOps::NONE,
             },
         )
         .unwrap();
@@ -47,10 +48,12 @@ fn scenario_1() {
             AccessRights {
                 start: 0,
                 end: 0x200,
+                ops: MemOps::NONE,
             },
             AccessRights {
                 start: 0x300,
                 end: 0x1000,
+                ops: MemOps::NONE,
             },
         )
         .unwrap();
@@ -72,10 +75,12 @@ fn scenario_1() {
             AccessRights {
                 start: 0,
                 end: 0x50,
+                ops: MemOps::NONE,
             },
             AccessRights {
                 start: 0x50,
                 end: 0x200,
+                ops: MemOps::NONE,
             },
         )
         .unwrap();
@@ -138,6 +143,7 @@ fn scenario_2() {
             AccessRights {
                 start: 0,
                 end: 0x1000,
+                ops: MemOps::NONE,
             },
         )
         .unwrap();
@@ -156,10 +162,12 @@ fn scenario_2() {
             AccessRights {
                 start: 0,
                 end: 0x200,
+                ops: MemOps::NONE,
             },
             AccessRights {
                 start: 0x300,
                 end: 0x1000,
+                ops: MemOps::NONE,
             },
         )
         .unwrap();
@@ -228,6 +236,7 @@ fn scenario_3() {
             AccessRights {
                 start: 0x0,
                 end: 0x10000,
+                ops: MemOps::NONE,
             },
         )
         .unwrap();
@@ -239,10 +248,12 @@ fn scenario_3() {
             AccessRights {
                 start: 0x0,
                 end: 0x1000,
+                ops: MemOps::NONE,
             },
             AccessRights {
                 start: 0x1000,
                 end: 0x10000,
+                ops: MemOps::NONE,
             },
         )
         .unwrap();
@@ -253,10 +264,12 @@ fn scenario_3() {
             AccessRights {
                 start: 0x1000,
                 end: 0x2000,
+                ops: MemOps::NONE,
             },
             AccessRights {
                 start: 0x2000,
                 end: 0x10000,
+                ops: MemOps::NONE,
             },
         )
         .unwrap();
@@ -268,10 +281,12 @@ fn scenario_3() {
             AccessRights {
                 start: 0x1000,
                 end: 0x1000,
+                ops: MemOps::NONE,
             },
             AccessRights {
                 start: 0x1000,
                 end: 0x2000,
+                ops: MemOps::NONE,
             },
         )
         .unwrap();

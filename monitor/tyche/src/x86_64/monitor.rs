@@ -3,7 +3,7 @@
 use capa_engine::config::NB_DOMAINS;
 use capa_engine::{
     permission, AccessRights, Bitmaps, Buffer, CapaEngine, CapaError, CapaInfo, Domain, GenArena,
-    Handle, LocalCapa, NextCapaToken,
+    Handle, LocalCapa, MemOps, NextCapaToken,
 };
 use mmu::eptmapper::EPT_ROOT_FLAGS;
 use mmu::{EptMapper, FrameAllocator};
@@ -83,6 +83,7 @@ pub fn init(manifest: &'static Manifest) {
             AccessRights {
                 start: 0,
                 end: manifest.poffset as usize,
+                ops: MemOps::ALL,
             },
         )
         .unwrap();
@@ -264,19 +265,23 @@ pub fn do_segment_region(
     capa: LocalCapa,
     start_1: usize,
     end_1: usize,
-    _prot_1: usize,
+    prot_1: usize,
     start_2: usize,
     end_2: usize,
-    _prot_2: usize,
+    prot_2: usize,
 ) -> Result<(LocalCapa, LocalCapa), CapaError> {
+    let prot_1 = MemOps::from_usize(prot_1)?;
+    let prot_2 = MemOps::from_usize(prot_2)?;
     let mut engine = CAPA_ENGINE.lock();
     let access_left = AccessRights {
         start: start_1,
         end: end_1,
+        ops: prot_1,
     };
     let access_right = AccessRights {
         start: start_2,
         end: end_2,
+        ops: prot_2,
     };
     let (left, right) = engine.segment_region(current, capa, access_left, access_right)?;
     apply_updates(&mut engine);

@@ -153,6 +153,7 @@ name = "capa-engine"
 version = "0.1.0"
 dependencies = [
  "bit_field",
+ "bitflags",
  "log",
  "simple_logger",
 ]

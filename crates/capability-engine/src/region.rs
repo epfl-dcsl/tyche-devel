@@ -1,13 +1,49 @@
 use core::fmt;
 
+use bitflags::bitflags;
+
 use crate::config::NB_REGIONS_PER_DOMAIN;
 use crate::gen_arena::{GenArena, Handle};
 use crate::CapaError;
+
+bitflags! {
+    pub struct MemOps: u8 {
+         const NONE  = 0;
+         const READ  = 1 << 0;
+         const WRITE = 1 << 1;
+         const EXEC  = 1 << 2;
+         const ALL = Self::READ.bits()|Self::WRITE.bits()|Self::EXEC.bits();
+    }
+}
+
+impl MemOps {
+    pub fn from_usize(val: usize) -> Result<Self, CapaError> {
+        let value = match Self::from_bits(val as u8) {
+            Some(v) => v,
+            _ => return Err(CapaError::InvalidMemOps),
+        };
+
+        if !value.is_valid() {
+            return Err(CapaError::InvalidMemOps);
+        }
+        return Ok(value);
+    }
+
+    pub fn is_valid(&self) -> bool {
+        if (self.contains(MemOps::WRITE) || self.contains(MemOps::EXEC))
+            & !self.contains(MemOps::READ)
+        {
+            return false;
+        }
+        return true;
+    }
+}
 
 #[derive(Clone, Copy, Debug)]
 pub struct AccessRights {
     pub start: usize,
     pub end: usize,
+    pub ops: MemOps,
 }
 
 #[derive(Clone, Copy)]
@@ -29,6 +65,9 @@ impl PermissionChange {
 pub struct Region {
     start: usize,
     end: usize,
+    read_count: usize,
+    write_count: usize,
+    exec_count: usize,
     ref_count: usize,
     next: Option<Handle<Region>>,
 }
@@ -46,6 +85,9 @@ impl Region {
         Self {
             start,
             end,
+            read_count: 0,
+            write_count: 0,
+            exec_count: 0,
             ref_count: 1,
             next: None,
         }
@@ -73,6 +115,9 @@ impl RegionTracker {
         const EMPTY_REGION: Region = Region {
             start: 0,
             end: 0,
+            read_count: 0,
+            write_count: 0,
+            exec_count: 0,
             ref_count: 0,
             next: None,
         };
@@ -311,6 +356,9 @@ impl RegionTracker {
         let second_half = Region {
             start: at,
             end: region.end,
+            read_count: region.read_count,
+            write_count: region.write_count,
+            exec_count: region.exec_count,
             ref_count: region.ref_count,
             next: region.next,
         };
@@ -550,6 +598,9 @@ mod tests {
         let region = Region {
             start: 0x100,
             end: 0x200,
+            read_count: 0,
+            write_count: 0,
+            exec_count: 0,
             ref_count: 0,
             next: None,
         };
