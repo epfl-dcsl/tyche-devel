@@ -18,7 +18,7 @@ use cores::{Core, CoreList};
 use domain::{insert_capa, remove_capa, DomainHandle, DomainPool};
 pub use domain::{permission, Bitmaps, Domain, LocalCapa, NextCapaToken};
 pub use gen_arena::{GenArena, Handle};
-pub use region::{AccessRights, MemOps, RegionTracker};
+pub use region::{AccessRights, MemOps, RegionTracker, MEMOPS_ALL};
 use region_capa::{RegionCapa, RegionPool};
 use update::UpdateBuffer;
 pub use update::{Buffer, Update};

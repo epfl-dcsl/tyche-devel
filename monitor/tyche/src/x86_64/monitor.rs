@@ -3,7 +3,7 @@
 use capa_engine::config::NB_DOMAINS;
 use capa_engine::{
     permission, AccessRights, Bitmaps, Buffer, CapaEngine, CapaError, CapaInfo, Domain, GenArena,
-    Handle, LocalCapa, MemOps, NextCapaToken,
+    Handle, LocalCapa, MemOps, NextCapaToken, MEMOPS_ALL,
 };
 use mmu::eptmapper::EPT_ROOT_FLAGS;
 use mmu::{EptMapper, FrameAllocator};
@@ -83,7 +83,7 @@ pub fn init(manifest: &'static Manifest) {
             AccessRights {
                 start: 0,
                 end: manifest.poffset as usize,
-                ops: MemOps::ALL,
+                ops: MEMOPS_ALL,
             },
         )
         .unwrap();

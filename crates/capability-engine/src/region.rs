@@ -12,15 +12,22 @@ bitflags! {
          const READ  = 1 << 0;
          const WRITE = 1 << 1;
          const EXEC  = 1 << 2;
-         const ALL = Self::READ.bits()|Self::WRITE.bits()|Self::EXEC.bits();
+         const SUPER = 1 << 3;
     }
 }
+
+pub const MEMOPS_ALL: MemOps = MemOps::READ
+    .union(MemOps::WRITE)
+    .union(MemOps::EXEC)
+    .union(MemOps::SUPER);
 
 impl MemOps {
     pub fn from_usize(val: usize) -> Result<Self, CapaError> {
         let value = match Self::from_bits(val as u8) {
             Some(v) => v,
-            _ => return Err(CapaError::InvalidMemOps),
+            _ => {
+                return Err(CapaError::InvalidMemOps);
+            }
         };
 
         if !value.is_valid() {
@@ -62,12 +69,14 @@ impl PermissionChange {
 
 // ———————————————————————————————— Regions ————————————————————————————————— //
 
+#[derive(Debug)]
 pub struct Region {
     start: usize,
     end: usize,
     read_count: usize,
     write_count: usize,
     exec_count: usize,
+    super_count: usize,
     ref_count: usize,
     next: Option<Handle<Region>>,
 }
@@ -88,6 +97,7 @@ impl Region {
             read_count: 0,
             write_count: 0,
             exec_count: 0,
+            super_count: 0,
             ref_count: 1,
             next: None,
         }
@@ -100,6 +110,14 @@ impl Region {
 
     pub fn contains(&self, addr: usize) -> bool {
         self.start <= addr && addr < self.end
+    }
+
+    pub fn same_counts(&self, other: &Self) -> bool {
+        self.ref_count == other.ref_count
+            && self.read_count == other.read_count
+            && self.write_count == other.write_count
+            && self.exec_count == other.exec_count
+            && self.super_count == other.super_count
     }
 }
 
@@ -118,6 +136,7 @@ impl RegionTracker {
             read_count: 0,
             write_count: 0,
             exec_count: 0,
+            super_count: 0,
             ref_count: 0,
             next: None,
         };
@@ -148,6 +167,7 @@ impl RegionTracker {
         &mut self,
         start: usize,
         end: usize,
+        ops: MemOps,
     ) -> Result<PermissionChange, CapaError> {
         log::trace!("Removing region [0x{:x}, 0x{:x}]", start, end);
 
@@ -174,7 +194,8 @@ impl RegionTracker {
         let mut change = PermissionChange::None;
         let mut next = bound;
         while self.regions[next].start < end {
-            let update = self.decrease_refcount(next);
+            let mut update = self.decrease_refcount(next);
+            update.update(self.decrease_ops(next, ops));
             change.update(update);
 
             // Free regions with ref_count 0.
@@ -220,12 +241,17 @@ impl RegionTracker {
         Ok(change)
     }
 
-    pub fn add_region(&mut self, start: usize, end: usize) -> Result<PermissionChange, CapaError> {
+    pub fn add_region(
+        &mut self,
+        start: usize,
+        end: usize,
+        ops: MemOps,
+    ) -> Result<PermissionChange, CapaError> {
         log::trace!("Adding region [0x{:x}, 0x{:x}]", start, end);
 
         // There is no region yet, insert head and exit
         let Some(head) = self.head else {
-            self.insert_head(start, end)?;
+            self.insert_head(start, end, ops)?;
             return Ok(PermissionChange::Some);
         };
 
@@ -236,7 +262,7 @@ impl RegionTracker {
                 if start == region.start {
                     // Regions have the same start
                     let (previous, update) =
-                        self.partial_add_region_overlapping(start, end, lower_bound)?;
+                        self.partial_add_region_overlapping(start, end, lower_bound, ops)?;
                     change.update(update);
                     let cursor = self.regions[previous].end;
                     (previous, cursor)
@@ -251,14 +277,14 @@ impl RegionTracker {
             } else {
                 let head = &self.regions[head];
                 let cursor = core::cmp::min(end, head.start);
-                let previous = self.insert_head(start, cursor)?;
+                let previous = self.insert_head(start, cursor, ops)?;
                 change = PermissionChange::Some;
                 (previous, cursor)
             };
 
         // Add the remaining portions of the region
         while cursor < end {
-            let (next, update) = self.partial_add_region_after(cursor, end, previous)?;
+            let (next, update) = self.partial_add_region_after(cursor, end, previous, ops)?;
             previous = next;
             change.update(update);
             cursor = self.regions[previous].end;
@@ -274,6 +300,7 @@ impl RegionTracker {
         start: usize,
         end: usize,
         after: Handle<Region>,
+        ops: MemOps,
     ) -> Result<(Handle<Region>, PermissionChange), CapaError> {
         let region = &mut self.regions[after];
 
@@ -286,14 +313,13 @@ impl RegionTracker {
             let next = &mut self.regions[next_handle];
             if start == next.start {
                 // Overlapping
-                return self.partial_add_region_overlapping(start, end, next_handle);
+                return self.partial_add_region_overlapping(start, end, next_handle, ops);
             } else if end > next.start {
                 // Fit as much as possible
                 end = next.start;
             }
         }
-
-        self.insert_after(start, end, after)
+        self.insert_after(start, end, ops, after)
     }
 
     fn partial_add_region_overlapping(
@@ -301,6 +327,7 @@ impl RegionTracker {
         start: usize,
         end: usize,
         overlapping: Handle<Region>,
+        ops: MemOps,
     ) -> Result<(Handle<Region>, PermissionChange), CapaError> {
         let region = &self.regions[overlapping];
         assert!(
@@ -311,7 +338,8 @@ impl RegionTracker {
         if end < region.end {
             self.split_region_at(overlapping, end)?;
         }
-        let change = self.increase_refcount(overlapping);
+        let mut change = self.increase_refcount(overlapping);
+        change.update(self.increase_ops(overlapping, ops));
         Ok((overlapping, change))
     }
 
@@ -359,6 +387,7 @@ impl RegionTracker {
             read_count: region.read_count,
             write_count: region.write_count,
             exec_count: region.exec_count,
+            super_count: region.super_count,
             ref_count: region.ref_count,
             next: region.next,
         };
@@ -381,6 +410,7 @@ impl RegionTracker {
         &mut self,
         start: usize,
         end: usize,
+        ops: MemOps,
         after: Handle<Region>,
     ) -> Result<(Handle<Region>, PermissionChange), CapaError> {
         let region = &self.regions[after];
@@ -399,6 +429,7 @@ impl RegionTracker {
                 log::trace!("Unable to allocate new region!");
                 CapaError::OutOfMemory
             })?;
+        self.increase_ops(handle, ops);
         let region = &mut self.regions[after];
         region.next = Some(handle);
 
@@ -406,7 +437,12 @@ impl RegionTracker {
         Ok((handle, PermissionChange::Some))
     }
 
-    fn insert_head(&mut self, start: usize, end: usize) -> Result<Handle<Region>, CapaError> {
+    fn insert_head(
+        &mut self,
+        start: usize,
+        end: usize,
+        ops: MemOps,
+    ) -> Result<Handle<Region>, CapaError> {
         if let Some(head) = self.head {
             assert!(
                 self.regions[head].start >= end,
@@ -419,6 +455,7 @@ impl RegionTracker {
             log::trace!("Unable to allocate new region!");
             CapaError::OutOfMemory
         })?;
+        self.increase_ops(handle, ops);
         self.head = Some(handle);
         Ok(handle)
     }
@@ -434,6 +471,36 @@ impl RegionTracker {
         }
     }
 
+    fn increase_ops(&mut self, handle: Handle<Region>, ops: MemOps) -> PermissionChange {
+        let region = &mut self.regions[handle];
+        let mut change = PermissionChange::None;
+        if ops.contains(MemOps::READ) {
+            region.read_count += 1;
+            if region.read_count == 1 {
+                change = PermissionChange::Some;
+            }
+        }
+        if ops.contains(MemOps::WRITE) {
+            region.write_count += 1;
+            if region.write_count == 1 {
+                change = PermissionChange::Some;
+            }
+        }
+        if ops.contains(MemOps::EXEC) {
+            region.exec_count += 1;
+            if region.exec_count == 1 {
+                change = PermissionChange::Some;
+            }
+        }
+        if ops.contains(MemOps::SUPER) {
+            region.super_count += 1;
+            if region.super_count == 1 {
+                change = PermissionChange::Some;
+            }
+        }
+        return change;
+    }
+
     fn decrease_refcount(&mut self, handle: Handle<Region>) -> PermissionChange {
         let region = &mut self.regions[handle];
         region.ref_count = region.ref_count.checked_sub(1).unwrap();
@@ -443,6 +510,36 @@ impl RegionTracker {
         } else {
             PermissionChange::None
         }
+    }
+
+    fn decrease_ops(&mut self, handle: Handle<Region>, ops: MemOps) -> PermissionChange {
+        let region = &mut self.regions[handle];
+        let mut change = PermissionChange::None;
+        if ops.contains(MemOps::READ) {
+            region.read_count.checked_sub(1).unwrap();
+            if region.read_count == 0 {
+                change = PermissionChange::Some;
+            }
+        }
+        if ops.contains(MemOps::WRITE) {
+            region.write_count.checked_sub(1).unwrap();
+            if region.write_count == 0 {
+                change = PermissionChange::Some;
+            }
+        }
+        if ops.contains(MemOps::EXEC) {
+            region.exec_count.checked_sub(1).unwrap();
+            if region.exec_count == 0 {
+                change = PermissionChange::Some;
+            }
+        }
+        if ops.contains(MemOps::SUPER) {
+            region.super_count.checked_sub(1).unwrap();
+            if region.super_count == 0 {
+                change = PermissionChange::Some;
+            }
+        }
+        return change;
     }
 
     fn coalesce(&mut self) {
@@ -457,7 +554,7 @@ impl RegionTracker {
         while curr != None {
             let current = curr.unwrap();
             if self.regions[prev].end == self.regions[current].start
-                && (self.regions[prev].ref_count == self.regions[current].ref_count
+                && (self.regions[prev].same_counts(&self.regions[current])
                     || self.regions[current].start == self.regions[current].end
                     || self.regions[prev].start == self.regions[prev].end)
             {
@@ -727,8 +824,14 @@ impl fmt::Display for RegionTracker {
         for (_, region) in self {
             write!(
                 f,
-                "[0x{:x}, 0x{:x} | {}]",
-                region.start, region.end, region.ref_count
+                "[0x{:x}, 0x{:x} | {} ({} - {} - {} - {})]",
+                region.start,
+                region.end,
+                region.ref_count,
+                region.read_count,
+                region.write_count,
+                region.exec_count,
+                region.super_count
             )?;
             if region.next.is_some() {
                 write!(f, " -> ")?;
@@ -741,5 +844,31 @@ impl fmt::Display for RegionTracker {
 impl fmt::Display for MemoryPermission {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "[0x{:x}, 0x{:x} | RWX]", self.start, self.end)
+    }
+}
+
+impl fmt::Display for MemOps {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.contains(Self::READ) {
+            write!(f, "R")?;
+        } else {
+            write!(f, "_")?;
+        }
+        if self.contains(Self::WRITE) {
+            write!(f, "W")?;
+        } else {
+            write!(f, "_")?;
+        }
+        if self.contains(Self::EXEC) {
+            write!(f, "X")?;
+        } else {
+            write!(f, "_")?;
+        }
+        if self.contains(Self::SUPER) {
+            write!(f, "S")?;
+        } else {
+            write!(f, "_")?;
+        }
+        write!(f, "")
     }
 }

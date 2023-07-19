@@ -432,9 +432,9 @@ static capability_t* trick_segment_null_copy(capability_t* capa)
   if (segment_region_capa(
         capa, &left, &right,
         // This is NULL
-        capa->info.region.start, capa->info.region.start, capa->info.region.flags,
+        capa->info.region.start, capa->info.region.start, capa->info.region.flags >> 2,
         // This is copy(capa)
-        capa->info.region.start, capa->info.region.end, capa->info.region.flags
+        capa->info.region.start, capa->info.region.end, capa->info.region.flags >> 2
         ) != SUCCESS) {
     ERROR("Unable to perform the duplicate");
     goto failure;
@@ -517,8 +517,8 @@ int grant_region(domain_id_t id, paddr_t start, paddr_t end,
     capability_t *left = NULL, *right = NULL;
     if (segment_region_capa(
           capa, &left, &right,
-          capa->info.region.start, start, capa->info.region.flags,
-          start, capa->info.region.end, capa->info.region.flags) != SUCCESS) {
+          capa->info.region.start, start, capa->info.region.flags >> 2,
+          start, capa->info.region.end, capa->info.region.flags >> 2) != SUCCESS) {
       ERROR("Middle case duplicate failed.");
       goto failure;
     }
@@ -557,8 +557,8 @@ int grant_region(domain_id_t id, paddr_t start, paddr_t end,
 
     // Do the duplicate.
     if (segment_region_capa(capa, &left, &right,
-          s, m, capa->info.region.flags,
-          m, e, capa->info.region.flags) != SUCCESS) {
+          s, m, capa->info.region.flags >> 2,
+          m, e, capa->info.region.flags >> 2) != SUCCESS) {
       ERROR("Left or right duplicate case failed.");
       goto failure;
     }
@@ -654,8 +654,8 @@ int share_region(domain_id_t id, paddr_t start, paddr_t end,
   // shares.
   if (segment_region_capa(
         capa, &left, &right,
-        capa->info.region.start, capa->info.region.end, capa->info.region.flags,
-        start, end, capa->info.region.flags) != SUCCESS) {
+        capa->info.region.start, capa->info.region.end, capa->info.region.flags >> 2,
+        start, end, capa->info.region.flags >> 2) != SUCCESS) {
     ERROR("First segment region call failed.");
     goto failure;
   }

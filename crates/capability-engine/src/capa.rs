@@ -5,7 +5,7 @@ use core::fmt;
 use crate::domain::{Domain, DomainPool};
 use crate::gen_arena::Handle;
 use crate::region_capa::{RegionCapa, RegionPool};
-use crate::CapaError;
+use crate::{CapaError, MemOps};
 
 #[derive(Clone, Copy, Debug)]
 pub enum Capa {
@@ -27,6 +27,7 @@ pub enum CapaInfo {
         end: usize,
         active: bool,
         confidential: bool,
+        ops: MemOps,
     },
     Management {
         domain_id: usize,
@@ -53,6 +54,7 @@ impl CapaInfo {
                 end,
                 active,
                 confidential,
+                ops,
             } => {
                 v1 = *start;
                 v2 = *end;
@@ -62,6 +64,7 @@ impl CapaInfo {
                 if *confidential {
                     flags |= 1 << 1;
                 }
+                flags |= ops.bits() << 2;
                 capa_type = capa_type::REGION;
             }
             CapaInfo::Management { domain_id, sealed } => {
@@ -95,11 +98,13 @@ impl CapaInfo {
             capa_type::REGION => {
                 let active = (flags & 0b01) != 0;
                 let confidential = (flags & 0b10) != 0;
+                let ops = MemOps::from_bits(flags as u8 >> 2).unwrap_or(MemOps::NONE);
                 Self::Region {
                     start: v1,
                     end: v2,
                     active,
                     confidential,
+                    ops,
                 }
             }
             capa_type::MANAGEMENT => Self::Management {
@@ -176,6 +181,7 @@ impl Capa {
                     end: region.access.end,
                     active: region.is_active,
                     confidential: region.is_confidential,
+                    ops: region.access.ops,
                 })
             }
             Capa::Management(h) => {
@@ -228,10 +234,15 @@ impl fmt::Display for CapaInfo {
                 end,
                 active,
                 confidential,
+                ops,
             } => {
                 let a = if *active { 'A' } else { '_' };
                 let c = if *confidential { 'C' } else { '_' };
-                write!(f, "Region([0x{:x}, 0x{:x} | {}{}])", start, end, a, c)
+                write!(
+                    f,
+                    "Region([0x{:x}, 0x{:x} | {}{}{}])",
+                    start, end, a, c, ops
+                )
             }
             CapaInfo::Management { domain_id, sealed } => {
                 let s = if *sealed { 'S' } else { '_' };
