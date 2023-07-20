@@ -113,7 +113,9 @@ pub fn print_page_tables(file: &PathBuf) {
 
     // Find page tables.
     for seg in &elf.segments {
-        if seg.program_header.p_type(DENDIAN) != TychePhdrTypes::PageTables as u32 {
+        if seg.program_header.p_type(DENDIAN) != TychePhdrTypes::PageTablesConf as u32
+            || seg.program_header.p_type(DENDIAN) != TychePhdrTypes::PageTablesSB as u32
+        {
             if ModifiedSegment::is_loadable(seg.program_header.p_type(DENDIAN)) {
                 let mem = seg.program_header.p_memsz(Endianness::Little) as usize;
                 let size = align_address(mem);

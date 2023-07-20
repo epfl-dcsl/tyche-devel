@@ -8,6 +8,7 @@ use object::{elf, Endianness, U16Bytes, U32Bytes, U64Bytes};
 use serde::{Deserialize, Serialize};
 
 use crate::allocator::PAGE_SIZE;
+use crate::instrument::Security;
 use crate::page_table_mapper::{align_address, generate_page_tables};
 
 // —————————————————————————————— Local Enums ——————————————————————————————— //
@@ -26,20 +27,26 @@ pub enum ErrorBin {
 #[allow(dead_code)]
 #[repr(u32)]
 pub enum TychePhdrTypes {
-    /// User stack
-    UserStack = 0x60000001,
-    /// User shared
-    UserShared = 0x60000002,
-    /// User Confidential
-    UserConfidential = 0x60000003,
-    /// Page tables are always kernel.
-    PageTables = 0x60000004,
-    /// Kernel stack
-    KernelStack = 0x60000005,
-    /// Kernel shared
-    KernelShared = 0x60000006,
-    /// Kernel Confidential
-    KernelConfidential = 0x60000007,
+    /// User sandbox (shared) stack.
+    UserStackSB = 0x60000001,
+    /// User confidential stack.
+    UserStackConf = 0x60000002,
+    /// User sandbox (shared) segment.
+    UserShared = 0x60000003,
+    /// User confidential segment.
+    UserConfidential = 0x60000004,
+    /// Page tables sandbox, always kernel.
+    PageTablesSB = 0x60000005,
+    /// Page tables confidential, always kernel.
+    PageTablesConf = 0x60000006,
+    /// Kernel sandbox (shared) stack.
+    KernelStackSB = 0x60000007,
+    ///  Kernel confidential stack.
+    KernelStackConf = 0x60000008,
+    /// Kernel sandbox (shared) segment,
+    KernelShared = 0x60000009,
+    /// Kernel confidential segment.
+    KernelConfidential = 0x6000000a,
     /// Full enclave ELF embedded in application.
     EnclaveELF = object::elf::PT_NOTE,
 }
@@ -47,14 +54,16 @@ pub enum TychePhdrTypes {
 impl TychePhdrTypes {
     pub fn from_u32(val: u32) -> Option<Self> {
         match val {
-            0x60000001 => Some(TychePhdrTypes::UserStack),
-            0x60000002 => Some(TychePhdrTypes::UserShared),
-            0x60000003 => Some(TychePhdrTypes::UserConfidential),
-            0x60000004 => Some(TychePhdrTypes::PageTables),
-            0x60000005 => Some(TychePhdrTypes::KernelStack),
-            0x60000006 => Some(TychePhdrTypes::KernelShared),
-            0x60000007 => Some(TychePhdrTypes::KernelConfidential),
-            0x60000008 => Some(TychePhdrTypes::EnclaveELF),
+            0x60000001 => Some(TychePhdrTypes::UserStackSB),
+            0x60000002 => Some(TychePhdrTypes::UserStackConf),
+            0x60000003 => Some(TychePhdrTypes::UserShared),
+            0x60000004 => Some(TychePhdrTypes::UserConfidential),
+            0x60000005 => Some(TychePhdrTypes::PageTablesSB),
+            0x60000006 => Some(TychePhdrTypes::PageTablesConf),
+            0x60000007 => Some(TychePhdrTypes::KernelStackSB),
+            0x60000008 => Some(TychePhdrTypes::KernelStackConf),
+            0x60000009 => Some(TychePhdrTypes::KernelShared),
+            0x6000000a => Some(TychePhdrTypes::KernelConfidential),
             _ => None,
         }
     }
@@ -68,10 +77,10 @@ impl TychePhdrTypes {
 
     pub fn is_confidential(&self) -> bool {
         match self {
-            Self::PageTables => true,
-            Self::UserStack => true,
+            Self::PageTablesConf => true,
+            Self::UserStackConf => true,
             Self::UserConfidential => true,
-            Self::KernelStack => true,
+            Self::KernelStackConf => true,
             Self::KernelConfidential => true,
             _ => false,
         }
@@ -261,11 +270,16 @@ impl ModifiedELF {
     }
 
     /// Generate the page tables for this ELF and add them into their own segment.
-    pub fn generate_page_tables(&mut self) {
+    pub fn generate_page_tables(&mut self, security: Security) {
         let (pts, nb_pages, cr3) = generate_page_tables(self);
+        let tpe = if security == Security::Confidential {
+            TychePhdrTypes::PageTablesConf
+        } else {
+            TychePhdrTypes::PageTablesSB
+        };
         self.append_data_segment(
             Some(cr3 as u64),
-            TychePhdrTypes::PageTables as u32,
+            tpe as u32,
             object::elf::PF_R | object::elf::PF_W,
             nb_pages * PAGE_SIZE,
             &pts,
@@ -292,7 +306,8 @@ impl ModifiedELF {
         {
             for seg in &mut self.segments {
                 if let Some(tpe) = TychePhdrTypes::from_u32(seg.program_header.p_type(DENDIAN)) {
-                    if tpe == TychePhdrTypes::PageTables {
+                    if tpe == TychePhdrTypes::PageTablesConf || tpe == TychePhdrTypes::PageTablesSB
+                    {
                         page_seg = Some(seg);
                         break;
                     }
@@ -337,9 +352,14 @@ impl ModifiedELF {
             self.segments.sort_by(|a, b| {
                 let a_addr = a.program_header.p_vaddr(DENDIAN);
                 let b_addr = b.program_header.p_vaddr(DENDIAN);
-                if a.program_header.p_type(DENDIAN) == TychePhdrTypes::PageTables as u32 {
+                if a.program_header.p_type(DENDIAN) == TychePhdrTypes::PageTablesConf as u32 {
                     Ordering::Greater
-                } else if b.program_header.p_type(DENDIAN) == TychePhdrTypes::PageTables as u32 {
+                } else if b.program_header.p_type(DENDIAN) == TychePhdrTypes::PageTablesConf as u32
+                {
+                    Ordering::Less
+                } else if a.program_header.p_type(DENDIAN) == TychePhdrTypes::PageTablesSB as u32 {
+                    Ordering::Greater
+                } else if b.program_header.p_type(DENDIAN) == TychePhdrTypes::PageTablesSB as u32 {
                     Ordering::Less
                 } else {
                     a_addr.cmp(&b_addr)

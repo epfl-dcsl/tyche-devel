@@ -22,27 +22,23 @@
 int is_confidential(tyche_phdr_t tpe)
 {
   switch (tpe) {
-    case USER_STACK:
-    case KERNEL_STACK:
-    case PAGE_TABLES:
+    case USER_STACK_CONF:
+    case KERNEL_STACK_CONF:
+    case PAGE_TABLES_CONF:
     case USER_CONFIDENTIAL:
     case KERNEL_CONFIDENTIAL:
       return 1;
       break;
-    case USER_SHARED:
-    case KERNEL_SHARED:
+    default: 
       return 0;
       break;
-    default: 
-      ERROR("Unknown phdr type %d", tpe);
-      abort();
   }
   return 0;
 }
 
 int is_loadable(tyche_phdr_t tpe)
 {
-    if (tpe < USER_STACK || tpe > KERNEL_CONFIDENTIAL) {
+    if (tpe < USER_STACK_SB || tpe > KERNEL_CONFIDENTIAL) {
       return 0;
     }
     return 1;
@@ -114,11 +110,11 @@ int tychools_parse_enclave(enclave_t* enclave, const char* file)
   for (int i = 0; i < enclave->parser.header.e_phnum; i++) {
     Elf64_Phdr* segment = &enclave->parser.segments[i];
     // Found the user stack.
-    if (segment->p_type == USER_STACK) {
+    if (segment->p_type == USER_STACK_SB || segment->p_type == USER_STACK_CONF) {
       enclave->config.user_stack = segment->p_vaddr + segment->p_memsz - STACK_OFFSET_TOP; 
     }
     // Found the kernel stack.
-    if (segment->p_type == KERNEL_STACK) {
+    if (segment->p_type == KERNEL_STACK_SB || segment->p_type == KERNEL_STACK_CONF) {
       enclave->config.stack = segment->p_vaddr + segment->p_memsz - STACK_OFFSET_TOP;
     }
     // Found a shared segment.
@@ -135,7 +131,7 @@ int tychools_parse_enclave(enclave_t* enclave, const char* file)
       dll_add(&(enclave->config.shared_sections), shared, list);
     }
     // Found the page tables.
-    if (segment->p_type == PAGE_TABLES) {
+    if (segment->p_type == PAGE_TABLES_SB || segment->p_type == PAGE_TABLES_CONF) {
       enclave->config.cr3 = segment->p_vaddr;
       //TODO figure out if we want to keep a pointer to the segment.
     }
@@ -229,7 +225,7 @@ int tychools_load_enclave(enclave_t* enclave)
     }
 
     // Fix the page tables here.
-    if (seg.p_type == PAGE_TABLES) {
+    if (seg.p_type == PAGE_TABLES_CONF || seg.p_type == PAGE_TABLES_SB) {
       uint64_t* start = (uint64_t*) dest;
       uint64_t* end = (uint64_t*)(((uint64_t) dest) + size);
       for (; start < end; start++) {

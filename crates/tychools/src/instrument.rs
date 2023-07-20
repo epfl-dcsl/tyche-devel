@@ -23,6 +23,12 @@ pub enum BinaryOperation {
     AddSegment(SegmentDescriptor),
 }
 
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone, Copy)]
+pub enum Security {
+    Confidential = 1,
+    Sandbox = 2,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct BinaryInstrumentation {
     /// Path to the binary.
@@ -39,6 +45,9 @@ pub struct Manifest {
     user_bin: Option<BinaryInstrumentation>,
     /// Kernel binary
     kern_bin: Option<BinaryInstrumentation>,
+    /// Is this a sandbox or an enclave.
+    #[serde(default = "default_security")]
+    security: Security,
     /// Should we generate page tables.
     #[serde(default = "default_ops_true")]
     generate_pts: bool,
@@ -57,52 +66,27 @@ fn default_ops_false() -> bool {
     false
 }
 
+fn default_security() -> Security {
+    Security::Confidential
+}
+
 pub fn modify_binary(src: &PathBuf, dst: &PathBuf) {
     let data = std::fs::read(src).expect("Unable to read source file");
     info!("We read {} bytes from the file", data.len());
     let mut elf = ModifiedELF::new(&*data);
 
-    // Move default shared buffer into its own segment.
-    /*elf.split_segment_at_section(
-        ".tyche_shared_default_buffer",
-        TychePhdrTypes::KernelShared as u32,
-        &data,
-    )
-    .expect("Failed to split section into segment");*/
-
-    // Add the enclave stack as a segment.
-    /*elf.append_nodata_segment(
-        None,
-        TychePhdrTypes::KernelStack as u32,
-        object::elf::PF_R | object::elf::PF_W,
-        DEFAULT_STACK_SIZE,
-    );*/
-
-    // TODO we could add a confidential heap here.
-    // Or declare it as a section and move it into its own segment.
-
     // Create page tables.
     let (pts, nb_pages, cr3) = generate_page_tables(&*elf);
     elf.append_data_segment(
         Some(cr3 as u64),
-        TychePhdrTypes::PageTables as u32,
+        TychePhdrTypes::PageTablesConf as u32,
         object::elf::PF_R | object::elf::PF_W,
         nb_pages * PAGE_SIZE,
         &pts,
     );
 
     // Let's write that thing out.
-    //let mut out: Vec<u8> = Vec::with_capacity(elf.len());
-    //let mut writer = object::write::elf::Writer::new(Endianness::Little, true, &mut out);
     elf.dump_to_file(dst, true);
-
-    /*let mut file = OpenOptions::new()
-        .create(true)
-        .read(true)
-        .write(true)
-        .open(dst)
-        .expect("Unable to open dest file");
-    file.write(&*out).expect("Unable to dump the content");*/
 }
 
 pub fn instrument_with_manifest(src: &PathBuf) {
@@ -155,7 +139,11 @@ pub fn instrument_binary(manifest: &Manifest) {
     // Parse the user binary if present.
     let mut user_elf = if let Some(user) = &manifest.user_bin {
         let mut bin = parse_binary(user);
-        bin.mark(TychePhdrTypes::UserConfidential);
+        if manifest.security == Security::Confidential {
+            bin.mark(TychePhdrTypes::UserConfidential);
+        } else {
+            bin.mark(TychePhdrTypes::UserShared);
+        }
         Some(bin)
     } else {
         None
@@ -163,7 +151,11 @@ pub fn instrument_binary(manifest: &Manifest) {
     // Parse the kernel binary if present.
     let mut kern_elf = if let Some(kern) = &manifest.kern_bin {
         let mut bin = parse_binary(kern);
-        bin.mark(TychePhdrTypes::KernelConfidential);
+        if manifest.security == Security::Confidential {
+            bin.mark(TychePhdrTypes::KernelConfidential);
+        } else {
+            bin.mark(TychePhdrTypes::KernelShared);
+        }
         Some(bin)
     } else {
         None
@@ -178,17 +170,17 @@ pub fn instrument_binary(manifest: &Manifest) {
         }
         user.merge(kern);
         if manifest.generate_pts {
-            user.generate_page_tables();
+            user.generate_page_tables(manifest.security);
         }
         user
     } else if let Some(ref mut user) = &mut user_elf {
         if manifest.generate_pts {
-            user.generate_page_tables();
+            user.generate_page_tables(manifest.security);
         }
         user
     } else if let Some(ref mut kern) = &mut kern_elf {
         if manifest.generate_pts {
-            kern.generate_page_tables();
+            kern.generate_page_tables(manifest.security);
         }
         kern
     } else {
@@ -225,7 +217,7 @@ pub fn print_enum() {
             BinaryOperation::AddSegment(SegmentDescriptor {
                 start: None,
                 size: 0x2000,
-                tpe: TychePhdrTypes::UserStack,
+                tpe: TychePhdrTypes::UserStackConf,
                 write: true,
                 exec: false,
             }),

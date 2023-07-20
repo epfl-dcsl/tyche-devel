@@ -126,6 +126,7 @@ pub fn parse_and_run(file: &PathBuf) {
 }
 
 /// load an instrumented binary.
+/// //TODO(aghosn) this only handles enclaves for now.
 pub fn load(encl: &mut Enclave) {
     let mut memsize: usize = usize::MIN;
     for seg in &encl.elf.segments {
@@ -169,7 +170,7 @@ pub fn load(encl: &mut Enclave) {
 
     // Set the cr3 in the enclave.
     encl.cr3 = {
-        let seg_pages = encl.elf.find_segments(TychePhdrTypes::PageTables);
+        let seg_pages = encl.elf.find_segments(TychePhdrTypes::PageTablesConf);
         // It does not make sense for now to have two segments for page tables.
         assert!(seg_pages.len() == 1);
         seg_pages[0].program_header.p_vaddr(DENDIAN) + msg.physoffset as u64
@@ -177,8 +178,8 @@ pub fn load(encl: &mut Enclave) {
 
     // Finding the stack.
     encl.stack = {
-        let kern_stack = encl.elf.find_segments(TychePhdrTypes::KernelStack);
-        let user_stack = encl.elf.find_segments(TychePhdrTypes::UserStack);
+        let kern_stack = encl.elf.find_segments(TychePhdrTypes::KernelStackConf);
+        let user_stack = encl.elf.find_segments(TychePhdrTypes::UserStackConf);
         assert!(kern_stack.len() == 0 || kern_stack.len() == 1);
         assert!(user_stack.len() == 0 || user_stack.len() == 1);
         if kern_stack.len() == 1 {
