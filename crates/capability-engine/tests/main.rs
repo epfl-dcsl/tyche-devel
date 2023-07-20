@@ -33,8 +33,14 @@ fn scenario_1() {
             },
         )
         .unwrap();
-    snap!("{[0x0, 0x1000 | 1]}", regions(domain, &engine));
-    snap!("{Region([0x0, 0x1000 | AC])}", capas(domain, &mut engine));
+    snap!(
+        "{[0x0, 0x1000 | 1 (0 - 0 - 0 - 0)]}",
+        regions(domain, &engine)
+    );
+    snap!(
+        "{Region([0x0, 0x1000 | AC____])}",
+        capas(domain, &mut engine)
+    );
     snap!(
         "{PermissionUpdate(H(0, gen 0)), CreateDomain(H(0, gen 0))}",
         updates(&mut engine)
@@ -58,11 +64,11 @@ fn scenario_1() {
         )
         .unwrap();
     snap!(
-        "{[0x0, 0x200 | 1] -> [0x300, 0x1000 | 1]}",
+        "{[0x0, 0x200 | 1 (0 - 0 - 0 - 0)] -> [0x300, 0x1000 | 1 (0 - 0 - 0 - 0)]}",
         regions(domain, &engine),
     );
     snap!(
-        "{Region([0x0, 0x1000 | _C]), Region([0x0, 0x200 | AC]), Region([0x300, 0x1000 | AC])}",
+        "{Region([0x0, 0x1000 | _C____]), Region([0x0, 0x200 | AC____]), Region([0x300, 0x1000 | AC____])}",
         capas(domain, &mut engine),
     );
     snap!("{PermissionUpdate(H(0, gen 0))}", updates(&mut engine));
@@ -85,11 +91,11 @@ fn scenario_1() {
         )
         .unwrap();
     snap!(
-        "{[0x0, 0x200 | 1] -> [0x300, 0x1000 | 1]}",
+        "{[0x0, 0x200 | 1 (0 - 0 - 0 - 0)] -> [0x300, 0x1000 | 1 (0 - 0 - 0 - 0)]}",
         regions(domain, &engine),
     );
     snap!(
-        "{Region([0x0, 0x1000 | _C]), Region([0x0, 0x200 | _C]), Region([0x300, 0x1000 | AC]), Region([0x0, 0x50 | AC]), Region([0x50, 0x200 | AC])}",
+        "{Region([0x0, 0x1000 | _C____]), Region([0x0, 0x200 | _C____]), Region([0x300, 0x1000 | AC____]), Region([0x0, 0x50 | AC____]), Region([0x50, 0x200 | AC____])}",
         capas(domain, &mut engine)
     );
     snap!("{}", updates(&mut engine));
@@ -99,22 +105,28 @@ fn scenario_1() {
     let domain2 = engine.get_domain_capa(domain, dom2).unwrap();
     engine.send(domain, reg2, dom2).unwrap();
     snap!(
-        "{[0x0, 0x200 | 1] -> [0x300, 0x1000 | 1]}",
+        "{[0x0, 0x200 | 1 (0 - 0 - 0 - 0)] -> [0x300, 0x1000 | 1 (0 - 0 - 0 - 0)]}",
         regions(domain, &engine),
     );
     snap!("{}", regions(domain2, &engine));
     snap!(
-        "{Region([0x0, 0x1000 | _C]), Region([0x300, 0x1000 | AC]), Region([0x0, 0x50 | AC]), Region([0x50, 0x200 | AC]), Management(2 | _)}",
+        "{Region([0x0, 0x1000 | _C____]), Region([0x300, 0x1000 | AC____]), Region([0x0, 0x50 | AC____]), Region([0x50, 0x200 | AC____]), Management(2 | _)}",
         capas(domain, &mut engine)
     );
-    snap!("{Region([0x0, 0x200 | _C])}", capas(domain2, &mut engine));
+    snap!(
+        "{Region([0x0, 0x200 | _C____])}",
+        capas(domain2, &mut engine)
+    );
     snap!("{CreateDomain(H(1, gen 0))}", updates(&mut engine));
 
     // Revoke the domain owning the active region. This invalidates regions from the first domain
     engine.revoke_domain(domain2).unwrap();
-    snap!("{[0x300, 0x1000 | 1]}", regions(domain, &engine),);
     snap!(
-        "{Region([0x0, 0x1000 | _C]), Region([0x300, 0x1000 | AC])}",
+        "{[0x300, 0x1000 | 1 (0 - 0 - 0 - 0)]}",
+        regions(domain, &engine),
+    );
+    snap!(
+        "{Region([0x0, 0x1000 | _C____]), Region([0x300, 0x1000 | AC____])}",
         capas(domain, &mut engine)
     );
     snap!(
@@ -124,8 +136,14 @@ fn scenario_1() {
 
     // Restore the initial region
     engine.restore_region(domain, region).unwrap();
-    snap!("{[0x0, 0x1000 | 1]}", regions(domain, &engine),);
-    snap!("{Region([0x0, 0x1000 | AC])}", capas(domain, &mut engine));
+    snap!(
+        "{[0x0, 0x1000 | 1 (0 - 0 - 0 - 0)]}",
+        regions(domain, &engine),
+    );
+    snap!(
+        "{Region([0x0, 0x1000 | AC____])}",
+        capas(domain, &mut engine)
+    );
     snap!("{PermissionUpdate(H(0, gen 0))}", updates(&mut engine));
 }
 
@@ -147,8 +165,14 @@ fn scenario_2() {
             },
         )
         .unwrap();
-    snap!("{[0x0, 0x1000 | 1]}", regions(domain, &engine));
-    snap!("{Region([0x0, 0x1000 | AC])}", capas(domain, &mut engine));
+    snap!(
+        "{[0x0, 0x1000 | 1 (0 - 0 - 0 - 0)]}",
+        regions(domain, &engine)
+    );
+    snap!(
+        "{Region([0x0, 0x1000 | AC____])}",
+        capas(domain, &mut engine)
+    );
     snap!(
         "{PermissionUpdate(H(0, gen 0)), TlbShootdown(0), CreateDomain(H(0, gen 0))}",
         updates(&mut engine)
@@ -172,11 +196,11 @@ fn scenario_2() {
         )
         .unwrap();
     snap!(
-        "{[0x0, 0x200 | 1] -> [0x300, 0x1000 | 1]}",
+        "{[0x0, 0x200 | 1 (0 - 0 - 0 - 0)] -> [0x300, 0x1000 | 1 (0 - 0 - 0 - 0)]}",
         regions(domain, &engine),
     );
     snap!(
-        "{Region([0x0, 0x1000 | _C]), Region([0x0, 0x200 | AC]), Region([0x300, 0x1000 | AC])}",
+        "{Region([0x0, 0x1000 | _C____]), Region([0x0, 0x200 | AC____]), Region([0x300, 0x1000 | AC____])}",
         capas(domain, &mut engine),
     );
     snap!(
@@ -188,13 +212,22 @@ fn scenario_2() {
     let dom2 = engine.create_domain(domain).unwrap();
     let domain2 = engine.get_domain_capa(domain, dom2).unwrap();
     engine.send(domain, reg2, dom2).unwrap();
-    snap!("{[0x300, 0x1000 | 1]}", regions(domain, &engine),);
-    snap!("{[0x0, 0x200 | 1]}", regions(domain2, &engine));
     snap!(
-        "{Region([0x0, 0x1000 | _C]), Region([0x300, 0x1000 | AC]), Management(2 | _)}",
+        "{[0x300, 0x1000 | 1 (0 - 0 - 0 - 0)]}",
+        regions(domain, &engine),
+    );
+    snap!(
+        "{[0x0, 0x200 | 1 (0 - 0 - 0 - 0)]}",
+        regions(domain2, &engine)
+    );
+    snap!(
+        "{Region([0x0, 0x1000 | _C____]), Region([0x300, 0x1000 | AC____]), Management(2 | _)}",
         capas(domain, &mut engine)
     );
-    snap!("{Region([0x0, 0x200 | AC])}", capas(domain2, &mut engine));
+    snap!(
+        "{Region([0x0, 0x200 | AC____])}",
+        capas(domain2, &mut engine)
+    );
     snap!(
         "{PermissionUpdate(H(1, gen 0)), PermissionUpdate(H(0, gen 0)), TlbShootdown(0), CreateDomain(H(1, gen 0))}",
         updates(&mut engine)
@@ -309,15 +342,24 @@ fn scenario_3() {
         .set_child_config(domain, encl, capa_engine::Bitmaps::SWITCH, 0)
         .unwrap();
     let _ = engine.seal(domain, core, encl).unwrap();
-    snap!("{[0x1000, 0x2000 | 1]}", regions(enclave, &engine));
+    snap!(
+        "{[0x1000, 0x2000 | 1 (0 - 0 - 0 - 0)]}",
+        regions(enclave, &engine)
+    );
     // Now delete the enclaves' region.
     engine.revoke(domain, reg1).unwrap();
     snap!("{}", regions(enclave, &engine));
     engine.revoke(domain, encl).unwrap();
     // Test cleanup
     engine.revoke(domain, region).unwrap();
-    snap!("{[0x0, 0x10000 | 1]}", regions(domain, &engine));
-    snap!("{Region([0x0, 0x10000 | AC])}", capas(domain, &mut engine));
+    snap!(
+        "{[0x0, 0x10000 | 1 (0 - 0 - 0 - 0)]}",
+        regions(domain, &engine)
+    );
+    snap!(
+        "{Region([0x0, 0x10000 | AC____])}",
+        capas(domain, &mut engine)
+    );
 }
 
 // ————————————————————————————————— Utils —————————————————————————————————— //

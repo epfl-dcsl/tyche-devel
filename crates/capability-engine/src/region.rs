@@ -44,6 +44,14 @@ impl MemOps {
         }
         return true;
     }
+
+    pub fn as_counters(&self) -> (usize, usize, usize, usize) {
+        let read_count: usize = if self.contains(Self::READ) { 1 } else { 0 };
+        let write_count: usize = if self.contains(Self::WRITE) { 1 } else { 0 };
+        let exec_count: usize = if self.contains(Self::EXEC) { 1 } else { 0 };
+        let super_count: usize = if self.contains(Self::SUPER) { 1 } else { 0 };
+        (read_count, write_count, exec_count, super_count)
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -82,7 +90,7 @@ pub struct Region {
 }
 
 impl Region {
-    fn new(start: usize, end: usize) -> Self {
+    fn new(start: usize, end: usize, ops: MemOps) -> Self {
         if start >= end {
             log::error!(
                 "Region start must be smaller than end, got start = {} and end = {}",
@@ -91,13 +99,14 @@ impl Region {
             );
             panic!("Invalid region");
         }
+        let (r, w, x, s) = ops.as_counters();
         Self {
             start,
             end,
-            read_count: 0,
-            write_count: 0,
-            exec_count: 0,
-            super_count: 0,
+            read_count: r,
+            write_count: w,
+            exec_count: x,
+            super_count: s,
             ref_count: 1,
             next: None,
         }
@@ -425,12 +434,11 @@ impl RegionTracker {
 
         let handle = self
             .regions
-            .allocate(Region::new(start, end).set_next(region.next))
+            .allocate(Region::new(start, end, ops).set_next(region.next))
             .ok_or_else(|| {
                 log::trace!("Unable to allocate new region!");
                 CapaError::OutOfMemory
             })?;
-        self.increase_ops(handle, ops);
         let region = &mut self.regions[after];
         region.next = Some(handle);
 
@@ -451,12 +459,11 @@ impl RegionTracker {
             );
         }
 
-        let region = Region::new(start, end).set_next(self.head);
+        let region = Region::new(start, end, ops).set_next(self.head);
         let handle = self.regions.allocate(region).ok_or_else(|| {
             log::trace!("Unable to allocate new region!");
             CapaError::OutOfMemory
         })?;
-        self.increase_ops(handle, ops);
         self.head = Some(handle);
         Ok(handle)
     }
@@ -699,6 +706,7 @@ mod tests {
             read_count: 0,
             write_count: 0,
             exec_count: 0,
+            super_count: 0,
             ref_count: 0,
             next: None,
         };
@@ -713,7 +721,7 @@ mod tests {
     #[test]
     fn region_pool() {
         let mut regions = RegionTracker::new();
-        regions.add_region(0x100, 0x1000).unwrap();
+        regions.add_region(0x100, 0x1000, MEMOPS_ALL).unwrap();
 
         // Should return None if there is no lower bound region
         assert_eq!(regions.find_lower_bound(0x50), (None, None));
@@ -727,74 +735,83 @@ mod tests {
     fn region_add() {
         // Region is added as head
         let mut pool = RegionTracker::new();
-        pool.add_region(0x300, 0x400).unwrap();
-        snap("{[0x300, 0x400 | 1]}", &pool);
-        pool.add_region(0x100, 0x200).unwrap();
-        snap("{[0x100, 0x200 | 1] -> [0x300, 0x400 | 1]}", &pool);
+        pool.add_region(0x300, 0x400, MEMOPS_ALL).unwrap();
+        snap("{[0x300, 0x400 | 1 (1 - 1 - 1 - 1)]}", &pool);
+        pool.add_region(0x100, 0x200, MEMOPS_ALL).unwrap();
+        snap(
+            "{[0x100, 0x200 | 1 (1 - 1 - 1 - 1)] -> [0x300, 0x400 | 1 (1 - 1 - 1 - 1)]}",
+            &pool,
+        );
 
         // Region is added as head, but overlap
         let mut pool = RegionTracker::new();
-        pool.add_region(0x200, 0x400).unwrap();
-        snap("{[0x200, 0x400 | 1]}", &pool);
-        pool.add_region(0x100, 0x300).unwrap();
+        pool.add_region(0x200, 0x400, MEMOPS_ALL).unwrap();
+        snap("{[0x200, 0x400 | 1 (1 - 1 - 1 - 1)]}", &pool);
+        pool.add_region(0x100, 0x300, MEMOPS_ALL).unwrap();
         snap(
-            "{[0x100, 0x200 | 1] -> [0x200, 0x300 | 2] -> [0x300, 0x400 | 1]}",
+            "{[0x100, 0x200 | 1 (1 - 1 - 1 - 1)] -> [0x200, 0x300 | 2 (2 - 2 - 2 - 2)] -> [0x300, 0x400 | 1 (1 - 1 - 1 - 1)]}",
             &pool,
         );
 
         // Region is completely included
         let mut pool = RegionTracker::new();
-        pool.add_region(0x100, 0x400).unwrap();
-        snap("{[0x100, 0x400 | 1]}", &pool);
-        pool.add_region(0x200, 0x300).unwrap();
+        pool.add_region(0x100, 0x400, MEMOPS_ALL).unwrap();
+        snap("{[0x100, 0x400 | 1 (1 - 1 - 1 - 1)]}", &pool);
+        pool.add_region(0x200, 0x300, MEMOPS_ALL).unwrap();
         snap(
-            "{[0x100, 0x200 | 1] -> [0x200, 0x300 | 2] -> [0x300, 0x400 | 1]}",
+            "{[0x100, 0x200 | 1 (1 - 1 - 1 - 1)] -> [0x200, 0x300 | 2 (2 - 2 - 2 - 2)] -> [0x300, 0x400 | 1 (1 - 1 - 1 - 1)]}",
             &pool,
         );
 
         // Region is bridging two existing one
         let mut pool = RegionTracker::new();
-        pool.add_region(0x100, 0x400).unwrap();
-        snap("{[0x100, 0x400 | 1]}", &pool);
-        pool.add_region(0x500, 0x1000).unwrap();
-        snap("{[0x100, 0x400 | 1] -> [0x500, 0x1000 | 1]}", &pool);
-        pool.add_region(0x200, 0x600).unwrap();
-        snap("{[0x100, 0x200 | 1] -> [0x200, 0x400 | 2] -> [0x400, 0x500 | 1] -> [0x500, 0x600 | 2] -> [0x600, 0x1000 | 1]}", &pool);
+        pool.add_region(0x100, 0x400, MEMOPS_ALL).unwrap();
+        snap("{[0x100, 0x400 | 1 (1 - 1 - 1 - 1)]}", &pool);
+        pool.add_region(0x500, 0x1000, MEMOPS_ALL).unwrap();
+        snap(
+            "{[0x100, 0x400 | 1 (1 - 1 - 1 - 1)] -> [0x500, 0x1000 | 1 (1 - 1 - 1 - 1)]}",
+            &pool,
+        );
+        pool.add_region(0x200, 0x600, MEMOPS_ALL).unwrap();
+        snap("{[0x100, 0x200 | 1 (1 - 1 - 1 - 1)] -> [0x200, 0x400 | 2 (2 - 2 - 2 - 2)] -> [0x400, 0x500 | 1 (1 - 1 - 1 - 1)] -> [0x500, 0x600 | 2 (2 - 2 - 2 - 2)] -> [0x600, 0x1000 | 1 (1 - 1 - 1 - 1)]}", &pool);
 
         // Region is overlapping two adjacent regions
         let mut pool = RegionTracker::new();
-        pool.add_region(0x200, 0x300).unwrap();
-        snap("{[0x200, 0x300 | 1]}", &pool);
-        pool.add_region(0x300, 0x400).unwrap();
-        snap("{[0x200, 0x400 | 1]}", &pool);
-        pool.add_region(0x100, 0x500).unwrap();
+        pool.add_region(0x200, 0x300, MEMOPS_ALL).unwrap();
+        snap("{[0x200, 0x300 | 1 (1 - 1 - 1 - 1)]}", &pool);
+        pool.add_region(0x300, 0x400, MEMOPS_ALL).unwrap();
+        snap("{[0x200, 0x400 | 1 (1 - 1 - 1 - 1)]}", &pool);
+        pool.add_region(0x100, 0x500, MEMOPS_ALL).unwrap();
         snap(
-            "{[0x100, 0x200 | 1] -> [0x200, 0x400 | 2] -> [0x400, 0x500 | 1]}",
+            "{[0x100, 0x200 | 1 (1 - 1 - 1 - 1)] -> [0x200, 0x400 | 2 (2 - 2 - 2 - 2)] -> [0x400, 0x500 | 1 (1 - 1 - 1 - 1)]}",
             &pool,
         );
 
         // Region is added twice
         let mut pool = RegionTracker::new();
-        pool.add_region(0x100, 0x200).unwrap();
-        snap("{[0x100, 0x200 | 1]}", &pool);
-        pool.add_region(0x100, 0x200).unwrap();
-        snap("{[0x100, 0x200 | 2]}", &pool);
+        pool.add_region(0x100, 0x200, MEMOPS_ALL).unwrap();
+        snap("{[0x100, 0x200 | 1 (1 - 1 - 1 - 1)]}", &pool);
+        pool.add_region(0x100, 0x200, MEMOPS_ALL).unwrap();
+        snap("{[0x100, 0x200 | 2 (2 - 2 - 2 - 2)]}", &pool);
 
         // Regions have the same end
         let mut pool = RegionTracker::new();
-        pool.add_region(0x200, 0x300).unwrap();
-        snap("{[0x200, 0x300 | 1]}", &pool);
-        pool.add_region(0x100, 0x300).unwrap();
-        snap("{[0x100, 0x200 | 1] -> [0x200, 0x300 | 2]}", &pool);
+        pool.add_region(0x200, 0x300, MEMOPS_ALL).unwrap();
+        snap("{[0x200, 0x300 | 1 (1 - 1 - 1 - 1)]}", &pool);
+        pool.add_region(0x100, 0x300, MEMOPS_ALL).unwrap();
+        snap(
+            "{[0x100, 0x200 | 1 (1 - 1 - 1 - 1)] -> [0x200, 0x300 | 2 (2 - 2 - 2 - 2)]}",
+            &pool,
+        );
     }
 
     #[test]
     fn refcount() {
         let mut pool = RegionTracker::new();
-        pool.add_region(0x100, 0x300).unwrap();
-        pool.add_region(0x600, 0x1000).unwrap();
-        pool.add_region(0x200, 0x400).unwrap();
-        snap("{[0x100, 0x200 | 1] -> [0x200, 0x300 | 2] -> [0x300, 0x400 | 1] -> [0x600, 0x1000 | 1]}", &pool);
+        pool.add_region(0x100, 0x300, MEMOPS_ALL).unwrap();
+        pool.add_region(0x600, 0x1000, MEMOPS_ALL).unwrap();
+        pool.add_region(0x200, 0x400, MEMOPS_ALL).unwrap();
+        snap("{[0x100, 0x200 | 1 (1 - 1 - 1 - 1)] -> [0x200, 0x300 | 2 (2 - 2 - 2 - 2)] -> [0x300, 0x400 | 1 (1 - 1 - 1 - 1)] -> [0x600, 0x1000 | 1 (1 - 1 - 1 - 1)]}", &pool);
 
         assert_eq!(pool.get_refcount(0x0, 0x50), 0);
         assert_eq!(pool.get_refcount(0x0, 0x100), 0);

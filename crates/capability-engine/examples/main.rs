@@ -1,4 +1,4 @@
-use capa_engine::{permission, AccessRights, CapaEngine, Domain, Handle, MemOps};
+use capa_engine::{permission, AccessRights, CapaEngine, Domain, Handle, MemOps, MEMOPS_ALL};
 use simple_logger::SimpleLogger;
 
 fn main() {
@@ -17,13 +17,13 @@ fn main() {
 fn bar() {
     let mut pool = capa_engine::RegionTracker::new();
 
-    pool.add_region(0x200, 0x300).unwrap();
+    pool.add_region(0x200, 0x300, MEMOPS_ALL).unwrap();
     println!("{}", &pool);
-    pool.add_region(0x300, 0x400).unwrap();
+    pool.add_region(0x300, 0x400, MEMOPS_ALL).unwrap();
     println!("{}", &pool);
-    pool.add_region(0x100, 0x500).unwrap();
+    pool.add_region(0x100, 0x500, MEMOPS_ALL).unwrap();
     println!("{}", &pool);
-    pool.remove_region(0x200, 0x400).unwrap();
+    pool.remove_region(0x200, 0x400, MEMOPS_ALL).unwrap();
     println!("{}", &pool);
 }
 
