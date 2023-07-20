@@ -128,6 +128,23 @@ impl Region {
             && self.exec_count == other.exec_count
             && self.super_count == other.super_count
     }
+
+    pub fn get_ops(&self) -> MemOps {
+        let mut ops = MemOps::NONE;
+        if self.read_count > 0 {
+            ops |= MemOps::READ;
+        }
+        if self.write_count > 0 {
+            ops |= MemOps::WRITE;
+        }
+        if self.exec_count > 0 {
+            ops |= MemOps::EXEC;
+        }
+        if self.super_count > 0 {
+            ops |= MemOps::SUPER;
+        }
+        ops
+    }
 }
 
 // ————————————————————————————— RegionTracker —————————————————————————————— //
@@ -639,6 +656,7 @@ pub struct PermissionIterator<'a> {
 pub struct MemoryPermission {
     pub start: usize,
     pub end: usize,
+    pub ops: MemOps,
 }
 
 impl MemoryPermission {
@@ -666,7 +684,10 @@ impl<'a> Iterator for PermissionIterator<'a> {
             self.next = None; // makes next iteration faster
             return None;
         };
-        let mut end = self.tracker.regions[handle.unwrap()].end;
+        let (mut end, ops) = {
+            let reg = &self.tracker.regions[handle.unwrap()];
+            (reg.end, reg.get_ops())
+        };
 
         let mut next = None;
         for (handle, region) in self.tracker.iter_from(handle).skip(1) {
@@ -680,7 +701,7 @@ impl<'a> Iterator for PermissionIterator<'a> {
         }
 
         self.next = next;
-        Some(MemoryPermission { start, end })
+        Some(MemoryPermission { start, end, ops })
     }
 }
 

@@ -573,13 +573,6 @@ fn revoke_domain(_domain: Handle<Domain>) {
 }
 
 fn update_permission(domain_handle: Handle<Domain>, engine: &mut MutexGuard<CapaEngine>) {
-    // TODO: handle granular access rights
-    let flags = EptEntryFlags::USER_EXECUTE
-        | EptEntryFlags::SUPERVISOR_EXECUTE
-        | EptEntryFlags::READ
-        | EptEntryFlags::WRITE
-        | EptEntryFlags::SUPERVISOR_EXECUTE;
-
     let mut domain = get_domain(domain_handle);
     let allocator = allocator();
     if let Some(ept) = domain.ept {
@@ -596,6 +589,21 @@ fn update_permission(domain_handle: Handle<Domain>, engine: &mut MutexGuard<Capa
     );
 
     for range in engine[domain_handle].regions().permissions() {
+        if !range.ops.contains(MemOps::READ) {
+            log::error!("there is a region without read permission: {}", range);
+            continue;
+        }
+        let mut flags = EptEntryFlags::READ;
+        if range.ops.contains(MemOps::WRITE) {
+            flags |= EptEntryFlags::WRITE;
+        }
+        if range.ops.contains(MemOps::EXEC) {
+            if range.ops.contains(MemOps::SUPER) {
+                flags |= EptEntryFlags::SUPERVISOR_EXECUTE;
+            } else {
+                flags |= EptEntryFlags::USER_EXECUTE;
+            }
+        }
         mapper.map_range(
             allocator,
             GuestPhysAddr::new(range.start),
