@@ -401,8 +401,7 @@ impl RegionTracker {
             next: region.next,
         };
         let second_half_handle = self.regions.allocate(second_half).ok_or_else(|| {
-            log::trace!("Unable to allocate new region!");
-            //TODO(aghosn) this one fails.
+            log::error!("Unable to allocate new region!");
             CapaError::OutOfMemory
         })?;
 
@@ -524,25 +523,25 @@ impl RegionTracker {
         let region = &mut self.regions[handle];
         let mut change = PermissionChange::None;
         if ops.contains(MemOps::READ) {
-            region.read_count.checked_sub(1).unwrap();
+            region.read_count = region.read_count.checked_sub(1).unwrap();
             if region.read_count == 0 {
                 change = PermissionChange::Some;
             }
         }
         if ops.contains(MemOps::WRITE) {
-            region.write_count.checked_sub(1).unwrap();
+            region.write_count = region.write_count.checked_sub(1).unwrap();
             if region.write_count == 0 {
                 change = PermissionChange::Some;
             }
         }
         if ops.contains(MemOps::EXEC) {
-            region.exec_count.checked_sub(1).unwrap();
+            region.exec_count = region.exec_count.checked_sub(1).unwrap();
             if region.exec_count == 0 {
                 change = PermissionChange::Some;
             }
         }
         if ops.contains(MemOps::SUPER) {
-            region.super_count.checked_sub(1).unwrap();
+            region.super_count = region.super_count.checked_sub(1).unwrap();
             if region.super_count == 0 {
                 change = PermissionChange::Some;
             }

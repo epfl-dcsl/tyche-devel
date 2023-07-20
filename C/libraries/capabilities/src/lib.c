@@ -648,6 +648,8 @@ int share_region(domain_id_t id, paddr_t start, paddr_t end,
     goto failure;
   }
 
+  //TODO(aghosn) bug here, marks the entire region as non-confidential.
+  //Fix this.
   // A share is less complex than a grant because it doesn't require carving
   // out. We still create a capability that matches exactly the desired
   // interval. This allows to revoke that region independently of subsequent

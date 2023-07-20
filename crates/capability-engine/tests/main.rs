@@ -2,6 +2,7 @@ use std::fmt::Write;
 
 use capa_engine::{
     permission, AccessRights, CapaEngine, Domain, Handle, MemOps, NextCapaToken, RegionTracker,
+    MEMOPS_ALL,
 };
 
 /// Snapshot testing
@@ -358,6 +359,164 @@ fn scenario_3() {
     );
     snap!(
         "{Region([0x0, 0x10000 | AC____])}",
+        capas(domain, &mut engine)
+    );
+}
+
+#[test]
+fn access_rights_test() {
+    let mut engine = CapaEngine::new();
+    let core = 0;
+    // Create initial domain.
+    let domain = engine.create_manager_domain(permission::ALL).unwrap();
+    let _ctx = engine.start_domain_on_core(domain, core).unwrap();
+    let region = engine
+        .create_root_region(
+            domain,
+            AccessRights {
+                start: 0,
+                end: 0x100000,
+                ops: MEMOPS_ALL,
+            },
+        )
+        .unwrap();
+
+    snap!(
+        "{[0x0, 0x100000 | 1 (1 - 1 - 1 - 1)]}",
+        regions(domain, &engine)
+    );
+    snap!(
+        "{Region([0x0, 0x100000 | ACRWXS])}",
+        capas(domain, &mut engine)
+    );
+    // Try the null segment trick.
+    let (_reg1, _reg2) = engine
+        .segment_region(
+            domain,
+            region,
+            AccessRights {
+                start: 0,
+                end: 0,
+                ops: MEMOPS_ALL,
+            },
+            AccessRights {
+                start: 0,
+                end: 0x100000,
+                ops: MEMOPS_ALL,
+            },
+        )
+        .unwrap();
+
+    snap!(
+        "{[0x0, 0x100000 | 1 (1 - 1 - 1 - 1)]}",
+        regions(domain, &engine)
+    );
+    snap!("{Region([0x0, 0x100000 | _CRWXS]), Region([0x0, 0x0 | _CRWXS]), Region([0x0, 0x100000 | ACRWXS])}", capas(domain, &mut engine));
+
+    // Now revoke the original capability.
+    engine.revoke(domain, region).unwrap();
+    snap!(
+        "{[0x0, 0x100000 | 1 (1 - 1 - 1 - 1)]}",
+        regions(domain, &engine)
+    );
+    snap!(
+        "{Region([0x0, 0x100000 | ACRWXS])}",
+        capas(domain, &mut engine)
+    );
+
+    // Now try a duplicate.
+    let (_reg1, _reg2) = engine
+        .segment_region(
+            domain,
+            region,
+            AccessRights {
+                start: 0,
+                end: 0x100000,
+                ops: MEMOPS_ALL,
+            },
+            AccessRights {
+                start: 0,
+                end: 0x100000,
+                ops: MEMOPS_ALL,
+            },
+        )
+        .unwrap();
+    snap!(
+        "{[0x0, 0x100000 | 2 (2 - 2 - 2 - 2)]}",
+        regions(domain, &engine)
+    );
+    snap!(
+        "{Region([0x0, 0x100000 | _CRWXS]), Region([0x0, 0x100000 | A_RWXS]), Region([0x0, 0x100000 | A_RWXS])}",
+        capas(domain, &mut engine)
+    );
+    // revoke.
+    engine.revoke(domain, region).unwrap();
+    snap!(
+        "{[0x0, 0x100000 | 1 (1 - 1 - 1 - 1)]}",
+        regions(domain, &engine)
+    );
+    snap!(
+        "{Region([0x0, 0x100000 | ACRWXS])}",
+        capas(domain, &mut engine)
+    );
+    // Now with different access rights.
+    let (reg1, _reg2) = engine
+        .segment_region(
+            domain,
+            region,
+            AccessRights {
+                start: 0,
+                end: 0x100000,
+                ops: MemOps::READ,
+            },
+            AccessRights {
+                start: 0,
+                end: 0x100000,
+                ops: MEMOPS_ALL,
+            },
+        )
+        .unwrap();
+    snap!(
+        "{[0x0, 0x100000 | 2 (2 - 1 - 1 - 1)]}",
+        regions(domain, &engine)
+    );
+    snap!(
+        "{Region([0x0, 0x100000 | _CRWXS]), Region([0x0, 0x100000 | A_RWXS]), Region([0x0, 0x100000 | A_R___])}",
+        capas(domain, &mut engine)
+    );
+    // Now pause the read one.
+    let (_, _) = engine
+        .segment_region(
+            domain,
+            reg1,
+            AccessRights {
+                start: 0,
+                end: 0,
+                ops: MemOps::NONE,
+            },
+            AccessRights {
+                start: 0,
+                end: 0,
+                ops: MemOps::NONE,
+            },
+        )
+        .unwrap();
+    snap!(
+        "{[0x0, 0x100000 | 1 (1 - 1 - 1 - 1)]}",
+        regions(domain, &engine)
+    );
+    snap!(
+        "{Region([0x0, 0x100000 | _CRWXS]), Region([0x0, 0x100000 | A_RWXS]), Region([0x0, 0x100000 | __R___]), Region([0x0, 0x0 | ______]), Region([0x0, 0x0 | ______])}",
+        capas(domain, &mut engine)
+    );
+    // Cleanup everything from a higher capa.
+    engine.revoke(domain, region).unwrap();
+    snap!(
+        "{[0x0, 0x100000 | 1 (1 - 1 - 1 - 1)]}",
+        regions(domain, &engine)
+    );
+    snap!(
+        "{Region([0x0, 0x100000 | ACRWXS])}",
         capas(domain, &mut engine)
     );
 }

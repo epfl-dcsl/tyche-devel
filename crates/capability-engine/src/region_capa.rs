@@ -36,7 +36,8 @@ impl RegionCapa {
             domain,
             left: None,
             right: None,
-            is_active: true,
+            // Empty access is not active.
+            is_active: access.start != access.end,
             is_confidential: false,
             access,
         }
@@ -238,7 +239,8 @@ fn apply_install(
         return Ok(());
     }
 
-    if domains.get(domain_handle).is_some() {
+    // No need to activate the region if it is not active.
+    if domains.get(domain_handle).is_some() && capa.is_active {
         domain::activate_region(domain_handle, capa.access, domains, updates)?;
     }
 
@@ -255,7 +257,7 @@ fn apply_uninstall(
         return Ok(());
     }
 
-    if domains.get(domain_handle).is_some() {
+    if domains.get(domain_handle).is_some() && capa.is_active {
         domain::deactivate_region(domain_handle, capa.access, domains, updates)?;
     }
 
