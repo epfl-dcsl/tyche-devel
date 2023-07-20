@@ -393,6 +393,7 @@ impl RegionTracker {
         };
         let second_half_handle = self.regions.allocate(second_half).ok_or_else(|| {
             log::trace!("Unable to allocate new region!");
+            //TODO(aghosn) this one fails.
             CapaError::OutOfMemory
         })?;
 
