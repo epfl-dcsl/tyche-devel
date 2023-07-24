@@ -684,20 +684,17 @@ impl<'a> Iterator for PermissionIterator<'a> {
             self.next = None; // makes next iteration faster
             return None;
         };
-        let (mut end, ops) = {
+        let (end, ops) = {
             let reg = &self.tracker.regions[handle.unwrap()];
             (reg.end, reg.get_ops())
         };
 
         let mut next = None;
-        for (handle, region) in self.tracker.iter_from(handle).skip(1) {
-            if region.ref_count > 0 && region.start == end {
-                // Merge regions
-                end = region.end;
-            } else {
-                next = Some(handle);
-                break;
-            }
+        for (handle, _region) in self.tracker.iter_from(handle).skip(1) {
+            //TODO(aghosn) charly had some optimization here that I had to remove.
+            //We can put something correct here in the future.
+            next = Some(handle);
+            break;
         }
 
         self.next = next;
@@ -852,7 +849,7 @@ mod tests {
 
 impl fmt::Display for AccessRights {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "[0x{:x}, 0x{:x}]", self.start, self.end)
+        write!(f, "[0x{:x}, 0x{:x} | {}]", self.start, self.end, self.ops)
     }
 }
 
@@ -881,7 +878,7 @@ impl fmt::Display for RegionTracker {
 
 impl fmt::Display for MemoryPermission {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "[0x{:x}, 0x{:x} | RWX]", self.start, self.end)
+        write!(f, "[0x{:x}, 0x{:x} | {}]", self.start, self.end, self.ops)
     }
 }
 

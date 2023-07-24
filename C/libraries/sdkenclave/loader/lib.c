@@ -9,6 +9,7 @@
 #include "elf64.h"
 #include "driver_ioctl.h"
 #include "pts.h"
+#include "tyche_capabilities_types.h"
 #include "x86_64_pt.h"
 #include "common.h"
 #include "enclave_loader.h"
@@ -307,7 +308,7 @@ int load_enclave(enclave_t* enclave)
               enclave->handle,
               /*curr_va*/ virt_addr,
               section->sh_addr - curr_va,
-              flags,
+              flags | MEM_CONFIDENTIAL,
               CONFIDENTIAL) != SUCCESS) {
             ERROR("Unable to map confidential segment for enclave %lld at %llx",
               enclave->handle, curr_va);

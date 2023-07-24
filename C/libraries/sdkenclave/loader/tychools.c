@@ -10,6 +10,7 @@
 #include "elf64.h"
 #include "driver_ioctl.h"
 #include "pts.h"
+#include "tyche_capabilities_types.h"
 #include "tyche_enclave.h"
 #include "x86_64_pt.h"
 #include "common.h"
@@ -237,6 +238,9 @@ int tychools_load_enclave(enclave_t* enclave)
 
     // Now map the segment.
     int conf_or_shared = is_confidential(seg.p_type)? CONFIDENTIAL : SHARED; 
+    if (conf_or_shared == CONFIDENTIAL) {
+      flags |= MEM_CONFIDENTIAL;
+    }
     if (ioctl_mprotect_enclave(
           enclave->handle,
           dest,

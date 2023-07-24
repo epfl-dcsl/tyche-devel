@@ -40,6 +40,11 @@ child_domain_t* find_child(domain_id_t id)
   return child;
 }
 
+int has_access_rights(memory_access_right_t orig, memory_access_right_t dest)
+{
+  return (orig & dest) == dest;
+}
+
 // —————————————————————————————— Public APIs ——————————————————————————————— //
 
 int init(capa_alloc_t allocator, capa_dealloc_t deallocator) {
@@ -465,8 +470,8 @@ failure:
 
 // TODO: for the moment only handle the case where the region is fully contained
 // within one capability.
-int grant_region(domain_id_t id, paddr_t start, paddr_t end,
-                 memory_access_right_t access) {
+int carve_region(domain_id_t id, paddr_t start, paddr_t end,
+                 memory_access_right_t access, int is_shared) {
   child_domain_t *child = NULL;
   capability_t *capa = NULL;
 
@@ -494,8 +499,8 @@ int grant_region(domain_id_t id, paddr_t start, paddr_t end,
     if ((dll_contains(
             capa->info.region.start,
             capa->info.region.end, start)) &&
-        capa->info.region.start <= end && capa->info.region.end >= end
-        /*&& TODO(aghosn) check access rights once charly supports them*/) {
+        (capa->info.region.start <= end && capa->info.region.end >= end)
+        && has_access_rights(capa->info.region.flags, access)) {
       // Found the capability.
       break;
     }
@@ -503,6 +508,7 @@ int grant_region(domain_id_t id, paddr_t start, paddr_t end,
 
   // We were not able to find the capability.
   if (capa == NULL) {
+    LOG("The access rights we want: %x", access);
     ERROR("Unable to find the containing capa.");
     goto failure;
   }
@@ -531,6 +537,7 @@ int grant_region(domain_id_t id, paddr_t start, paddr_t end,
       (capa->info.region.start < start && capa->info.region.end == end)) {
     paddr_t s = 0, m = 0, e = 0;
     capability_t *left = NULL, *right = NULL;
+    memory_access_right_t ops_left = 0, ops_right = 0;
     capability_t **to_grant = NULL;
 
     if (capa->info.region.start == start && capa->info.region.end > end) {
@@ -543,6 +550,8 @@ int grant_region(domain_id_t id, paddr_t start, paddr_t end,
       m = end;
       e = capa->info.region.end;
       to_grant = &left;
+      ops_left = access;
+      ops_right = capa->info.region.flags;
     } else {
       // Right case.
       // capa: [s ............e].
@@ -553,12 +562,14 @@ int grant_region(domain_id_t id, paddr_t start, paddr_t end,
       m = start;
       e = capa->info.region.end;
       to_grant = &right;
+      ops_left = capa->info.region.flags;
+      ops_right = access;
     }
 
     // Do the duplicate.
     if (segment_region_capa(capa, &left, &right,
-          s, m, capa->info.region.flags >> 2,
-          m, e, capa->info.region.flags >> 2) != SUCCESS) {
+          s, m, ops_left >> 2,
+          m, e, ops_right >> 2) != SUCCESS) {
       ERROR("Left or right duplicate case failed.");
       goto failure;
     }
@@ -571,6 +582,19 @@ int grant_region(domain_id_t id, paddr_t start, paddr_t end,
   if (capa == NULL ||
       !(capa->info.region.start == start && capa->info.region.end == end)) {
     goto failure;
+  }
+
+  // If we have a share, we want to keep access to the region.
+  if (is_shared) {
+    capability_t* left_copy = NULL, *right_copy = NULL, *to_send = capa;  
+    if (segment_region_capa(
+          to_send, &left_copy, &right_copy, 
+          to_send->info.region.start, to_send->info.region.end, to_send->info.region.flags >> 2,
+          to_send->info.region.start, to_send->info.region.end, to_send->info.region.flags >> 2) != SUCCESS) {
+      ERROR("For shared, unable to duplicate capability.");
+      goto failure;
+    }
+    capa = right_copy;
   }
 
   // One last duplicate to have a revocation {NULL, to_send}.
@@ -608,97 +632,15 @@ failure:
   return FAILURE;
 }
 
+int grant_region(domain_id_t id, paddr_t start, paddr_t end,
+                 memory_access_right_t access)
+{
+  return carve_region(id, start, end, access, 0);
+} 
+
 int share_region(domain_id_t id, paddr_t start, paddr_t end,
                  memory_access_right_t access) {
-  child_domain_t *child = NULL;
-  capability_t *capa = NULL, *left = NULL, *right = NULL;
-
-  DEBUG("start");
-  // Quick checks.
-  if (start >= end) {
-    ERROR("start is greater or equal to end.\n");
-    goto failure;
-  }
-
-  // Find the target domain.
-  child = find_child(id); 
-
-  // We were not able to find the child.
-  if (child == NULL) {
-    ERROR("child not found.");
-    goto failure;
-  }
-
-  // Now attempt to find the capability.
-  dll_foreach(&(local_domain.capabilities), capa, list) {
-    if (capa->capa_type != Region || (capa->info.region.flags & MEM_ACTIVE) == 0) {
-      continue;
-    }
-    // TODO check dll_contains, might fail on end.
-    if (dll_contains(capa->info.region.start, capa->info.region.end,
-                     start) &&
-        capa->info.region.start <= end && capa->info.region.end >= end) {
-      // Found the capability.
-      break;
-    }
-  }
-
-  // We were not able to find the capability.
-  if (capa == NULL) {
-    goto failure;
-  }
-
-  //TODO(aghosn) bug here, marks the entire region as non-confidential.
-  //Fix this.
-  // A share is less complex than a grant because it doesn't require carving
-  // out. We still create a capability that matches exactly the desired
-  // interval. This allows to revoke that region independently of subsequent
-  // shares.
-  if (segment_region_capa(
-        capa, &left, &right,
-        capa->info.region.start, capa->info.region.end, capa->info.region.flags >> 2,
-        start, end, capa->info.region.flags >> 2) != SUCCESS) {
-    ERROR("First segment region call failed.");
-    goto failure;
-  }
-
-  // We care about the right capability.
-  capa = right;
-
-  // We do the magic segment_region_capa to have a single revoke.
-  // One last duplicate to have a revocation {NULL, to_send}.
-  do {
-    capability_t *to_send = trick_segment_null_copy(capa);
-    if (to_send == NULL) {
-      ERROR("To send is null.");
-      goto failure;
-    }
-
-    // Check we have a revocation capa.
-    if (capa->capa_type != Region || (capa->info.region.flags & MEM_ACTIVE) != 0) {
-      ERROR("This should be a revocation capability.");
-      goto failure;
-    }
-
-    // Send the capa to the target.
-    if (tyche_send(child->management->local_id, to_send->local_id) != SUCCESS) {
-      ERROR("Unable to send the capability!");
-      goto failure;
-    } 
-
-    // Cleanup to send.
-    local_domain.dealloc(to_send);
-  } while(0);
-
-  // Just remove the capability now. 
-  dll_remove(&(local_domain.capabilities), capa, list);
-  dll_add(&(child->revocations), right, list);
-
-  // All done!
-  DEBUG("Success");
-  return SUCCESS;
-failure:
-  return FAILURE;
+  return carve_region(id, start, end, access, 1); 
 }
 
 // TODO for now we only handle exact matches.
