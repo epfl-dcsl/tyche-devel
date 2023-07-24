@@ -1,4 +1,4 @@
-all: app enclave enclave_tychools instrument
+all: app sandbox instrument
 
 
 ## ————————————————————————————————— Paths —————————————————————————————————— ##
@@ -14,13 +14,13 @@ ELF64=$(LIB_PATH)/elf64
 PTS=$(LIB_PATH)/pts
 DRIVER=$(DRIVERS_PATH)/tyche
 
-## ——————————————————————— Untrusted code and headers ——————————————————————— ##
-CODE_UNTRUSTED=$(wildcard untrusted/*.c)
-HDRS_UNTRUSTED=$(wildcard include/*.h)
+## ————————————————————— Application code and headers ——————————————————————— ##
+CODE_APPLICATION=$(wildcard application/*.c)
+HDRS_APPLICATION=$(wildcard include/*.h)
 
-## ———————————————————————— Trusted code and headers ———————————————————————— ##
-CODE_TRUSTED=$(wildcard trusted/*.c)
-HDRS_TRUSTED=$(wildcard include/*.h)
+## —————————————————————— Sandboxed code and headers ———————————————————————— ##
+CODE_SANDBOXED=$(wildcard sandboxed/*.c)
+HDRS_SANDBOXED=$(wildcard include/*.h)
 
 ## ———————————————————————— Runtime code and headers ———————————————————————— ##
 CODE_RUNTIME=$(wildcard $(SDK)/runtime/*.c) $(wildcard $(SDK)/runtime/*.S)
@@ -39,12 +39,12 @@ CODE_PTS=$(wildcard $(PTS)/src/*.c)
 HDRS_PTS=$(wildcard $(PTS)/include/*.h)
 
 ## —————————————————————— Application code and headers —————————————————————— ##
-CODE_APP=$(CODE_ELF64) $(CODE_PTS) $(CODE_LOADER) $(CODE_UNTRUSTED)
-HDRS_APP=$(HDRS_ELF64) $(HDRS_PTS) $(HDRS_LOADER) $(HDRS_UNTRUSTED)
+CODE_APP=$(CODE_ELF64) $(CODE_PTS) $(CODE_LOADER) $(CODE_APPLICATION)
+HDRS_APP=$(HDRS_ELF64) $(HDRS_PTS) $(HDRS_LOADER) $(HDRS_APPLICATION)
 
-## ———————————————————————— Enclave code and headers ———————————————————————— ##
-CODE_ENCLAVE=$(CODE_RUNTIME) $(CODE_TRUSTED)
-HDRS_ENCLAVE=$(HDRS_RUNTIME) $(HDRS_TRUSTED)
+## ———————————————————————— Sandbox code and headers ———————————————————————— ##
+CODE_SANDBOX=$(CODE_RUNTIME) $(CODE_SANDBOXED)
+HDRS_SANDBOX=$(HDRS_RUNTIME) $(HDRS_SANDBOXED)
 
 ## ———————————————————————————————— Includes ———————————————————————————————— ##
 COMMON_INCLUDES = -Iinclude -I$(CAPA_LIB)/include -I$(COMMON_LIB)/include -I$(DLL_LIB)/include -I$(SDK)/include 
@@ -60,23 +60,20 @@ TYCHOOLS_PATH ?= ../../../../../crates/tychools/
 app: $(CODE_APP) $(HDRS_APP) 
 	gcc -DTYCHE_USER_SPACE=1 -g $(APP_INCLUDES) -o $@ $(CODE_APP)
 
-enclave: $(CODE_ENCLAVE) $(HDRS_ENCLAVE)
-	gcc -DTYCHE_USER_SPACE=1 -g $(COMMON_INCLUDES) -nostdlib -static -o $@ $(CODE_ENCLAVE) 
+sandbox: $(CODE_SANDBOX) $(HDRS_SANDBOX)
+	gcc -DTYCHE_USER_SPACE=1 -DTYCHOOLS=1 -g $(COMMON_INCLUDES) -nostdlib -static -o $@ $(CODE_SANDBOX)
 
-enclave_tychools: $(CODE_ENCLAVE) $(HDRS_ENCLAVE)
-	gcc -DTYCHE_USER_SPACE=1 -DTYCHOOLS=1 -g $(COMMON_INCLUDES) -nostdlib -static -o $@ $(CODE_ENCLAVE)
-
-instrument: app enclave_tychools
+instrument: app sandbox 
 	cargo -C $(TYCHOOLS_PATH) install --path .
 	tychools instrument -s manifests/default.json 
-	chmod +x app_instrumented
+	chmod +x application_with_sandbox
 
 install_disk: all 
 	mkdir -p $(DISK_PATH)
-	cp -t $(DISK_PATH) app enclave app_instrumented
+	cp -t $(DISK_PATH) application_with_sandbox 
 
 
 .PHONY: clean
 
 clean:
-	rm app enclave app_instrumented enclave_tychools
+	rm app sandbox application_with_sandbox

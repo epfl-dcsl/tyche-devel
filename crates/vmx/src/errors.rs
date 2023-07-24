@@ -244,13 +244,13 @@ impl VmExitInterrupt {
 
     /// Returns the error code valid field: 11.
     pub fn error_code_valid(&self) -> bool {
-        self._raw & (1 << EntryInterruptionInformationField::DELIVER.bits()) == 1
+        self._raw & (EntryInterruptionInformationField::DELIVER.bits()) != 0
     }
 
     pub fn set_error_code_valid(&mut self, value: bool) {
-        let mask: u32 = !(1 << EntryInterruptionInformationField::DELIVER.bits());
+        let mask: u32 = !(EntryInterruptionInformationField::DELIVER.bits());
         let n_val: u32 = if value {
-            1 << EntryInterruptionInformationField::DELIVER.bits()
+            EntryInterruptionInformationField::DELIVER.bits()
         } else {
             0
         };
@@ -264,12 +264,12 @@ impl VmExitInterrupt {
 
     /// Returns the NMI unblocking due to iret: 12
     pub fn nmi_unblocking(&self) -> bool {
-        self._raw & (1 << EntryInterruptionInformationField::NMI_UNBLOCKING.bits()) == 1
+        self._raw & (EntryInterruptionInformationField::NMI_UNBLOCKING.bits()) != 0
     }
 
     /// Returns the valid bit: 31
     pub fn valid(&self) -> bool {
-        self._raw & (1 << EntryInterruptionInformationField::VALID.bits()) == 1
+        self._raw & (EntryInterruptionInformationField::VALID.bits()) != 0
     }
 
     /// get raw value.

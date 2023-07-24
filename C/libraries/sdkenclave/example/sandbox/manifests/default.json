@@ -3,12 +3,12 @@
     "path": "app"
   },
   "kern_bin": {
-    "path":"enclave_tychools",
+    "path":"sandbox",
     "ops":[
       {
         "AddSegment":{
           "size":8192,
-          "tpe":"KernelStackConf",
+          "tpe":"KernelStackSB",
           "write":true,"exec":false
         }
       },
@@ -17,12 +17,13 @@
           "start": 3145728, 
           "size":8192,
           "tpe":"KernelShared",
-          "write":true,
+          "write":false,
           "exec":false
         }
       }
     ]
   },
+  "security": "Sandbox", 
   "generate_pts": true,
-  "output": "app_instrumented"
+  "output": "application_with_sandbox"
 }
