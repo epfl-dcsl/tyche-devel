@@ -15,7 +15,7 @@ pub struct Frame {
     /// the virtual adddress of the frame using the current mapping.
     ///
     /// WARNING: the mapping must stay stable for the whole duration of VMX operations.
-    pub virt_addr: u64,
+    pub virt_addr: usize,
 }
 
 impl Frame {
@@ -25,7 +25,7 @@ impl Frame {
     /// The virtual address must be mapped to the physical address, and the mapping must remain
     /// valid for ever.
     pub unsafe fn new(phys_addr: HostPhysAddr, virt_addr: HostVirtAddr) -> Self {
-        let virt_addr = virt_addr.as_usize() as *mut u8 as u64;
+        let virt_addr = virt_addr.as_usize() as *mut u8 as usize;
         Self {
             phys_addr,
             virt_addr,
