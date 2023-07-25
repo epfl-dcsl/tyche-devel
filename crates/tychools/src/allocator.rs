@@ -34,7 +34,7 @@ impl<const N: usize> BumpAllocator<N> {
     fn allocate_frame(&mut self) -> Option<Frame> {
         if self.idx < N {
             let idx = self.idx;
-            let frame = &mut self.pages[idx].data as *mut u8 as u64;
+            let frame = &mut self.pages[idx].data as *mut u8 as usize;
             self.idx += 1;
             return Some(Frame {
                 phys_addr: HostPhysAddr::new(self.phys_offset + idx * PAGE_SIZE),
