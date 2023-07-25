@@ -154,7 +154,6 @@ version = "0.1.0"
 dependencies = [
  "bit_field",
  "log",
- "num-traits",
  "simple_logger",
 ]
 

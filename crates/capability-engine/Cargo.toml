@@ -6,7 +6,6 @@ edition = "2021"
 [dependencies]
 bit_field = "0.10.2"
 log = { workspace = true }
-num-traits = {version = "0.2.15", default-features = false}
 
 [dev-dependencies.simple_logger]
 default-features = false
