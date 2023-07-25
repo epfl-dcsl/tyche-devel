@@ -30,7 +30,7 @@ impl RCFrame {
             return Err(CapaError::InvalidOperation);
         }
 
-        self.count -= 1;
+        self.count = self.count.checked_sub(1).unwrap();
         Ok(self.count)
     }
 }
