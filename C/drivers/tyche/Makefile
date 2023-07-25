@@ -26,7 +26,7 @@ INCLUDES = -I$(src)/$(LIB_COMMON)/include -I$(src)/include -I$(src)/$(LIB_PT)/in
 
 # Kernel build system variables.
 obj-m := $(TARGET_MODULE).o
-$(TARGET_MODULE)-objs += src/driver.o src/ioctl.o src/enclaves.o src/capabilities.o src/dbg_addresses.o
+$(TARGET_MODULE)-objs += src/driver.o src/ioctl.o src/domains.o src/capabilities.o
 $(TARGET_MODULE)-objs += ../../libraries/pts/src/lib.o  ../../libraries/pts/src/x86_64_pt.o
 $(TARGET_MODULE)-objs += ../../libraries/capabilities/src/ecs.o  ../../libraries/capabilities/src/lib.o  ../../libraries/capabilities/src/tyche_api.o
 

@@ -10,6 +10,7 @@ ubuntu_umount:
 update_disk:
 	sudo chown --recursive $(shell whoami) /tmp/mount/tyche
 	make -B -C drivers/tyche install_disk
-	make -B -C libraries/sdkenclave/example/enclave install_disk
-	make -B -C libraries/trt install_disk
+	make -B -C libraries/sdktyche/example/app-selector install_disk
+	make -B -C libraries/sdktyche/example/simple-enclave install_disk
+	make -B -C libraries/sdktyche/example/simple-sandbox install_disk
 	cp scripts/install_drivers.sh /tmp/mount/tyche

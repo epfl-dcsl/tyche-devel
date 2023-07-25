@@ -2,7 +2,7 @@
 #include <linux/slab.h>
 
 #include "common.h"
-#include "enclaves.h"
+#include "domains.h"
 #include "tyche_capabilities.h"
 // ———————————————————————————————— Helpers ————————————————————————————————— //
 static unsigned long long counter_alloc = 0;
@@ -26,7 +26,7 @@ static void local_print(const char *msg)
 
 // ——————————————————————————————— Public API ——————————————————————————————— //
 
-int init_capabilities(void)
+int driver_init_capabilities(void)
 {
   return init(local_allocator, local_free); 
 } 

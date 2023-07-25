@@ -4,7 +4,6 @@
 #include <linux/kernel.h>
 
 #include "common.h"
-#include "dbg_addresses.h"
 
 // —————————————————————————————— Module Info ——————————————————————————————— //
 
@@ -15,19 +14,15 @@ MODULE_VERSION("0.01");
 
 
 // —————————————————————— Loading/Unloading  functions —————————————————————— //
-static int __init tyche_enclave_init(void)
+static int __init tyche_init(void)
 {
   int result = 0;
   printk(KERN_INFO "Loading Tyche driver.");
   result = tyche_register();
-  if (init_page_walker() != 0) {
-    ERROR("Unable to init the page walker for some reason!");
-    return -1;
-  }
   return result;
 }
 
-static void __exit tyche_enclave_exit(void)
+static void __exit tyche_exit(void)
 {
   printk(KERN_INFO "Removing Tyche driver.");
   tyche_unregister();
@@ -35,5 +30,5 @@ static void __exit tyche_enclave_exit(void)
 
 // ————————————————————————— Module's Registration —————————————————————————— //
 
-module_init(tyche_enclave_init);
-module_exit(tyche_enclave_exit);
+module_init(tyche_init);
+module_exit(tyche_exit);

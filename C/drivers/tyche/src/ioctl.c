@@ -5,9 +5,9 @@
 #include <linux/fs.h>
 
 #include "common.h"
-#include "enclaves.h"
+#include "domains.h"
 #define _IN_MODULE
-#include "tyche_enclave.h"
+#include "tyche_driver.h"
 #include "tyche_ioctl.h"
 #undef _IN_MODULE
 // —————————————————————— Global Driver Configuration ——————————————————————— //
@@ -67,7 +67,7 @@ int tyche_register(void)
     goto r_device;
   }
 
-  init_enclaves();
+  driver_init_domains();
   LOG("Tyche driver registered!\n");
   return SUCCESS; 
 
@@ -95,8 +95,8 @@ int tyche_open(struct inode* inode, struct file* file)
     ERROR("We received a Null file descriptor.");
     goto failure;
   }
-  if (create_enclave(file) != SUCCESS) {
-    ERROR("Unable to create a new enclave");
+  if (driver_create_domain(file) != SUCCESS) {
+    ERROR("Unable to create a new domain");
     goto failure;
   }
   return SUCCESS;
@@ -106,8 +106,8 @@ failure:
 
 int tyche_close(struct inode* inode, struct file* handle)
 {
-   if (delete_enclave(handle) != SUCCESS) {
-        ERROR("Unable to delete the enclave %p", handle);
+   if (driver_delete_domain(handle) != SUCCESS) {
+        ERROR("Unable to delete the domain %p", handle);
         goto failure;
     }
   return SUCCESS;
@@ -118,32 +118,32 @@ failure:
 
 long tyche_ioctl(struct file* handle, unsigned int cmd, unsigned long arg)
 {
-  msg_enclave_info_t info = {UNINIT_USIZE, UNINIT_USIZE}; 
+  msg_info_t info = {UNINIT_USIZE, UNINIT_USIZE}; 
   msg_entry_on_core_t commit = {0, 0, 0, 0};
-  msg_enclave_mprotect_t mprotect = {0, 0, 0, 0};
-  msg_enclave_switch_t transition = {0};
+  msg_mprotect_t mprotect = {0, 0, 0, 0};
+  msg_switch_t transition = {0};
   msg_set_perm_t perm = {0};
   switch(cmd) {
-    case TYCHE_ENCLAVE_GET_PHYSOFFSET:
-      if (get_physoffset_enclave(handle, &info.physoffset) != SUCCESS) {
-        ERROR("Unable to get the physoffset for enclave %p", handle);
+    case TYCHE_GET_PHYSOFFSET:
+      if (driver_get_physoffset_domain(handle, &info.physoffset) != SUCCESS) {
+        ERROR("Unable to get the physoffset for domain %p", handle);
         goto failure;
       }
       if (copy_to_user(
-            (msg_enclave_info_t*) arg, 
+            (msg_info_t*) arg, 
             &info, 
-            sizeof(msg_enclave_info_t))) {
-        ERROR("Unable to copy enclave physoffset for %p", handle);
+            sizeof(msg_info_t))) {
+        ERROR("Unable to copy domain physoffset for %p", handle);
         goto failure;
       }
       break;
-    case TYCHE_ENCLAVE_COMMIT:
-      if (commit_enclave(handle) != SUCCESS) {
-        ERROR("Commit failed for enclave %p", handle);
+    case TYCHE_COMMIT:
+      if (driver_commit_domain(handle) != SUCCESS) {
+        ERROR("Commit failed for domain %p", handle);
         goto failure;
       }
       break;
-    case TYCHE_ENCLAVE_SET_TRAPS:
+    case TYCHE_SET_TRAPS:
         if (copy_from_user(
             &perm,
             (msg_set_perm_t*) arg,
@@ -151,14 +151,12 @@ long tyche_ioctl(struct file* handle, unsigned int cmd, unsigned long arg)
         ERROR("Unable to copy perm arguments from user.");
         goto failure;
       }
-      if (set_traps(
-            handle,
-            perm.value) != SUCCESS) {
-        ERROR("Setting traps failed for enclave %p", handle);
+      if (driver_set_traps(handle, perm.value) != SUCCESS) {
+        ERROR("Setting traps failed for domain %p", handle);
         goto failure;
       }
       break;
-   case TYCHE_ENCLAVE_SET_CORES:
+   case TYCHE_SET_CORES:
         if (copy_from_user(
             &perm,
             (msg_set_perm_t*) arg,
@@ -166,14 +164,12 @@ long tyche_ioctl(struct file* handle, unsigned int cmd, unsigned long arg)
         ERROR("Unable to copy perm arguments from user.");
         goto failure;
       }
-      if (set_cores(
-            handle,
-            perm.value) != SUCCESS) {
-        ERROR("Setting cores failed for enclave %p", handle);
+      if (driver_set_cores(handle, perm.value) != SUCCESS) {
+        ERROR("Setting cores failed for domain %p", handle);
         goto failure;
       }
       break;
-   case TYCHE_ENCLAVE_SET_PERM:
+   case TYCHE_SET_PERM:
         if (copy_from_user(
             &perm,
             (msg_set_perm_t*) arg,
@@ -181,14 +177,12 @@ long tyche_ioctl(struct file* handle, unsigned int cmd, unsigned long arg)
         ERROR("Unable to copy perm arguments from user.");
         goto failure;
       }
-      if (set_perm(
-            handle,
-            perm.value) != SUCCESS) {
-        ERROR("Setting perm failed for enclave %p", handle);
+      if (driver_set_perm(handle, perm.value) != SUCCESS) {
+        ERROR("Setting perm failed for domain %p", handle);
         goto failure;
       }
       break;
-   case TYCHE_ENCLAVE_SET_SWITCH:
+   case TYCHE_SET_SWITCH:
         if (copy_from_user(
             &perm,
             (msg_set_perm_t*) arg,
@@ -196,14 +190,12 @@ long tyche_ioctl(struct file* handle, unsigned int cmd, unsigned long arg)
         ERROR("Unable to copy perm arguments from user.");
         goto failure;
       }
-      if (set_switch(
-            handle,
-            perm.value) != SUCCESS) {
-        ERROR("Setting perm failed for enclave %p", handle);
+      if (driver_set_switch(handle, perm.value) != SUCCESS) {
+        ERROR("Setting perm failed for domain %p", handle);
         goto failure;
       }
       break;
-   case TYCHE_ENCLAVE_SET_ENTRY_POINT:
+   case TYCHE_SET_ENTRY_POINT:
         if (copy_from_user(
             &commit,
             (msg_entry_on_core_t*) arg,
@@ -211,44 +203,44 @@ long tyche_ioctl(struct file* handle, unsigned int cmd, unsigned long arg)
         ERROR("Unable to copy perm arguments from user.");
         goto failure;
       }
-      if (set_entry_on_core(
+      if (driver_set_entry_on_core(
             handle,
             commit.core,
             commit.page_tables,
             commit.entry,
             commit.stack) != SUCCESS) {
-        ERROR("Setting perm failed for enclave %p", handle);
+        ERROR("Setting perm failed for domain %p", handle);
         goto failure;
       }
       break;
-    case TYCHE_ENCLAVE_MPROTECT:
+    case TYCHE_MPROTECT:
       if (copy_from_user(
             &mprotect,
-            (msg_enclave_mprotect_t*) arg,
-            sizeof(msg_enclave_mprotect_t))) {
+            (msg_mprotect_t*) arg,
+            sizeof(msg_mprotect_t))) {
         ERROR("Unable to copy arguments from user.");
         goto failure;
       }
-      if (mprotect_enclave(
+      if (driver_mprotect_domain(
             handle,
             mprotect.start,
             mprotect.size,
             mprotect.flags,
             mprotect.tpe) != SUCCESS) {
-        ERROR("Unable to mprotect he region for enclave %p", handle);
+        ERROR("Unable to mprotect he region for domain %p", handle);
         goto failure;
       }
       break;
     case TYCHE_TRANSITION:
       if (copy_from_user(
             &transition,
-            (msg_enclave_switch_t*) arg,
-            sizeof(msg_enclave_switch_t))) {
+            (msg_switch_t*) arg,
+            sizeof(msg_switch_t))) {
         ERROR("Unable to copy arguments from user.");
         goto failure;
       }
-      if (switch_enclave(handle, transition.args) != SUCCESS) {
-        ERROR("Unable to switch to enclave %p", handle);
+      if (driver_switch_domain(handle, transition.args) != SUCCESS) {
+        ERROR("Unable to switch to domain %p", handle);
         goto failure;
       }
       break;
@@ -263,5 +255,5 @@ failure:
 
 int tyche_mmap(struct file *file, struct vm_area_struct *vma)
 {
-  return mmap_segment(file, vma);
+  return driver_mmap_segment(file, vma);
 }
