@@ -54,16 +54,17 @@ int extract_enclave(const char* self, const char* destf)
   }
   memset(&self_parser, 0, sizeof(parser_t));
 
-  self_parser.fd = open(self, O_RDONLY); 
-  if (self_parser.fd < 0) {
+  self_parser.elf.fd = open(self, O_RDONLY); 
+  self_parser.elf.type = FILE_ELF;
+  if (self_parser.elf.fd < 0) {
     ERROR("Failed to read self(%s)", self);
     goto failure;
   }
   // Read the header.
-  read_elf64_header(self_parser.fd, &(self_parser.header));
+  read_elf64_header(&self_parser.elf, &(self_parser.header));
   
   // Read the sections.
-  read_elf64_sections(self_parser.fd, self_parser.header, &(self_parser.sections));
+  read_elf64_sections(&self_parser.elf, self_parser.header, &(self_parser.sections));
 
   // Find the section for the enclave.
   enclave_elf = &self_parser.sections[self_parser.header.e_shnum-1];
@@ -77,7 +78,7 @@ int extract_enclave(const char* self, const char* destf)
   }
   
   // Now load the section.
-  dest = read_section64(self_parser.fd, *enclave_elf); 
+  dest = read_section64(&self_parser.elf, *enclave_elf); 
   if (dest == NULL) {
     ERROR("Unable to mmap memory for the enclave ELF");
     goto failure_free_seg;
@@ -153,19 +154,20 @@ int parse_enclave(enclave_t* enclave, const char* file)
   dll_init_list(&(enclave->config.shared_sections));
   
   // Open the enclave file.
-  enclave->parser.fd = open(file, O_RDONLY);
-  if (enclave->parser.fd < 0) {
+  enclave->parser.elf.type = FILE_ELF;
+  enclave->parser.elf.fd = open(file, O_RDONLY);
+  if (enclave->parser.elf.fd < 0) {
     ERROR("Could not open '%s': %d", file, errno);
     goto failure;
   }
 
   // Parse the ELF.
-  read_elf64_header(enclave->parser.fd, &(enclave->parser.header));
-  read_elf64_segments(enclave->parser.fd,
+  read_elf64_header(&enclave->parser.elf, &(enclave->parser.header));
+  read_elf64_segments(&enclave->parser.elf,
       enclave->parser.header, &(enclave->parser.segments)); 
-  read_elf64_sections(enclave->parser.fd,
+  read_elf64_sections(&enclave->parser.elf,
       enclave->parser.header, &(enclave->parser.sections));
-  enclave->parser.strings = read_section64(enclave->parser.fd,
+  enclave->parser.strings = read_section64(&enclave->parser.elf,
       enclave->parser.sections[enclave->parser.header.e_shstrndx]);
 
   // Set up the entry point.
@@ -231,7 +233,7 @@ int parse_enclave(enclave_t* enclave, const char* file)
   // We are done for now, next step is to load the enclave.
   return SUCCESS;
 close_failure:
-  close(enclave->parser.fd);
+  close(enclave->parser.elf.fd);
 failure:
   return FAILURE;
 }
@@ -294,7 +296,7 @@ int load_enclave(enclave_t* enclave)
     addr_t dest = enclave->map.virtoffset + phys_size;
     addr_t size = align_up(seg.p_memsz);
     memory_access_right_t flags = translate_flags_to_tyche(seg.p_flags);
-    load_elf64_segment(enclave->parser.fd, (void*) dest, seg);
+    load_elf64_segment(&enclave->parser.elf, (void*) dest, seg);
     addr_t curr_va = seg.p_vaddr;
     usize local_size = 0;
 
@@ -463,7 +465,7 @@ int delete_enclave(enclave_t* enclave)
   free(enclave->parser.segments);
   free(enclave->parser.sections);
   free(enclave->parser.strings);
-  close(enclave->parser.fd);
+  close(enclave->parser.elf.fd);
 
   // Unmap the enclave.
   munmap((void*) enclave->map.virtoffset, enclave->map.size); 

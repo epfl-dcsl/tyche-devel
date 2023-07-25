@@ -69,8 +69,8 @@ addr_t align_up(addr_t addr);
 
 /// Encapsulates the parser state for an enclave.
 typedef struct {
-  /// The file descriptor for the ELF.
-  int fd;
+  /// The ELF parser.
+  elf_parser_t elf;
 
   /// ELF header.
   Elf64_Ehdr header;

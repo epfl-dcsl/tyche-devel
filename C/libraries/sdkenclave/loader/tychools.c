@@ -92,15 +92,16 @@ int tychools_parse_enclave(enclave_t* enclave, const char* file)
   dll_init_list(&(enclave->config.shared_sections));
   
   // Open the enclave file.
-  enclave->parser.fd = open(file, O_RDONLY);
-  if (enclave->parser.fd < 0) {
+  enclave->parser.elf.type = FILE_ELF;
+  enclave->parser.elf.fd = open(file, O_RDONLY);
+  if (enclave->parser.elf.fd < 0) {
     ERROR("Could not open '%s': %d", file, errno);
     goto failure;
   }
 
   // Parse the ELF.
-  read_elf64_header(enclave->parser.fd, &(enclave->parser.header));
-  read_elf64_segments(enclave->parser.fd,
+  read_elf64_header(&enclave->parser.elf, &(enclave->parser.header));
+  read_elf64_segments(&enclave->parser.elf,
       enclave->parser.header, &(enclave->parser.segments)); 
   //@note: We do not need to parse the sections as tychools works on segments. 
 
@@ -158,7 +159,7 @@ int tychools_parse_enclave(enclave_t* enclave, const char* file)
   LOG("Parsed tychools binary %s", file);
   return SUCCESS;
 close_failure:
-  close(enclave->parser.fd);
+  close(enclave->parser.elf.fd);
 failure:
   return FAILURE;
 }
@@ -214,7 +215,7 @@ int tychools_load_enclave(enclave_t* enclave)
     addr_t dest = enclave->map.virtoffset + phys_size;
     addr_t size = align_up(seg.p_memsz);
     memory_access_right_t flags = translate_flags_to_tyche(seg.p_flags);
-    load_elf64_segment(enclave->parser.fd, (void*) dest, seg);
+    load_elf64_segment(&enclave->parser.elf, (void*) dest, seg);
 
     // If segment is shared, fix it in the shared_segments.
     // For now, do it in a non-efficient way.
