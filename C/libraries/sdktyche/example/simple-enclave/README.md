@@ -17,16 +17,19 @@ The application loads the enclave and performs two calls to it, printing two dif
 
 ```
 dev@tyche:/tyche/programs$ ./simple_enclave
-[LOG @untrusted/main.c:282 main] Let's load the binary 'enclave'!
-[LOG @untrusted/main.c:304 main] Calling the application 'HELLO_WORLD', good luck!
-[LOG @untrusted/main.c:120 hello_world] Executing HELLO_WORLD enclave
+[LOG @../../..//sdktyche/loader/lib.c:269 parse_domain] Parsed tychools binary
+[LOG @untrusted/main.c:92 main] The binary enclave has been loaded!
+[LOG @untrusted/main.c:100 main] Calling the enclave, good luck!
+[LOG @untrusted/main.c:49 hello_world] Executing HELLO_WORLD enclave
 
-[LOG @untrusted/main.c:127 hello_world] First enclave message:
+[ERROR | capa_engine::domain] Removing from a core in which the domains was NOT executing
+[LOG @untrusted/main.c:56 hello_world] First enclave message:
 Hello World!
 
-[LOG @untrusted/main.c:134 hello_world] Second enclave message:
+[LOG @untrusted/main.c:63 hello_world] Second enclave message:
 Bye Bye! :)!
 
-[LOG @untrusted/main.c:141 hello_world] All done!
-[LOG @untrusted/main.c:309 main] Done, have a good day!
+[LOG @untrusted/main.c:70 hello_world] All done!
+[LOG @untrusted/main.c:106 main] Done, have a good day!
+
 ```
