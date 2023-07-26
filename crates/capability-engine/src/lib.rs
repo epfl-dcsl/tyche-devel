@@ -32,7 +32,7 @@ pub mod config {
     pub const NB_REGIONS_PER_DOMAIN: usize = 64;
     pub const NB_REGIONS: usize = 256;
     pub const NB_UPDATES: usize = 128;
-    pub const NB_CORES: usize = 64; // NOTE: Can't be greater than 64 as we use 64 bits bitmaps.
+    pub const NB_CORES: usize = 32; // NOTE: Can't be greater than 64 as we use 64 bits bitmaps.
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

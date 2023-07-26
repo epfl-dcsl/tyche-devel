@@ -1,6 +1,6 @@
 //! Architecture specific monitor state, independant of the CapaEngine.
 
-use capa_engine::config::NB_DOMAINS;
+use capa_engine::config::{NB_CORES, NB_DOMAINS};
 use capa_engine::{
     permission, AccessRights, Bitmaps, Buffer, CapaEngine, CapaError, CapaInfo, Domain, GenArena,
     Handle, LocalCapa, MemOps, NextCapaToken, MEMOPS_ALL,
@@ -19,7 +19,6 @@ use super::guest::VmxState;
 use super::init::NB_BOOTED_CORES;
 use crate::allocator::allocator;
 use crate::rcframe::{drop_rc, RCFrame, RCFramePool, EMPTY_RCFRAME};
-use crate::statics::NB_CORES;
 
 // ————————————————————————— Statics & Backend Data ————————————————————————— //
 

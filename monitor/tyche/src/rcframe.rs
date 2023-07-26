@@ -1,10 +1,9 @@
-use capa_engine::config::NB_DOMAINS;
+use capa_engine::config::{NB_CORES, NB_DOMAINS};
 use capa_engine::{CapaError, GenArena, Handle};
 use mmu::FrameAllocator;
 use utils::{Frame, HostPhysAddr};
 
 use crate::allocator::allocator;
-use crate::statics::NB_CORES;
 
 /// Simple wrapper for frames representing a frame.
 /// This structure will be inside a static array in the monitor.

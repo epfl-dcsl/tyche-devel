@@ -4,7 +4,7 @@ use core::arch::asm;
 use core::mem::size_of;
 use core::sync::atomic::{AtomicBool, Ordering};
 
-use crate::statics::NB_CORES;
+use capa_engine::config::NB_CORES;
 
 // ———————————————————— Interrupt-related Initialization ———————————————————— //
 
