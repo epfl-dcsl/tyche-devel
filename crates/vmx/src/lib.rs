@@ -286,6 +286,13 @@ impl<'vmx> VmcsRegion<'vmx> {
     pub fn set_frame(&mut self, frame: Frame) {
         self.frame = frame;
     }
+
+    pub fn get_regs(&self) -> &[u64; REGFILE_SIZE] {
+        &self.regs
+    }
+    pub fn set_regs(&mut self, src: &[u64; REGFILE_SIZE]) {
+        self.regs.copy_from_slice(src);
+    }
 }
 
 impl<'vmx> ActiveVmcs<'vmx> {
@@ -295,7 +302,18 @@ impl<'vmx> ActiveVmcs<'vmx> {
         Ok(self.region)
     }
 
+    pub fn dump_regs(&self, dest: &mut [u64; REGFILE_SIZE]) {
+        dest.clone_from(self.region.get_regs());
+    }
+
+    pub fn load_regs(&mut self, src: &[u64; REGFILE_SIZE]) {
+        self.region.set_regs(src);
+    }
+
     pub fn flush(&mut self) {
+        if !self.launched {
+            return;
+        }
         // Dump the current state.
         unsafe {
             raw::vmclear(self.region.frame.phys_addr.as_u64()).expect("Unable to perform a clear");
@@ -320,7 +338,7 @@ impl<'vmx> ActiveVmcs<'vmx> {
 
     pub fn switch_frame(&mut self, dest: Frame) -> Result<(), VmxError> {
         // Save the state of the current VM.
-        unsafe { raw::vmclear(self.region.frame.phys_addr.as_u64())? };
+        self.flush();
         self.region.set_frame(dest);
         unsafe { raw::vmptrld(self.region.frame().phys_addr.as_u64())? };
         self.launched = false;

@@ -1,6 +1,7 @@
 #ifndef __TRT_INCLUDE_IDT_H__
 #define __TRT_INCLUDE_IDT_H__
 
+#include "sdk_tyche_rt.h"
 #include <stdint.h>
 
 // ————————————————————————————— IDT constants —————————————————————————————— //
@@ -29,7 +30,7 @@ typedef struct idtr_t {
 } __attribute__((packed)) idtr_t;
 
 // ——————————————————————————————— Functions ———————————————————————————————— //
-void idt_init(void);
+void idt_init(frame_t* frame);
 void save_idt(idtr_t* to_save);
 void restore_idt(idtr_t* to_restore);
 void exception_handler(void);

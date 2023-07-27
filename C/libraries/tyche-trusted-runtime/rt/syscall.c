@@ -60,5 +60,6 @@ int syscall_handler(
     uint64_t arg6)
 {
   //TODO implement
+  __asm__ volatile("cli; hlt");
   return FAILURE;
 }

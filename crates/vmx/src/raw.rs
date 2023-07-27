@@ -165,7 +165,7 @@ pub unsafe fn vmresume(vmcs: &mut ActiveVmcs) -> Result<(), VmxError> {
         // Save remaining host state to VMCS
         "vmwrite rcx, rsp",           // Write %rsp to VMCS
         "lea rbp, [rip + 25]",        // Compute the address of the next instruction after vmlaunch
-        "vmwrite rdx, rbp",           // Write tha value to VMCS
+        "vmwrite rdx, rbp",           // Write that value to VMCS
 
         // Restore guest registers
         "mov rbx, [rax + 8]",         // Restore guest %rbx

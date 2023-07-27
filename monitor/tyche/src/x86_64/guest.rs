@@ -233,8 +233,8 @@ fn handle_exit(
                 }
                 calls::SWITCH => {
                     log::trace!("Switch");
-                    monitor::do_switch(*domain, LocalCapa::new(arg_1), cpuid()).expect("TODO");
                     vs.vcpu.next_instruction()?;
+                    monitor::do_switch(*domain, LocalCapa::new(arg_1), cpuid()).expect("TODO");
                     Ok(HandlerResult::Resume)
                 }
                 calls::DEBUG => {

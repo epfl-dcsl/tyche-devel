@@ -12,7 +12,8 @@ use stage_two_abi::Manifest;
 use utils::{GuestPhysAddr, HostPhysAddr};
 use vmx::bitmaps::{EptEntryFlags, ExceptionBitmap};
 use vmx::errors::Trapnr;
-use vmx::{ActiveVmcs, ControlRegister, Register, VmExitInterrupt};
+use vmx::msr::IA32_LSTAR;
+use vmx::{ActiveVmcs, ControlRegister, Register, VmExitInterrupt, REGFILE_SIZE};
 
 use super::cpuid;
 use super::guest::VmxState;
@@ -38,8 +39,43 @@ pub struct ContextData {
     pub cr3: usize,
     pub rip: usize,
     pub rsp: usize,
+    // General-purpose registers.
+    pub regs: [u64; REGFILE_SIZE],
+    // The MSR(s?) we need to save and restore.
+    pub lstar: u64,
     /// Vcpu for this core.
     pub vmcs: Handle<RCFrame>,
+}
+
+impl ContextData {
+    pub fn save_partial(&mut self, vcpu: &ActiveVmcs<'static>) {
+        self.cr3 = vcpu.get_cr(ControlRegister::Cr3);
+        self.rip = vcpu.get(Register::Rip) as usize;
+        self.rsp = vcpu.get(Register::Rsp) as usize;
+    }
+
+    pub fn save(&mut self, vcpu: &mut ActiveVmcs<'static>) {
+        self.save_partial(vcpu);
+        vcpu.dump_regs(&mut self.regs);
+        self.lstar = unsafe { IA32_LSTAR.read() };
+        vcpu.flush();
+    }
+
+    pub fn restore_partial(&self, vcpu: &mut ActiveVmcs<'static>) {
+        vcpu.set_cr(ControlRegister::Cr3, self.cr3);
+        vcpu.set(Register::Rip, self.rip as u64);
+        vcpu.set(Register::Rsp, self.rsp as u64);
+    }
+
+    pub fn restore(&self, vcpu: &mut ActiveVmcs<'static>) {
+        let locked = RC_VMCS.lock();
+        let rc_frame = locked.get(self.vmcs).unwrap();
+        vcpu.load_regs(&self.regs);
+        unsafe { vmx::msr::Msr::new(IA32_LSTAR.address()).write(self.lstar) };
+        vcpu.switch_frame(rc_frame.frame).unwrap();
+        // Restore partial must be called AFTER we set a valid frame.
+        self.restore_partial(vcpu);
+    }
 }
 
 #[repr(u64)]
@@ -66,6 +102,8 @@ const EMPTY_CONTEXT: Mutex<ContextData> = Mutex::new(ContextData {
     cr3: usize::max_value(),
     rip: usize::max_value(),
     rsp: usize::max_value(),
+    regs: [0; REGFILE_SIZE],
+    lstar: u64::max_value(),
     vmcs: Handle::<RCFrame>::new_invalid(),
 });
 const EMPTY_CONTEXT_ARRAY: [Mutex<ContextData>; NB_CORES] = [EMPTY_CONTEXT; NB_CORES];
@@ -244,17 +282,6 @@ pub fn do_seal(current: Handle<Domain>, domain: LocalCapa) -> Result<LocalCapa, 
     let core = cpuid();
     let mut engine = CAPA_ENGINE.lock();
     let capa = engine.seal(current, core, domain)?;
-    /*let new_domain = engine
-        .get_domain_capa(current, domain)
-        .expect("Should be a domain capa");
-    let mut context = get_context(new_domain, core);
-    //TODO do it on all the cores.
-    context.cr3 = cr3;
-    context.rip = rip;
-    context.rsp = rsp;
-    let mut guard = RC_VMCS.lock();
-    drop_rc(&mut guard, context.vmcs);
-    context.vmcs = Handle::new_invalid();*/
     apply_updates(&mut engine);
     Ok(capa)
 }
@@ -529,23 +556,14 @@ fn switch_domain(
         );
         return Err(CapaError::InvalidSwitch);
     }
-    // Save current context
-    current_ctx.cr3 = vcpu.get_cr(ControlRegister::Cr3);
-    current_ctx.rip = vcpu.get(Register::Rip) as usize;
-    current_ctx.rsp = vcpu.get(Register::Rsp) as usize;
-
-    // We need to save the current vmcs and load the new one.
     if current_ctx.vmcs != next_ctx.vmcs {
-        let rcvmcs = RC_VMCS.lock();
-        let next_vmcs = rcvmcs.get(next_ctx.vmcs).unwrap();
-        vcpu.switch_frame(next_vmcs.frame)
-            .expect("Unable to switch frame");
+        current_ctx.save(vcpu);
+        next_ctx.restore(vcpu);
+    } else {
+        current_ctx.save_partial(vcpu);
+        next_ctx.restore_partial(vcpu);
     }
 
-    // Switch domain
-    vcpu.set_cr(ControlRegister::Cr3, next_ctx.cr3);
-    vcpu.set(Register::Rip, next_ctx.rip as u64);
-    vcpu.set(Register::Rsp, next_ctx.rsp as u64);
     vcpu.set_ept_ptr(HostPhysAddr::new(
         next_domain.ept.unwrap().as_usize() | EPT_ROOT_FLAGS,
     ))

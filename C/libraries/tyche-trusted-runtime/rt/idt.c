@@ -1,5 +1,6 @@
 #include "idt.h"
 #include <stdint.h>
+#include "sdk_tyche_rt.h"
 
 // ———————————————————————————————— Globals ————————————————————————————————— //
 __attribute__((aligned(0x10))) 
@@ -8,6 +9,8 @@ idt_desc_t idt[IDT_MAX_DESCRIPTORS];
 static idtr_t idtr;
 
 extern uint64_t isr_stub_table[];
+
+frame_t* ret_handle = NULL;
 // ——————————————————————————————— Functions ———————————————————————————————— //
 
 void save_idt(idtr_t* to_save)
@@ -37,8 +40,9 @@ void idt_set_descriptor(
   descriptor->reserved = 0;
 }
 
-void idt_init(void)
+void idt_init(frame_t* frame)
 {
+  ret_handle = frame;
   idtr.base = (uintptr_t)&idt[0]; 
   idtr.limit = (uint16_t) (sizeof(idt_desc_t) * IDT_MAX_DESCRIPTORS -1);
   
@@ -57,10 +61,12 @@ void idt_init(void)
 // ———————————————————————————————— Handlers ———————————————————————————————— //
 __attribute__((noreturn))
 void exception_handler() {
-    __asm__ volatile ("cli; hlt"); // Completely hangs the computer
+    __asm__ volatile ("cli");
+    gate_call(ret_handle);
 }
 
 __attribute__((noreturn))
 void divide_zero_handler() {
-  __asm__ volatile ("cli; hlt");
+  // Let's just return to the original domain.
+  gate_call(ret_handle);
 }

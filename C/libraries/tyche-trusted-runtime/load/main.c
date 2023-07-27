@@ -5,9 +5,9 @@ int main(int argc, char* argv[])
 {
   tyche_domain_t enclave;
   LOG("Loading enclave");
-  /// Disable divide by zero exception.
+  /// Enable divide by zero exception.
   if (sdk_create_domain(
-        &enclave, argv[0], 1, ALL_TRAPS -1, DEFAULT_PERM, CopyVCPU) != SUCCESS) {
+        &enclave, argv[0], 1, 1, DEFAULT_PERM, CopyVCPU) != SUCCESS) {
     ERROR("Unable to parse the enclave");
     goto failure;
   }

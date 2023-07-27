@@ -27,11 +27,13 @@ void trusted_entry(frame_t* frame)
   //Set up the gdt
   gdt_assemble();
   //Set up idt handler.
-  idt_init();
+  idt_init(frame);
   //Set up syscall handler.
   syscall_init();
   //TODO call the user
 
+  gate_call(frame);
+  // Dead code below 
   asm volatile (
       "sti\n\t"
       "mov $0, %%ebx\n\t"
@@ -40,13 +42,7 @@ void trusted_entry(frame_t* frame)
       :
       :);
 
-  asm volatile("cli\n\t" : : : );
-
-  // Restore the previous values.
-  //restore_gdt(&saved_gdt);
-  //restore_segments(&ds, &es, &ss); // TODO still have a problem here.
-  //restore_idt(&saved_idt);
-  //restore_syscall(&sys_handler);
+  //asm volatile("cli\n\t" : : : );
 }
 
 /*

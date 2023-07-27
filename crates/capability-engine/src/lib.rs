@@ -406,9 +406,9 @@ impl CapaEngine {
     ) -> Result<(), CapaError> {
         // Check the domain can be scheduled on the core.
         if (1 << core) & self.domains[domain].core_map() == 0 {
-            log::debug!("Attempt to schedule domain on unallowed core {}", core);
-            log::debug!("allowed: {:b}", self.domains[domain].core_map());
-            log::debug!("request: {:b}", 1 << core);
+            log::error!("Attempt to schedule domain on unallowed core {}", core);
+            log::error!("allowed: {:b}", self.domains[domain].core_map());
+            log::error!("request: {:b}", 1 << core);
             return Err(CapaError::InvalidCore);
         }
         let (next_dom, _) = self.domains[domain].get(capa)?.as_switch()?;
