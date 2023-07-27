@@ -304,7 +304,7 @@ impl<'vmx> ActiveVmcs<'vmx> {
     }
 
     pub fn copy_into(&mut self, mut dest: Frame) {
-        if !self.launched {
+        if self.launched {
             self.flush();
         }
         // Write the VMCS back.
@@ -321,7 +321,6 @@ impl<'vmx> ActiveVmcs<'vmx> {
     pub fn switch_frame(&mut self, dest: Frame) -> Result<(), VmxError> {
         // Save the state of the current VM.
         unsafe { raw::vmclear(self.region.frame.phys_addr.as_u64())? };
-        self.copy_into(dest);
         self.region.set_frame(dest);
         unsafe { raw::vmptrld(self.region.frame().phys_addr.as_u64())? };
         self.launched = false;
