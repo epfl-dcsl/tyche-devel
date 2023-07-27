@@ -6,7 +6,7 @@ LIB_PATH=../
 DRIVERS_PATH=../../drivers/
 
 ## ——————————————————————————————— Libraries ———————————————————————————————— ##
-SDK=$(LIB_PATH)/sdkenclave
+SDK=$(LIB_PATH)/sdktyche
 DLL_LIB= $(LIB_PATH)/dll
 CAPA_LIB=$(LIB_PATH)/capabilities
 COMMON_LIB=$(LIB_PATH)/common

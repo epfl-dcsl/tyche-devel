@@ -4,7 +4,7 @@
 #include "gdt.h"
 #include "syscall.h"
 #include "segments.h"
-#include "enclave_rt.h"
+#include "sdk_tyche_rt.h"
 
 
 // ———————————————————————— Entry Point into binary ————————————————————————— //

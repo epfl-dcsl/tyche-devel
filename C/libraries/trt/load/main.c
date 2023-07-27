@@ -1,21 +1,19 @@
 #include "common.h"
-#include "enclave_loader.h"
-
-const char* ENCLAVE_PATH = "trt";
+#include "sdk_tyche.h"
 
 int main(void)
 {
-  enclave_t enclave;
+  tyche_domain_t enclave;
   LOG("Loading enclave");
   /// Disable divide by zero exception.
-  if (init_enclave_with_cores_traps(&enclave, ENCLAVE_PATH, NO_CORES, ALL_TRAPS -1) != SUCCESS) {
-    ERROR("Unable to parse the enclave: %s", ENCLAVE_PATH);
+  if (sdk_create_domain(&enclave, NULL, NO_CORES, ALL_TRAPS -1) != SUCCESS) {
+    ERROR("Unable to parse the enclave");
     goto failure;
   }
 
   /// Call the enclave a first time.
   LOG("About to call the enclave");
-  if (call_enclave(&enclave, NULL) != SUCCESS) {
+  if (sdk_call_domain(&enclave, NULL) != SUCCESS) {
     ERROR("Unable to call the enclave %lld", enclave.handle);
     goto failure;
   }
@@ -24,7 +22,7 @@ int main(void)
   LOG("Survived a call to the enclave!");
 
   /// Clean up.
-  if (delete_enclave(&enclave) != SUCCESS) {
+  if (sdk_delete_domain(&enclave) != SUCCESS) {
     ERROR("Unable to delete the enclave %lld", enclave.handle);
     goto failure;
   }
