@@ -34,6 +34,41 @@ int tyche_call(vmcall_frame_t* frame)
   return (int)result;
 } 
 
+/// Simple generic vmcall implementation with cli.
+int tyche_call_cli(vmcall_frame_t* frame)
+{
+  usize result = FAILURE;
+#if defined(CONFIG_X86) || defined(__x86_64__)
+  asm volatile(
+    // Setting arguments.
+    "movq %7, %%rax\n\t"
+    "movq %8, %%rdi\n\t"
+    "movq %9, %%rsi\n\n"
+    "movq %10, %%rdx\n\t"
+    "movq %11, %%rcx\n\t"
+    "movq %12, %%r8\n\t"
+    "movq %13, %%r9\n\t"
+    "cli\n\t"
+    "vmcall\n\t"
+    // Receiving results.
+    "movq %%rax, %0\n\t"
+    "movq %%rdi, %1\n\t"
+    "movq %%rsi, %2\n\t"
+    "movq %%rdx, %3\n\t"
+    "movq %%rcx, %4\n\t"
+    "movq %%r8,  %5\n\t"
+    "movq %%r9,  %6\n\t"
+    "sti\n\t"
+    : "=rm" (result), "=rm" (frame->value_1), "=rm" (frame->value_2), "=rm" (frame->value_3), "=rm" (frame->value_4), "=rm" (frame->value_5), "=rm" (frame->value_6)
+    : "rm" (frame->vmcall), "rm" (frame->arg_1), "rm" (frame->arg_2), "rm" (frame->arg_3), "rm" (frame->arg_4), "rm" (frame->arg_5), "rm" (frame->arg_6) 
+    : "rax", "rdi", "rsi", "rdx", "rcx", "r8", "r9", "memory");
+#elif defined(CONFIG_RISCV) || defined(__riscv)
+  //TODO(neelu)
+  TEST(0);
+#endif
+  return (int)result;
+} 
+
 int tyche_create_domain(capa_index_t* management) {
   vmcall_frame_t frame;
   if (management == NULL) {
@@ -105,7 +140,7 @@ int tyche_set_switch(capa_index_t management, usize swtype)
     .arg_2 = management,
     .arg_3 = swtype,
   };
-  if (tyche_call(&frame) != SUCCESS) {
+  if (tyche_call_cli(&frame) != SUCCESS) {
     goto failure;
   }
   return SUCCESS;
