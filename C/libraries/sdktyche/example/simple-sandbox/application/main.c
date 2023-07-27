@@ -76,7 +76,8 @@ int main(int argc, char *argv[]) {
     goto failure;
   }
   // Init the domain.
-  if (sdk_create_domain(sandbox, argv[0], ALL_CORES, NO_TRAPS) != SUCCESS) {
+  if (sdk_create_domain(
+        sandbox, argv[0], ALL_CORES, NO_TRAPS, DEFAULT_PERM, SharedVCPU) != SUCCESS) {
       ERROR("Unable to parse the sandbox");
       goto failure;
   }

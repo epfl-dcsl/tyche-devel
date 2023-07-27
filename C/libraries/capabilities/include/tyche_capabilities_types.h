@@ -44,7 +44,7 @@ typedef enum switch_save_t {
   CopyVCPU = 2,
   /// New VCPU, raw (for VMs).
   FreshVCPU = 3,
-} security_vcpu_t;
+} switch_save_t;
 
 /// Region Access Rights
 typedef enum memory_access_right_t {

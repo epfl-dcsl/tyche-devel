@@ -9,6 +9,7 @@
 #include "sdk_tyche_rt.h"
 #include "sdk_tyche.h"
 #include "enclave_app.h"
+#include "tyche_capabilities_types.h"
 
 // ———————————————————————————— Local Variables ————————————————————————————— //
 
@@ -271,14 +272,16 @@ int main(int argc, char *argv[]) {
   if (application == BREAKPOINT) {
       if (sdk_create_domain(
             enclave, argv[0],
-            DEFAULT_CORES, ALL_TRAPS - (1 << 3)) != SUCCESS) {
+            DEFAULT_CORES, ALL_TRAPS - (1 << 3),
+            DEFAULT_PERM, SharedVCPU) != SUCCESS) {
       ERROR("Unable to parse the enclave");
       goto failure;
     }
   } else {
     if (sdk_create_domain(
           enclave, argv[0],
-          DEFAULT_CORES, ALL_TRAPS) != SUCCESS) {
+          DEFAULT_CORES, ALL_TRAPS,
+          DEFAULT_PERM, SharedVCPU) != SUCCESS) {
       ERROR("Unable to parse the enclave '%s'", APP_NAMES[application]);
       goto failure;
     }

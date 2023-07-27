@@ -1,6 +1,7 @@
 #pragma once
 
 #include "sdk_tyche_types.h"
+#include "tyche_capabilities_types.h"
 
 // ————————————— Environment variables to configure the loader —————————————— //
 
@@ -17,7 +18,9 @@ int sdk_create_domain(
     tyche_domain_t* encl,
     const char* self,
     usize cores,
-    usize traps);
+    usize traps,
+    usize perms,
+    switch_save_t switch_type);
 
 /// Transitions into the domain.
 int sdk_call_domain(tyche_domain_t* domain, void* args);

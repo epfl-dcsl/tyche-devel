@@ -1,6 +1,7 @@
 #pragma once
 
 #include "elf64.h"
+#include "tyche_capabilities_types.h"
 #include "tyche_driver.h"
 
 #include <elf.h>
@@ -122,4 +123,10 @@ typedef struct {
 
   /// The domain's trap bitmap.
   usize traps;
+
+  /// The domain's permissions.
+  usize perms;
+
+  /// The domain's switch type.
+  switch_save_t switch_type;
 } tyche_domain_t;

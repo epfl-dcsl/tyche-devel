@@ -157,7 +157,9 @@ failure:
 int init_domain_with_cores_traps(
     tyche_domain_t* domain,
     usize cores,
-    usize traps);
+    usize traps,
+    usize perms,
+    switch_save_t switch_type);
 
 /// Parses an ELF binary created by tychools.
 /// All the segments for the domain should have OS-specific types.
@@ -173,7 +175,9 @@ int load_domain(tyche_domain_t* domain);
 int init_domain_with_cores_traps(
     tyche_domain_t* domain,
     usize cores,
-    usize traps)
+    usize traps,
+    usize perms,
+    switch_save_t switch_type)
 {
   if (domain == NULL || domain->parser.elf.memory.start == NULL) {
     ERROR("Null argument provided: domain(%s)", domain);
@@ -181,6 +185,8 @@ int init_domain_with_cores_traps(
   }
   domain->traps = traps;
   domain->core_map = cores;
+  domain->perms = perms;
+  domain->switch_type = switch_type;
   if (parse_domain(domain) != SUCCESS) {
     ERROR("Unable to parse the domain");
     goto failure;
@@ -382,13 +388,13 @@ int load_domain(tyche_domain_t* domain)
   // TODO(aghosn) expose this through the SDK.
   // I don't do it now because I'll need some time to refactor libraries to avoid
   // having so many layers of forwarding. It's becoming really annoying.
-  if (ioctl_set_perms(domain->handle, DEFAULT_PERM) != SUCCESS) {
+  if (ioctl_set_perms(domain->handle, domain->perms) != SUCCESS) {
     ERROR("Unable to set the permission on domain %d", domain->handle);
     goto failure;
   }
 
   // TODO(aghosn) same as above.
-  if (ioctl_set_switch(domain->handle, SharedVCPU) != SUCCESS) {
+  if (ioctl_set_switch(domain->handle, domain->switch_type) != SUCCESS) {
       ERROR("Unable to set the switch type.");
       goto failure;
   } 
@@ -420,7 +426,9 @@ int sdk_create_domain(
     tyche_domain_t* dom,
     const char* self,
     usize cores,
-    usize traps)
+    usize traps,
+    usize perms,
+    switch_save_t switch_type)
 {
   char* dump =  NULL;
   if (dom == NULL) {
@@ -443,7 +451,8 @@ int sdk_create_domain(
   } 
 
   // The binary is already instrumented, let's load it.
-  if (init_domain_with_cores_traps(dom, cores, traps) != SUCCESS) {
+  if (init_domain_with_cores_traps(
+        dom, cores, traps, perms, switch_type) != SUCCESS) {
     ERROR("Unable to load tychools binary");
     goto failure;
   } 

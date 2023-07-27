@@ -1,4 +1,4 @@
-all: trt loader trt_relocated
+all: test-trt
 
 
 ## ————————————————————————————————— Paths —————————————————————————————————— ##
@@ -52,28 +52,29 @@ APP_INCLUDES = $(COMMON_INCLUDES) -I$(ELF64)/include -I$(PTS)/include -I$(DRIVER
 ## ————————————————————— Configuration for the install —————————————————————— ##
 DISK_PATH ?= /tmp/mount/tyche/programs
 
+TYCHOOLS_PATH ?= ../../../crates/tychools/ 
+
 ## ———————————————————————————————— Targets ————————————————————————————————— ##
 %_asm.o : %.asm
 	nasm -w+all -f elf64 $< -o $@
 
-
-trt: $(CODE_TRT) $(CODE_RUNTIME) $(HDRS_TRT) $(HDRS_RUNTIME)
-	gcc -DTYCHE_USER_SPACE=1 -g $(COMMON_INCLUDES) -nostdlib -static -o $@ $(CODE_RUNTIME) $(CODE_TRT)
-	#@rm $(ASO_TRT)
-
-trt_relocated: $(CODE_TRT) $(CODE_RUNTIME) $(HDRS_TRT) $(HDRS_RUNTIME) $(RELOC)
+trt: $(CODE_TRT) $(CODE_RUNTIME) $(HDRS_TRT) $(HDRS_RUNTIME) $(RELOC)
 	gcc -DTYCHE_USER_SPACE=1 -T $(RELOC) -g $(COMMON_INCLUDES) -nostdlib -static -o $@ $(CODE_RUNTIME) $(CODE_TRT)
-	#@rm $(ASO_TRT)
-
 
 loader: $(CODE_APP) $(HDRS_APP)
 	gcc -DTYCHE_USER_SPACE=1 -g $(APP_INCLUDES) -o $@ $(CODE_APP)
 
+test-trt: loader trt
+	cargo -C $(TYCHOOLS_PATH) install --path .
+	tychools instrument -s manifests/config.json
+	chmod +x test-trt
+	rm -rf loader trt
+
 install_disk: all
 	mkdir -p $(DISK_PATH)
-	cp -t $(DISK_PATH) loader trt
+	cp -t $(DISK_PATH) test-trt
 
 .PHONY: clean
 
 clean:
-	rm trt loader trt_relocated
+	rm -rf trt loader test-trt

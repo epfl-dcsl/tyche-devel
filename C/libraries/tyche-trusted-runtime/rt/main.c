@@ -43,10 +43,10 @@ void trusted_entry(frame_t* frame)
   asm volatile("cli\n\t" : : : );
 
   // Restore the previous values.
-  restore_gdt(&saved_gdt);
+  //restore_gdt(&saved_gdt);
   //restore_segments(&ds, &es, &ss); // TODO still have a problem here.
-  restore_idt(&saved_idt);
-  restore_syscall(&sys_handler);
+  //restore_idt(&saved_idt);
+  //restore_syscall(&sys_handler);
 }
 
 /*

@@ -1,6 +1,6 @@
 trt
-trt_relocated
 loader
 *.o
+test-trt
 compile_commands.json
 .cache
