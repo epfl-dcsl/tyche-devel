@@ -32,7 +32,6 @@ void trusted_entry(frame_t* frame)
   syscall_init();
   //TODO call the user
 
-  gate_call(frame);
   // Dead code below 
   asm volatile (
       "sti\n\t"

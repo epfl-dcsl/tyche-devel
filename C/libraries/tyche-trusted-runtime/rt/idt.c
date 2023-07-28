@@ -61,12 +61,13 @@ void idt_init(frame_t* frame)
 // ———————————————————————————————— Handlers ———————————————————————————————— //
 __attribute__((noreturn))
 void exception_handler() {
-    __asm__ volatile ("cli");
-    gate_call(ret_handle);
+    __asm__ volatile ("cli; hlt");
 }
 
 __attribute__((noreturn))
 void divide_zero_handler() {
   // Let's just return to the original domain.
+  int* shared = (int*) get_default_shared_buffer();
+  *shared = 666;
   gate_call(ret_handle);
 }
