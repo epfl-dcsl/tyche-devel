@@ -1,27 +1,29 @@
-use syscalls::*;
+use core::arch::asm;
+
+use crate::syscalls;
 
 #[no_mangle]
 pub extern "C" fn syscall_handler() {
-    let rax : u64;
-    let rcx : u64;
-    let r11 : u64;
-    let rdi : u64;
-    let rsi : u64;
-    let rdx : u64;
+    let mut rax: usize;
+    let rcx: usize;
+    let r11: usize;
+    let rdi: usize;
+    let rsi: usize;
+    let rdx: usize;
     unsafe {
-        asm!("mov {:e}, rax", out(reg) rax);
-        asm!("mov {:e}, rcx", out(reg) rcx);
-        asm!("mov {:e}, r11", out(reg) r11);
-        asm!("mov {:e}, rdi", out(reg) rdi);
-        asm!("mov {:e}, rsi", out(reg) rsi);
-        asm!("mov {:e}, rdx", out(reg) rdx);
+        asm!("mov {:}, rax", out(reg) rax);
+        asm!("mov {:}, rcx", out(reg) rcx);
+        asm!("mov {:}, r11", out(reg) r11);
+        asm!("mov {:}, rdi", out(reg) rdi);
+        asm!("mov {:}, rsi", out(reg) rsi);
+        asm!("mov {:}, rdx", out(reg) rdx);
     }
 
     match rax {
-        ENCLAVE_ATTESTATION => {
+        syscalls::ATTEST_ENCLAVE => {
             // TODO implement it
         }
-        LINUX_MALLOC => {
+        syscalls::LINUX_MALLOC => {
             // TODO implement it
         }
         _ => {
