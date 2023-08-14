@@ -25,6 +25,7 @@ members = [
     "crates/tychools",
     "vendor/forked_signature",
     "crates/attestation",
+    "crates/bricks",
     "boot_toolchain",
 ]
 

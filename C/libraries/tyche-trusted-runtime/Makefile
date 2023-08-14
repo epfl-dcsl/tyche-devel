@@ -4,7 +4,9 @@ all: test-trt
 ## ————————————————————————————————— Paths —————————————————————————————————— ##
 LIB_PATH=../
 DRIVERS_PATH=../../drivers/
-
+LIB_BRICKS_PATH = ../../../target/release
+BRICKS_PATH = ../../../crates/bricks
+BRICKS = bricks
 ## ——————————————————————————————— Libraries ———————————————————————————————— ##
 SDK=$(LIB_PATH)/sdktyche
 DLL_LIB= $(LIB_PATH)/dll
@@ -59,7 +61,8 @@ TYCHOOLS_PATH ?= ../../../crates/tychools/
 	nasm -w+all -f elf64 $< -o $@
 
 trt: $(CODE_TRT) $(CODE_RUNTIME) $(HDRS_TRT) $(HDRS_RUNTIME) $(RELOC)
-	gcc -DTYCHE_USER_SPACE=1 -T $(RELOC) -g $(COMMON_INCLUDES) -nostdlib -static -o $@ $(CODE_RUNTIME) $(CODE_TRT)
+	cargo build --manifest-path $(BRICKS_PATH)/Cargo.toml --release
+	gcc -DTYCHE_USER_SPACE=1 -T $(RELOC) -g $(COMMON_INCLUDES) -nostdlib -static -o $@ $(CODE_RUNTIME) $(CODE_TRT) -L $(LIB_BRICKS_PATH) -l$(BRICKS)
 
 loader: $(CODE_APP) $(HDRS_APP)
 	gcc -DTYCHE_USER_SPACE=1 -g $(APP_INCLUDES) -o $@ $(CODE_APP)

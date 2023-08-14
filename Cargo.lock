@@ -154,6 +154,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "bricks"
+version = "0.1.0"
+
+[[package]]
 name = "byte-tools"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

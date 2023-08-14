@@ -45,7 +45,8 @@ int main(int argc, char* argv[])
   /// We survived one call!
   LOG("Survived a call to the enclave!");
   int* shared = (int*) find_default_shared(&enclave);
-  TEST(*shared == 666);
+  TEST(*shared == 21);
+  LOG("SHARED IS 21!");
 
   /// Clean up.
   if (sdk_delete_domain(&enclave) != SUCCESS) {
