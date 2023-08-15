@@ -61,7 +61,10 @@ void idt_init(frame_t* frame)
 // ———————————————————————————————— Handlers ———————————————————————————————— //
 __attribute__((noreturn))
 void exception_handler() {
-    __asm__ volatile ("cli; hlt");
+  int* shared = (int*) bricks_get_default_shared_buffer();
+  *shared = 777;
+  bricks_gate_call(ret_handle);
+  // __asm__ volatile ("cli; hlt");
 }
 
 __attribute__((noreturn))

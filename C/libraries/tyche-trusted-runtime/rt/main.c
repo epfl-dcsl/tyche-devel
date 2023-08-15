@@ -57,11 +57,11 @@ void trusted_entry(frame_t* frame)
   
   // gate_call(frame);
   
-  // setup_interrupts_syscalls(frame);
+  setup_interrupts_syscalls(frame);
 
   // TODO call the user
 
-  // divide_by_zero_exception();
+  divide_by_zero_exception();
 
   //asm volatile("cli\n\t" : : : );
 }
