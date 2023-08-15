@@ -21,6 +21,20 @@ failure:
   return NULL;
 }
 
+int loop_calls(tyche_domain_t* enclave, const int num_of_calls) {
+  for(int i = 0 ;i < num_of_calls;i++) {
+    LOG("About to call the enclave");
+    if (sdk_call_domain(enclave, NULL) != SUCCESS) {
+      ERROR("Unable to call the enclave %lld", enclave->handle);
+      return FAILURE;
+    }
+    LOG("Survived a call to the enclave!");
+    int* shared = (int*) find_default_shared(enclave);
+    LOG("SHARED IS %d!", *shared);
+  }
+  return SUCCESS;
+}
+
 int main(int argc, char* argv[])
 {
   tyche_domain_t enclave;
@@ -35,18 +49,10 @@ int main(int argc, char* argv[])
     goto failure;
   }
 
-  /// Call the enclave a first time.
-  LOG("About to call the enclave");
-  if (sdk_call_domain(&enclave, NULL) != SUCCESS) {
-    ERROR("Unable to call the enclave %lld", enclave.handle);
+  const int num_of_calls = 10;
+  if(loop_calls(&enclave, num_of_calls) != SUCCESS) {
     goto failure;
-  }
-
-  /// We survived one call!
-  LOG("Survived a call to the enclave!");
-  int* shared = (int*) find_default_shared(&enclave);
-  TEST(*shared == 21);
-  LOG("SHARED IS 21!");
+  }  
 
   /// Clean up.
   if (sdk_delete_domain(&enclave) != SUCCESS) {

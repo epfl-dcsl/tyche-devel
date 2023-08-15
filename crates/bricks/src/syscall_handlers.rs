@@ -3,7 +3,7 @@ use core::arch::asm;
 use crate::syscalls;
 
 #[no_mangle]
-pub extern "C" fn syscall_handler() {
+pub extern "C" fn bricks_syscall_handler() {
     let mut rax: usize;
     let rcx: usize;
     let r11: usize;

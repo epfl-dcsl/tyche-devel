@@ -5,8 +5,7 @@
 #include "syscall.h"
 #include "segments.h"
 #include "sdk_tyche_rt.h"
-
-extern int rust_function(int a, int b);
+#include "bricks.h"
 
 void setup_interrupts_syscalls(frame_t* frame) {
   gdtr_t saved_gdt;
@@ -38,9 +37,9 @@ void divide_by_zero_exception() {
       :);
 }
 
-void call_rust() {
-  int x = rust_function(28,7);
-  int* shared = (int*) get_default_shared_buffer();
+void call_bricks(int a, int b) {
+  int x = bricks_function(a,b);
+  int* shared = (int*) bricks_get_default_shared_buffer();
   *shared = x;
 }
 
@@ -50,11 +49,16 @@ void trusted_entry(frame_t* frame)
   if (frame == NULL) {
     return;
   }
+  const int num_of_calls = 10;
+  for(int i = 0; i < num_of_calls;i++) {
+    call_bricks(2*i, 3*i);
+    bricks_gate_call(frame);
+  }
   
-  call_rust();
-
-  gate_call(frame);
+  // gate_call(frame);
+  
   // setup_interrupts_syscalls(frame);
+
   // TODO call the user
 
   // divide_by_zero_exception();

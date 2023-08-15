@@ -24,7 +24,7 @@ HDRS_TRT=$(wildcard include/*.h)
 RELOC=linkers/custom.ld
 
 ## —————————————————————— External Sources and Headers —————————————————————— ##
-CODE_RUNTIME=$(wildcard $(SDK)/runtime/*.c) $(wildcard $(SDK)/runtime/*.S)
+CODE_RUNTIME=$(wildcard runtime/*.c) $(wildcard runtime/*.S)
 HDRS_RUNTIME= $(wildcard $(SDK)/include/*.h)
 
 ## ————————————————————————— Load code and headers —————————————————————————— ##

@@ -10,3 +10,9 @@ edition = "2021"
 [lib]
 name = "bricks"
 crate-type = ["staticlib"]
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"

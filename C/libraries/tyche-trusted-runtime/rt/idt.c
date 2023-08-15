@@ -67,7 +67,7 @@ void exception_handler() {
 __attribute__((noreturn))
 void divide_zero_handler() {
   // Let's just return to the original domain.
-  int* shared = (int*) get_default_shared_buffer();
+  int* shared = (int*) bricks_get_default_shared_buffer();
   *shared = 666;
-  gate_call(ret_handle);
+  bricks_gate_call(ret_handle);
 }
