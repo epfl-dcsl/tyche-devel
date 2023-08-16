@@ -52,16 +52,16 @@ void trusted_entry(frame_t* frame)
   const int num_of_calls = 10;
   for(int i = 0; i < num_of_calls;i++) {
     call_bricks(2*i, 3*i);
-    bricks_gate_call(frame);
+    bricks_gate_call();
   }
   
   // gate_call(frame);
   
-  setup_interrupts_syscalls(frame);
+  // setup_interrupts_syscalls(frame);
 
   // TODO call the user
 
-  divide_by_zero_exception();
+  // divide_by_zero_exception();
 
   //asm volatile("cli\n\t" : : : );
 }

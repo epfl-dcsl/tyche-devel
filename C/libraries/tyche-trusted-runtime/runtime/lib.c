@@ -4,21 +4,27 @@
 
 // ————————————————————————————————— Hooks —————————————————————————————————— //
 /// Entry point defined by the application.
-extern void trusted_entry(frame_t* frame); 
+extern void trusted_entry(frame_t* frame);
 // ——————————————————————————————— Functions ———————————————————————————————— //
 void trusted_main(capa_index_t ret_handle, void *args)
 {
-  frame_t frame = {ret_handle, args}; 
- 
-  // Call the domain's main.
-  trusted_entry(&frame); 
-
-  // Done executing the domain, return.
-  bricks_gate_call(&frame);
-  // Should never return, if we do, an exit call happens.
+  bricks_trusted_main(ret_handle, args);
 }
 
 // ———————————————————————————— Functions ported to Bricks ———————————————————————————— //
+
+// void old_trusted_main(capa_index_t ret_handle, void* args) {
+  // frame_t frame = {ret_handle, args}; 
+ 
+  // Call the domain's main.
+  // trusted_entry(&frame); 
+  // bricks_trusted_entry(&frame);
+
+  // Done executing the domain, return.
+  // bricks_gate_call();
+  // gate_call(&frame);
+  // Should never return, if we do, an exit call happens.
+// }
 
 // extern int asm_call_gate(capa_index_t* capa, void** args);
 // int gate_call(frame_t* frame)
@@ -28,11 +34,10 @@ void trusted_main(capa_index_t ret_handle, void *args)
 //   return result;
 // }
 
-
+/// This is introduced by tychools.
+// char *shared_buffer = (char*) 0x300000; 
 // void* get_default_shared_buffer()
 // {
 //   return (void*) (shared_buffer);
 // }
 
-/// This is introduced by tychools.
-// char *shared_buffer = (char*) 0x300000; 
