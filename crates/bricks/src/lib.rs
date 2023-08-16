@@ -1,10 +1,14 @@
 #![feature(lang_items)]
+#![feature(abi_x86_interrupt)]
 #![no_std]
 #![no_main]
 
 use core::panic::PanicInfo;
 
+pub mod bricks_entry;
 pub mod gate_calls;
+pub mod gdt;
+pub mod idt;
 pub mod interrupts;
 pub mod interrupts_handlers;
 pub mod shared_buffer;

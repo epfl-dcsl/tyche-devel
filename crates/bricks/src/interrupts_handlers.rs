@@ -23,3 +23,20 @@ pub extern "C" fn bricks_divide_zero_handler() {
     }
     bricks_gate_call();
 }
+
+// ———————————————————————————————— Handlers for x86_64 crate ————————————————————————————————— //
+
+use x86_64::structures::idt::InterruptStackFrame;
+
+pub extern "x86-interrupt" fn bricks_x86_64_handler(stack_frame: InterruptStackFrame) {}
+
+pub extern "x86-interrupt" fn bricks_x86_64_handler_double(
+    stack_frame: InterruptStackFrame,
+    _error_code: u64,
+) -> ! {
+    panic!("Panicking: double fault")
+}
+
+pub extern "x86-interrupt" fn bricks_divide_zero_handler_x86(stack_frame: InterruptStackFrame) {
+    bricks_divide_zero_handler();
+}

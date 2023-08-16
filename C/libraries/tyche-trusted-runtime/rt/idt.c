@@ -41,9 +41,9 @@ void idt_set_descriptor(
   descriptor->reserved = 0;
 }
 
-void idt_init(frame_t* frame)
+void idt_init()
 {
-  ret_handle = frame;
+  // ret_handle = frame;
   idtr.base = (uintptr_t)&idt[0]; 
   idtr.limit = (uint16_t) (sizeof(idt_desc_t) * IDT_MAX_DESCRIPTORS -1);
   

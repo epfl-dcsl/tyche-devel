@@ -7,7 +7,7 @@
 #include "sdk_tyche_rt.h"
 #include "bricks.h"
 
-void setup_interrupts_syscalls(frame_t* frame) {
+void setup_interrupts_syscalls() {
   gdtr_t saved_gdt;
   idtr_t saved_idt;
   uint64_t sys_handler; 
@@ -22,7 +22,7 @@ void setup_interrupts_syscalls(frame_t* frame) {
   //Set up the gdt
   gdt_assemble();
   //Set up idt handler.
-  idt_init(frame);
+  idt_init();
   //Set up syscall handler.
   syscall_init();
 }
@@ -67,7 +67,7 @@ void trusted_entry(frame_t* frame)
     bricks_gate_call();
   }
   
-  setup_interrupts_syscalls(frame);
+  setup_interrupts_syscalls();
 
   // TODO call the user
 
