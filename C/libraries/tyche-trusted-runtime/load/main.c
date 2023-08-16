@@ -54,14 +54,14 @@ int main(int argc, char* argv[])
     goto failure;
   }  
 
-  // LOG("\nFinished loop calls! Domain call to set interrupts");
-  // if (sdk_call_domain(&enclave, NULL) != SUCCESS) {
-  //     ERROR("Unable to call the enclave %lld", enclave.handle);
-  //     return FAILURE;
-  // }
-  // LOG("Survived a call to the enclave!");
-  // int* shared = (int*) find_default_shared(&enclave);
-  // LOG("SHARED IS %d!", *shared);
+  LOG("\nFinished loop calls! Domain call to set interrupts");
+  if (sdk_call_domain(&enclave, NULL) != SUCCESS) {
+      ERROR("Unable to call the enclave %lld", enclave.handle);
+      return FAILURE;
+  }
+  LOG("Survived a call to the enclave!");
+  int* shared = (int*) find_default_shared(&enclave);
+  LOG("SHARED IS %d!", *shared);
 
 
   /// Clean up.

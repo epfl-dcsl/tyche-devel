@@ -1,14 +1,14 @@
-extern exception_handler
+extern bricks_exception_handler
 
 %macro isr_err_stub 1
 isr_stub_%+%1:
-    call exception_handler
+    call bricks_exception_handler
     iretq
 %endmacro
 
 %macro isr_no_err_stub 1
 isr_stub_%+%1:
-    call exception_handler
+    call bricks_exception_handler
     iretq
 %endmacro
 

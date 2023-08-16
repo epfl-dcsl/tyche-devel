@@ -1,6 +1,7 @@
 #include "idt.h"
 #include <stdint.h>
 #include "sdk_tyche_rt.h"
+#include "bricks.h"
 
 // ———————————————————————————————— Globals ————————————————————————————————— //
 __attribute__((aligned(0x10))) 
@@ -48,29 +49,30 @@ void idt_init(frame_t* frame)
   
   
   // Special handler for divide by zero.
-  idt_set_descriptor(0, (uintptr_t) divide_zero_handler, 0x8E, 0);
+  idt_set_descriptor(0, (uintptr_t) &bricks_divide_zero_handler, 0x8E, 0);
 
   for (uint8_t vector = 1; vector < 32; vector++) {
-    idt_set_descriptor(vector, (uintptr_t) exception_handler, 0x8E, 0); 
+    idt_set_descriptor(vector, (uintptr_t) &bricks_exception_handler, 0x8E, 0); 
   }
   __asm__ volatile("lidt %0" : : "memory"(idtr)); // load the new IDT
   //TODO reenable when we want to have interrupts
   //__asm__ volatile("sti");    
 }
  
-// ———————————————————————————————— Handlers ———————————————————————————————— //
-__attribute__((noreturn))
-void exception_handler() {
-  int* shared = (int*) bricks_get_default_shared_buffer();
-  *shared = 777;
-  bricks_gate_call(ret_handle);
-  // __asm__ volatile ("cli; hlt");
-}
+// ———————————————————————————————— Handlers (ported to Bricks) ———————————————————————————————— //
+// __attribute__((noreturn))
+// void exception_handler() {
+//   int* shared = (int*) bricks_get_default_shared_buffer();
+//   *shared = 777;
+//   bricks_gate_call(ret_handle);
+//   // __asm__ volatile ("cli; hlt");
+// }
 
-__attribute__((noreturn))
-void divide_zero_handler() {
-  // Let's just return to the original domain.
-  int* shared = (int*) bricks_get_default_shared_buffer();
-  *shared = 666;
-  bricks_gate_call(ret_handle);
-}
+// __attribute__((noreturn))
+// void divide_zero_handler() {
+//   // Let's just return to the original domain.
+//   int* shared = (int*) bricks_get_default_shared_buffer();
+//   *shared = 666;
+//   bricks_gate_call(ret_handle);
+// }
+

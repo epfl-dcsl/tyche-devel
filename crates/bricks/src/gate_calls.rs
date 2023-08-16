@@ -14,7 +14,7 @@ pub struct BricksFrame {
 
 const SUCCESS: u32 = 0;
 const FAILURE: u32 = 1;
-static mut current_frame: Option<BricksFrame> = None;
+pub static mut current_frame: Option<BricksFrame> = None;
 
 extern "C" {
     fn asm_call_gate(capa_handle: &u64, args: &*const c_void) -> u32;

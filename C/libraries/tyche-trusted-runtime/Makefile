@@ -62,7 +62,7 @@ TYCHOOLS_PATH ?= ../../../crates/tychools/
 
 trt: $(CODE_TRT) $(CODE_RUNTIME) $(HDRS_TRT) $(HDRS_RUNTIME) $(RELOC)
 	cargo build --manifest-path $(BRICKS_PATH)/Cargo.toml --release
-	gcc -DTYCHE_USER_SPACE=1 -T $(RELOC) -g $(COMMON_INCLUDES) -nostdlib -static -o $@ $(CODE_RUNTIME) $(CODE_TRT) -L $(LIB_BRICKS_PATH) -l$(BRICKS)
+	gcc -DTYCHE_USER_SPACE=1 -T $(RELOC) -g $(COMMON_INCLUDES) -Xlinker --no-relax -nostdlib -static -o $@ $(CODE_RUNTIME) $(CODE_TRT) -L $(LIB_BRICKS_PATH) -l$(BRICKS)
 
 loader: $(CODE_APP) $(HDRS_APP)
 	gcc -DTYCHE_USER_SPACE=1 -g $(APP_INCLUDES) -o $@ $(CODE_APP)

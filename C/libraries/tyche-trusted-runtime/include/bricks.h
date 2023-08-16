@@ -9,4 +9,6 @@ extern int bricks_function(int a, int b);
 extern void* bricks_get_default_shared_buffer();
 extern void bricks_trusted_entry(frame_t* frame);
 extern void bricks_trusted_main(capa_index_t ret_handle, void* args);
+extern void bricks_exception_handler();
+extern void bricks_divide_zero_handler();
 #endif

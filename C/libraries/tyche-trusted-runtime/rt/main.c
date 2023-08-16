@@ -37,6 +37,18 @@ void divide_by_zero_exception() {
       :);
 }
 
+void int_exception() {
+  asm volatile (
+      "sti\n\t"
+      "int $1\n\t"
+      :);
+}
+
+void make_exception() {
+  // divide_by_zero_exception();
+  int_exception();
+}
+
 void call_bricks(int a, int b) {
   int x = bricks_function(a,b);
   int* shared = (int*) bricks_get_default_shared_buffer();
@@ -55,13 +67,11 @@ void trusted_entry(frame_t* frame)
     bricks_gate_call();
   }
   
-  // gate_call(frame);
-  
-  // setup_interrupts_syscalls(frame);
+  setup_interrupts_syscalls(frame);
 
   // TODO call the user
 
-  // divide_by_zero_exception();
+  make_exception();
 
   //asm volatile("cli\n\t" : : : );
 }
