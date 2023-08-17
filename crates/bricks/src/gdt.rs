@@ -49,7 +49,6 @@ pub fn bricks_init_gdt() {
     GDT.0.load();
     unsafe {
         CS::set_reg(GDT.1.kernel_code_selector);
-        // not set in tutorial, I am trying to emulate our previous implementation
         DS::set_reg(GDT.1.kernel_data_selector);
         ES::set_reg(GDT.1.kernel_data_selector);
         SS::set_reg(GDT.1.kernel_data_selector);

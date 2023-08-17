@@ -7,25 +7,25 @@
 #include "sdk_tyche_rt.h"
 #include "bricks.h"
 
-void setup_interrupts_syscalls() {
-  gdtr_t saved_gdt;
-  idtr_t saved_idt;
-  uint64_t sys_handler; 
-  uint16_t ds, es, ss;
+// void setup_interrupts_syscalls() {
+//   gdtr_t saved_gdt;
+//   idtr_t saved_idt;
+//   uint64_t sys_handler; 
+//   uint16_t ds, es, ss;
 
-  // Save previous values
-  save_gdt(&saved_gdt);
-  //save_segments(&ds, &es, &ss); // TODO still have a problem when restoring.
-  save_idt(&saved_idt);
-  save_syscall(&sys_handler);
+//   // Save previous values
+//   save_gdt(&saved_gdt);
+//   //save_segments(&ds, &es, &ss); // TODO still have a problem when restoring.
+//   save_idt(&saved_idt);
+//   save_syscall(&sys_handler);
 
-  //Set up the gdt
-  gdt_assemble();
-  //Set up idt handler.
-  idt_init();
-  //Set up syscall handler.
-  syscall_init();
-}
+//   //Set up the gdt
+//   gdt_assemble();
+//   //Set up idt handler.
+//   idt_init();
+//   //Set up syscall handler.
+//   syscall_init();
+// }
 
 void divide_by_zero_exception() {
   asm volatile (

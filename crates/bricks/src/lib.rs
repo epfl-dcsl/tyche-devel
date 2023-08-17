@@ -29,8 +29,3 @@ fn panic(info: &PanicInfo) -> ! {
 
 #[lang = "eh_personality"]
 extern "C" fn eh_personality() {}
-
-// #[lang = "eh_unwind_resume"]
-// #[no_mangle]
-// pub extern fn rust_eh_unwind_resume() {
-// }

@@ -18,6 +18,6 @@ pub fn c_interrupt_setup() {
 }
 
 pub fn interrupt_setup() {
-    // bricks_interrupt_setup();
-    c_interrupt_setup();
+    bricks_interrupt_setup();
+    // c_interrupt_setup();
 }

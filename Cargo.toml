@@ -69,5 +69,9 @@ map-physical-memory = true
 name = "stack_overflow"
 harness = false
 
+[profile.dev]
+panic = "abort"
+
 [profile.release]
 opt-level = "s"
+panic = "abort"
