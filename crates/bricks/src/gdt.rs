@@ -45,7 +45,7 @@ lazy_static! {
     };
 }
 
-pub fn init_gdt() {
+pub fn bricks_init_gdt() {
     GDT.0.load();
     unsafe {
         CS::set_reg(GDT.1.kernel_code_selector);

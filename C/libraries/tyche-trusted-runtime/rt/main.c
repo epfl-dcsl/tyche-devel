@@ -45,8 +45,8 @@ void int_exception() {
 }
 
 void make_exception() {
-  // divide_by_zero_exception();
-  int_exception();
+  divide_by_zero_exception();
+  // int_exception();
 }
 
 void call_bricks(int a, int b) {
@@ -67,7 +67,7 @@ void trusted_entry(frame_t* frame)
     bricks_gate_call();
   }
   
-  setup_interrupts_syscalls();
+  // setup_interrupts_syscalls();
 
   // TODO call the user
 

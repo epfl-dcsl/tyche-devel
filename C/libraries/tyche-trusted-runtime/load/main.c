@@ -54,7 +54,7 @@ int main(int argc, char* argv[])
     goto failure;
   }  
 
-  LOG("\nFinished loop calls! Domain call to set interrupts");
+  LOG("\nFinished loop calls! Domain call to catch an interrupt");
   if (sdk_call_domain(&enclave, NULL) != SUCCESS) {
       ERROR("Unable to call the enclave %lld", enclave.handle);
       return FAILURE;

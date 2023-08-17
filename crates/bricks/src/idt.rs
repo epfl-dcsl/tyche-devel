@@ -20,6 +20,6 @@ lazy_static! {
     };
 }
 
-pub fn init_idt() {
+pub fn bricks_init_idt() {
     IDT.load();
 }

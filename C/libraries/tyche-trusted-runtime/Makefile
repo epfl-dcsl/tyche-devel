@@ -4,7 +4,7 @@ all: test-trt
 ## ————————————————————————————————— Paths —————————————————————————————————— ##
 LIB_PATH=../
 DRIVERS_PATH=../../drivers/
-LIB_BRICKS_PATH = ../../../target/release
+LIB_BRICKS_PATH = ../../../target/x86_64-unknown-linux-gnu/release
 BRICKS_PATH = ../../../crates/bricks
 BRICKS = bricks
 ## ——————————————————————————————— Libraries ———————————————————————————————— ##
@@ -61,7 +61,7 @@ TYCHOOLS_PATH ?= ../../../crates/tychools/
 	nasm -w+all -f elf64 $< -o $@
 
 trt: $(CODE_TRT) $(CODE_RUNTIME) $(HDRS_TRT) $(HDRS_RUNTIME) $(RELOC)
-	cargo build --manifest-path $(BRICKS_PATH)/Cargo.toml --release
+	RUSTFLAGS='-C target-feature=+crt-static' cargo build --manifest-path $(BRICKS_PATH)/Cargo.toml --release --target x86_64-unknown-linux-gnu
 	gcc -DTYCHE_USER_SPACE=1 -T $(RELOC) -g $(COMMON_INCLUDES) -Xlinker --no-relax -nostdlib -static -o $@ $(CODE_RUNTIME) $(CODE_TRT) -L $(LIB_BRICKS_PATH) -l$(BRICKS)
 
 loader: $(CODE_APP) $(HDRS_APP)

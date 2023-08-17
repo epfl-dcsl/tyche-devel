@@ -5,6 +5,8 @@
 use core::arch::asm;
 use core::ffi::c_void;
 
+use crate::bricks_entry::interrupt_setup;
+
 #[derive(Copy, Clone)]
 #[repr(C)]
 pub struct BricksFrame {
@@ -45,6 +47,7 @@ pub extern "C" fn bricks_trusted_main(capa_index: u64, args: *const c_void) {
     unsafe {
         current_frame = Some(br_frame_curr);
     }
+    interrupt_setup();
     bricks_trusted_entry(&mut br_frame);
 }
 

@@ -1,17 +1,17 @@
 use crate::gate_calls::{current_frame, BricksFrame};
-use crate::gdt::init_gdt;
-use crate::idt::init_idt;
+use crate::gdt::bricks_init_gdt;
+use crate::idt::bricks_init_idt;
 
 extern "C" {
     fn setup_interrupts_syscalls();
 }
 
 pub fn bricks_interrupt_setup() {
-    init_gdt();
-    init_idt();
+    bricks_init_gdt();
+    bricks_init_idt();
 }
 
-pub fn C_interrupt_setup() {
+pub fn c_interrupt_setup() {
     unsafe {
         setup_interrupts_syscalls();
     }
@@ -19,5 +19,5 @@ pub fn C_interrupt_setup() {
 
 pub fn interrupt_setup() {
     // bricks_interrupt_setup();
-    C_interrupt_setup();
+    c_interrupt_setup();
 }
