@@ -5,6 +5,7 @@
 use core::arch::asm;
 use core::ffi::c_void;
 
+use crate::bricks_const::FAILURE;
 use crate::bricks_entry::interrupt_setup;
 
 #[derive(Copy, Clone)]
@@ -14,8 +15,6 @@ pub struct BricksFrame {
     pub args: *const c_void,
 }
 
-const SUCCESS: u32 = 0;
-const FAILURE: u32 = 1;
 pub static mut current_frame: Option<BricksFrame> = None;
 
 extern "C" {

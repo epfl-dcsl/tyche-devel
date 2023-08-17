@@ -38,7 +38,3 @@ Bricks will have small startup routine to setup interrupts before giving control
 
                                 
 ```
-
-## Problems
-
-Linking Bricks with libc when I want to use x86_64 crate
