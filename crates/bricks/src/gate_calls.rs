@@ -22,8 +22,7 @@ extern "C" {
     fn trusted_entry(frame: &mut BricksFrame);
 }
 
-#[no_mangle]
-pub extern "C" fn bricks_gate_call() -> u32 {
+pub fn bricks_gate_call() -> u32 {
     let mut result: u32 = FAILURE;
     unsafe {
         if let Some(frame_curr) = &current_frame {

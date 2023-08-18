@@ -27,4 +27,9 @@ int syscall_handler(
     uint64_t arg4,
     uint64_t arg5,
     uint64_t arg6);
+
+// ———————————————————————————————— Syscalls ————————————————————————————————
+int syscall_print();
+int syscall_enclave_attestation();
+int syscall_gate_call();
 #endif

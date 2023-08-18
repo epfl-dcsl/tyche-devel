@@ -251,6 +251,8 @@ fn handle_exit(
                 }
                 calls::ENCLAVE_ATTESTATION => {
                     log::trace!("Get attestation!");
+                    log::trace!("arg1 {:#x}", arg_1);
+                    log::trace!("arg2 {:#x}", arg_2);
                     if let Some(report) = monitor::do_domain_attestation(*domain, arg_1, arg_2) {
                         vs.vcpu.set(Register::Rax, 0 as u64);
                         if arg_2 == 0 {
