@@ -29,7 +29,18 @@ int syscall_handler(
     uint64_t arg6);
 
 // ———————————————————————————————— Syscalls ————————————————————————————————
-int syscall_print();
+#define ATTEST_ENCLAVE 1000
+#define  PRINT 1001
+#define  GATE_CALL 1002
+typedef unsigned long long arg_t;
+typedef struct SyscallArgs {
+  arg_t syscall;
+  arg_t arg_1;
+  arg_t arg_2;
+  arg_t arg_3;
+  arg_t arg_4;
+}SyscallArgs;
+int syscall_print(char* buff);
 int syscall_enclave_attestation();
 int syscall_gate_call();
 #endif

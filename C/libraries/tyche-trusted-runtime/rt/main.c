@@ -51,31 +51,14 @@ void trusted_entry(frame_t* frame)
 
   // TODO call the user
 
+  // __asm__ volatile("syscall");
+
   // make_exception();
   int nonce = 0x123;
   syscall_enclave_attestation(nonce);
-  syscall_gate_call();
+  // syscall_gate_call();
+
+  syscall_print("Papa");
 
   //asm volatile("cli\n\t" : : : );
 }
-
-// ———————————————————————— Ported to bricks ————————————————————————— //
-// void setup_interrupts_syscalls() {
-//   gdtr_t saved_gdt;
-//   idtr_t saved_idt;
-//   uint64_t sys_handler; 
-//   uint16_t ds, es, ss;
-
-//   // Save previous values
-//   save_gdt(&saved_gdt);
-//   //save_segments(&ds, &es, &ss); // TODO still have a problem when restoring.
-//   save_idt(&saved_idt);
-//   save_syscall(&sys_handler);
-
-//   //Set up the gdt
-//   gdt_assemble();
-//   //Set up idt handler.
-//   idt_init();
-//   //Set up syscall handler.
-//   syscall_init();
-// }

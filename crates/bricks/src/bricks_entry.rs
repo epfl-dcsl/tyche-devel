@@ -5,10 +5,11 @@ use lazy_static::lazy_static;
 use crate::gate_calls::{current_frame, BricksFrame};
 use crate::gdt::bricks_init_gdt;
 use crate::idt::bricks_init_idt;
-use crate::syscall_handlers::{save_syscalls, syscalls_init};
+use crate::syscall_handlers::{bricks_save_syscalls, bricks_syscalls_init};
 
 extern "C" {
     fn setup_interrupts_syscalls();
+    fn syscall_init();
 }
 
 pub fn bricks_interrupt_setup() {
@@ -28,6 +29,6 @@ pub fn interrupt_setup() {
 }
 
 pub fn syscall_setup() {
-    save_syscalls();
-    syscalls_init();
+    bricks_save_syscalls();
+    bricks_syscalls_init();
 }

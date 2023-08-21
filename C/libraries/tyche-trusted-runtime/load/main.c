@@ -1,6 +1,14 @@
 #include "common.h"
 #include "sdk_tyche.h"
 
+// ———————————————————————————————— Types ————————————————————————————————— //
+
+typedef unsigned long long ret_code_t;
+#define PRINT 1001
+#define GATE_CALL 1002
+#define DIVIDE_ZERO 1003
+#define EXIT_GATE 107
+// ———————————————————————————————— Functions for untrusted part ————————————————————————————————— //
 /// Looks up for the shared memory region with the enclave.
 static void* find_default_shared(tyche_domain_t* enclave)
 {
@@ -21,20 +29,6 @@ failure:
   return NULL;
 }
 
-int loop_calls(tyche_domain_t* enclave, const int num_of_calls) {
-  for(int i = 0 ;i < num_of_calls;i++) {
-    LOG("About to call the enclave");
-    if (sdk_call_domain(enclave, NULL) != SUCCESS) {
-      ERROR("Unable to call the enclave %lld", enclave->handle);
-      return FAILURE;
-    }
-    LOG("Survived a call to the enclave!");
-    int* shared = (int*) find_default_shared(enclave);
-    LOG("SHARED IS %d!", *shared);
-  }
-  return SUCCESS;
-}
-
 int main(int argc, char* argv[])
 {
   tyche_domain_t enclave;
@@ -49,20 +43,41 @@ int main(int argc, char* argv[])
     goto failure;
   }
 
-  const int num_of_calls = 10;
-  if(loop_calls(&enclave, num_of_calls) != SUCCESS) {
-    goto failure;
-  }  
-
-  LOG("\nFinished loop calls! Domain call to catch an interrupt");
-  if (sdk_call_domain(&enclave, NULL) != SUCCESS) {
-      ERROR("Unable to call the enclave %lld", enclave.handle);
-      return FAILURE;
+  int cnt_sys = 0;
+  int exit_flag = 0;
+  while(1) {
+    LOG("\nCalling enclave...");
+    if (sdk_call_domain(&enclave, NULL) != SUCCESS) {
+        ERROR("Unable to call the enclave %lld", enclave.handle);
+        return FAILURE;
+    }
+    LOG("Survived call to enclave...");
+    ret_code_t* shared = (ret_code_t*) find_default_shared(&enclave);
+    switch(*shared) {
+      case PRINT:
+        LOG("PRINT syscall...");
+        char* str = (char*)(shared + 1);
+        LOG("print : %s", str);
+        break;
+      case EXIT_GATE:
+        LOG("EXIT GATE");
+        LOG("Num of syscalls handled %d", cnt_sys);
+        exit_flag = 1;
+        break;
+      case DIVIDE_ZERO:
+        LOG("Enclave produces DIVIDE ZERO exception, exiting...");
+        exit_flag = 1;
+        break;
+      default:
+        LOG("GATE CALL syscall");
+        int* shared = (int*) find_default_shared(&enclave);
+        LOG("SHARED is %d", *shared);
+        break;
+    }
+    if(exit_flag) 
+      break;
+    cnt_sys++;
   }
-  LOG("Survived a call to the enclave!");
-  int* shared = (int*) find_default_shared(&enclave);
-  LOG("SHARED IS %d!", *shared);
-
 
   /// Clean up.
   if (sdk_delete_domain(&enclave) != SUCCESS) {

@@ -6,7 +6,9 @@ use core::arch::asm;
 use core::ffi::c_void;
 
 use crate::bricks_const::FAILURE;
-use crate::bricks_entry::interrupt_setup;
+use crate::bricks_entry::{interrupt_setup, syscall_setup};
+use crate::shared_buffer::bricks_get_default_shared_buffer;
+use crate::syscall_handlers::bricks_gate_call_handler;
 
 #[derive(Copy, Clone)]
 #[repr(C)]
@@ -46,6 +48,7 @@ pub extern "C" fn bricks_trusted_main(capa_index: u64, args: *const c_void) {
         current_frame = Some(br_frame_curr);
     }
     interrupt_setup();
+    syscall_setup();
     bricks_trusted_entry(&mut br_frame);
 }
 
@@ -53,6 +56,10 @@ pub extern "C" fn bricks_trusted_main(capa_index: u64, args: *const c_void) {
 pub extern "C" fn bricks_trusted_entry(frame: &mut BricksFrame) {
     unsafe {
         trusted_entry(frame);
+    }
+    let shared_buff_u64 = bricks_get_default_shared_buffer() as *mut u64;
+    unsafe {
+        *shared_buff_u64 = 107;
     }
     bricks_gate_call();
 }
