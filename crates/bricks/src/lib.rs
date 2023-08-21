@@ -3,8 +3,6 @@
 #![no_std]
 #![no_main]
 
-// extern crate libc;
-
 use core::panic::PanicInfo;
 
 pub mod bricks_const;

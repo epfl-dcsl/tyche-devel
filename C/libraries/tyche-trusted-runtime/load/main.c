@@ -47,7 +47,7 @@ int main(int argc, char* argv[])
 
   int cnt_sys = 0;
   int exit_flag = 0;
-  while(1) {
+  while(!exit_flag) {
     LOG("\nCalling enclave...");
     if (sdk_call_domain(&enclave, NULL) != SUCCESS) {
         ERROR("Unable to call the enclave %lld", enclave.handle);
@@ -79,15 +79,14 @@ int main(int argc, char* argv[])
         LOG("SHARED is %d", *shared);
         break;
       case EXCEPTION_CONST:
-        LOG("EXCEPTION exit");
+        LOG("Enclave produced exception, exiting...");
         exit_flag = 1;
+        break;
       default:
-        LOG("UKNOWN SYSCALL!!!!!!");
+        LOG("UNKNOWN SYSCALL!!!!!!");
         exit_flag = 1;
         break;
     }
-    if(exit_flag) 
-      break;
     cnt_sys++;
   }
 

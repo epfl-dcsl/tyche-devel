@@ -1,7 +1,3 @@
-// use core::arch::global_asm;
-
-// global_asm!(include_str!("asm.S"));
-
 use core::arch::asm;
 use core::ffi::c_void;
 
