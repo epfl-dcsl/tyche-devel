@@ -32,6 +32,8 @@ int syscall_handler(
 #define ATTEST_ENCLAVE 1000
 #define  PRINT 1001
 #define  GATE_CALL 1002
+#define WRITE 1003
+#define READ 1004
 typedef unsigned long long arg_t;
 typedef struct SyscallArgs {
   arg_t syscall;
@@ -43,4 +45,6 @@ typedef struct SyscallArgs {
 int syscall_print(char* buff);
 int syscall_enclave_attestation();
 int syscall_gate_call();
+int syscall_write(char* buff, int cnt);
+int syscall_read(char* buff, int cnt);
 #endif

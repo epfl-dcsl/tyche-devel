@@ -2,12 +2,14 @@
 #include "sdk_tyche.h"
 
 // ———————————————————————————————— Types ————————————————————————————————— //
-
 typedef unsigned long long ret_code_t;
 #define PRINT 1001
 #define GATE_CALL 1002
-#define DIVIDE_ZERO 1003
+#define WRITE 1003
 #define EXIT_GATE 107
+#define EXCEPTION_CONST 111
+#define DIVIDE_ZERO 222
+#define RET_CODE_BYTES 8
 // ———————————————————————————————— Functions for untrusted part ————————————————————————————————— //
 /// Looks up for the shared memory region with the enclave.
 static void* find_default_shared(tyche_domain_t* enclave)
@@ -68,10 +70,20 @@ int main(int argc, char* argv[])
         LOG("Enclave produces DIVIDE ZERO exception, exiting...");
         exit_flag = 1;
         break;
-      default:
-        LOG("GATE CALL syscall");
-        int* shared = (int*) find_default_shared(&enclave);
+      case GATE_CALL:
+        LOG("GATE CALL");
+        break;
+      case WRITE:
+        LOG("WRITE CALL");
+        int* shared = (int*)(((char*)find_default_shared(&enclave)) + RET_CODE_BYTES);
         LOG("SHARED is %d", *shared);
+        break;
+      case EXCEPTION_CONST:
+        LOG("EXCEPTION exit");
+        exit_flag = 1;
+      default:
+        LOG("UKNOWN SYSCALL!!!!!!");
+        exit_flag = 1;
         break;
     }
     if(exit_flag) 

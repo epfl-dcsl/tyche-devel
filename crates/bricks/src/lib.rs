@@ -9,6 +9,7 @@ use core::panic::PanicInfo;
 
 pub mod bricks_const;
 pub mod bricks_entry;
+pub mod bricks_utils;
 pub mod gate_calls;
 pub mod gdt;
 pub mod idt;

@@ -31,8 +31,7 @@ void make_exception() {
 
 void call_bricks(int a, int b) {
   int x = bricks_function(a,b);
-  int* shared = (int*) bricks_get_default_shared_buffer();
-  *shared = x;
+  syscall_write((char*)&x, sizeof(x));
 }
 
 // ———————————————————————— Entry Point into binary ————————————————————————— //
@@ -44,10 +43,8 @@ void trusted_entry(frame_t* frame)
   const int num_of_calls = 10;
   for(int i = 0; i < num_of_calls;i++) {
     call_bricks(2*i, 3*i);
-    syscall_gate_call();
+    // syscall_gate_call();
   }
-  
-  // setup_interrupts_syscalls();
 
   // TODO call the user
 
@@ -56,7 +53,6 @@ void trusted_entry(frame_t* frame)
   // make_exception();
   int nonce = 0x123;
   syscall_enclave_attestation(nonce);
-  // syscall_gate_call();
 
   syscall_print("Papa");
 

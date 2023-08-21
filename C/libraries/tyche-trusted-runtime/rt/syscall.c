@@ -41,3 +41,24 @@ int syscall_gate_call() {
   return 0;
 }
 
+extern int bricks_write_shared_handler(char* buff, int cnt);
+int syscall_write(char* buff, int cnt) {
+  return bricks_write_shared_handler(buff,cnt);
+  SyscallArgs args;
+  args.syscall = WRITE;
+  args.arg_1 = (arg_t)buff;
+  args.arg_2 = (arg_t)cnt;
+  make_syscall(&args);
+  return 0;
+}
+
+extern int bricks_read_shared_handler(char* buff, int cnt);
+int syscall_read(char* buff, int cnt) {
+  return bricks_read_shared_handler(buff,cnt);
+  SyscallArgs args;
+  args.syscall = READ;
+  args.arg_1 = (arg_t)buff;
+  args.arg_2 = (arg_t)cnt;
+  make_syscall(&args);
+  return 0;
+}

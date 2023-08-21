@@ -8,7 +8,6 @@ use core::ffi::c_void;
 use crate::bricks_const::FAILURE;
 use crate::bricks_entry::{interrupt_setup, syscall_setup};
 use crate::shared_buffer::bricks_get_default_shared_buffer;
-use crate::syscall_handlers::bricks_gate_call_handler;
 
 #[derive(Copy, Clone)]
 #[repr(C)]

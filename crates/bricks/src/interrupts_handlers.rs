@@ -1,10 +1,8 @@
-use core::arch::asm;
-
 use crate::gate_calls::bricks_gate_call;
 use crate::shared_buffer::bricks_get_default_shared_buffer;
 
-const EXCEPTION_CONST: u64 = 888;
-const DIVIDE_ZERO_CONST: u64 = 999;
+const EXCEPTION_CONST: u64 = 111;
+const DIVIDE_ZERO_CONST: u64 = 222;
 
 #[no_mangle]
 pub extern "C" fn bricks_exception_handler() {
