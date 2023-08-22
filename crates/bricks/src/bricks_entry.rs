@@ -1,4 +1,3 @@
-use crate::gate_calls::{current_frame, BricksFrame};
 use crate::gdt::bricks_init_gdt;
 use crate::idt::bricks_init_idt;
 use crate::syscall_handlers::{bricks_save_syscalls, bricks_syscalls_init};

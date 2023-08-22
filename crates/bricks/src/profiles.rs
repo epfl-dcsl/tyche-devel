@@ -1,6 +1,10 @@
 use lazy_static::lazy_static;
 
 use crate::syscalls::NUM_OF_SYSCALLS;
+
+// TODO improve profiling
+// Profiles are basically flag for behaviour for now
+
 enum SyscallsBehave {
     HANDLE,
     KILL,

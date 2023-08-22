@@ -3,7 +3,7 @@ use core::ffi::c_void;
 
 use crate::bricks_const::FAILURE;
 use crate::bricks_entry::{interrupt_setup, syscall_setup};
-use crate::shared_buffer::{bricks_get_default_shared_buffer, bricks_write_ret_code};
+use crate::shared_buffer::bricks_write_ret_code;
 
 #[derive(Copy, Clone)]
 #[repr(C)]
@@ -19,6 +19,7 @@ extern "C" {
     fn trusted_entry(frame: &mut BricksFrame);
 }
 
+// Gate call to return to untrusted part
 pub fn bricks_gate_call() -> u32 {
     let mut result: u32 = FAILURE;
     unsafe {
@@ -32,6 +33,7 @@ pub fn bricks_gate_call() -> u32 {
     result
 }
 
+// Called from trusted_main with same args
 #[no_mangle]
 pub extern "C" fn bricks_trusted_main(capa_index: u64, args: *const c_void) {
     let mut br_frame = BricksFrame {
@@ -48,12 +50,13 @@ pub extern "C" fn bricks_trusted_main(capa_index: u64, args: *const c_void) {
 }
 
 const EXIT_GATE: u64 = 107;
-
+// Exits enclave with exit code
 pub fn exit_gate() {
     bricks_write_ret_code(EXIT_GATE);
     bricks_gate_call();
 }
 
+// Called from bricks_trusted_main, wrapper for user entry
 #[no_mangle]
 pub extern "C" fn bricks_trusted_entry(frame: &mut BricksFrame) {
     unsafe {

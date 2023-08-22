@@ -2,17 +2,15 @@ use core::arch::asm;
 
 use crate::bricks_const::SUCCESS;
 
-// #[derive(Default)]
 pub struct TycheCallArgs {
     vmmcall: usize,
-
+    // Args
     arg_1: usize,
     arg_2: usize,
     arg_3: usize,
     arg_4: usize,
     arg_5: usize,
     arg_6: usize,
-
     // Results.
     res: usize,
     value_1: usize,

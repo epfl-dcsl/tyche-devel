@@ -6,33 +6,7 @@ use crate::bricks_utils::{bricks_memcpy, bricks_strlen};
 use crate::profiles::check_syscalls_kill;
 use crate::shared_buffer::{bricks_get_shared_pointer, bricks_write_ret_code};
 use crate::syscalls;
-// ———————————————————————————————— Save/restore syscalls ————————————————————————————————— //
-use crate::syscalls::LSTAR;
-static mut msr_val: u64 = 0;
-pub fn bricks_save_syscalls() {
-    let msr_lstar = x86_64::registers::model_specific::Msr::new(LSTAR as u32);
-    unsafe {
-        msr_val = msr_lstar.read();
-    }
-}
-
-pub fn bricks_syscalls_init() {
-    let mut msr_lstar = x86_64::registers::model_specific::Msr::new(LSTAR as u32);
-    let handler_addr = bricks_syscall_handler as u64;
-    unsafe {
-        msr_lstar.write(handler_addr);
-    }
-}
-
-pub fn bricks_restore_syscalls() {
-    let mut msr_lstar = x86_64::registers::model_specific::Msr::new(LSTAR as u32);
-    unsafe {
-        msr_lstar.write(msr_val);
-    }
-}
-
 // ———————————————————————————————— Main syscall handler ————————————————————————————————— //
-
 #[no_mangle]
 pub extern "C" fn bricks_syscall_handler() {
     if check_syscalls_kill() {
@@ -83,7 +57,7 @@ pub extern "C" fn bricks_syscall_handler() {
     // }
 }
 
-// ———————————————————————————————— Helping handlers ————————————————————————————————— //
+// ———————————————————————————————— Helping handlers (logic for handlers) ————————————————————————————————— //
 
 // TODO add pointer to the structure where to write result
 #[no_mangle]
@@ -123,4 +97,28 @@ pub extern "C" fn bricks_read_shared_handler(buff: *mut c_char, cnt: u32) -> u32
     let shared_buff_str = bricks_get_shared_pointer(RET_CODE_BYTES);
     bricks_memcpy(shared_buff_str, buff, cnt);
     SUCCESS
+}
+// ———————————————————————————————— Save/restore syscalls ————————————————————————————————— //
+use crate::syscalls::LSTAR;
+static mut msr_val: u64 = 0;
+pub fn bricks_save_syscalls() {
+    let msr_lstar = x86_64::registers::model_specific::Msr::new(LSTAR as u32);
+    unsafe {
+        msr_val = msr_lstar.read();
+    }
+}
+
+pub fn bricks_syscalls_init() {
+    let mut msr_lstar = x86_64::registers::model_specific::Msr::new(LSTAR as u32);
+    let handler_addr = bricks_syscall_handler as u64;
+    unsafe {
+        msr_lstar.write(handler_addr);
+    }
+}
+
+pub fn bricks_restore_syscalls() {
+    let mut msr_lstar = x86_64::registers::model_specific::Msr::new(LSTAR as u32);
+    unsafe {
+        msr_lstar.write(msr_val);
+    }
 }
