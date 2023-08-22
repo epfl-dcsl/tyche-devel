@@ -22,7 +22,7 @@ void divide_by_zero_exception() {
 void int_exception() {
   asm volatile (
       "sti\n\t"
-      "int $3\n\t"
+      "int $1\n\t"
       :);
 }
 

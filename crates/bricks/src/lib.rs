@@ -1,5 +1,6 @@
 #![feature(lang_items)]
 #![feature(abi_x86_interrupt)]
+#![feature(stmt_expr_attributes)]
 #![no_std]
 #![no_main]
 
@@ -13,6 +14,7 @@ pub mod gdt;
 pub mod idt;
 pub mod interrupts;
 pub mod interrupts_handlers;
+pub mod profiles;
 pub mod shared_buffer;
 pub mod syscall_handlers;
 pub mod syscalls;

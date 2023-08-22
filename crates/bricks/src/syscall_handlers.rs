@@ -3,9 +3,8 @@ use core::ffi::c_char;
 
 use crate::bricks_const::{FAILURE, RET_CODE_BYTES, SUCCESS};
 use crate::bricks_utils::{bricks_memcpy, bricks_strlen};
-use crate::shared_buffer::{
-    bricks_get_default_shared_buffer, bricks_get_shared_pointer, bricks_write_ret_code,
-};
+use crate::profiles::check_syscalls_kill;
+use crate::shared_buffer::{bricks_get_shared_pointer, bricks_write_ret_code};
 use crate::syscalls;
 // ———————————————————————————————— Save/restore syscalls ————————————————————————————————— //
 use crate::syscalls::LSTAR;
@@ -34,18 +33,13 @@ pub fn bricks_restore_syscalls() {
 
 // ———————————————————————————————— Main syscall handler ————————————————————————————————— //
 
-const SYSCALL_CONST: u64 = 1111;
 #[no_mangle]
 pub extern "C" fn bricks_syscall_handler() {
-    let shared_buff_u64 = bricks_get_default_shared_buffer() as *mut u64;
-    unsafe {
-        *shared_buff_u64 = SYSCALL_CONST;
+    if check_syscalls_kill() {
+        exit_gate();
     }
-    bricks_gate_call();
-    // Guard to make sure cpu halts if someone calls syscall
-    unsafe {
-        asm!("hlt");
-    }
+    // Guard to make sure cpu halts if someone calls syscall - for now
+    x86_64::instructions::hlt();
     let mut rax: usize;
     let r10: usize;
     let rdi: usize;
@@ -91,13 +85,13 @@ pub extern "C" fn bricks_syscall_handler() {
 
 // ———————————————————————————————— Helping handlers ————————————————————————————————— //
 
-// TODO
+// TODO add pointer to the structure where to write result
 #[no_mangle]
 pub extern "C" fn bricks_attest_enclave_handler(nonce: u32) -> u32 {
     enclave_attestation_tyche(nonce)
 }
 
-use crate::gate_calls::bricks_gate_call;
+use crate::gate_calls::{bricks_gate_call, exit_gate};
 use crate::tyche_api::enclave_attestation_tyche;
 #[no_mangle]
 pub extern "C" fn bricks_gate_call_handler() -> u32 {

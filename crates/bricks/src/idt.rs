@@ -10,7 +10,7 @@ lazy_static! {
         let mut idt = InterruptDescriptorTable::new();
         idt.divide_error
             .set_handler_fn(bricks_divide_zero_handler_x86);
-        idt.breakpoint.set_handler_fn(bricks_x86_64_handler);
+        idt.debug.set_handler_fn(bricks_x86_64_handler);
         unsafe {
             idt.double_fault
                 .set_handler_fn(bricks_x86_64_handler_double)
