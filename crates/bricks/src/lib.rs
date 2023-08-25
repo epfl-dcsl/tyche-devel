@@ -6,6 +6,7 @@
 
 use core::panic::PanicInfo;
 
+pub mod allocator;
 pub mod bricks_const;
 pub mod bricks_entry;
 pub mod bricks_utils;

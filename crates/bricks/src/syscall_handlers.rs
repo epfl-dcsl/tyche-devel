@@ -103,11 +103,11 @@ pub extern "C" fn bricks_read_shared_handler(buff: *mut c_char, cnt: u32) -> u32
 }
 
 #[no_mangle]
-pub extern "C" fn bricks_malloc_handler(num_bytes : usize) -> * mut i8 {
-    let (cr3, _)  = x86_64::registers::control::Cr3::read();
+pub extern "C" fn bricks_malloc_handler(num_bytes: usize) -> *mut i8 {
+    let (cr3, _) = x86_64::registers::control::Cr3::read();
     bricks_write_ret_code(1144);
     let x = cr3.start_address().as_u64();
-    let pt = bricks_get_shared_pointer(8) as * mut u64;
+    let pt = bricks_get_shared_pointer(8) as *mut u64;
     unsafe {
         *pt = x;
     }
@@ -115,7 +115,7 @@ pub extern "C" fn bricks_malloc_handler(num_bytes : usize) -> * mut i8 {
     unsafe {
         asm!("hlt");
     }
-    return core::ptr::null_mut() as * mut i8;
+    return core::ptr::null_mut() as *mut i8;
 }
 
 // ———————————————————————————————— Save/restore syscalls ————————————————————————————————— //

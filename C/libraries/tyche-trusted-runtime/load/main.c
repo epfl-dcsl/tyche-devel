@@ -46,6 +46,10 @@ int main(int argc, char* argv[])
     goto failure;
   }
 
+  /// Before first call we put physical offset in shared buffer
+  unsigned long long* off = (unsigned long long*)find_default_shared(&enclave);
+  *off = enclave.map.physoffset;
+
   int cnt_sys = 0;
   int exit_flag = 0;
   while(!exit_flag) {

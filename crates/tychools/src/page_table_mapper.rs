@@ -8,7 +8,9 @@ use object::read::elf::ProgramHeader;
 use object::{elf, Endianness};
 use utils::{HostPhysAddr, HostVirtAddr};
 
-use crate::allocator::{Allocator, BumpAllocator, DEFAULT_BUMP_SIZE, PAGE_SIZE};
+use crate::allocator::{
+    addr_idx, phys_addrs, virt_addrs, Allocator, BumpAllocator, DEFAULT_BUMP_SIZE, PAGE_SIZE,
+};
 use crate::elf_modifier::{ModifiedELF, ModifiedSegment, TychePhdrTypes, DENDIAN};
 
 pub fn align_address(addr: usize) -> usize {
@@ -78,23 +80,35 @@ pub fn generate_page_tables(melf: &ModifiedELF) -> (Vec<u8>, usize, usize) {
         mapper.map_range(&allocator, virt, HostPhysAddr::new(curr_phys), size, flags);
         curr_phys += size;
     }
+    unsafe {
+        log::debug!(
+            "Done mapping all the segments, we consummed {} extra pages",
+            addr_idx
+        );
+    }
+    unsafe {
+        let cnt = 0;
+        while cnt < addr_idx {
+            let virt_addr = virt_addrs[cnt];
+            let phys_addr = phys_addrs[cnt];
+            let size: usize = PAGE_SIZE;
+            log::debug!("virt addr {:#x}", virt_addr);
+            log::debug!("phys addr {:#x}", phys_addr);
+            log::debug!("size {:#x}", size);
+            mapper.map_range(
+                &allocator,
+                HostVirtAddr::new(virt_addr),
+                HostPhysAddr::new(phys_addr),
+                size,
+                MAP_PAGE_TABLE,
+            );
+            curr_phys += size;
+        }
+    }
     log::debug!(
-        "Done mapping all the segments, we consummed {} extra pages",
+        "Done mapping all pages for the page tables, we consummed {} extra pages",
         bump.idx
     );
-
-    // let cnt = 0;
-    // while cnt < bump.idx {
-    //     let virt_addr = &bump.pages[cnt].data as * const u8 as usize;
-    //     let phys_addr = curr_phys;
-    //     let size : usize = PAGE_SIZE;
-    //     log::debug!("virt addr {:#x}", virt_addr);
-    //     log::debug!("phys addr {:#x}", curr_phys);
-    //     log::debug!("size {:#x}", size);
-    //     mapper.map_range(&allocator, HostVirtAddr::new(virt_addr), HostPhysAddr::new(curr_phys), size, MAP_PAGE_TABLE);
-    //     curr_phys += size;
-    // }
-
     // Transform everything into a vec array.
     let mut result: Vec<u8> = Vec::new();
     for i in 0..bump.idx {
