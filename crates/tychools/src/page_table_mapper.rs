@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 use std::process::abort;
 
+use mmu::ptmapper::MAP_PAGE_TABLE;
 use mmu::walker::{Level, WalkNext, Walker};
 use mmu::{FrameAllocator, PtFlag, PtMapper};
 use object::read::elf::ProgramHeader;
@@ -71,6 +72,9 @@ pub fn generate_page_tables(melf: &ModifiedELF) -> (Vec<u8>, usize, usize) {
         let virt = HostVirtAddr::new(vaddr);
         let size = align_address(mem_size);
         let flags = translate_flags(ph.program_header.p_flags(Endianness::Little), segtype);
+        log::debug!("virt addr {:#x}", vaddr);
+        log::debug!("phys addr {:#x}", curr_phys);
+        log::debug!("size {:#x}", size);
         mapper.map_range(&allocator, virt, HostPhysAddr::new(curr_phys), size, flags);
         curr_phys += size;
     }
@@ -78,6 +82,19 @@ pub fn generate_page_tables(melf: &ModifiedELF) -> (Vec<u8>, usize, usize) {
         "Done mapping all the segments, we consummed {} extra pages",
         bump.idx
     );
+
+    // let cnt = 0;
+    // while cnt < bump.idx {
+    //     let virt_addr = &bump.pages[cnt].data as * const u8 as usize;
+    //     let phys_addr = curr_phys;
+    //     let size : usize = PAGE_SIZE;
+    //     log::debug!("virt addr {:#x}", virt_addr);
+    //     log::debug!("phys addr {:#x}", curr_phys);
+    //     log::debug!("size {:#x}", size);
+    //     mapper.map_range(&allocator, HostVirtAddr::new(virt_addr), HostPhysAddr::new(curr_phys), size, MAP_PAGE_TABLE);
+    //     curr_phys += size;
+    // }
+
     // Transform everything into a vec array.
     let mut result: Vec<u8> = Vec::new();
     for i in 0..bump.idx {

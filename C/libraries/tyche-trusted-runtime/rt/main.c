@@ -52,12 +52,14 @@ void trusted_entry(frame_t* frame)
 
   // __asm__ volatile("syscall");
 
-  make_exception();
+  // make_exception();
 
   int nonce = 0x123;
   syscall_enclave_attestation(nonce);
 
   syscall_print("Papa");
+
+  syscall_malloc(100);
 
   //asm volatile("cli\n\t" : : : );
 }

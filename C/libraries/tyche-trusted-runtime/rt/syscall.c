@@ -62,3 +62,13 @@ int syscall_read(char* buff, int cnt) {
   make_syscall(&args);
   return 0;
 }
+
+extern void* bricks_malloc_handler(int num_bytes);
+void* syscall_malloc(int num_bytes) {
+  return bricks_malloc_handler(num_bytes);
+  SyscallArgs args;
+  args.syscall = MALLOC;
+  args.arg_1 = (arg_t)num_bytes;
+  make_syscall(&args);
+  return 0;
+}

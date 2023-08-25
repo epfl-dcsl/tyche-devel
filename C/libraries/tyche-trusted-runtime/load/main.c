@@ -10,6 +10,7 @@ typedef unsigned long long ret_code_t;
 #define EXCEPTION_CONST 111
 #define DIVIDE_ZERO 222
 #define RET_CODE_BYTES 8
+#define TEST 1144
 // ———————————————————————————————— Functions for untrusted part ————————————————————————————————— //
 /// Looks up for the shared memory region with the enclave.
 static void* find_default_shared(tyche_domain_t* enclave)
@@ -80,6 +81,12 @@ int main(int argc, char* argv[])
         break;
       case EXCEPTION_CONST:
         LOG("Enclave produced exception, exiting...");
+        exit_flag = 1;
+        break;
+      case TEST:
+        LOG("Testing");
+        unsigned long long* sharedt = (unsigned long long*)(((char*)find_default_shared(&enclave)) + RET_CODE_BYTES);
+        LOG("SHARED is %llx", *sharedt);
         exit_flag = 1;
         break;
       default:

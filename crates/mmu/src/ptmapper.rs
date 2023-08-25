@@ -40,6 +40,7 @@ bitflags! {
 /// Mask to remove the top 12 bits, containing PKU keys and Exec disable bits.
 pub const HIGH_BITS_MASK: u64 = !(0b111111111111 << 52);
 pub const DEFAULT_PROTS: PtFlag = PtFlag::PRESENT.union(PtFlag::WRITE).union(PtFlag::USER);
+pub const MAP_PAGE_TABLE : PtFlag = PtFlag::PRESENT.union(PtFlag::WRITE);
 
 unsafe impl<PhysAddr, VirtAddr> Walker for PtMapper<PhysAddr, VirtAddr>
 where
