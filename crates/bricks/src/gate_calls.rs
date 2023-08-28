@@ -26,7 +26,6 @@ pub fn bricks_gate_call() -> u32 {
         if let Some(frame_curr) = &current_frame {
             result = asm_call_gate(&(frame_curr.handle), &(frame_curr.args));
         } else {
-            // TODO error
             asm!("hlt");
         }
     }
@@ -49,8 +48,8 @@ pub extern "C" fn bricks_trusted_main(capa_index: u64, args: *const c_void) {
     bricks_trusted_entry(&mut br_frame);
 }
 
-const EXIT_GATE: u64 = 107;
 // Exits enclave with exit code
+const EXIT_GATE: u64 = 107;
 pub fn exit_gate() {
     bricks_write_ret_code(EXIT_GATE);
     bricks_gate_call();

@@ -20,6 +20,15 @@
           "write":true,
           "exec":false
         }
+      },
+      {
+        "AddSegment":{
+          "start": 5242880, 
+          "size":8192,
+          "tpe":"KernelConfidential",
+          "write" : true,
+          "exec" : false
+        }
       }
     ]
   },

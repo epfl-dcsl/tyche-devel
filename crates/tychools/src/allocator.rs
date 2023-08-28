@@ -15,8 +15,6 @@ pub struct Page {
     pub data: [u8; PAGE_SIZE],
 }
 
-pub static mut virt_addrs: [usize; DEFAULT_BUMP_SIZE] = [0; DEFAULT_BUMP_SIZE];
-pub static mut phys_addrs: [usize; DEFAULT_BUMP_SIZE] = [0; DEFAULT_BUMP_SIZE];
 pub static mut addr_idx: usize = 0;
 
 pub struct BumpAllocator<const N: usize> {
@@ -41,8 +39,6 @@ impl<const N: usize> BumpAllocator<N> {
             let frame = &mut self.pages[idx].data as *mut u8 as usize;
             self.idx += 1;
             unsafe {
-                virt_addrs[addr_idx] = frame;
-                phys_addrs[addr_idx] = self.phys_offset + idx * PAGE_SIZE;
                 addr_idx += 1;
             }
             return Some(Frame {

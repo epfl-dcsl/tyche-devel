@@ -1,11 +1,8 @@
 use x86_64::VirtAddr;
-
-const NUM_PAGES: usize = 8;
+const NUM_PAGES: usize = 2;
 static mut allocated: [bool; NUM_PAGES] = [false; NUM_PAGES];
 const PAGE_SIZE: u64 = 0x1000;
-// TODO
-// maybe fix this value through tychools
-const MEM_POOL_START: u64 = 0x300000;
+const MEM_POOL_START: u64 = 0x500000; // this is fixed by tychools
 
 pub fn alloc_page() -> (bool, VirtAddr) {
     for i in 0..NUM_PAGES {
@@ -32,15 +29,12 @@ pub fn free_page(addr: VirtAddr) -> bool {
     if !check_allignment(addr) {
         return false;
     }
-
     let index = calc_index(addr);
     if index >= (NUM_PAGES as u64) {
         return false;
     }
-
     unsafe {
         allocated[index as usize] = false;
     }
-
     true
 }

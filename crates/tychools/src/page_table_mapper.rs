@@ -8,9 +8,7 @@ use object::read::elf::ProgramHeader;
 use object::{elf, Endianness};
 use utils::{HostPhysAddr, HostVirtAddr};
 
-use crate::allocator::{
-    addr_idx, phys_addrs, virt_addrs, Allocator, BumpAllocator, DEFAULT_BUMP_SIZE, PAGE_SIZE,
-};
+use crate::allocator::{addr_idx, Allocator, BumpAllocator, DEFAULT_BUMP_SIZE, PAGE_SIZE};
 use crate::elf_modifier::{ModifiedELF, ModifiedSegment, TychePhdrTypes, DENDIAN};
 
 pub fn align_address(addr: usize) -> usize {
@@ -86,14 +84,13 @@ pub fn generate_page_tables(melf: &ModifiedELF) -> (Vec<u8>, usize, usize) {
             addr_idx
         );
     }
-    let mut virt_page_addr: usize= 0x800000000000;
+    let mut virt_page_addr: usize = 0x800000000000;
     log::debug!("Now mapping the pages for page tables");
     unsafe {
         let mut cnt = 0;
         while cnt < addr_idx {
-            // let virt_addr = virt_addrs[cnt];
             let virt_addr = virt_page_addr;
-            let phys_addr = phys_addrs[cnt];
+            let phys_addr = curr_phys;
             let size: usize = PAGE_SIZE;
             log::debug!("virt addr {:#x}", virt_addr);
             log::debug!("phys addr {:#x}", phys_addr);
@@ -106,8 +103,8 @@ pub fn generate_page_tables(melf: &ModifiedELF) -> (Vec<u8>, usize, usize) {
                 MAP_PAGE_TABLE,
             );
             curr_phys += size;
-            virt_page_addr+= size;
-            cnt+=1;
+            virt_page_addr += size;
+            cnt += 1;
         }
     }
     log::debug!(

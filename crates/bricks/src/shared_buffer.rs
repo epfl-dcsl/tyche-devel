@@ -1,9 +1,12 @@
 use core::ffi::{c_char, c_void};
 
-use crate::{bricks_const::RET_CODE_BYTES, gate_calls::bricks_gate_call};
+use crate::bricks_const::RET_CODE_BYTES;
+use crate::gate_calls::bricks_gate_call;
 
 // This is introduces by tychools
 pub const BRICKS_SHARED_BUFFER: usize = 0x300000;
+
+pub const DEBUG_TEST: u64 = 1144;
 
 #[no_mangle]
 pub extern "C" fn bricks_get_default_shared_buffer() -> *const c_void {
@@ -21,9 +24,9 @@ pub fn bricks_write_ret_code(ret_code: u64) {
     }
 }
 
-pub fn bricks_debug(x : u64) {
-    bricks_write_ret_code(1144);
-    let sh = bricks_get_shared_pointer(RET_CODE_BYTES) as * mut u64;
+pub fn bricks_debug(x: u64) {
+    bricks_write_ret_code(DEBUG_TEST);
+    let sh = bricks_get_shared_pointer(RET_CODE_BYTES) as *mut u64;
     unsafe {
         *sh = x;
     }

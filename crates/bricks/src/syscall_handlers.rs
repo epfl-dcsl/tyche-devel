@@ -1,11 +1,13 @@
 use core::arch::asm;
 use core::ffi::{c_char, c_void};
 
-use crate::allocator::alloc_user;
+use x86_64::VirtAddr;
+
+use crate::allocator::{alloc_user, free_user};
 use crate::bricks_const::{FAILURE, RET_CODE_BYTES, SUCCESS};
 use crate::bricks_utils::{bricks_memcpy, bricks_strlen};
 use crate::profiles::check_syscalls_kill;
-use crate::shared_buffer::{bricks_get_shared_pointer, bricks_write_ret_code, bricks_debug};
+use crate::shared_buffer::{bricks_get_shared_pointer, bricks_write_ret_code};
 use crate::syscalls;
 // ———————————————————————————————— Main syscall handler ————————————————————————————————— //
 #[no_mangle]
@@ -46,6 +48,9 @@ pub extern "C" fn bricks_syscall_handler() {
         }
         syscalls::MALLOC => {
             let pointer = bricks_malloc_handler(rdi as usize);
+        }
+        syscalls::FREE => {
+            result = bricks_free_handler(rdi as *mut c_void);
         }
         _ => {
             // TODO implement it
@@ -105,18 +110,22 @@ pub extern "C" fn bricks_read_shared_handler(buff: *mut c_char, cnt: u32) -> u32
 
 #[no_mangle]
 pub extern "C" fn bricks_malloc_handler(num_bytes: usize) -> *mut c_void {
-    let (cr3, _) = x86_64::registers::control::Cr3::read();
-    let x = cr3.start_address().as_u64();
-    bricks_debug(x);
     let (res, addr) = alloc_user(num_bytes as u64);
     if res {
-        bricks_debug(addr.as_u64());
         return addr.as_u64() as *mut c_void;
-    }
-    else {
+    } else {
         return core::ptr::null_mut() as *mut c_void;
     }
-    return core::ptr::null_mut() as *mut c_void;
+}
+
+#[no_mangle]
+pub extern "C" fn bricks_free_handler(mem: *mut c_void) -> u32 {
+    let res = free_user(VirtAddr::new(mem as u64));
+    if res {
+        SUCCESS
+    } else {
+        FAILURE
+    }
 }
 
 // ———————————————————————————————— Save/restore syscalls ————————————————————————————————— //

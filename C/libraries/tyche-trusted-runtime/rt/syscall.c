@@ -72,3 +72,13 @@ void* syscall_malloc(int num_bytes) {
   make_syscall(&args);
   return 0;
 }
+
+extern int bricks_free_handler(void *p);
+int syscall_free(void* p) {
+  return bricks_free_handler(p);
+  SyscallArgs args;
+  args.syscall = FREE;
+  args.arg_1 = (arg_t)p;
+  make_syscall(&args);
+  return 0;
+}

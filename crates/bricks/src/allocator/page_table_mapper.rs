@@ -1,21 +1,15 @@
-use lazy_static::lazy_static;
+use x86_64::registers::control::Cr3;
+use x86_64::structures::paging::{PageTable, PageTableFlags};
 use x86_64::VirtAddr;
 
 pub type PageAccess = usize;
 pub const USER_ACCESS: PageAccess = 0;
 pub const KERNEL_ACCESS: PageAccess = 1;
-
-use x86_64::registers::control::Cr3;
-use x86_64::structures::paging::page_table::{self, FrameError};
-use x86_64::structures::paging::{OffsetPageTable, Page, PageTable, PageTableFlags};
-
-use crate::shared_buffer::bricks_debug;
-
 const NUM_LEVELS: usize = 4;
 
 pub fn change_access(addr: VirtAddr, access: PageAccess) {
     let (page_table_root, _) = Cr3::read();
-    let mut virt_page_addr: u64 = 0x800000000000;
+    let virt_page_addr: u64 = 0x0800000000000;
     let phys_start = page_table_root.start_address().as_u64();
     let table_indexes = [
         addr.p4_index(),
@@ -23,22 +17,23 @@ pub fn change_access(addr: VirtAddr, access: PageAccess) {
         addr.p2_index(),
         addr.p1_index(),
     ];
-
     let mut frame = page_table_root;
     for i in 0..NUM_LEVELS {
         let index = table_indexes[i];
-        let virt = VirtAddr::new((virt_page_addr + (frame.start_address().as_u64()  - phys_start)));
-        bricks_debug(virt.as_u64());
+        let virt = VirtAddr::new(
+            ((virt_page_addr as u64) + (frame.start_address().as_u64() - phys_start)),
+        );
         let table_ptr: *mut PageTable = virt.as_mut_ptr();
         let table = unsafe { &mut *table_ptr };
-
         let entry = &mut table[index];
         if i == NUM_LEVELS - 1 {
             match access {
-                USER_ACCESS => entry.set_flags(PageTableFlags::union(
-                    entry.flags(),
-                    PageTableFlags::USER_ACCESSIBLE,
-                )),
+                USER_ACCESS => {
+                    entry.set_flags(PageTableFlags::union(
+                        entry.flags(),
+                        PageTableFlags::USER_ACCESSIBLE,
+                    ));
+                }
                 KERNEL_ACCESS => {
                     PageTableFlags::remove(&mut entry.flags(), PageTableFlags::USER_ACCESSIBLE)
                 }

@@ -17,6 +17,7 @@ pub const GATE_CALL: usize = 1002;
 pub const WRITE_SHARED: usize = 1003;
 pub const READ_SHARED: usize = 1004;
 pub const MALLOC: usize = 1005;
+pub const FREE: usize = 1006;
 // ——————————————————————————————— Standard syscalls ———————————————————————————————— //
 /// Linux syscalls
 pub const LINUX_MMAP: usize = 9;

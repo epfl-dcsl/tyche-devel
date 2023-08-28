@@ -59,7 +59,23 @@ void trusted_entry(frame_t* frame)
 
   syscall_print("Papa");
 
-  syscall_malloc(100);
+  for(int i = 0; i < 10;i++) {
+    void* x = syscall_malloc(100);
+    if(x == NULL) {
+      syscall_print("NULL");
+    }
+    else {
+      syscall_print("Good alloc");
+    }
+  }
+
+  // void* x = syscall_malloc(100);
+  // if(syscall_free(x) == 0) {
+  //   syscall_print("Successfull allocation and free");
+  // }
+  // else {
+  //   syscall_print("Alloc and free error");
+  // }
 
   //asm volatile("cli\n\t" : : : );
 }
