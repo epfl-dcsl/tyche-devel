@@ -1,7 +1,7 @@
 use std::fs::read_to_string;
 use std::path::PathBuf;
 
-use ed25519_compact::{PublicKey, SecretKey, Signature};
+use ed25519_compact::{PublicKey, Signature};
 use object::elf::{PF_R, PF_W, PF_X};
 use object::read::elf::ProgramHeader;
 use sha2::{Digest, Sha256};
@@ -137,7 +137,7 @@ pub fn attestation_check(src_bin: &PathBuf, src_att: &PathBuf, offset: u64, nonc
     copy_arr(&mut message, &u64::to_le_bytes(nonce), 32);
     {
         let mut data_file = File::create("tychools_response.txt").expect("creation failed");
-        if let Ok(r) = pkey.verify(message, &sig) {
+        if let Ok(_r) = pkey.verify(message, &sig) {
             log::info!("Verified!");
             data_file.write(b"Message verified").expect("Write failed");
         } else {

@@ -670,7 +670,7 @@ impl ModifiedELF {
     pub fn set_attestation_hash(&mut self) {
         for seg in &mut self.segments {
             if ModifiedSegment::is_loadable(seg.program_header.p_type(DENDIAN)) {
-                if let Some(tpe) = TychePhdrTypes::from_u32(seg.program_header.p_type(DENDIAN)) {
+                if let Some(_tpe) = TychePhdrTypes::from_u32(seg.program_header.p_type(DENDIAN)) {
                     if seg.should_include_attestation() {
                         seg.set_mask_flags(PF_H);
                     }

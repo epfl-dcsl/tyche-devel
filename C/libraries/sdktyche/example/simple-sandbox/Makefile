@@ -64,7 +64,7 @@ sandbox: $(CODE_SANDBOX) $(HDRS_SANDBOX)
 	gcc -DTYCHE_USER_SPACE=1 -DTYCHOOLS=1 -g $(COMMON_INCLUDES) -nostdlib -static -o $@ $(CODE_SANDBOX)
 
 instrument: app sandbox 
-	cargo -C $(TYCHOOLS_PATH) install --path .
+	cargo -C $(TYCHOOLS_PATH) install --path . --locked
 	tychools instrument -s manifests/default.json 
 	chmod +x application_with_sandbox
 	rm app sandbox

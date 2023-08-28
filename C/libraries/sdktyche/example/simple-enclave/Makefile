@@ -78,7 +78,7 @@ enclave_iso: app enclave
 	rm app enclave
 
 attestation_enclave: app enclave
-	cargo -C $(TYCHOOLS_PATH) install --path .
+	cargo -C $(TYCHOOLS_PATH) install --path . --locked
 	tychools instrument -s manifests/default.json 
 	chmod +x simple_enclave
 	tychools instrument -s manifests/enclave_iso.json 
