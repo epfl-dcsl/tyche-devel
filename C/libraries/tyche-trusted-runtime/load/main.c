@@ -45,11 +45,6 @@ int main(int argc, char* argv[])
     ERROR("Unable to parse the enclave");
     goto failure;
   }
-
-  /// Before first call we put physical offset in shared buffer
-  unsigned long long* off = (unsigned long long*)find_default_shared(&enclave);
-  *off = enclave.map.physoffset;
-
   int cnt_sys = 0;
   int exit_flag = 0;
   while(!exit_flag) {
@@ -90,8 +85,7 @@ int main(int argc, char* argv[])
       case TEST:
         LOG("Testing");
         unsigned long long* sharedt = (unsigned long long*)(((char*)find_default_shared(&enclave)) + RET_CODE_BYTES);
-        LOG("SHARED is %llx", *sharedt);
-        exit_flag = 1;
+        LOG("SHARED is 0x%llx", *sharedt);
         break;
       default:
         LOG("UNKNOWN SYSCALL!!!!!!");

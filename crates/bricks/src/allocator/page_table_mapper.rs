@@ -9,17 +9,14 @@ use x86_64::registers::control::Cr3;
 use x86_64::structures::paging::page_table::{self, FrameError};
 use x86_64::structures::paging::{OffsetPageTable, Page, PageTable, PageTableFlags};
 
+use crate::shared_buffer::bricks_debug;
+
 const NUM_LEVELS: usize = 4;
 
-static mut PHYS_MEM_OFFSET: u64 = 0;
-
 pub fn change_access(addr: VirtAddr, access: PageAccess) {
-    let PHYS_MEM_OFF_ADDR: VirtAddr;
-    unsafe {
-        PHYS_MEM_OFF_ADDR = VirtAddr::new(PHYS_MEM_OFFSET);
-    }
     let (page_table_root, _) = Cr3::read();
-
+    let mut virt_page_addr: u64 = 0x800000000000;
+    let phys_start = page_table_root.start_address().as_u64();
     let table_indexes = [
         addr.p4_index(),
         addr.p3_index(),
@@ -30,7 +27,8 @@ pub fn change_access(addr: VirtAddr, access: PageAccess) {
     let mut frame = page_table_root;
     for i in 0..NUM_LEVELS {
         let index = table_indexes[i];
-        let virt = PHYS_MEM_OFF_ADDR + frame.start_address().as_u64();
+        let virt = VirtAddr::new((virt_page_addr + (frame.start_address().as_u64()  - phys_start)));
+        bricks_debug(virt.as_u64());
         let table_ptr: *mut PageTable = virt.as_mut_ptr();
         let table = unsafe { &mut *table_ptr };
 
@@ -54,11 +52,5 @@ pub fn change_access(addr: VirtAddr, access: PageAccess) {
                 }
             };
         }
-    }
-}
-
-pub fn set_physical_offset(phys_off: u64) {
-    unsafe {
-        PHYS_MEM_OFFSET = phys_off;
     }
 }

@@ -1,11 +1,11 @@
 use x86_64::VirtAddr;
 
-const NUM_PAGES: usize = 16;
+const NUM_PAGES: usize = 8;
 static mut allocated: [bool; NUM_PAGES] = [false; NUM_PAGES];
 const PAGE_SIZE: u64 = 0x1000;
 // TODO
 // maybe fix this value through tychools
-const MEM_POOL_START: u64 = 0x5000;
+const MEM_POOL_START: u64 = 0x300000;
 
 pub fn alloc_page() -> (bool, VirtAddr) {
     for i in 0..NUM_PAGES {

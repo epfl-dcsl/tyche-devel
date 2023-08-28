@@ -2,7 +2,7 @@ use core::arch::asm;
 use core::ffi::c_void;
 
 use crate::bricks_const::FAILURE;
-use crate::bricks_entry::{interrupt_setup, setup_physical_offset, syscall_setup};
+use crate::bricks_entry::{interrupt_setup, syscall_setup};
 use crate::shared_buffer::bricks_write_ret_code;
 
 #[derive(Copy, Clone)]
@@ -44,7 +44,6 @@ pub extern "C" fn bricks_trusted_main(capa_index: u64, args: *const c_void) {
     unsafe {
         current_frame = Some(br_frame_curr);
     }
-    setup_physical_offset();
     interrupt_setup();
     syscall_setup();
     bricks_trusted_entry(&mut br_frame);

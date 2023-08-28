@@ -66,13 +66,13 @@ enclave: $(CODE_ENCLAVE) $(HDRS_ENCLAVE)
 	gcc -DTYCHE_USER_SPACE=1 -DTYCHE_ENCLAVE=1 -g $(COMMON_INCLUDES) -nostdlib -static -o $@ $(CODE_ENCLAVE)
 
 simple_enclave: app enclave
-	cargo -C $(TYCHOOLS_PATH) install --path .
+	cargo -C $(TYCHOOLS_PATH) install --path . --locked
 	tychools instrument -s manifests/default.json 
 	chmod +x simple_enclave
 	rm app enclave
 
 enclave_iso: app enclave
-	cargo -C $(TYCHOOLS_PATH) install --path .
+	cargo -C $(TYCHOOLS_PATH) install --path . --locked
 	tychools instrument -s manifests/enclave_iso.json 
 	chmod +x enclave_iso
 	rm app enclave

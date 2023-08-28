@@ -86,10 +86,13 @@ pub fn generate_page_tables(melf: &ModifiedELF) -> (Vec<u8>, usize, usize) {
             addr_idx
         );
     }
+    let mut virt_page_addr: usize= 0x800000000000;
+    log::debug!("Now mapping the pages for page tables");
     unsafe {
-        let cnt = 0;
+        let mut cnt = 0;
         while cnt < addr_idx {
-            let virt_addr = virt_addrs[cnt];
+            // let virt_addr = virt_addrs[cnt];
+            let virt_addr = virt_page_addr;
             let phys_addr = phys_addrs[cnt];
             let size: usize = PAGE_SIZE;
             log::debug!("virt addr {:#x}", virt_addr);
@@ -103,6 +106,8 @@ pub fn generate_page_tables(melf: &ModifiedELF) -> (Vec<u8>, usize, usize) {
                 MAP_PAGE_TABLE,
             );
             curr_phys += size;
+            virt_page_addr+= size;
+            cnt+=1;
         }
     }
     log::debug!(

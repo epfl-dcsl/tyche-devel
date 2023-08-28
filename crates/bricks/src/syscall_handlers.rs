@@ -1,10 +1,11 @@
 use core::arch::asm;
-use core::ffi::c_char;
+use core::ffi::{c_char, c_void};
 
+use crate::allocator::alloc_user;
 use crate::bricks_const::{FAILURE, RET_CODE_BYTES, SUCCESS};
 use crate::bricks_utils::{bricks_memcpy, bricks_strlen};
 use crate::profiles::check_syscalls_kill;
-use crate::shared_buffer::{bricks_get_shared_pointer, bricks_write_ret_code};
+use crate::shared_buffer::{bricks_get_shared_pointer, bricks_write_ret_code, bricks_debug};
 use crate::syscalls;
 // ———————————————————————————————— Main syscall handler ————————————————————————————————— //
 #[no_mangle]
@@ -103,19 +104,19 @@ pub extern "C" fn bricks_read_shared_handler(buff: *mut c_char, cnt: u32) -> u32
 }
 
 #[no_mangle]
-pub extern "C" fn bricks_malloc_handler(num_bytes: usize) -> *mut i8 {
+pub extern "C" fn bricks_malloc_handler(num_bytes: usize) -> *mut c_void {
     let (cr3, _) = x86_64::registers::control::Cr3::read();
-    bricks_write_ret_code(1144);
     let x = cr3.start_address().as_u64();
-    let pt = bricks_get_shared_pointer(8) as *mut u64;
-    unsafe {
-        *pt = x;
+    bricks_debug(x);
+    let (res, addr) = alloc_user(num_bytes as u64);
+    if res {
+        bricks_debug(addr.as_u64());
+        return addr.as_u64() as *mut c_void;
     }
-    bricks_gate_call();
-    unsafe {
-        asm!("hlt");
+    else {
+        return core::ptr::null_mut() as *mut c_void;
     }
-    return core::ptr::null_mut() as *mut i8;
+    return core::ptr::null_mut() as *mut c_void;
 }
 
 // ———————————————————————————————— Save/restore syscalls ————————————————————————————————— //
