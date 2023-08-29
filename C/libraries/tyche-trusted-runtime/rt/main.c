@@ -57,7 +57,7 @@ void trusted_entry(frame_t* frame)
   int nonce = 0x123;
   syscall_enclave_attestation(nonce);
 
-  syscall_print("Papa");
+  syscall_print("Tyche");
 
   for(int i = 0; i < 10;i++) {
     void* x = syscall_malloc(100);

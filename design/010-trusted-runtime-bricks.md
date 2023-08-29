@@ -29,15 +29,40 @@ So far, things that were implemented in Bricks
     - READ syscall - being able to read some number of bytes from shared buffer
     - ATTEST ENCLAVE - being able to call Tyche to do the attestation, same what we did for the attestation example 
     - GATE CALL - giving up control to untrusted part, can be removed, it has no specific purpose except for debugging
+    - MALLOC - requesting memory from the trusted runtime 
+    - FREE - returning allocated memory to trusted runtime
 - Profiles - deciding behaviour in compile-time using custom flags
     - System calls profiles
     - Interrupts profiles
     - Exceptions profiles
 
+## Memory management
+
+In order to have memory management inside of trusted runtime, page tables need to be mapped inside of the enclave. We need this in order for runtime to change access flags for the memory we want to give to the user and remove user access whet memory is freed. 
+This is achieved through using tychools, where the option for mapping can be given in the config file.
+
+We can also give Tychools memory segment that is actually going to represent memory it can access and give to the user. This is done in a same manner in which we give shared buffer memory segment to enclave. 
+
+```
+[user part of the enclave]  
+             |                  ^
+-------------| [malloc call]----|--[return pointer to memory]----                            |        
+[Bricks]     v                  ----------------|
+|--------|                                      |
+| page 1 | <--[take the page]                   |
+|--------|   |                                  |
+| page 2 |   |             cr3 page tables      |
+|--------|   |--------->|-------------------|-->|
+                        |change access flags|
+                        |                   |
+
+```
+
 ## TODO
 
-- Memory management
 - Fixing interrupts globally, not just trt related
+- Allocation algorithm improvement
+- How can we pass arguments to trusted runtime from tychools
 
 ## Graphical overview
 

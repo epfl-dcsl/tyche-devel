@@ -10,6 +10,7 @@ use utils::{HostPhysAddr, HostVirtAddr};
 
 use crate::allocator::{addr_idx, Allocator, BumpAllocator, DEFAULT_BUMP_SIZE, PAGE_SIZE};
 use crate::elf_modifier::{ModifiedELF, ModifiedSegment, TychePhdrTypes, DENDIAN};
+use crate::instrument::{MappingPageTables, decode_map};
 
 pub fn align_address(addr: usize) -> usize {
     if addr % PAGE_SIZE == 0 {
@@ -33,7 +34,8 @@ fn translate_flags(flags: u32, segtype: u32) -> PtFlag {
 }
 
 #[allow(dead_code)]
-pub fn generate_page_tables(melf: &ModifiedELF) -> (Vec<u8>, usize, usize) {
+pub fn generate_page_tables(melf: &ModifiedELF, map_page_tables : &Option<MappingPageTables>) -> (Vec<u8>, usize, usize) {
+    let (map_op, virt_addr_start) = decode_map(map_page_tables);
     // Compute the overall memory required for the binary.
     let mut memsz: usize = 0;
     for ph in &melf.segments {
@@ -84,27 +86,29 @@ pub fn generate_page_tables(melf: &ModifiedELF) -> (Vec<u8>, usize, usize) {
             addr_idx
         );
     }
-    let mut virt_page_addr: usize = 0x800000000000;
-    log::debug!("Now mapping the pages for page tables");
-    unsafe {
-        let mut cnt = 0;
-        while cnt < addr_idx {
-            let virt_addr = virt_page_addr;
-            let phys_addr = curr_phys;
-            let size: usize = PAGE_SIZE;
-            log::debug!("virt addr {:#x}", virt_addr);
-            log::debug!("phys addr {:#x}", phys_addr);
-            log::debug!("size {:#x}", size);
-            mapper.map_range(
-                &allocator,
-                HostVirtAddr::new(virt_addr),
-                HostPhysAddr::new(phys_addr),
-                size,
-                MAP_PAGE_TABLE,
-            );
-            curr_phys += size;
-            virt_page_addr += size;
-            cnt += 1;
+    if map_op {
+        let mut virt_page_addr: usize = virt_addr_start;
+        log::debug!("Now mapping the pages for page tables");
+        unsafe {
+            let mut cnt = 0;
+            while cnt < addr_idx {
+                let virt_addr = virt_page_addr;
+                let phys_addr = curr_phys;
+                let size: usize = PAGE_SIZE;
+                log::debug!("virt addr {:#x}", virt_addr);
+                log::debug!("phys addr {:#x}", phys_addr);
+                log::debug!("size {:#x}", size);
+                mapper.map_range(
+                    &allocator,
+                    HostVirtAddr::new(virt_addr),
+                    HostPhysAddr::new(phys_addr),
+                    size,
+                    MAP_PAGE_TABLE,
+                );
+                curr_phys += size;
+                virt_page_addr += size;
+                cnt += 1;
+            }
         }
     }
     log::debug!(

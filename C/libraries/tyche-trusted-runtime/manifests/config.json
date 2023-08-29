@@ -33,5 +33,8 @@
     ]
   },
   "generate_pts": true,
+  "map_page_tables" : {
+    "map" : true
+  },
   "output": "test-trt"
 }

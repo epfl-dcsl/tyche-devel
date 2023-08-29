@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use log::info;
 use serde::{Deserialize, Serialize};
-use serde_json;
+use serde_json::{self, Map};
 
 use crate::allocator::PAGE_SIZE;
 use crate::elf_modifier::{ModifiedELF, ModifiedSection, TychePhdrTypes};
@@ -38,6 +38,14 @@ pub struct BinaryInstrumentation {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+pub struct MappingPageTables {
+    /// Do we need to map the page tables
+    map: bool,
+    /// If we want to map it, from which address
+    virt_addr_start: Option<usize>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Manifest {
     /// Untrusted part of the application.
     untrusted_bin: Option<BinaryInstrumentation>,
@@ -51,6 +59,8 @@ pub struct Manifest {
     /// Should we generate page tables.
     #[serde(default = "default_ops_true")]
     generate_pts: bool,
+    /// Options for mapping page tables
+    map_page_tables: Option<MappingPageTables>,
     /// Should we sort Phdrs
     #[serde(default = "default_ops_false")]
     sort_phdrs: bool,
@@ -70,13 +80,37 @@ fn default_security() -> Security {
     Security::Confidential
 }
 
+fn should_we_map(map: &Option<MappingPageTables>) -> bool {
+    if let Some(mp) = map {
+        mp.map
+    } else {
+        false
+    }
+}
+const DEFAULT_VIRT_ADDR_START: usize = 0x800000000000;
+fn map_page_table_virt_addr(map: &Option<MappingPageTables>) -> usize {
+    if let Some(mp) = map {
+        if let Some(addr) = mp.virt_addr_start {
+            return addr;
+        }
+        DEFAULT_VIRT_ADDR_START
+    } else {
+        0
+    }
+}
+
+pub fn decode_map(map : &Option<MappingPageTables>) -> (bool, usize) {
+    (should_we_map(map), map_page_table_virt_addr(map))
+}
+
 pub fn modify_binary(src: &PathBuf, dst: &PathBuf) {
     let data = std::fs::read(src).expect("Unable to read source file");
     info!("We read {} bytes from the file", data.len());
     let mut elf = ModifiedELF::new(&*data);
 
     // Create page tables.
-    let (pts, nb_pages, cr3) = generate_page_tables(&*elf);
+    // TODO do we need an option to choose mapping of page tables here
+    let (pts, nb_pages, cr3) = generate_page_tables(&*elf, &None);
     elf.append_data_segment(
         Some(cr3 as u64),
         TychePhdrTypes::PageTablesConf as u32,
@@ -172,17 +206,17 @@ pub fn instrument_binary(manifest: &Manifest) {
         kern.set_attestation_hash();
         user.merge(kern);
         if manifest.generate_pts {
-            user.generate_page_tables(manifest.security);
+            user.generate_page_tables(manifest.security, &manifest.map_page_tables);
         }
         user
     } else if let Some(ref mut user) = &mut user_elf {
         if manifest.generate_pts {
-            user.generate_page_tables(manifest.security);
+            user.generate_page_tables(manifest.security, &manifest.map_page_tables);
         }
         user
     } else if let Some(ref mut kern) = &mut kern_elf {
         if manifest.generate_pts {
-            kern.generate_page_tables(manifest.security);
+            kern.generate_page_tables(manifest.security, &manifest.map_page_tables);
         }
         kern.set_attestation_hash();
         kern
