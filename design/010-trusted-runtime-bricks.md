@@ -29,8 +29,8 @@ So far, things that were implemented in Bricks
     - READ syscall - being able to read some number of bytes from shared buffer
     - ATTEST ENCLAVE - being able to call Tyche to do the attestation, same what we did for the attestation example 
     - GATE CALL - giving up control to untrusted part, can be removed, it has no specific purpose except for debugging
-    - MALLOC - requesting memory from the trusted runtime 
-    - FREE - returning allocated memory to trusted runtime
+    - SBRK - standard Linux **sbrk** system call
+    - BRK - standard Linux **brk** system call
 - Profiles - deciding behaviour in compile-time using custom flags
     - System calls profiles
     - Interrupts profiles
@@ -46,7 +46,7 @@ We can also give Tychools memory segment that is actually going to represent mem
 ```
 [user part of the enclave]  
              |                  ^
--------------| [malloc call]----|--[return pointer to memory]----                            |        
+-------------| [sbrk call]----|--[return pointer to memory]----                            |        
 [Bricks]     v                  ----------------|
 |--------|                                      |
 | page 1 | <--[take the page]                   |
@@ -61,7 +61,6 @@ We can also give Tychools memory segment that is actually going to represent mem
 ## TODO
 
 - Fixing interrupts globally, not just trt related
-- Allocation algorithm improvement
 - How can we pass arguments to trusted runtime from tychools
 
 ## Graphical overview
