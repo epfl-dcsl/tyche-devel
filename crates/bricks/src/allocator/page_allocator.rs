@@ -17,6 +17,19 @@ pub fn alloc_page() -> (bool, VirtAddr) {
     (false, VirtAddr::new(0))
 }
 
+pub fn alloc_page_back() -> (bool, VirtAddr) {
+    for i in (0..NUM_PAGES).rev() {
+        unsafe {
+            if !allocated[i] {
+                allocated[i] = true;
+                return (true, VirtAddr::new(MEM_POOL_START + (i as u64) * PAGE_SIZE));
+            }
+        }
+    }
+
+    (false, VirtAddr::new(0))
+}
+
 fn check_allignment(addr: VirtAddr) -> bool {
     (addr.as_u64() % 0x1000) == 0
 }

@@ -6,6 +6,7 @@ use self::user_allocator::UserAllocator;
 pub mod bricks_allocator;
 pub mod page_allocator;
 pub mod user_allocator;
+pub mod utils;
 
 static mut BRICKS_ALLOCATOR: BricksAllocator = BricksAllocator {
     pages: [0; NUM_PAGES],
@@ -13,20 +14,20 @@ static mut BRICKS_ALLOCATOR: BricksAllocator = BricksAllocator {
 };
 
 static mut USER_ALLOCATOR: UserAllocator = UserAllocator {
-    pages: [0; NUM_PAGES],
-    allocated: [false; NUM_PAGES],
+    virt_start : 0,
+    virt_size : 0,
 };
 
-pub fn alloc_user(num_bytes: u64) -> (bool, VirtAddr) {
-    unsafe { USER_ALLOCATOR.malloc(num_bytes) }
+pub fn alloc_user(num_bytes: u64) -> u64 {
+    unsafe { USER_ALLOCATOR.malloc(num_bytes).as_u64() }
 }
 
 pub fn alloc_bricks(num_bytes: u64) -> (bool, VirtAddr) {
     unsafe { BRICKS_ALLOCATOR.kmalloc(num_bytes) }
 }
 
-pub fn free_user(addr: VirtAddr) -> bool {
-    unsafe { USER_ALLOCATOR.free(addr) }
+pub fn free_user(addr: VirtAddr) -> u64 {
+    unsafe { USER_ALLOCATOR.free(addr).as_u64() }
 }
 
 pub fn free_bricks(addr: VirtAddr) -> bool {

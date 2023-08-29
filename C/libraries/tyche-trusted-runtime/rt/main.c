@@ -58,15 +58,17 @@ void trusted_entry(frame_t* frame)
   syscall_enclave_attestation(nonce);
 
   syscall_print("Tyche");
-
+  void* next = NULL;
+  void* prev = NULL;
   for(int i = 0; i < 10;i++) {
-    void* x = syscall_malloc(100);
-    if(x == NULL) {
+    next = bricks_malloc(100); // one page
+    if(next == prev) {
       syscall_print("NULL");
     }
     else {
       syscall_print("Good alloc");
     }
+    prev = next;
   }
 
   // void* x = syscall_malloc(100);

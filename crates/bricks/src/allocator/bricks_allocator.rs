@@ -9,7 +9,7 @@ pub struct BricksAllocator {
 
 impl BricksAllocator {
     pub fn kmalloc(&mut self, num_bytes: u64) -> (bool, VirtAddr) {
-        let (res, addr) = page_allocator::alloc_page();
+        let (res, addr) = page_allocator::alloc_page_back();
         if res {
             for i in 0..NUM_PAGES {
                 if !self.allocated[i] {
@@ -24,6 +24,7 @@ impl BricksAllocator {
     }
 
     pub fn kfree(&mut self, addr: VirtAddr) -> bool {
+        page_allocator::free_page(addr);
         for i in 0..NUM_PAGES {
             if self.allocated[i] && self.pages[i] == addr.as_u64() {
                 self.allocated[i] = false;

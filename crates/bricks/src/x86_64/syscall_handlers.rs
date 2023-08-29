@@ -46,11 +46,11 @@ pub extern "C" fn bricks_syscall_handler() {
         syscalls::READ_SHARED => {
             result = bricks_read_shared_handler(rdi as *mut c_char, rsi as u32);
         }
-        syscalls::MALLOC => {
-            let pointer = bricks_malloc_handler(rdi as usize);
+        syscalls::SBRK => {
+            let pointer = bricks_sbrk_handler(rdi as usize);
         }
-        syscalls::FREE => {
-            result = bricks_free_handler(rdi as *mut c_void);
+        syscalls::BRK => {
+            result = bricks_brk_handler(rdi as *mut c_void) as u32;
         }
         _ => {
             // TODO implement it
@@ -109,23 +109,15 @@ pub extern "C" fn bricks_read_shared_handler(buff: *mut c_char, cnt: u32) -> u32
 }
 
 #[no_mangle]
-pub extern "C" fn bricks_malloc_handler(num_bytes: usize) -> *mut c_void {
-    let (res, addr) = alloc_user(num_bytes as u64);
-    if res {
-        return addr.as_u64() as *mut c_void;
-    } else {
-        return core::ptr::null_mut() as *mut c_void;
-    }
+pub extern "C" fn bricks_sbrk_handler(num_bytes: usize) -> *mut c_void {
+    let addr = alloc_user(num_bytes as u64);
+    addr as *mut c_void
 }
 
 #[no_mangle]
-pub extern "C" fn bricks_free_handler(mem: *mut c_void) -> u32 {
+pub extern "C" fn bricks_brk_handler(mem: *mut c_void) -> *mut c_void {
     let res = free_user(VirtAddr::new(mem as u64));
-    if res {
-        SUCCESS
-    } else {
-        FAILURE
-    }
+    res as *mut c_void
 }
 
 // ———————————————————————————————— Save/restore syscalls ————————————————————————————————— //

@@ -63,21 +63,21 @@ int syscall_read(char* buff, int cnt) {
   return 0;
 }
 
-extern void* bricks_malloc_handler(int num_bytes);
-void* syscall_malloc(int num_bytes) {
-  return bricks_malloc_handler(num_bytes);
+extern void* bricks_sbrk_handler(int num_bytes);
+void* bricks_malloc(int num_bytes) {
+  return bricks_sbrk_handler(num_bytes);
   SyscallArgs args;
-  args.syscall = MALLOC;
+  args.syscall = SBRK;
   args.arg_1 = (arg_t)num_bytes;
   make_syscall(&args);
   return 0;
 }
 
-extern int bricks_free_handler(void *p);
-int syscall_free(void* p) {
-  return bricks_free_handler(p);
+extern void* bricks_brk_handler(void *p);
+void* bricks_free(void* p) {
+  return bricks_brk_handler(p);
   SyscallArgs args;
-  args.syscall = FREE;
+  args.syscall = BRK;
   args.arg_1 = (arg_t)p;
   make_syscall(&args);
   return 0;
