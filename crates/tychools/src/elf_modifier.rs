@@ -8,7 +8,7 @@ use object::{elf, Endianness, U16Bytes, U32Bytes, U64Bytes};
 use serde::{Deserialize, Serialize};
 
 use crate::allocator::PAGE_SIZE;
-use crate::instrument::{Security, MappingPageTables};
+use crate::instrument::{MappingPageTables, Security};
 use crate::page_table_mapper::{align_address, generate_page_tables};
 
 pub static PF_H: u32 = 1 << 3;
@@ -272,7 +272,11 @@ impl ModifiedELF {
     }
 
     /// Generate the page tables for this ELF and add them into their own segment.
-    pub fn generate_page_tables(&mut self, security: Security, map_page_tables : &Option<MappingPageTables>) {
+    pub fn generate_page_tables(
+        &mut self,
+        security: Security,
+        map_page_tables: &Option<MappingPageTables>,
+    ) {
         let (pts, nb_pages, cr3) = generate_page_tables(self, map_page_tables);
         let tpe = if security == Security::Confidential {
             TychePhdrTypes::PageTablesConf

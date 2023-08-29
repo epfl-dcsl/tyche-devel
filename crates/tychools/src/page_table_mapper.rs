@@ -10,7 +10,7 @@ use utils::{HostPhysAddr, HostVirtAddr};
 
 use crate::allocator::{addr_idx, Allocator, BumpAllocator, DEFAULT_BUMP_SIZE, PAGE_SIZE};
 use crate::elf_modifier::{ModifiedELF, ModifiedSegment, TychePhdrTypes, DENDIAN};
-use crate::instrument::{MappingPageTables, decode_map};
+use crate::instrument::{decode_map, MappingPageTables};
 
 pub fn align_address(addr: usize) -> usize {
     if addr % PAGE_SIZE == 0 {
@@ -34,7 +34,10 @@ fn translate_flags(flags: u32, segtype: u32) -> PtFlag {
 }
 
 #[allow(dead_code)]
-pub fn generate_page_tables(melf: &ModifiedELF, map_page_tables : &Option<MappingPageTables>) -> (Vec<u8>, usize, usize) {
+pub fn generate_page_tables(
+    melf: &ModifiedELF,
+    map_page_tables: &Option<MappingPageTables>,
+) -> (Vec<u8>, usize, usize) {
     let (map_op, virt_addr_start) = decode_map(map_page_tables);
     // Compute the overall memory required for the binary.
     let mut memsz: usize = 0;

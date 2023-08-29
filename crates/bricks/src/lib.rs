@@ -11,15 +11,21 @@ pub mod bricks_const;
 pub mod bricks_entry;
 pub mod bricks_utils;
 pub mod gate_calls;
-pub mod gdt;
-pub mod idt;
 pub mod interrupts;
-pub mod interrupts_handlers;
 pub mod profiles;
 pub mod shared_buffer;
-pub mod syscall_handlers;
 pub mod syscalls;
-pub mod tyche_api;
+
+#[cfg(target_arch = "x86_64")]
+pub mod x86_64;
+
+#[cfg(target_arch = "x86_64")]
+pub mod arch {
+    pub use crate::x86_64::*;
+}
+
+#[cfg(target_arch = "riscv64")]
+pub mod riscv;
 
 #[no_mangle]
 pub extern "C" fn bricks_function(a: u32, b: u32) -> u32 {

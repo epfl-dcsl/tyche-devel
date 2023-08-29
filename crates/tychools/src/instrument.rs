@@ -99,7 +99,7 @@ fn map_page_table_virt_addr(map: &Option<MappingPageTables>) -> usize {
     }
 }
 
-pub fn decode_map(map : &Option<MappingPageTables>) -> (bool, usize) {
+pub fn decode_map(map: &Option<MappingPageTables>) -> (bool, usize) {
     (should_we_map(map), map_page_table_virt_addr(map))
 }
 

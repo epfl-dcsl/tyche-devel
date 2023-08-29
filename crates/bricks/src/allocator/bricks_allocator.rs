@@ -1,5 +1,3 @@
-use core::cell::{RefCell, UnsafeCell};
-
 use x86_64::VirtAddr;
 
 use super::page_allocator;

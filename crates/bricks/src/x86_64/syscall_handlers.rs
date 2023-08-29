@@ -75,7 +75,7 @@ pub extern "C" fn bricks_attest_enclave_handler(nonce: u32) -> u32 {
 }
 
 use crate::gate_calls::{bricks_gate_call, exit_gate};
-use crate::tyche_api::enclave_attestation_tyche;
+
 #[no_mangle]
 pub extern "C" fn bricks_gate_call_handler() -> u32 {
     bricks_write_ret_code(syscalls::GATE_CALL as u64);
@@ -129,7 +129,8 @@ pub extern "C" fn bricks_free_handler(mem: *mut c_void) -> u32 {
 }
 
 // ———————————————————————————————— Save/restore syscalls ————————————————————————————————— //
-use crate::syscalls::LSTAR;
+
+use super::tyche_api::enclave_attestation_tyche;
 static mut msr_val: u64 = 0;
 pub fn bricks_save_syscalls() {
     let msr_lstar = x86_64::registers::model_specific::Msr::new(LSTAR as u32);
@@ -152,3 +153,14 @@ pub fn bricks_restore_syscalls() {
         msr_lstar.write(msr_val);
     }
 }
+
+// ——————————————————————————————— Syscall related constants ———————————————————————————————— //
+/// /// The RIP syscall entry for 64 bit software.
+pub const LSTAR: u64 = 0xC0000082;
+/// The RIP syscall entry for compatibility mode
+pub const CSTAR: u64 = 0xC0000083;
+/// low 32 bits syscall flag mask, if a bit is set, clear the corresponding one
+/// in RFLAGS.
+pub const SFMASK_VAL: u64 = 0xC0000084;
+/// Mask for the low/high bits of msr.
+pub const MASK32: u64 = 0xFFFFFFFF;

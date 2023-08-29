@@ -1,7 +1,8 @@
 use x86_64::VirtAddr;
 
 use super::page_allocator;
-use super::page_table_mapper::{self, KERNEL_ACCESS, USER_ACCESS};
+use crate::arch::page_table_mapper::{KERNEL_ACCESS, USER_ACCESS};
+use crate::arch::{self};
 pub const NUM_PAGES: usize = 16;
 pub struct UserAllocator {
     pub pages: [u64; NUM_PAGES],
@@ -12,7 +13,7 @@ impl UserAllocator {
     pub fn malloc(&mut self, num_bytes: u64) -> (bool, VirtAddr) {
         let (res, addr) = page_allocator::alloc_page();
         if res {
-            page_table_mapper::change_access(addr, USER_ACCESS);
+            arch::page_table_mapper::change_access(addr, USER_ACCESS);
             for i in 0..NUM_PAGES {
                 if !self.allocated[i] {
                     self.allocated[i] = true;
@@ -28,7 +29,7 @@ impl UserAllocator {
     pub fn free(&mut self, addr: VirtAddr) -> bool {
         for i in 0..NUM_PAGES {
             if self.allocated[i] && self.pages[i] == addr.as_u64() {
-                page_table_mapper::change_access(addr, KERNEL_ACCESS);
+                arch::page_table_mapper::change_access(addr, KERNEL_ACCESS);
                 self.allocated[i] = false;
                 return true;
             }

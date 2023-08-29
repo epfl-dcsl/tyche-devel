@@ -2,7 +2,7 @@ use core::arch::asm;
 
 use crate::gate_calls::bricks_gate_call;
 use crate::profiles::{check_exceptions_ignore, check_exceptions_kill};
-use crate::shared_buffer::{bricks_get_default_shared_buffer, bricks_write_ret_code};
+use crate::shared_buffer::bricks_write_ret_code;
 
 const EXCEPTION_CONST: u64 = 111;
 const DIVIDE_ZERO_CONST: u64 = 222;
