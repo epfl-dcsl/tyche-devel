@@ -1,4 +1,4 @@
-use x86_64::VirtAddr;
+use crate::arch::VirtualAddr;
 
 use self::bricks_allocator::{BricksAllocator, NUM_PAGES};
 use self::user_allocator::UserAllocator;
@@ -22,14 +22,14 @@ pub fn alloc_user(num_bytes: u64) -> u64 {
     unsafe { USER_ALLOCATOR.malloc(num_bytes).as_u64() }
 }
 
-pub fn alloc_bricks(num_bytes: u64) -> (bool, VirtAddr) {
+pub fn alloc_bricks(num_bytes: u64) -> (bool, VirtualAddr) {
     unsafe { BRICKS_ALLOCATOR.kmalloc(num_bytes) }
 }
 
-pub fn free_user(addr: VirtAddr) -> u64 {
+pub fn free_user(addr: VirtualAddr) -> u64 {
     unsafe { USER_ALLOCATOR.free(addr).as_u64() }
 }
 
-pub fn free_bricks(addr: VirtAddr) -> bool {
+pub fn free_bricks(addr: VirtualAddr) -> bool {
     unsafe { BRICKS_ALLOCATOR.kfree(addr) }
 }

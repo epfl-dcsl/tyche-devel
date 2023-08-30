@@ -117,12 +117,13 @@ pub extern "C" fn bricks_sbrk_handler(num_bytes: usize) -> *mut c_void {
 
 #[no_mangle]
 pub extern "C" fn bricks_brk_handler(mem: *mut c_void) -> *mut c_void {
-    let res = free_user(VirtAddr::new(mem as u64));
+    let res = free_user(VirtualAddr::new(mem as u64));
     res as *mut c_void
 }
 
 // ———————————————————————————————— Save/restore syscalls ————————————————————————————————— //
 
+use super::VirtualAddr;
 use super::tyche_api::enclave_attestation_tyche;
 static mut msr_val: u64 = 0;
 pub fn bricks_save_syscalls() {

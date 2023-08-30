@@ -2,14 +2,17 @@ use x86_64::registers::control::Cr3;
 use x86_64::structures::paging::{PageTable, PageTableFlags};
 use x86_64::VirtAddr;
 
+use super::VirtualAddr;
+
 pub type PageAccess = usize;
 pub const USER_ACCESS: PageAccess = 0;
 pub const KERNEL_ACCESS: PageAccess = 1;
 const NUM_LEVELS: usize = 4;
 
-pub fn change_access(addr: VirtAddr, access: PageAccess) {
+pub fn change_access(addr_virt: &VirtualAddr, access: PageAccess) {
     let (page_table_root, _) = Cr3::read();
     let virt_page_addr: u64 = 0x0800000000000;
+    let addr = addr_virt.addr;
     let phys_start = page_table_root.start_address().as_u64();
     let table_indexes = [
         addr.p4_index(),

@@ -1,3 +1,5 @@
+use x86_64::VirtAddr;
+
 use self::gdt::bricks_init_gdt;
 use self::idt::bricks_init_idt;
 use self::syscall_handlers::{bricks_save_syscalls, bricks_syscalls_init};
@@ -22,4 +24,18 @@ pub fn bricks_syscals_setup() {
 
 pub fn halt() {
     x86_64::instructions::hlt();
+}
+
+pub struct VirtualAddr {
+    addr : VirtAddr
+}
+
+impl VirtualAddr {
+    pub fn new(addr_u64 : u64) -> Self {
+        VirtualAddr { addr: VirtAddr::new(addr_u64) }
+    }
+
+    pub fn as_u64(&self) -> u64 {
+        self.addr.as_u64()
+    }
 }
