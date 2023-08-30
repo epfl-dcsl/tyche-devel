@@ -1,6 +1,7 @@
 use core::arch::asm;
 use core::ffi::{c_char, c_void};
 
+use x86_64::registers::segmentation::Segment;
 use x86_64::VirtAddr;
 
 use crate::allocator::{alloc_user, free_user};

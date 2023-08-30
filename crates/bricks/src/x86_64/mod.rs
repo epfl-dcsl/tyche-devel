@@ -6,6 +6,7 @@ pub mod gdt;
 pub mod idt;
 pub mod interrupt_handlers;
 pub mod page_table_mapper;
+pub mod segments;
 pub mod syscall_handlers;
 pub mod tyche_api;
 

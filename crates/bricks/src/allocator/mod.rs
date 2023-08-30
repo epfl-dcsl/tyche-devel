@@ -14,8 +14,8 @@ static mut BRICKS_ALLOCATOR: BricksAllocator = BricksAllocator {
 };
 
 static mut USER_ALLOCATOR: UserAllocator = UserAllocator {
-    virt_start : 0,
-    virt_size : 0,
+    virt_start: 0,
+    virt_size: 0,
 };
 
 pub fn alloc_user(num_bytes: u64) -> u64 {

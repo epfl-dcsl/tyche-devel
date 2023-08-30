@@ -1,5 +1,6 @@
 use lazy_static::lazy_static;
 use x86_64::structures::idt::InterruptDescriptorTable;
+use x86_64::structures::DescriptorTablePointer;
 
 use crate::arch::gdt;
 use crate::arch::interrupt_handlers::*;
@@ -21,4 +22,21 @@ lazy_static! {
 
 pub fn bricks_init_idt() {
     IDT.load();
+}
+
+// ———————————————————————————————— Save/restore idt ————————————————————————————————— //
+static mut IDT_SAVE: Option<DescriptorTablePointer> = None;
+
+pub fn bricks_save_idt() {
+    unsafe {
+        IDT_SAVE = Some(x86_64::instructions::tables::sidt());
+    }
+}
+
+pub fn bricks_restore_idt() {
+    unsafe {
+        if let Some(idt_s) = IDT_SAVE {
+            x86_64::instructions::tables::lidt(&idt_s);
+        }
+    }
 }

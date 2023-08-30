@@ -3,6 +3,7 @@ use x86_64::instructions::tables::load_tss;
 use x86_64::registers::segmentation::{Segment, CS, DS, ES, SS};
 use x86_64::structures::gdt::{Descriptor, GlobalDescriptorTable, SegmentSelector};
 use x86_64::structures::tss::TaskStateSegment;
+use x86_64::structures::DescriptorTablePointer;
 use x86_64::VirtAddr;
 
 pub const DOUBLE_FAULT_IST_INDEX: u16 = 0;
@@ -53,5 +54,21 @@ pub fn bricks_init_gdt() {
         ES::set_reg(GDT.1.kernel_data_selector);
         SS::set_reg(GDT.1.kernel_data_selector);
         load_tss(GDT.1.tss_selector);
+    }
+}
+// ———————————————————————————————— Save/restore idt ————————————————————————————————— //
+static mut GDT_SAVE: Option<DescriptorTablePointer> = None;
+
+pub fn bricks_save_idt() {
+    unsafe {
+        GDT_SAVE = Some(x86_64::instructions::tables::sgdt());
+    }
+}
+
+pub fn bricks_restore_idt() {
+    unsafe {
+        if let Some(gdt_s) = GDT_SAVE {
+            x86_64::instructions::tables::lgdt(&gdt_s);
+        }
     }
 }

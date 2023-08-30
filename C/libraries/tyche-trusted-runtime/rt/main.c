@@ -1,9 +1,6 @@
 #include <stdint.h>
 
-#include "idt.h"
-#include "gdt.h"
 #include "syscall.h"
-#include "segments.h"
 #include "sdk_tyche_rt.h"
 #include "bricks.h"
 
@@ -36,28 +33,20 @@ void call_bricks(int a, int b) {
   syscall_write((char*)&x, sizeof(x));
 }
 
-// ———————————————————————— Entry Point into binary ————————————————————————— //
-void trusted_entry(frame_t* frame)
-{
-  if (frame == NULL) {
-    return;
-  }
+void test_sum() {
   const int num_of_calls = 10;
   for(int i = 0; i < num_of_calls;i++) {
     call_bricks(2*i, 3*i);
     // syscall_gate_call();
   }
+}
 
-  // TODO call the user
-
-  // __asm__ volatile("syscall");
-
-  // make_exception();
-
+void test_attestation() {
   int nonce = 0x123;
   syscall_enclave_attestation(nonce);
+}
 
-  syscall_print("Tyche");
+void test_mm() {
   void* next = NULL;
   void* prev = NULL;
   for(int i = 0; i < 10;i++) {
@@ -70,14 +59,22 @@ void trusted_entry(frame_t* frame)
     }
     prev = next;
   }
+} 
 
-  // void* x = syscall_malloc(100);
-  // if(syscall_free(x) == 0) {
-  //   syscall_print("Successfull allocation and free");
-  // }
-  // else {
-  //   syscall_print("Alloc and free error");
-  // }
+// ———————————————————————— Entry Point into binary ————————————————————————— //
+void trusted_entry(frame_t* frame)
+{
+  if (frame == NULL) {
+    return;
+  }
+  
+  test_sum();
+  // make_exception();
+  test_attestation();
+  test_mm();
+  syscall_print("Tyche");  
+  // TODO call the user
+  // __asm__ volatile("syscall");
 
   //asm volatile("cli\n\t" : : : );
 }

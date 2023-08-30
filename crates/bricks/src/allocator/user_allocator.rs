@@ -7,8 +7,8 @@ use crate::arch::{self};
 use crate::shared_buffer::bricks_debug;
 pub const NUM_PAGES: usize = 16;
 pub struct UserAllocator {
-    pub virt_start : u64,
-    pub virt_size : u64,
+    pub virt_start: u64,
+    pub virt_size: u64,
 }
 
 impl UserAllocator {
@@ -22,11 +22,10 @@ impl UserAllocator {
                 if self.virt_start == 0 {
                     self.virt_start = addr.as_u64();
                 }
-                self.virt_size+=PAGE_SIZE;
-            }
-            else {
+                self.virt_size += PAGE_SIZE;
+            } else {
                 while self.virt_size > prev_virt_size {
-                    self.virt_size-=PAGE_SIZE;
+                    self.virt_size -= PAGE_SIZE;
                     let addr_free = VirtAddr::new(self.virt_start + self.virt_size);
                     arch::page_table_mapper::change_access(addr_free, KERNEL_ACCESS);
                     page_allocator::free_page(addr_free);
@@ -46,8 +45,8 @@ impl UserAllocator {
         let mut virt_end = self.virt_start + self.virt_size;
         while self.virt_size > 0 && (virt_end - PAGE_SIZE) > addr.as_u64() {
             let addr_free = VirtAddr::new(virt_end - PAGE_SIZE);
-            virt_end-=PAGE_SIZE;
-            self.virt_size-=PAGE_SIZE;
+            virt_end -= PAGE_SIZE;
+            self.virt_size -= PAGE_SIZE;
             arch::page_table_mapper::change_access(addr_free, KERNEL_ACCESS);
             page_allocator::free_page(addr_free);
         }
@@ -58,8 +57,8 @@ impl UserAllocator {
 
     pub fn new() -> Self {
         UserAllocator {
-            virt_start : 0,
-            virt_size : 0
+            virt_start: 0,
+            virt_size: 0,
         }
     }
 }
