@@ -21,3 +21,8 @@ panic = "abort"
 
 [profile.release]
 panic = "abort"
+
+[features]
+exceptions_behave = []
+syscalls_behave = []
+interrupts_behave = []
