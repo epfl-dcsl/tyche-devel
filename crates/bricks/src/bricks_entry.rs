@@ -1,5 +1,6 @@
 use core::ffi::c_void;
 
+use crate::arch::bricks_init_transition;
 use crate::arch::{bricks_interrupt_setup, bricks_syscals_setup};
 use crate::gate_calls::exit_gate;
 
@@ -29,6 +30,7 @@ pub extern "C" fn bricks_trusted_main(capa_index: u64, args: *const c_void) {
     }
     interrupt_setup();
     syscall_setup();
+    tranistion_setup();
     bricks_trusted_entry(&mut br_frame);
 }
 
@@ -47,4 +49,8 @@ pub fn interrupt_setup() {
 
 pub fn syscall_setup() {
     bricks_syscals_setup();
+}
+
+pub fn tranistion_setup() {
+    bricks_init_transition();
 }
