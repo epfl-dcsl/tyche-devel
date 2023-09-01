@@ -34,8 +34,8 @@ impl UserAllocator {
                 break;
             }
         }
-        bricks_debug(self.virt_start);
-        bricks_debug(self.virt_size);
+        // bricks_debug(self.virt_start);
+        // bricks_debug(self.virt_size);
         VirtualAddr::new(self.virt_start + self.virt_size)
     }
 
@@ -48,8 +48,8 @@ impl UserAllocator {
             arch::page_table_mapper::change_access(&addr_free, KERNEL_ACCESS);
             page_allocator::free_page(&addr_free);
         }
-        bricks_debug(self.virt_start);
-        bricks_debug(self.virt_size);
+        // bricks_debug(self.virt_start);
+        // bricks_debug(self.virt_size);
         VirtualAddr::new(self.virt_start + self.virt_size)
     }
 

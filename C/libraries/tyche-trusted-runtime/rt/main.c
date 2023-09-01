@@ -69,7 +69,7 @@ void trusted_entry(frame_t* frame)
   }
   
   test_sum();
-  // make_exception();
+  make_exception();
   test_attestation();
   test_mm();
   syscall_print("Tyche");  

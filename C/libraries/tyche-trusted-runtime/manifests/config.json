@@ -20,17 +20,13 @@
           "write":true,
           "exec":false
         }
-      },
-      {
-        "AddSegment":{
-          "start": 5242880, 
-          "size":8192,
-          "tpe":"KernelConfidential",
-          "write" : true,
-          "exec" : false
-        }
       }
-    ]
+    ],
+    "bricks_info" : {
+      "memory_pool" : true,
+      "memory_pool_size" : 4,
+      "user_stack" : true
+    }
   },
   "generate_pts": true,
   "map_page_tables" : {

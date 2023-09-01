@@ -1,6 +1,5 @@
-use crate::arch::VirtualAddr;
-
 use super::page_allocator;
+use crate::arch::VirtualAddr;
 pub const NUM_PAGES: usize = 16;
 pub struct BricksAllocator {
     pub pages: [u64; NUM_PAGES],

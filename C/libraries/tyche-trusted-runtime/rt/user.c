@@ -1,5 +1,5 @@
 
-void user_code()
+void user_main()
 {
   // Find something to here.
   

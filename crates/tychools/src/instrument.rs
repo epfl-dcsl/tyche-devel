@@ -18,6 +18,29 @@ pub struct SegmentDescriptor {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+pub struct BricksInfo {
+    memory_pool: bool,
+    memory_pool_size: Option<u64>,
+    user_stack: bool,
+}
+
+pub struct BricksData {
+    memory_pool_start: u64,
+    memory_pool_size: u64,
+    user_stack_start: u64,
+}
+
+impl BricksData {
+    pub fn to_le_bytes(&self) -> Vec<u8> {
+        let mut vec: Vec<u8> = Vec::new();
+        vec.extend(self.memory_pool_start.to_le_bytes().to_vec());
+        vec.extend(self.memory_pool_size.to_le_bytes().to_vec());
+        vec.extend(self.user_stack_start.to_le_bytes().to_vec());
+        vec
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub enum BinaryOperation {
     SectionToSegment(String, TychePhdrTypes),
     AddSegment(SegmentDescriptor),
@@ -35,6 +58,8 @@ pub struct BinaryInstrumentation {
     path: String,
     /// Extra operations to perform on the binary.
     ops: Option<Vec<BinaryOperation>>,
+    /// Bricks info
+    bricks_info: Option<BricksInfo>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -160,6 +185,58 @@ pub fn parse_binary(binary: &BinaryInstrumentation) -> Box<ModifiedELF> {
         }
     }
 
+    // Apply Bricks info
+    let DEF_PAGE_NUM: u64 = 4;
+    let DEF_PAGE_STACK: u64 = 2;
+    if let Some(bricks_info) = &binary.bricks_info {
+        log::debug!("Bricks info!");
+        let mut virt_addr: u64 = 0x300000 + 0x3000; // fixed for now, after shared, segment
+        let virt_addr_info: u64 = virt_addr - 0x1000;
+        let mut bricks_data = BricksData {
+            memory_pool_size: 0,
+            memory_pool_start: 0,
+            user_stack_start: 0,
+        };
+        if bricks_info.memory_pool {
+            let byte_size: u64;
+            if let Some(sz) = bricks_info.memory_pool_size {
+                byte_size = sz * PAGE_SIZE as u64;
+                bricks_data.memory_pool_size = sz;
+            } else {
+                byte_size = DEF_PAGE_NUM * PAGE_SIZE as u64;
+                bricks_data.memory_pool_size = DEF_PAGE_NUM;
+            }
+            bricks_data.memory_pool_start = virt_addr;
+            let rights = object::elf::PF_R | object::elf::PF_W;
+            elf.append_nodata_segment(
+                Some(virt_addr),
+                TychePhdrTypes::KernelConfidential as u32,
+                rights,
+                byte_size as usize,
+            );
+            virt_addr += byte_size;
+        }
+        if bricks_info.user_stack {
+            let user_stack_size = DEF_PAGE_STACK * PAGE_SIZE as u64;
+            bricks_data.user_stack_start = virt_addr;
+            let rights = object::elf::PF_R | object::elf::PF_W;
+            elf.append_nodata_segment(
+                Some(virt_addr),
+                TychePhdrTypes::UserConfidential as u32,
+                rights,
+                user_stack_size as usize,
+            );
+        }
+        let vec_data: Vec<u8> = bricks_data.to_le_bytes();
+        elf.append_data_segment(
+            Some(virt_addr_info),
+            TychePhdrTypes::KernelConfidential as u32,
+            object::elf::PF_R,
+            PAGE_SIZE as usize,
+            &vec_data,
+        );
+    }
+
     elf
 }
 
@@ -266,6 +343,7 @@ pub fn print_enum() {
                 exec: false,
             }),
         ]),
+        bricks_info: None,
     };
     let json = serde_json::to_string(&op).unwrap();
     log::info!("The generated json {}", json);

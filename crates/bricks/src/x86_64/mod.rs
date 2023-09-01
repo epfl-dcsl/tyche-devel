@@ -11,8 +11,8 @@ pub mod interrupt_handlers;
 pub mod page_table_mapper;
 pub mod segments;
 pub mod syscall_handlers;
-pub mod tyche_api;
 pub mod transition;
+pub mod tyche_api;
 
 pub fn bricks_interrupt_setup() {
     bricks_init_gdt();
@@ -33,12 +33,14 @@ pub fn halt() {
 }
 
 pub struct VirtualAddr {
-    addr : VirtAddr
+    addr: VirtAddr,
 }
 
 impl VirtualAddr {
-    pub fn new(addr_u64 : u64) -> Self {
-        VirtualAddr { addr: VirtAddr::new(addr_u64) }
+    pub fn new(addr_u64: u64) -> Self {
+        VirtualAddr {
+            addr: VirtAddr::new(addr_u64),
+        }
     }
 
     pub fn as_u64(&self) -> u64 {

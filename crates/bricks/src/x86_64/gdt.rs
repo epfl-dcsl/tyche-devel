@@ -6,14 +6,23 @@ use x86_64::structures::tss::TaskStateSegment;
 use x86_64::structures::DescriptorTablePointer;
 use x86_64::VirtAddr;
 
-pub const DOUBLE_FAULT_IST_INDEX: u16 = 0;
+use crate::allocator::utils::PAGE_SIZE;
 
+pub const DOUBLE_FAULT_IST_INDEX: u16 = 0;
+pub const STACK_SWITCH_INDEX: usize = 0;
 lazy_static! {
     static ref TSS: TaskStateSegment = {
         let mut tss = TaskStateSegment::new();
-        // tss.privilege_stack_table
+        tss.privilege_stack_table[STACK_SWITCH_INDEX] = {
+            const STACK_SIZE: usize = PAGE_SIZE as usize;
+            static mut STACK: [u8; STACK_SIZE] = [0; STACK_SIZE];
+
+            let stack_start = VirtAddr::from_ptr(unsafe { &STACK });
+            let stack_end = stack_start + STACK_SIZE;
+            stack_end
+        };
         tss.interrupt_stack_table[DOUBLE_FAULT_IST_INDEX as usize] = {
-            const STACK_SIZE: usize = 4096 * 5;
+            const STACK_SIZE: usize = PAGE_SIZE as usize;
             static mut STACK: [u8; STACK_SIZE] = [0; STACK_SIZE];
 
             let stack_start = VirtAddr::from_ptr(unsafe { &STACK });
@@ -27,6 +36,8 @@ lazy_static! {
 struct Selectors {
     kernel_code_selector: SegmentSelector,
     kernel_data_selector: SegmentSelector,
+    user_code_selector: SegmentSelector,
+    user_data_selector: SegmentSelector,
     tss_selector: SegmentSelector,
 }
 
@@ -35,12 +46,17 @@ lazy_static! {
         let mut gdt = GlobalDescriptorTable::new();
         let kernel_code_selector = gdt.add_entry(Descriptor::kernel_code_segment());
         let kernel_data_selector = gdt.add_entry(Descriptor::kernel_data_segment());
+        // TODO in which order should this be
+        let user_code_selector = gdt.add_entry(Descriptor::user_code_segment());
+        let user_data_selector = gdt.add_entry(Descriptor::user_data_segment());
         let tss_selector = gdt.add_entry(Descriptor::tss_segment(&TSS));
         (
             gdt,
             Selectors {
                 kernel_code_selector,
                 kernel_data_selector,
+                user_code_selector,
+                user_data_selector,
                 tss_selector,
             },
         )

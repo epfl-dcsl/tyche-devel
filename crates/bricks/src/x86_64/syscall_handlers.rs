@@ -123,8 +123,8 @@ pub extern "C" fn bricks_brk_handler(mem: *mut c_void) -> *mut c_void {
 
 // ———————————————————————————————— Save/restore syscalls ————————————————————————————————— //
 
-use super::VirtualAddr;
 use super::tyche_api::enclave_attestation_tyche;
+use super::VirtualAddr;
 static mut msr_val: u64 = 0;
 pub fn bricks_save_syscalls() {
     let msr_lstar = x86_64::registers::model_specific::Msr::new(LSTAR as u32);
