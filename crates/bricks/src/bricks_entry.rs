@@ -16,7 +16,7 @@ pub struct BricksFrame {
 pub static mut current_frame: Option<BricksFrame> = None;
 
 extern "C" {
-    fn trusted_entry(frame: &mut BricksFrame);
+    fn trusted_entry();
 }
 
 // Called from trusted_main with same args
@@ -42,7 +42,7 @@ pub extern "C" fn bricks_trusted_main(capa_index: u64, args: *const c_void) {
 #[no_mangle]
 pub extern "C" fn bricks_trusted_entry(frame: &mut BricksFrame) {
     unsafe {
-        trusted_entry(frame);
+        trusted_entry();
     }
     exit_gate();
 }

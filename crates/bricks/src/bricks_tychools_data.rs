@@ -1,7 +1,9 @@
-use crate::{shared_buffer::{bricks_debug, BRICKS_SHARED_BUFFER, BRICKS_SHARED_BUFFER_SIZE}, allocator::page_allocator::bricks_setup_allocator, arch::transition::setup_rsp};
+use crate::allocator::page_allocator::bricks_setup_allocator;
+use crate::arch::transition::setup_rsp;
+use crate::shared_buffer::{bricks_debug, BRICKS_SHARED_BUFFER, BRICKS_SHARED_BUFFER_SIZE};
 
 // Introduced by tychools
-pub const BRICKS_INFO_SEGMENT : usize = BRICKS_SHARED_BUFFER + BRICKS_SHARED_BUFFER_SIZE;
+pub const BRICKS_INFO_SEGMENT: usize = BRICKS_SHARED_BUFFER + BRICKS_SHARED_BUFFER_SIZE;
 
 // TODO if there is something that is not u64, conversion will not work
 #[derive(Copy, Clone)]

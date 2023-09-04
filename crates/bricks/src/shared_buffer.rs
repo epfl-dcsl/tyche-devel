@@ -5,7 +5,7 @@ use crate::gate_calls::bricks_gate_call;
 
 // This is introduces by tychools
 pub const BRICKS_SHARED_BUFFER: usize = 0x300000;
-pub const BRICKS_SHARED_BUFFER_SIZE : usize = 0x2000;
+pub const BRICKS_SHARED_BUFFER_SIZE: usize = 0x2000;
 
 pub const DEBUG_TEST: u64 = 1144;
 

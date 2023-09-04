@@ -1,19 +1,16 @@
-use crate::{arch::VirtualAddr, bricks_utils::bricks_min};
 use lazy_static::lazy_static;
 
 use super::utils::PAGE_SIZE;
+use crate::arch::VirtualAddr;
+use crate::bricks_utils::bricks_min;
 
 const NUM_PAGES_MAX: usize = 4;
 static mut NUM_PAGES_DIF: usize = 0;
 static mut allocated: [bool; NUM_PAGES_MAX] = [false; NUM_PAGES_MAX];
 static mut MEM_POOL_START: u64 = 0x500000; // this is fixed by tychools
 
-lazy_static!{
-    static ref NUM_PAGES: usize = {
-        unsafe {
-            bricks_min(NUM_PAGES_DIF, NUM_PAGES_MAX)
-        }
-    };
+lazy_static! {
+    static ref NUM_PAGES: usize = { unsafe { bricks_min(NUM_PAGES_DIF, NUM_PAGES_MAX) } };
 }
 
 pub fn alloc_page() -> (bool, VirtualAddr) {

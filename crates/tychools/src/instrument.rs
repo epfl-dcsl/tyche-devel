@@ -4,10 +4,12 @@ use log::info;
 use serde::{Deserialize, Serialize};
 use serde_json::{self, Map};
 
-use crate::allocator::{PAGE_SIZE, DEFAULT_BUMP_SIZE};
+use crate::allocator::{DEFAULT_BUMP_SIZE, PAGE_SIZE};
 use crate::elf_modifier::{ModifiedELF, ModifiedSection, TychePhdrTypes};
 use crate::page_table_mapper::generate_page_tables;
-use crate::tychools_const::{BRICKS_DATA_INFO, BRICKS_DATA_INFO_SIZE, DEFAULT_MEMPOOL_PNUM, DEFAULT_STACK_PNUM};
+use crate::tychools_const::{
+    BRICKS_DATA_INFO, BRICKS_DATA_INFO_SIZE, DEFAULT_MEMPOOL_PNUM, DEFAULT_STACK_PNUM,
+};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SegmentDescriptor {

@@ -1,7 +1,6 @@
 #include <stdint.h>
 
 #include "syscall.h"
-#include "sdk_tyche_rt.h"
 #include "bricks.h"
 
 // ———————————————————————————————— Functions to do different things in trusted main  ————————————————————————————————— 
@@ -47,8 +46,8 @@ void test_attestation() {
 }
 
 void test_mm() {
-  void* next = NULL;
-  void* prev = NULL;
+  void* next = (void*)0;
+  void* prev = (void*)0;
   for(int i = 0; i < 10;i++) {
     next = bricks_malloc(100); // one page
     if(next == prev) {
@@ -62,12 +61,8 @@ void test_mm() {
 } 
 
 // ———————————————————————— Entry Point into binary ————————————————————————— //
-void trusted_entry(frame_t* frame)
+void trusted_entry()
 {
-  if (frame == NULL) {
-    return;
-  }
-  
   test_sum();
   // make_exception();
   test_attestation();

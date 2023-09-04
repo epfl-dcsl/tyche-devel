@@ -22,7 +22,7 @@ int syscall_print(char* buff) {
   return bricks_print_handler(buff);
 }
 
-// extern int bricks_attest_enclave_hadler(int nonce);
+extern int bricks_attest_enclave_handler(int nonce);
 int syscall_enclave_attestation(int nonce) {
   return bricks_attest_enclave_handler(nonce);
   SyscallArgs args;

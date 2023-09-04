@@ -23,11 +23,9 @@ RELOC=linkers/custom.ld
 
 ## —————————————————————— External Sources and Headers —————————————————————— ##
 CODE_RUNTIME=$(wildcard runtime/*.c) $(wildcard runtime/*.S)
-HDRS_RUNTIME= $(wildcard $(SDK)/include/*.h)
 
 ## ————————————————————————— Load code and headers —————————————————————————— ##
 CODE_LOAD=$(wildcard load/*.c)
-HDRS_LOAD=$(wildcard include/*.h)
 
 ## ———————————————————————— Loader code and headers ————————————————————————— ##
 CODE_LOADER=$(wildcard $(SDK)/loader/*.c) $(wildcard $(SDK)/loader/*.S)
@@ -43,12 +41,12 @@ HDRS_PTS=$(wildcard $(PTS)/include/*.h)
 
 ## —————————————————————— Application code and headers —————————————————————— ##
 CODE_APP=$(CODE_ELF64) $(CODE_PTS) $(CODE_LOADER) $(CODE_LOAD)
-HDRS_APP=$(HDRS_ELF64) $(HDRS_PTS) $(HDRS_LOADER) $(HDRS_LOAD)
+HDRS_APP=$(HDRS_ELF64) $(HDRS_PTS) $(HDRS_LOADER)
 
 ## ——————————————————————— Compilation Configuration ———————————————————————— ##
 COMMON_INCLUDES = -Iinclude -I$(CAPA_LIB)/include -I$(COMMON_LIB)/include -I$(DLL_LIB)/include -I$(SDK)/include 
 APP_INCLUDES = $(COMMON_INCLUDES) -I$(ELF64)/include -I$(PTS)/include -I$(DRIVER)/include
-
+TRT_INCLUDES = -Iinclude -I$(COMMON_LIB)/include
 ## ————————————————————— Configuration for the install —————————————————————— ##
 DISK_PATH ?= /tmp/mount/tyche/programs
 
@@ -56,9 +54,9 @@ TYCHOOLS_PATH ?= ../../../crates/tychools/
 
 ## ———————————————————————————————— Targets ————————————————————————————————— ##
 
-trt: $(CODE_TRT) $(CODE_RUNTIME) $(HDRS_TRT) $(HDRS_RUNTIME) $(RELOC)
+trt: $(CODE_TRT) $(CODE_RUNTIME) $(HDRS_TRT) $(RELOC)
 	cargo build --manifest-path $(BRICKS_PATH)/Cargo.toml -Zbuild-std=core,alloc -Zbuild-std-features=compiler-builtins-mem --release --target=x86_64-unknown-linux-gnu
-	gcc -DTYCHE_USER_SPACE=1 -T $(RELOC) -g $(COMMON_INCLUDES) -Xlinker --no-relax -nostdlib -static -o $@ $(CODE_RUNTIME) $(CODE_TRT) -L $(LIB_BRICKS_PATH) -l$(BRICKS)
+	gcc -DTYCHE_USER_SPACE=1 -T $(RELOC) -g $(TRT_INCLUDES) -Xlinker --no-relax -nostdlib -static -o $@ $(CODE_RUNTIME) $(CODE_TRT) -L $(LIB_BRICKS_PATH) -l$(BRICKS)
 
 loader: $(CODE_APP) $(HDRS_APP)
 	gcc -DTYCHE_USER_SPACE=1 -g $(APP_INCLUDES) -o $@ $(CODE_APP)

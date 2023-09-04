@@ -4,21 +4,25 @@
 #![no_std]
 #![no_main]
 
+use core::arch::global_asm;
 use core::panic::PanicInfo;
 
 pub mod allocator;
 pub mod bricks_const;
 pub mod bricks_entry;
+pub mod bricks_tychools_data;
 pub mod bricks_utils;
 pub mod gate_calls;
 pub mod interrupts;
 pub mod profiles;
 pub mod shared_buffer;
 pub mod syscalls;
-pub mod bricks_tychools_data;
 
 #[cfg(target_arch = "x86_64")]
 pub mod x86_64;
+
+// #[cfg(target_arch = "x86_64")]
+// global_asm!(include_str!("x86_64/entry.S"), options(att_syntax));
 
 #[cfg(target_arch = "x86_64")]
 pub mod arch {
