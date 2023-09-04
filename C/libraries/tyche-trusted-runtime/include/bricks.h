@@ -3,6 +3,6 @@
 
 typedef unsigned long long capa_index_t;
 // ———————————————————————————————— Functions from Bricks (testing) ————————————————————————————————— 
-extern int bricks_function(int a, int b);
+// extern int bricks_function(int a, int b);
 
 #endif

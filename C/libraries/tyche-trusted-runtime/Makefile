@@ -51,18 +51,29 @@ TYCHOOLS_PATH ?= ../../../crates/tychools/
 
 ## ———————————————————————————————— Targets ————————————————————————————————— ##
 
+trt-user: $(CODE_TRT) $(HDRS_TRT) $(RELOC)
+	RUSTFLAGS='-C link-arg=-nostartfiles' cargo build --manifest-path $(BRICKS_PATH)/Cargo.toml -Zbuild-std=core,alloc -Zbuild-std-features=compiler-builtins-mem --release --target=x86_64-unknown-linux-gnu
+	gcc --entry=user_main -DTYCHE_USER_SPACE=1 -T $(RELOC) -g $(TRT_INCLUDES) -Xlinker --no-relax -nostdlib -static -o $@ $(CODE_TRT)
+	chmod +rwx trt-user
+
 trt: $(CODE_TRT) $(HDRS_TRT) $(RELOC)
 	cargo build --manifest-path $(BRICKS_PATH)/Cargo.toml -Zbuild-std=core,alloc -Zbuild-std-features=compiler-builtins-mem --release --target=x86_64-unknown-linux-gnu
-	gcc --entry=_start -DTYCHE_USER_SPACE=1 -T $(RELOC) -g $(TRT_INCLUDES) -Xlinker --no-relax -nostdlib -static -o $@ $(CODE_TRT) -L $(LIB_BRICKS_PATH) -l$(BRICKS)
+	gcc --entry=_start -DTYCHE_USER_SPACE=1 -T $(RELOC) -g $(TRT_INCLUDES) -Xlinker --no-relax -nostdlib -static -o $@ $(CODE_TRT) -L $(LIB_BRICKS_PATH) -l$(#BRICKS)
 
 loader: $(CODE_APP) $(HDRS_APP)
 	gcc -DTYCHE_USER_SPACE=1 -g $(APP_INCLUDES) -o $@ $(CODE_APP)
 
-test-trt: loader trt
+test-trt : loader trt-user
 	cargo -C $(TYCHOOLS_PATH) install --path . --locked
-	tychools instrument -s manifests/config.json
+	tychools instrument -s manifests/user_kernel.json
 	chmod +x test-trt
-	rm -rf loader trt
+	rm -rf loader trt-user
+
+# test-trt: loader trt
+# 	cargo -C $(TYCHOOLS_PATH) install --path . --locked
+# 	tychools instrument -s manifests/config.json
+# 	chmod +x test-trt
+# 	rm -rf loader trt
 
 install_disk: all
 	mkdir -p $(DISK_PATH)

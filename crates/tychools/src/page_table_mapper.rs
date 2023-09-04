@@ -33,6 +33,14 @@ fn translate_flags(flags: u32, segtype: u32) -> PtFlag {
     ptflags
 }
 
+pub fn allign_address(addr : usize) -> usize {
+    addr / PAGE_SIZE * PAGE_SIZE
+}
+
+pub fn is_alligned(addr : usize) -> bool {
+    allign_address(addr) == addr
+}
+
 #[allow(dead_code)]
 pub fn generate_page_tables(
     melf: &ModifiedELF,
@@ -45,6 +53,10 @@ pub fn generate_page_tables(
         let segtype = ph.program_header.p_type(Endianness::Little);
         if !ModifiedSegment::is_loadable(segtype) {
             continue;
+        }
+        let virt_addr = ph.program_header.p_vaddr(Endianness::Little) as usize;
+        if !is_alligned(virt_addr) {
+            memsz+=PAGE_SIZE;
         }
         let mem = ph.program_header.p_memsz(Endianness::Little) as usize;
         let size = align_address(mem);
@@ -73,13 +85,21 @@ pub fn generate_page_tables(
             continue;
         }
         let mem_size = ph.program_header.p_memsz(Endianness::Little) as usize;
-        let vaddr = ph.program_header.p_vaddr(Endianness::Little) as usize;
-        let virt = HostVirtAddr::new(vaddr);
-        let size = align_address(mem_size);
+        let mut vaddr = ph.program_header.p_vaddr(Endianness::Little) as usize;
+        let mut virt = HostVirtAddr::new(vaddr);
+        let mut size = align_address(mem_size);
         let flags = translate_flags(ph.program_header.p_flags(Endianness::Little), segtype);
-        log::debug!("virt addr {:#x}", vaddr);
+
+        if !is_alligned(vaddr) {
+            vaddr = allign_address(vaddr);
+            virt = HostVirtAddr::new(vaddr);
+            size+=PAGE_SIZE;
+        }
+        
+        log::debug!("virt addr {:#x}", virt.as_u64());
         log::debug!("phys addr {:#x}", curr_phys);
         log::debug!("size {:#x}", size);
+        log::debug!("flags {:#x}", flags);
         mapper.map_range(&allocator, virt, HostPhysAddr::new(curr_phys), size, flags);
         curr_phys += size;
     }

@@ -43,7 +43,7 @@ pub extern "C" fn bricks_trusted_main(capa_index: u64, args: *const c_void) {
 #[no_mangle]
 pub extern "C" fn bricks_trusted_entry(frame: &mut BricksFrame) {
     unsafe {
-        trusted_entry();
+        // trusted_entry();
     }
     exit_gate();
 }

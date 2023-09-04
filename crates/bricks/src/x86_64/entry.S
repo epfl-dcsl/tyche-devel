@@ -41,8 +41,8 @@ asm_call_gate:
     ret
 
 
-.globl _start
-_start:
+.globl bricks_start
+bricks_start:
   movq %r11, %rsi
   callq bricks_trusted_main
   // Should never return here, call exit if we do.

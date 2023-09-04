@@ -14,7 +14,7 @@ features = ["spin_no_std"]
 
 [lib]
 name = "bricks"
-crate-type = ["staticlib"]
+crate-type = ["bin"]
 
 [profile.dev]
 panic = "abort"

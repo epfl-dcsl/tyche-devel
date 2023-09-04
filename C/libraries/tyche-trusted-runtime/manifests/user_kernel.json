@@ -1,0 +1,40 @@
+{
+    "untrusted_bin": {
+      "path": "loader"
+    },
+    "kern_bin": {
+      "path":"../../../target/x86_64-unknown-linux-gnu/release/bricks",
+      "ops":[
+        {
+          "AddSegment":{
+            "size":8192,
+            "tpe":"KernelStackConf",
+            "write":true,"exec":false
+          }
+        },
+        {
+          "AddSegment":{
+            "start": 3145728, 
+            "size":8192,
+            "tpe":"KernelShared",
+            "write":true,
+            "exec":false
+          }
+        }
+      ],
+      "bricks_info" : {
+        "memory_pool" : true,
+        "memory_pool_size" : 4,
+        "user_stack" : true
+      }
+    },
+    "generate_pts": true,
+    "map_page_tables" : {
+      "map" : true
+    },
+    "user_bin" : {
+        "path" : "trt-user"
+    },
+    "output": "test-trt"
+  }
+  

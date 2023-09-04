@@ -28,7 +28,8 @@ void make_exception() {
 }
 
 void call_bricks(int a, int b) {
-  int x = bricks_function(a,b);
+  // int x = bricks_function(a,b);
+  int x = 5;
   syscall_write((char*)&x, sizeof(x));
 }
 
@@ -61,7 +62,7 @@ void test_mm() {
 } 
 
 // ———————————————————————— Entry Point into binary ————————————————————————— //
-void trusted_entry()
+void user_main()
 {
   test_sum();
   // make_exception();
@@ -73,3 +74,16 @@ void trusted_entry()
 
   //asm volatile("cli\n\t" : : : );
 }
+
+// void trusted_entry()
+// {
+//   test_sum();
+//   // make_exception();
+//   test_attestation();
+//   test_mm();
+//   syscall_print("Tyche");  
+//   // TODO call the user
+//   // __asm__ volatile("syscall");
+
+//   //asm volatile("cli\n\t" : : : );
+// }

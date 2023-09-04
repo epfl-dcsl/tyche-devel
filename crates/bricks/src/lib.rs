@@ -4,7 +4,7 @@
 #![no_std]
 #![no_main]
 
-use core::arch::global_asm;
+use core::arch::{asm,global_asm};
 use core::panic::PanicInfo;
 
 pub mod allocator;
@@ -35,6 +35,17 @@ pub mod riscv;
 #[no_mangle]
 pub extern "C" fn bricks_function(a: u32, b: u32) -> u32 {
     a + b
+}
+
+extern "C" {
+    fn bricks_start();
+}
+#[no_mangle]
+pub extern "C" fn _start() -> ! {
+    unsafe {
+        bricks_start();
+    }
+    panic!("Panic: shouldn't coem to the end of _start")
 }
 
 #[panic_handler]
