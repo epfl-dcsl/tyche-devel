@@ -4,9 +4,10 @@ use log::info;
 use serde::{Deserialize, Serialize};
 use serde_json::{self, Map};
 
-use crate::allocator::PAGE_SIZE;
+use crate::allocator::{PAGE_SIZE, DEFAULT_BUMP_SIZE};
 use crate::elf_modifier::{ModifiedELF, ModifiedSection, TychePhdrTypes};
 use crate::page_table_mapper::generate_page_tables;
+use crate::tychools_const::{BRICKS_DATA_INFO, BRICKS_DATA_INFO_SIZE, DEFAULT_MEMPOOL_PNUM, DEFAULT_STACK_PNUM};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SegmentDescriptor {
@@ -186,47 +187,44 @@ pub fn parse_binary(binary: &BinaryInstrumentation) -> Box<ModifiedELF> {
     }
 
     // Apply Bricks info
-    let DEF_PAGE_NUM: u64 = 4;
-    let DEF_PAGE_STACK: u64 = 2;
     if let Some(bricks_info) = &binary.bricks_info {
         log::debug!("Bricks info!");
-        let mut virt_addr: u64 = 0x300000 + 0x3000; // fixed for now, after shared, segment
-        let virt_addr_info: u64 = virt_addr - 0x1000;
+        let mut virt_addr: u64 = BRICKS_DATA_INFO + BRICKS_DATA_INFO_SIZE;
+        let virt_addr_info: u64 = BRICKS_DATA_INFO;
         let mut bricks_data = BricksData {
             memory_pool_size: 0,
             memory_pool_start: 0,
             user_stack_start: 0,
         };
+        let rights = object::elf::PF_R | object::elf::PF_W;
+        // if there is requirement for memory pool, add it
         if bricks_info.memory_pool {
-            let byte_size: u64;
+            bricks_data.memory_pool_start = virt_addr;
             if let Some(sz) = bricks_info.memory_pool_size {
-                byte_size = sz * PAGE_SIZE as u64;
                 bricks_data.memory_pool_size = sz;
             } else {
-                byte_size = DEF_PAGE_NUM * PAGE_SIZE as u64;
-                bricks_data.memory_pool_size = DEF_PAGE_NUM;
+                bricks_data.memory_pool_size = DEFAULT_MEMPOOL_PNUM;
             }
-            bricks_data.memory_pool_start = virt_addr;
-            let rights = object::elf::PF_R | object::elf::PF_W;
+            let byte_size = bricks_data.memory_pool_size * PAGE_SIZE as u64;
             elf.append_nodata_segment(
-                Some(virt_addr),
+                Some(virt_addr as u64),
                 TychePhdrTypes::KernelConfidential as u32,
                 rights,
                 byte_size as usize,
             );
             virt_addr += byte_size;
         }
+        // if there is requirement for stack, add it
         if bricks_info.user_stack {
-            let user_stack_size = DEF_PAGE_STACK * PAGE_SIZE as u64;
             bricks_data.user_stack_start = virt_addr;
-            let rights = object::elf::PF_R | object::elf::PF_W;
             elf.append_nodata_segment(
                 Some(virt_addr),
                 TychePhdrTypes::UserConfidential as u32,
                 rights,
-                user_stack_size as usize,
+                DEFAULT_STACK_PNUM as usize * PAGE_SIZE,
             );
         }
+        // converting Bricks data to vector for segment
         let vec_data: Vec<u8> = bricks_data.to_le_bytes();
         elf.append_data_segment(
             Some(virt_addr_info),

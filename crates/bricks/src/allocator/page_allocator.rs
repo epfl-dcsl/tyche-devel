@@ -1,17 +1,23 @@
-use crate::arch::VirtualAddr;
+use crate::{arch::VirtualAddr, bricks_utils::bricks_min};
+use lazy_static::lazy_static;
 
-const NUM_PAGES: usize = 4;
-static mut NUM_PAGES_DIF: usize = 4;
-static mut allocated: [bool; NUM_PAGES] = [false; NUM_PAGES];
-const PAGE_SIZE: u64 = 0x1000;
+use super::utils::PAGE_SIZE;
+
+const NUM_PAGES_MAX: usize = 4;
+static mut NUM_PAGES_DIF: usize = 0;
+static mut allocated: [bool; NUM_PAGES_MAX] = [false; NUM_PAGES_MAX];
 static mut MEM_POOL_START: u64 = 0x500000; // this is fixed by tychools
 
+lazy_static!{
+    static ref NUM_PAGES: usize = {
+        unsafe {
+            bricks_min(NUM_PAGES_DIF, NUM_PAGES_MAX)
+        }
+    };
+}
+
 pub fn alloc_page() -> (bool, VirtualAddr) {
-    let np: usize;
-    unsafe {
-        np = NUM_PAGES_DIF;
-    }
-    for i in 0..np {
+    for i in 0..*NUM_PAGES {
         unsafe {
             if !allocated[i] {
                 allocated[i] = true;
@@ -27,11 +33,7 @@ pub fn alloc_page() -> (bool, VirtualAddr) {
 }
 
 pub fn alloc_page_back() -> (bool, VirtualAddr) {
-    let np: usize;
-    unsafe {
-        np = NUM_PAGES_DIF;
-    }
-    for i in (0..np).rev() {
+    for i in (0..*NUM_PAGES).rev() {
         unsafe {
             if !allocated[i] {
                 allocated[i] = true;
@@ -50,31 +52,27 @@ fn check_allignment(addr: &VirtualAddr) -> bool {
     (addr.as_u64() % 0x1000) == 0
 }
 
-pub fn bricks_set_mem_pool_start(start: u64, num_pages: u64) {
+pub fn bricks_setup_allocator(start: u64, num_pages: u64) {
     unsafe {
         MEM_POOL_START = start;
         NUM_PAGES_DIF = num_pages as usize;
     }
 }
 
-fn calc_index(addr: &VirtualAddr) -> u64 {
-    unsafe { (addr.as_u64() - MEM_POOL_START) / PAGE_SIZE }
+fn calc_index(addr: &VirtualAddr) -> usize {
+    unsafe { (addr.as_u64() as usize - MEM_POOL_START as usize) / PAGE_SIZE as usize }
 }
 
 pub fn free_page(addr: &VirtualAddr) -> bool {
-    let np: usize;
-    unsafe {
-        np = NUM_PAGES_DIF;
-    }
     if !check_allignment(addr) {
         return false;
     }
     let index = calc_index(addr);
-    if index >= (np as u64) {
+    if index >= (*NUM_PAGES) {
         return false;
     }
     unsafe {
-        allocated[index as usize] = false;
+        allocated[index] = false;
     }
     true
 }

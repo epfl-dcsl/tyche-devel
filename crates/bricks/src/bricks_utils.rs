@@ -26,3 +26,7 @@ pub fn bricks_strlen(str: *mut c_char) -> u32 {
     }
     cnt_chars
 }
+
+pub fn bricks_min(a : usize, b : usize) -> usize{
+    if a > b {b} else {a}
+}

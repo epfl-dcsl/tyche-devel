@@ -15,6 +15,7 @@ pub mod interrupts;
 pub mod profiles;
 pub mod shared_buffer;
 pub mod syscalls;
+pub mod bricks_tychools_data;
 
 #[cfg(target_arch = "x86_64")]
 pub mod x86_64;

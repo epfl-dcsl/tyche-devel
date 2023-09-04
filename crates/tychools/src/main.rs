@@ -4,6 +4,7 @@ mod elf_modifier;
 mod instrument;
 mod loader;
 mod page_table_mapper;
+mod tychools_const;
 
 use std::path::PathBuf;
 

@@ -13,7 +13,7 @@ impl UserAllocator {
     pub fn malloc(&mut self, num_bytes: u64) -> VirtualAddr {
         let num_p = num_pages(num_bytes);
         let prev_virt_size = self.virt_size;
-        for i in 0..num_p {
+        for _ in 0..num_p {
             let (res, addr) = page_allocator::alloc_page();
             if res {
                 arch::page_table_mapper::change_access(&addr, USER_ACCESS);
