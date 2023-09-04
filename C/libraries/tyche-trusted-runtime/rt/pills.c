@@ -1,6 +1,3 @@
-
-
-
 void blue_pill(unsigned long user_rip, unsigned long user_rsp)
 {
   asm volatile(

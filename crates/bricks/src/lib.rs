@@ -21,8 +21,8 @@ pub mod syscalls;
 #[cfg(target_arch = "x86_64")]
 pub mod x86_64;
 
-// #[cfg(target_arch = "x86_64")]
-// global_asm!(include_str!("x86_64/entry.S"), options(att_syntax));
+#[cfg(target_arch = "x86_64")]
+global_asm!(include_str!("x86_64/entry.S"), options(att_syntax));
 
 #[cfg(target_arch = "x86_64")]
 pub mod arch {

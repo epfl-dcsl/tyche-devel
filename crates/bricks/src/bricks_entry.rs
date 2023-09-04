@@ -1,6 +1,7 @@
 use core::arch::asm;
 use core::ffi::c_void;
 
+use crate::arch::syscall_handlers::bricks_print_handler;
 use crate::arch::{bricks_init_transition, bricks_interrupt_setup, bricks_syscals_setup};
 use crate::bricks_tychools_data::get_tychools_info;
 use crate::gate_calls::exit_gate;

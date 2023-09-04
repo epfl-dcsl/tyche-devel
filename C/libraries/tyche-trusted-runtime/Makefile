@@ -21,9 +21,6 @@ CODE_TRT=$(wildcard rt/*.c) $(wildcard rt/*.S)
 HDRS_TRT=$(wildcard include/*.h)
 RELOC=linkers/custom.ld
 
-## —————————————————————— External Sources and Headers —————————————————————— ##
-CODE_RUNTIME=$(wildcard runtime/*.c) $(wildcard runtime/*.S)
-
 ## ————————————————————————— Load code and headers —————————————————————————— ##
 CODE_LOAD=$(wildcard load/*.c)
 
@@ -54,9 +51,9 @@ TYCHOOLS_PATH ?= ../../../crates/tychools/
 
 ## ———————————————————————————————— Targets ————————————————————————————————— ##
 
-trt: $(CODE_TRT) $(CODE_RUNTIME) $(HDRS_TRT) $(RELOC)
+trt: $(CODE_TRT) $(HDRS_TRT) $(RELOC)
 	cargo build --manifest-path $(BRICKS_PATH)/Cargo.toml -Zbuild-std=core,alloc -Zbuild-std-features=compiler-builtins-mem --release --target=x86_64-unknown-linux-gnu
-	gcc -DTYCHE_USER_SPACE=1 -T $(RELOC) -g $(TRT_INCLUDES) -Xlinker --no-relax -nostdlib -static -o $@ $(CODE_RUNTIME) $(CODE_TRT) -L $(LIB_BRICKS_PATH) -l$(BRICKS)
+	gcc --entry=_start -DTYCHE_USER_SPACE=1 -T $(RELOC) -g $(TRT_INCLUDES) -Xlinker --no-relax -nostdlib -static -o $@ $(CODE_TRT) -L $(LIB_BRICKS_PATH) -l$(BRICKS)
 
 loader: $(CODE_APP) $(HDRS_APP)
 	gcc -DTYCHE_USER_SPACE=1 -g $(APP_INCLUDES) -o $@ $(CODE_APP)

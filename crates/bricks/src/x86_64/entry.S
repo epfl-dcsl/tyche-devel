@@ -43,9 +43,8 @@ asm_call_gate:
 
 .globl _start
 _start:
-  hlt
   movq %r11, %rsi
-  callq trusted_main
+  callq bricks_trusted_main
   // Should never return here, call exit if we do.
   movq $1, %rax
   vmcall
