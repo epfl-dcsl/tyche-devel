@@ -268,6 +268,10 @@ impl ModifiedELF {
             self.append_other_segment(seg);
         }
         // Replace the entry point of the current.
+        let y = self.header.e_entry(DENDIAN);
+        log::debug!("Entry of user binary {:#x}", y);
+        let x = other.header.e_entry(DENDIAN);
+        log::debug!("Entry of the kernel binary {:#x}",x);
         self.header.e_entry = other.header.e_entry;
     }
 

@@ -64,6 +64,7 @@ impl ContextData {
     }
 
     pub fn restore_partial(&self, vcpu: &mut ActiveVmcs<'static>) {
+        log::trace!("Switching info cr3 : {:#x}, rip : {:#x}, rsp : {:#x}", self.cr3, self.rip as u64, self.rsp as u64);
         vcpu.set_cr(ControlRegister::Cr3, self.cr3);
         vcpu.set(Register::Rip, self.rip as u64);
         vcpu.set(Register::Rsp, self.rsp as u64);

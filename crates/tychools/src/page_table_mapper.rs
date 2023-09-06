@@ -55,9 +55,9 @@ pub fn generate_page_tables(
             continue;
         }
         let virt_addr = ph.program_header.p_vaddr(Endianness::Little) as usize;
-        if !is_alligned(virt_addr) {
-            memsz+=PAGE_SIZE;
-        }
+        // if !is_alligned(virt_addr) {
+        //     memsz+=PAGE_SIZE;
+        // }
         let mem = ph.program_header.p_memsz(Endianness::Little) as usize;
         let size = align_address(mem);
         memsz += size;
@@ -90,11 +90,14 @@ pub fn generate_page_tables(
         let mut size = align_address(mem_size);
         let flags = translate_flags(ph.program_header.p_flags(Endianness::Little), segtype);
 
-        if !is_alligned(vaddr) {
-            vaddr = allign_address(vaddr);
-            virt = HostVirtAddr::new(vaddr);
-            size+=PAGE_SIZE;
-        }
+        vaddr = allign_address(vaddr);
+        virt = HostVirtAddr::new(vaddr);
+
+        // if !is_alligned(vaddr) {
+        //     vaddr = allign_address(vaddr);
+        //     virt = HostVirtAddr::new(vaddr);
+        //     size+=PAGE_SIZE;
+        // }
         
         log::debug!("virt addr {:#x}", virt.as_u64());
         log::debug!("phys addr {:#x}", curr_phys);

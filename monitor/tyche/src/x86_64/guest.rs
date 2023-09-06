@@ -488,6 +488,7 @@ fn handle_exit(
             }
         }
         VmxExitReason::Exception => {
+            log::trace!("The vcpu {:x?}", vs.vcpu);
             match vs.vcpu.interrupt_info() {
                 Ok(Some(exit)) => {
                     // The domain exited, so it shouldn't be able to handle it.

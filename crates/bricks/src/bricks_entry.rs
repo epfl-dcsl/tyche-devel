@@ -45,6 +45,7 @@ pub extern "C" fn bricks_trusted_entry(frame: &mut BricksFrame) {
     unsafe {
         // trusted_entry();
     }
+    unsafe {asm!("hlt");}
     exit_gate();
 }
 
