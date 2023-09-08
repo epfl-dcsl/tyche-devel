@@ -1,8 +1,6 @@
-use core::arch::asm;
 use core::ffi::c_void;
-
 use crate::arch::syscall_handlers::bricks_print_handler;
-use crate::arch::{bricks_init_transition, bricks_interrupt_setup, bricks_syscals_setup};
+use crate::arch::{bricks_init_transition, bricks_interrupt_setup, bricks_syscals_setup, self};
 use crate::bricks_tychools_data::get_tychools_info;
 use crate::gate_calls::exit_gate;
 use crate::shared_buffer::bricks_debug;
@@ -36,6 +34,7 @@ pub extern "C" fn bricks_trusted_main(capa_index: u64, args: *const c_void) {
     syscall_setup();
     tranistion_setup();
     // transition_into_user_mode();
+    exit_gate();
     bricks_trusted_entry(&mut br_frame);
 }
 
@@ -45,7 +44,7 @@ pub extern "C" fn bricks_trusted_entry(frame: &mut BricksFrame) {
     unsafe {
         // trusted_entry();
     }
-    unsafe {asm!("hlt");}
+    // unsafe {asm!("hlt");}
     exit_gate();
 }
 
