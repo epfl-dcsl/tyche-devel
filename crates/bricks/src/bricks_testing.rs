@@ -1,6 +1,4 @@
-use crate::arch::syscall_handlers::{
-    bricks_attest_enclave_handler, bricks_print_handler, bricks_sbrk_handler,
-};
+use crate::arch::syscall_handlers::{bricks_attest_enclave_handler, bricks_sbrk_handler};
 use crate::bricks_utils::bricks_print;
 
 extern "C" {

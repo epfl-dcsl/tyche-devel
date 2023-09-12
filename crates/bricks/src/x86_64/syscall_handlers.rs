@@ -67,21 +67,18 @@ pub extern "C" fn bricks_syscall_handler() {
 // ———————————————————————————————— Helping handlers (logic for handlers) ————————————————————————————————— //
 
 // TODO add pointer to the structure where to write result
-#[no_mangle]
-pub extern "C" fn bricks_attest_enclave_handler(nonce: u32) -> u64 {
+pub fn bricks_attest_enclave_handler(nonce: u32) -> u64 {
     enclave_attestation_tyche(nonce)
 }
 
 use crate::gate_calls::{bricks_gate_call, exit_gate};
 
-#[no_mangle]
-pub extern "C" fn bricks_gate_call_handler() -> u64 {
+pub fn bricks_gate_call_handler() -> u64 {
     bricks_write_ret_code(syscalls::GATE_CALL as u64);
     bricks_gate_call()
 }
 
-#[no_mangle]
-pub extern "C" fn bricks_print_handler(buff: *mut c_char) -> u64 {
+pub fn bricks_print_handler(buff: *mut c_char) -> u64 {
     bricks_write_ret_code(syscalls::PRINT as u64);
     let shared_buff_str = bricks_get_shared_pointer(RET_CODE_BYTES);
     let cnt_chars = bricks_strlen(buff);
@@ -90,8 +87,7 @@ pub extern "C" fn bricks_print_handler(buff: *mut c_char) -> u64 {
     SUCCESS
 }
 
-#[no_mangle]
-pub extern "C" fn bricks_write_shared_handler(buff: *mut c_char, cnt: u32) -> u64 {
+pub fn bricks_write_shared_handler(buff: *mut c_char, cnt: u32) -> u64 {
     bricks_write_ret_code(syscalls::WRITE_SHARED as u64);
     let shared_buff_str = bricks_get_shared_pointer(RET_CODE_BYTES);
     bricks_memcpy(shared_buff_str, buff, cnt);
@@ -99,20 +95,17 @@ pub extern "C" fn bricks_write_shared_handler(buff: *mut c_char, cnt: u32) -> u6
     SUCCESS
 }
 
-#[no_mangle]
-pub extern "C" fn bricks_read_shared_handler(buff: *mut c_char, cnt: u32) -> u64 {
+pub fn bricks_read_shared_handler(buff: *mut c_char, cnt: u32) -> u64 {
     let shared_buff_str = bricks_get_shared_pointer(RET_CODE_BYTES);
     bricks_memcpy(shared_buff_str, buff, cnt);
     SUCCESS
 }
 
-#[no_mangle]
-pub extern "C" fn bricks_sbrk_handler(num_bytes: usize) -> u64 {
+pub fn bricks_sbrk_handler(num_bytes: usize) -> u64 {
     alloc_user(num_bytes as u64)
 }
 
-#[no_mangle]
-pub extern "C" fn bricks_brk_handler(mem: *mut c_void) -> u64 {
+pub fn bricks_brk_handler(mem: *mut c_void) -> u64 {
     free_user(VirtualAddr::new(mem as u64))
 }
 

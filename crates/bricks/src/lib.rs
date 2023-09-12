@@ -36,14 +36,14 @@ pub mod arch {
 #[cfg(target_arch = "riscv64")]
 pub mod riscv;
 
-#[no_mangle]
-pub extern "C" fn bricks_function(a: u32, b: u32) -> u32 {
+pub fn bricks_function(a: u32, b: u32) -> u32 {
     a + b
 }
 
 extern "C" {
     fn bricks_start();
 }
+
 #[no_mangle]
 pub extern "C" fn _start() -> ! {
     unsafe {

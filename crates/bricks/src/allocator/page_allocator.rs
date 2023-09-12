@@ -1,26 +1,25 @@
-use lazy_static::lazy_static;
+use core::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
 use super::utils::PAGE_SIZE;
 use crate::arch::VirtualAddr;
 use crate::bricks_utils::bricks_min;
 
 const NUM_PAGES_MAX: usize = 4;
-static mut NUM_PAGES_DIF: usize = 0;
+static NUM_PAGES: AtomicUsize = AtomicUsize::new(0);
 static mut allocated: [bool; NUM_PAGES_MAX] = [false; NUM_PAGES_MAX];
-static mut MEM_POOL_START: u64 = 0x500000; // this is fixed by tychools
-
-lazy_static! {
-    static ref NUM_PAGES: usize = { unsafe { bricks_min(NUM_PAGES_DIF, NUM_PAGES_MAX) } };
-}
+static MEM_POOL_START: AtomicU64 = AtomicU64::new(0);
 
 pub fn alloc_page() -> (bool, VirtualAddr) {
-    for i in 0..*NUM_PAGES {
+    let num_pages = NUM_PAGES.load(Ordering::Relaxed);
+    for i in 0..num_pages {
         unsafe {
             if !allocated[i] {
                 allocated[i] = true;
                 return (
                     true,
-                    VirtualAddr::new(MEM_POOL_START + (i as u64) * PAGE_SIZE),
+                    VirtualAddr::new(
+                        MEM_POOL_START.load(Ordering::Relaxed) + (i as u64) * PAGE_SIZE,
+                    ),
                 );
             }
         }
@@ -30,13 +29,16 @@ pub fn alloc_page() -> (bool, VirtualAddr) {
 }
 
 pub fn alloc_page_back() -> (bool, VirtualAddr) {
-    for i in (0..*NUM_PAGES).rev() {
+    let num_pages = NUM_PAGES.load(Ordering::Relaxed);
+    for i in (0..num_pages).rev() {
         unsafe {
             if !allocated[i] {
                 allocated[i] = true;
                 return (
                     true,
-                    VirtualAddr::new(MEM_POOL_START + (i as u64) * PAGE_SIZE),
+                    VirtualAddr::new(
+                        MEM_POOL_START.load(Ordering::Relaxed) + (i as u64) * PAGE_SIZE,
+                    ),
                 );
             }
         }
@@ -50,14 +52,15 @@ fn check_allignment(addr: &VirtualAddr) -> bool {
 }
 
 pub fn bricks_setup_allocator(start: u64, num_pages: u64) {
-    unsafe {
-        MEM_POOL_START = start;
-        NUM_PAGES_DIF = num_pages as usize;
-    }
+    MEM_POOL_START.store(start, Ordering::Relaxed);
+    NUM_PAGES.store(
+        bricks_min(num_pages as usize, NUM_PAGES_MAX),
+        Ordering::Relaxed,
+    );
 }
 
 fn calc_index(addr: &VirtualAddr) -> usize {
-    unsafe { (addr.as_u64() as usize - MEM_POOL_START as usize) / PAGE_SIZE as usize }
+    (addr.as_u64() - MEM_POOL_START.load(Ordering::Relaxed)) as usize / PAGE_SIZE as usize
 }
 
 pub fn free_page(addr: &VirtualAddr) -> bool {
@@ -65,7 +68,8 @@ pub fn free_page(addr: &VirtualAddr) -> bool {
         return false;
     }
     let index = calc_index(addr);
-    if index >= (*NUM_PAGES) {
+    let num_pages = NUM_PAGES.load(Ordering::Relaxed);
+    if index >= (num_pages) {
         return false;
     }
     unsafe {

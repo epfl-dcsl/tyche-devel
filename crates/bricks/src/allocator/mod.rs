@@ -1,7 +1,7 @@
 use self::bricks_allocator::{BricksAllocator, NUM_PAGES};
 use self::user_allocator::UserAllocator;
 use crate::arch::VirtualAddr;
-// TODO implement trait for VirtualAddr
+
 pub mod bricks_allocator;
 pub mod page_allocator;
 pub mod user_allocator;

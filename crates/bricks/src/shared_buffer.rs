@@ -9,8 +9,7 @@ pub const BRICKS_SHARED_BUFFER_SIZE: usize = 0x2000;
 
 pub const DEBUG_TEST: u64 = 1144;
 
-#[no_mangle]
-pub extern "C" fn bricks_get_default_shared_buffer() -> *const c_void {
+pub fn bricks_get_default_shared_buffer() -> *const c_void {
     BRICKS_SHARED_BUFFER as *const c_void
 }
 
