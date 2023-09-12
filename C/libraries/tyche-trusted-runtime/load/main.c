@@ -3,6 +3,7 @@
 
 // ———————————————————————————————— Types ————————————————————————————————— //
 typedef unsigned long long ret_code_t;
+typedef unsigned long long num_bytes_t;
 #define PRINT 1001
 #define GATE_CALL 1002
 #define WRITE 1003
@@ -75,8 +76,14 @@ int main(int argc, char* argv[])
         break;
       case WRITE:
         LOG("WRITE CALL");
-        int* shared = (int*)(((char*)find_default_shared(&enclave)) + RET_CODE_BYTES);
-        LOG("SHARED is %d", *shared);
+        num_bytes_t num_bytes = *(num_bytes_t*)((char*)shared + RET_CODE_BYTES); 
+        char* data = (char*)shared + RET_CODE_BYTES + sizeof(num_bytes_t);
+        LOG("Data written in write call is");
+        while(num_bytes > 0) {
+          LOG("%02x", *data);
+          data++;
+          num_bytes--;
+        }
         break;
       case EXCEPTION_CONST:
         LOG("Enclave produced exception, exiting...");

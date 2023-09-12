@@ -8,8 +8,7 @@ use crate::profiles::check_syscalls_kill;
 use crate::shared_buffer::{bricks_get_shared_pointer, bricks_write_ret_code};
 use crate::syscalls;
 // ———————————————————————————————— Main syscall handler ————————————————————————————————— //
-#[no_mangle]
-pub extern "C" fn bricks_syscall_handler() {
+pub fn bricks_syscall_handler() {
     if check_syscalls_kill() {
         exit_gate();
     }
@@ -89,15 +88,17 @@ pub fn bricks_print_handler(buff: *mut c_char) -> u64 {
 
 pub fn bricks_write_shared_handler(buff: *mut c_char, cnt: u32) -> u64 {
     bricks_write_ret_code(syscalls::WRITE_SHARED as u64);
-    let shared_buff_str = bricks_get_shared_pointer(RET_CODE_BYTES);
-    bricks_memcpy(shared_buff_str, buff, cnt);
+    let shared_buff_num_bytes = bricks_get_shared_pointer(RET_CODE_BYTES) as * mut u64;
+    unsafe {*shared_buff_num_bytes = cnt as u64;}
+    let shared_buff_data = bricks_get_shared_pointer(RET_CODE_BYTES + (u64::BITS as u64) / 8);
+    bricks_memcpy(shared_buff_data, buff, cnt);
     bricks_gate_call();
     SUCCESS
 }
 
 pub fn bricks_read_shared_handler(buff: *mut c_char, cnt: u32) -> u64 {
-    let shared_buff_str = bricks_get_shared_pointer(RET_CODE_BYTES);
-    bricks_memcpy(shared_buff_str, buff, cnt);
+    let shared_buff_data = bricks_get_shared_pointer(RET_CODE_BYTES);
+    bricks_memcpy(buff, shared_buff_data, cnt);
     SUCCESS
 }
 
