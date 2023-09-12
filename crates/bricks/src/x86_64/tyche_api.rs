@@ -41,7 +41,7 @@ pub fn call_tyche(args: &mut TycheCallArgs) {
 const ENCLAVE_ATTESTATION: usize = 14;
 const CALC_REPORT: usize = 0;
 const READ_REPORT: usize = 1;
-pub fn enclave_attestation_tyche(nonce: u32) -> u32 {
+pub fn enclave_attestation_tyche(nonce: u32) -> u64 {
     let mut call_args = TycheCallArgs::default();
     call_args.vmmcall = ENCLAVE_ATTESTATION;
     call_args.arg_1 = nonce as usize;

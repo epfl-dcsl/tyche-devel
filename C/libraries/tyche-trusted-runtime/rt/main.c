@@ -27,20 +27,6 @@ void make_exception() {
   // int_exception();
 }
 
-void call_bricks(int a, int b) {
-  // int x = bricks_function(a,b);
-  int x = 5;
-  syscall_write((char*)&x, sizeof(x));
-}
-
-void test_sum() {
-  const int num_of_calls = 10;
-  for(int i = 0; i < num_of_calls;i++) {
-    call_bricks(2*i, 3*i);
-    // syscall_gate_call();
-  }
-}
-
 void test_attestation() {
   int nonce = 0x123;
   syscall_enclave_attestation(nonce);
@@ -64,26 +50,10 @@ void test_mm() {
 // ———————————————————————— Entry Point into binary ————————————————————————— //
 void user_main()
 {
-  test_sum();
   // make_exception();
   test_attestation();
   test_mm();
   syscall_print("Tyche");  
+
   // TODO call the user
-  // __asm__ volatile("syscall");
-
-  //asm volatile("cli\n\t" : : : );
 }
-
-// void trusted_entry()
-// {
-//   test_sum();
-//   // make_exception();
-//   test_attestation();
-//   test_mm();
-//   syscall_print("Tyche");  
-//   // TODO call the user
-//   // __asm__ volatile("syscall");
-
-//   //asm volatile("cli\n\t" : : : );
-// }

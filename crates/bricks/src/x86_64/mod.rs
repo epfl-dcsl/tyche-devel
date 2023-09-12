@@ -24,8 +24,8 @@ pub fn bricks_syscals_setup() {
     bricks_syscalls_init();
 }
 
-pub fn bricks_init_transition() {
-    x86_64_transition_setup();
+pub fn bricks_transition_setup(user_rip: u64, user_rsp: u64) {
+    x86_64_transition_setup(user_rip, user_rsp);
 }
 
 pub fn halt() {

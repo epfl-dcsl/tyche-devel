@@ -1,5 +1,7 @@
 use core::ffi::c_char;
 
+use crate::arch::syscall_handlers::bricks_print_handler;
+
 pub fn bricks_memcpy(dst: *mut c_char, src: *mut c_char, cnt: u32) {
     let mut dst_cp = dst;
     let mut src_cp = src;
@@ -33,4 +35,16 @@ pub fn bricks_min(a: usize, b: usize) -> usize {
     } else {
         a
     }
+}
+
+const ARR_SZ: usize = 256;
+pub fn bricks_print(str_print: &'static str) {
+    let mut char_arr: [u8; ARR_SZ] = [0; ARR_SZ];
+    let mut i: usize = 0;
+    for chr in str_print.chars() {
+        char_arr[i] = chr as u8;
+        i += 1;
+    }
+    char_arr[i] = '\0' as u8;
+    bricks_print_handler(char_arr.as_ptr() as *mut i8);
 }

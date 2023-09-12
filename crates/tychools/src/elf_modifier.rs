@@ -271,7 +271,7 @@ impl ModifiedELF {
         let y = self.header.e_entry(DENDIAN);
         log::debug!("Entry of user binary {:#x}", y);
         let x = other.header.e_entry(DENDIAN);
-        log::debug!("Entry of the kernel binary {:#x}",x);
+        log::debug!("Entry of the kernel binary {:#x}", x);
         self.header.e_entry = other.header.e_entry;
     }
 
@@ -405,6 +405,11 @@ impl ModifiedELF {
     /// Returns the length of of all the binary's program headers (segments).
     pub fn len_phdrs(&self) -> usize {
         ModifiedSegment::len() * self.segments.len()
+    }
+
+    /// Returns start address of the elf
+    pub fn elf_start(&self) -> u64 {
+        self.header.e_entry(DENDIAN)
     }
 
     /// Computes and returns the length of the ELF binary.

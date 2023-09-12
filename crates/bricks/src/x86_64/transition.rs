@@ -4,19 +4,10 @@ use core::arch::asm;
 static mut USER_RSP: u64 = 0x900000;
 pub const STACK_SIZE: u64 = 0x2000;
 
-extern "C" {
-    fn user_main();
-}
-
-pub fn setup_rsp(user_rsp: u64) {
+pub fn x86_64_transition_setup(user_rip: u64, user_rsp: u64) {
     unsafe {
+        USER_RIP = user_rip;
         USER_RSP = user_rsp;
-    }
-}
-
-pub fn x86_64_transition_setup() {
-    unsafe {
-        USER_RIP = user_main as u64;
     }
 }
 

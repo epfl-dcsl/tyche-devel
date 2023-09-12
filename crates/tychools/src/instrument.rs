@@ -30,6 +30,7 @@ pub struct BricksInfo {
 pub struct BricksData {
     memory_pool_start: u64,
     memory_pool_size: u64,
+    user_rip_start: u64,
     user_stack_start: u64,
 }
 
@@ -38,6 +39,7 @@ impl BricksData {
         let mut vec: Vec<u8> = Vec::new();
         vec.extend(self.memory_pool_start.to_le_bytes().to_vec());
         vec.extend(self.memory_pool_size.to_le_bytes().to_vec());
+        vec.extend(self.user_rip_start.to_le_bytes().to_vec());
         vec.extend(self.user_stack_start.to_le_bytes().to_vec());
         vec
     }
@@ -162,7 +164,10 @@ pub fn instrument_with_manifest(src: &PathBuf) {
 }
 
 /// Parse singular binary instrumentation description and applies its operations.
-pub fn parse_binary(binary: &BinaryInstrumentation) -> Box<ModifiedELF> {
+pub fn parse_binary(
+    binary: &BinaryInstrumentation,
+    user_bin: &Option<Box<ModifiedELF>>,
+) -> Box<ModifiedELF> {
     let data = std::fs::read(PathBuf::from(&binary.path)).expect("Unable to read the binary");
     let mut elf = ModifiedELF::new(&*data);
 
@@ -196,6 +201,7 @@ pub fn parse_binary(binary: &BinaryInstrumentation) -> Box<ModifiedELF> {
         let mut bricks_data = BricksData {
             memory_pool_size: 0,
             memory_pool_start: 0,
+            user_rip_start: 0,
             user_stack_start: 0,
         };
         let rights = object::elf::PF_R | object::elf::PF_W;
@@ -226,6 +232,9 @@ pub fn parse_binary(binary: &BinaryInstrumentation) -> Box<ModifiedELF> {
                 DEFAULT_STACK_PNUM as usize * PAGE_SIZE,
             );
         }
+        if let Some(usr) = user_bin {
+            bricks_data.user_rip_start = usr.elf_start();
+        }
         // converting Bricks data to vector for segment
         let vec_data: Vec<u8> = bricks_data.to_le_bytes();
         elf.append_data_segment(
@@ -243,14 +252,14 @@ pub fn parse_binary(binary: &BinaryInstrumentation) -> Box<ModifiedELF> {
 pub fn instrument_binary(manifest: &Manifest) {
     // Parse the untrusted part of the application.
     let mut untrusted_elf = if let Some(untrusted) = &manifest.untrusted_bin {
-        let bin = parse_binary(untrusted);
+        let bin = parse_binary(untrusted, &None);
         Some(bin)
     } else {
         None
     };
     // Parse the user binary if present.
     let mut user_elf = if let Some(user) = &manifest.user_bin {
-        let mut bin = parse_binary(user);
+        let mut bin = parse_binary(user, &None);
         if manifest.security == Security::Confidential {
             bin.mark(TychePhdrTypes::UserConfidential);
         } else {
@@ -262,7 +271,7 @@ pub fn instrument_binary(manifest: &Manifest) {
     };
     // Parse the kernel binary if present.
     let mut kern_elf = if let Some(kern) = &manifest.kern_bin {
-        let mut bin = parse_binary(kern);
+        let mut bin = parse_binary(kern, &user_elf);
         if manifest.security == Security::Confidential {
             bin.mark(TychePhdrTypes::KernelConfidential);
         } else {
