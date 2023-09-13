@@ -2,9 +2,9 @@ use std::path::PathBuf;
 
 use log::info;
 use serde::{Deserialize, Serialize};
-use serde_json::{self, Map};
+use serde_json::{self};
 
-use crate::allocator::{DEFAULT_BUMP_SIZE, PAGE_SIZE};
+use crate::allocator::PAGE_SIZE;
 use crate::elf_modifier::{ModifiedELF, ModifiedSection, TychePhdrTypes};
 use crate::page_table_mapper::generate_page_tables;
 use crate::tychools_const::{

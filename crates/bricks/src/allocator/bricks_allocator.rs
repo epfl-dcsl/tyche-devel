@@ -7,7 +7,8 @@ pub struct BricksAllocator {
 }
 
 impl BricksAllocator {
-    pub fn kmalloc(&mut self, num_bytes: u64) -> (bool, VirtualAddr) {
+    //TODO(papa) incorporate nymber of bytes here
+    pub fn kmalloc(&mut self, _num_bytes: u64) -> (bool, VirtualAddr) {
         let (res, addr) = page_allocator::alloc_page_back();
         if res {
             for i in 0..NUM_PAGES {

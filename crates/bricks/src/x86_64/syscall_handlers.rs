@@ -17,46 +17,46 @@ pub fn bricks_syscall_handler() {
     // Guard to make sure cpu halts if someone calls syscall - for now
     x86_64::instructions::hlt();
     let mut rax: usize;
-    let r10: usize;
+    let _r10: usize;
     let rdi: usize;
     let rsi: usize;
-    let rdx: usize;
+    let _rdx: usize;
     unsafe {
         asm!("mov {}, rax", out(reg) rax);
         asm!("mov {}, rdi", out(reg) rdi);
         asm!("mov {}, rsi", out(reg) rsi);
-        asm!("mov {}, rdx", out(reg) rdx);
-        asm!("mov {}, r10", out(reg) r10);
+        asm!("mov {}, rdx", out(reg) _rdx);
+        asm!("mov {}, r10", out(reg) _r10);
     }
-    let result: u64;
+    let _result: u64;
     match rax {
         syscalls::ATTEST_ENCLAVE => {
-            result = bricks_attest_enclave_handler(rdi as u64, rsi as *mut AttestationResult);
+            _result = bricks_attest_enclave_handler(rdi as u64, rsi as *mut AttestationResult);
         }
         syscalls::PRINT => {
-            result = bricks_print_handler(rdi as *mut c_char);
+            _result = bricks_print_handler(rdi as *mut c_char);
         }
         syscalls::WRITE_SHARED => {
-            result = bricks_write_shared_handler(rdi as *mut c_char, rsi as u32);
+            _result = bricks_write_shared_handler(rdi as *mut c_char, rsi as u32);
         }
         syscalls::READ_SHARED => {
-            result = bricks_read_shared_handler(rdi as *mut c_char, rsi as u32);
+            _result = bricks_read_shared_handler(rdi as *mut c_char, rsi as u32);
         }
         syscalls::SBRK => {
-            result = bricks_sbrk_handler(rdi as usize);
+            _result = bricks_sbrk_handler(rdi as usize);
         }
         syscalls::BRK => {
-            result = bricks_brk_handler(rdi as *mut c_void);
+            _result = bricks_brk_handler(rdi as *mut c_void);
         }
         _ => {
-            // TODO implement it
-            result = FAILURE;
+            // TODO(papa) implement it
+            _result = FAILURE;
             unsafe {
                 asm!("hlt");
             }
         }
     }
-    // TODO return from syscall doesn't work
+    // TODO(papa) return from syscall doesn't work
     // unsafe {
     //     asm!("sysret");
     // }
@@ -110,11 +110,11 @@ pub fn bricks_brk_handler(mem: *mut c_void) -> u64 {
 
 use super::tyche_api::enclave_attestation_tyche;
 use super::VirtualAddr;
-static mut msr_val: u64 = 0;
+static mut MSR_VAL: u64 = 0;
 pub fn bricks_save_syscalls() {
     let msr_lstar = x86_64::registers::model_specific::Msr::new(LSTAR as u32);
     unsafe {
-        msr_val = msr_lstar.read();
+        MSR_VAL = msr_lstar.read();
     }
 }
 
@@ -129,7 +129,7 @@ pub fn bricks_syscalls_init() {
 pub fn bricks_restore_syscalls() {
     let mut msr_lstar = x86_64::registers::model_specific::Msr::new(LSTAR as u32);
     unsafe {
-        msr_lstar.write(msr_val);
+        msr_lstar.write(MSR_VAL);
     }
 }
 

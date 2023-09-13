@@ -22,7 +22,7 @@ pub fn bricks_divide_zero_handler() {
 
 use x86_64::structures::idt::InterruptStackFrame;
 
-pub extern "x86-interrupt" fn bricks_x86_64_handler(stack_frame: InterruptStackFrame) {
+pub extern "x86-interrupt" fn bricks_x86_64_handler(_stack_frame: InterruptStackFrame) {
     if check_exceptions_kill() {
         bricks_exception_handler();
     } else if check_exceptions_ignore() {
@@ -33,13 +33,13 @@ pub extern "x86-interrupt" fn bricks_x86_64_handler(stack_frame: InterruptStackF
 }
 
 pub extern "x86-interrupt" fn bricks_x86_64_handler_double(
-    stack_frame: InterruptStackFrame,
+    _stack_frame: InterruptStackFrame,
     _error_code: u64,
 ) -> ! {
     panic!("Panicking: double fault")
 }
 
-pub extern "x86-interrupt" fn bricks_divide_zero_handler_x86(stack_frame: InterruptStackFrame) {
+pub extern "x86-interrupt" fn bricks_divide_zero_handler_x86(_stack_frame: InterruptStackFrame) {
     if check_exceptions_kill() {
         bricks_divide_zero_handler();
     } else if check_exceptions_ignore() {

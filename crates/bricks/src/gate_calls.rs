@@ -2,7 +2,7 @@ use core::ffi::c_void;
 
 use crate::arch;
 use crate::bricks_const::FAILURE;
-use crate::bricks_entry::current_frame;
+use crate::bricks_entry::CURRENT_FRAME;
 use crate::shared_buffer::bricks_write_ret_code;
 
 extern "C" {
@@ -13,7 +13,7 @@ extern "C" {
 pub fn bricks_gate_call() -> u64 {
     let mut result: u64 = FAILURE;
     unsafe {
-        if let Some(frame_curr) = &current_frame {
+        if let Some(frame_curr) = &CURRENT_FRAME {
             result = asm_call_gate(&(frame_curr.handle), &(frame_curr.args));
         } else {
             arch::halt();

@@ -2,13 +2,13 @@ use super::page_allocator;
 use super::utils::{num_pages, PAGE_SIZE};
 use crate::arch::page_table_mapper::{KERNEL_ACCESS, USER_ACCESS};
 use crate::arch::{self, VirtualAddr};
-use crate::shared_buffer::bricks_debug;
+
 pub const NUM_PAGES: usize = 16;
 pub struct UserAllocator {
     pub virt_start: u64,
     pub virt_size: u64,
 }
-
+// Support for sbrk and brk calls
 impl UserAllocator {
     pub fn malloc(&mut self, num_bytes: u64) -> VirtualAddr {
         let num_p = num_pages(num_bytes);
@@ -34,8 +34,6 @@ impl UserAllocator {
                 break;
             }
         }
-        // bricks_debug(self.virt_start);
-        // bricks_debug(self.virt_size);
         VirtualAddr::new(self.virt_start + self.virt_size)
     }
 
@@ -48,8 +46,6 @@ impl UserAllocator {
             arch::page_table_mapper::change_access(&addr_free, KERNEL_ACCESS);
             page_allocator::free_page(&addr_free);
         }
-        // bricks_debug(self.virt_start);
-        // bricks_debug(self.virt_size);
         VirtualAddr::new(self.virt_start + self.virt_size)
     }
 

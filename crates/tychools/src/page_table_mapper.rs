@@ -8,7 +8,7 @@ use object::read::elf::ProgramHeader;
 use object::{elf, Endianness};
 use utils::{HostPhysAddr, HostVirtAddr};
 
-use crate::allocator::{addr_idx, Allocator, BumpAllocator, DEFAULT_BUMP_SIZE, PAGE_SIZE};
+use crate::allocator::{Allocator, BumpAllocator, ADDR_IDX, DEFAULT_BUMP_SIZE, PAGE_SIZE};
 use crate::elf_modifier::{ModifiedELF, ModifiedSegment, TychePhdrTypes, DENDIAN};
 use crate::instrument::{decode_map, MappingPageTables};
 
@@ -88,7 +88,7 @@ pub fn generate_page_tables(
     unsafe {
         log::debug!(
             "Done mapping all the segments, we consummed {} extra pages",
-            addr_idx
+            ADDR_IDX
         );
     }
     if map_op {
@@ -96,7 +96,7 @@ pub fn generate_page_tables(
         log::debug!("Now mapping the pages for page tables");
         unsafe {
             let mut cnt = 0;
-            while cnt < addr_idx {
+            while cnt < ADDR_IDX {
                 let virt_addr = virt_page_addr;
                 let phys_addr = curr_phys;
                 let size: usize = PAGE_SIZE;

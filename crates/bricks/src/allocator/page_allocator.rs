@@ -6,15 +6,15 @@ use crate::bricks_utils::bricks_min;
 
 const NUM_PAGES_MAX: usize = 4;
 static NUM_PAGES: AtomicUsize = AtomicUsize::new(0);
-static mut allocated: [bool; NUM_PAGES_MAX] = [false; NUM_PAGES_MAX];
+static mut ALLOCATED: [bool; NUM_PAGES_MAX] = [false; NUM_PAGES_MAX];
 static MEM_POOL_START: AtomicU64 = AtomicU64::new(0);
 
 pub fn alloc_page() -> (bool, VirtualAddr) {
     let num_pages = NUM_PAGES.load(Ordering::Relaxed);
     for i in 0..num_pages {
         unsafe {
-            if !allocated[i] {
-                allocated[i] = true;
+            if !ALLOCATED[i] {
+                ALLOCATED[i] = true;
                 return (
                     true,
                     VirtualAddr::new(
@@ -32,8 +32,8 @@ pub fn alloc_page_back() -> (bool, VirtualAddr) {
     let num_pages = NUM_PAGES.load(Ordering::Relaxed);
     for i in (0..num_pages).rev() {
         unsafe {
-            if !allocated[i] {
-                allocated[i] = true;
+            if !ALLOCATED[i] {
+                ALLOCATED[i] = true;
                 return (
                     true,
                     VirtualAddr::new(
@@ -73,7 +73,7 @@ pub fn free_page(addr: &VirtualAddr) -> bool {
         return false;
     }
     unsafe {
-        allocated[index] = false;
+        ALLOCATED[index] = false;
     }
     true
 }

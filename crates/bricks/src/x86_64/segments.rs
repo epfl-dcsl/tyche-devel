@@ -1,4 +1,4 @@
-use x86_64::registers::segmentation::{Segment, SegmentSelector, CS, DS, ES, SS};
+use x86_64::registers::segmentation::{Segment, SegmentSelector, DS, ES, SS};
 
 static mut DS_REG: Option<SegmentSelector> = None;
 static mut ES_REG: Option<SegmentSelector> = None;

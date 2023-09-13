@@ -14,6 +14,9 @@ pub mod syscall_handlers;
 pub mod transition;
 pub mod tyche_api;
 
+// Public functions provided by architecture-dependent part
+// RISC-V will need to provide same interface
+
 pub fn bricks_interrupt_setup() {
     bricks_init_gdt();
     bricks_init_idt();
@@ -32,6 +35,8 @@ pub fn halt() {
     x86_64::instructions::hlt();
 }
 
+// Wrapper around x86 crate VirtAddr
+// Useful for Allocator to work with VirtualAddr (arch-independent)
 pub struct VirtualAddr {
     addr: VirtAddr,
 }

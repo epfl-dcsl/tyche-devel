@@ -1,7 +1,6 @@
-use crate::arch;
-use crate::arch::syscall_handlers::{bricks_attest_enclave_handler, bricks_sbrk_handler};
+use crate::arch::syscall_handlers::bricks_sbrk_handler;
 use crate::arch::tyche_api::enclave_attestation_tyche;
-use crate::bricks_structs::{AttestationResult, PUB_KEY_SIZE, SIGNED_DATA_SIZE};
+use crate::bricks_structs::AttestationResult;
 use crate::bricks_utils::bricks_print;
 
 extern "C" {
@@ -12,13 +11,13 @@ extern "C" {
 pub fn bricks_make_exception() {
     unsafe {
         bricks_divide_by_zero_exception();
-        // bricks_int_exception();
+        bricks_int_exception();
     }
 }
 
 pub fn bricks_test_mm() {
     let mut prev: u64 = 0;
-    let mut next: u64 = 0;
+    let mut next: u64;
     let iters = 10;
     let num_bytes: usize = 100;
     for _ in 0..iters {

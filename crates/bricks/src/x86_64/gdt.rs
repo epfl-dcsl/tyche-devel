@@ -8,6 +8,7 @@ use x86_64::VirtAddr;
 
 use crate::allocator::utils::PAGE_SIZE;
 
+//TODO(papa) should something here be aligned
 pub const DOUBLE_FAULT_IST_INDEX: u16 = 0;
 pub const STACK_SWITCH_INDEX: usize = 0;
 lazy_static! {
@@ -46,7 +47,7 @@ lazy_static! {
         let mut gdt = GlobalDescriptorTable::new();
         let kernel_code_selector = gdt.add_entry(Descriptor::kernel_code_segment());
         let kernel_data_selector = gdt.add_entry(Descriptor::kernel_data_segment());
-        // TODO in which order should this be
+        // TODO(papa) in which order should this be
         let user_code_selector = gdt.add_entry(Descriptor::user_code_segment());
         let user_data_selector = gdt.add_entry(Descriptor::user_data_segment());
         let tss_selector = gdt.add_entry(Descriptor::tss_segment(&TSS));

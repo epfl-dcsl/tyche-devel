@@ -12,17 +12,17 @@ pub struct BricksFrame {
     pub args: *const c_void,
 }
 
-pub static mut current_frame: Option<BricksFrame> = None;
+pub static mut CURRENT_FRAME: Option<BricksFrame> = None;
 
 #[no_mangle]
 pub extern "C" fn bricks_trusted_main(capa_index: u64, args: *const c_void) {
-    let mut br_frame = BricksFrame {
+    let br_frame = BricksFrame {
         handle: capa_index,
         args: args,
     };
     let br_frame_curr = br_frame;
     unsafe {
-        current_frame = Some(br_frame_curr);
+        CURRENT_FRAME = Some(br_frame_curr);
     }
     get_tychools_info();
     interrupt_setup();

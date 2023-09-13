@@ -15,7 +15,7 @@ pub struct Page {
     pub data: [u8; PAGE_SIZE],
 }
 
-pub static mut addr_idx: usize = 0;
+pub static mut ADDR_IDX: usize = 0;
 
 pub struct BumpAllocator<const N: usize> {
     pub idx: usize,
@@ -39,7 +39,7 @@ impl<const N: usize> BumpAllocator<N> {
             let frame = &mut self.pages[idx].data as *mut u8 as usize;
             self.idx += 1;
             unsafe {
-                addr_idx += 1;
+                ADDR_IDX += 1;
             }
             return Some(Frame {
                 phys_addr: HostPhysAddr::new(self.phys_offset + idx * PAGE_SIZE),
