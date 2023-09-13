@@ -10,6 +10,7 @@ use core::panic::PanicInfo;
 pub mod allocator;
 pub mod bricks_const;
 pub mod bricks_entry;
+pub mod bricks_structs;
 pub mod bricks_testing;
 pub mod bricks_tychools_data;
 pub mod bricks_utils;

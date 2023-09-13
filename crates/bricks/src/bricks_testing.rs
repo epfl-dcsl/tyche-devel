@@ -1,4 +1,7 @@
+use crate::arch;
 use crate::arch::syscall_handlers::{bricks_attest_enclave_handler, bricks_sbrk_handler};
+use crate::arch::tyche_api::enclave_attestation_tyche;
+use crate::bricks_structs::{AttestationResult, PUB_KEY_SIZE, SIGNED_DATA_SIZE};
 use crate::bricks_utils::bricks_print;
 
 extern "C" {
@@ -31,7 +34,8 @@ pub fn bricks_test_mm() {
 
 pub fn bricks_test_attestation() {
     let nonce = 0x123;
-    bricks_attest_enclave_handler(nonce);
+    let mut att_res = AttestationResult::default();
+    enclave_attestation_tyche(nonce, &mut att_res);
 }
 
 pub fn bricks_test_print(str_print: &'static str) {
@@ -40,6 +44,7 @@ pub fn bricks_test_print(str_print: &'static str) {
 
 pub fn bricks_testing() {
     // bricks_make_exception();
+    bricks_test_print("Test inside Bricks is starting...");
     bricks_test_attestation();
     bricks_test_mm();
     bricks_test_print("Tyche");

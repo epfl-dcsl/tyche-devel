@@ -3,6 +3,7 @@ use core::ffi::{c_char, c_void};
 
 use crate::allocator::{alloc_user, free_user};
 use crate::bricks_const::{FAILURE, RET_CODE_BYTES, SUCCESS};
+use crate::bricks_structs::AttestationResult;
 use crate::bricks_utils::{bricks_memcpy, bricks_strlen};
 use crate::profiles::check_syscalls_kill;
 use crate::shared_buffer::{bricks_get_shared_pointer, bricks_write_ret_code};
@@ -29,7 +30,7 @@ pub fn bricks_syscall_handler() {
     let result: u64;
     match rax {
         syscalls::ATTEST_ENCLAVE => {
-            result = bricks_attest_enclave_handler(rdi as u32);
+            result = bricks_attest_enclave_handler(rdi as u64, rsi as *mut AttestationResult);
         }
         syscalls::PRINT => {
             result = bricks_print_handler(rdi as *mut c_char);
@@ -64,10 +65,12 @@ pub fn bricks_syscall_handler() {
 }
 
 // ———————————————————————————————— Helping handlers (logic for handlers) ————————————————————————————————— //
-
-// TODO add pointer to the structure where to write result
-pub fn bricks_attest_enclave_handler(nonce: u32) -> u64 {
-    enclave_attestation_tyche(nonce)
+pub fn bricks_attest_enclave_handler(nonce: u64, result_struct: *mut AttestationResult) -> u64 {
+    let ref_struct: &mut AttestationResult;
+    unsafe {
+        ref_struct = &mut *result_struct;
+    }
+    enclave_attestation_tyche(nonce, ref_struct)
 }
 
 use crate::gate_calls::{bricks_gate_call, exit_gate};
@@ -88,8 +91,10 @@ pub fn bricks_print_handler(buff: *mut c_char) -> u64 {
 
 pub fn bricks_write_shared_handler(buff: *mut c_char, cnt: u32) -> u64 {
     bricks_write_ret_code(syscalls::WRITE_SHARED as u64);
-    let shared_buff_num_bytes = bricks_get_shared_pointer(RET_CODE_BYTES) as * mut u64;
-    unsafe {*shared_buff_num_bytes = cnt as u64;}
+    let shared_buff_num_bytes = bricks_get_shared_pointer(RET_CODE_BYTES) as *mut u64;
+    unsafe {
+        *shared_buff_num_bytes = cnt as u64;
+    }
     let shared_buff_data = bricks_get_shared_pointer(RET_CODE_BYTES + (u64::BITS as u64) / 8);
     bricks_memcpy(shared_buff_data, buff, cnt);
     bricks_gate_call();

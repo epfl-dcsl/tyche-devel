@@ -1,6 +1,7 @@
 use core::ffi::c_char;
 
 use crate::arch::syscall_handlers::bricks_print_handler;
+use crate::bricks_structs::AttestationResult;
 
 pub fn bricks_memcpy(dst: *mut c_char, src: *mut c_char, cnt: u32) {
     let mut dst_cp = dst;
@@ -47,4 +48,16 @@ pub fn bricks_print(str_print: &'static str) {
     }
     char_arr[i] = '\0' as u8;
     bricks_print_handler(char_arr.as_ptr() as *mut i8);
+}
+
+pub fn copy_to_pub_key(num: u64, index: usize, result_struct: &mut AttestationResult) {
+    // let index_end = index + u64::BITS as usize / 8;
+    // let slice = &mut result_struct.pub_key[index..index_end];
+    // slice.copy_from_slice(&u64::to_le_bytes(num));
+}
+
+pub fn copy_to_signed_data(num: u64, index: usize, result_struct: &mut AttestationResult) {
+    // let index_end = index + u64::BITS as usize / 8;
+    // let slice = &mut result_struct.signed_enclave_data[index..index_end];
+    // slice.copy_from_slice(&u64::to_le_bytes(num));
 }
