@@ -25,17 +25,11 @@ int syscall_print(char* buff) {
   return 0;
 }
 
-int syscall_enclave_attestation(int nonce) {
+int syscall_enclave_attestation(int nonce, attestation_struct_t* att_struct) {
   SyscallArgs args;
   args.syscall = ATTEST_ENCLAVE;
   args.arg_1 = nonce;
-  make_syscall(&args);
-  return 0;
-}
-
-int syscall_gate_call() {
-  SyscallArgs args;
-  args.syscall = GATE_CALL;
+  args.arg_2 = (arg_t)att_struct;
   make_syscall(&args);
   return 0;
 }

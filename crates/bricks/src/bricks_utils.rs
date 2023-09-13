@@ -51,13 +51,13 @@ pub fn bricks_print(str_print: &'static str) {
 }
 
 pub fn copy_to_pub_key(num: u64, index: usize, result_struct: &mut AttestationResult) {
-    // let index_end = index + u64::BITS as usize / 8;
-    // let slice = &mut result_struct.pub_key[index..index_end];
-    // slice.copy_from_slice(&u64::to_le_bytes(num));
+    let index_end = index + u64::BITS as usize / 8;
+    let slice = &mut result_struct.pub_key[index..index_end];
+    slice.copy_from_slice(&u64::to_le_bytes(num));
 }
 
 pub fn copy_to_signed_data(num: u64, index: usize, result_struct: &mut AttestationResult) {
-    // let index_end = index + u64::BITS as usize / 8;
-    // let slice = &mut result_struct.signed_enclave_data[index..index_end];
-    // slice.copy_from_slice(&u64::to_le_bytes(num));
+    let index_end = index + u64::BITS as usize / 8;
+    let slice = &mut result_struct.signed_enclave_data[index..index_end];
+    slice.copy_from_slice(&u64::to_le_bytes(num));
 }

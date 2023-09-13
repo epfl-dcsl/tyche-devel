@@ -44,6 +44,8 @@ asm_call_gate:
 .globl bricks_start
 bricks_start:
   movq %r11, %rsi
+  // Aligning the stack to 16 bytes, had bug with xmm registers
+  andl $-16, %esp
   callq bricks_trusted_main
   // Should never return here, call exit if we do.
   movq $1, %rax

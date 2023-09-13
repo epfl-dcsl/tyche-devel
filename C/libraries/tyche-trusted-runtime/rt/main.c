@@ -1,7 +1,6 @@
 #include <stdint.h>
 
 #include "syscall.h"
-#include "bricks.h"
 
 // ———————————————————————————————— Functions to do different things in trusted main  ————————————————————————————————— 
 
@@ -29,7 +28,8 @@ void make_exception() {
 
 void test_attestation() {
   int nonce = 0x123;
-  syscall_enclave_attestation(nonce);
+  attestation_struct_t att_struct;
+  syscall_enclave_attestation(nonce, &att_struct);
 }
 
 void test_mm() {

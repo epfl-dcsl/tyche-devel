@@ -5,6 +5,7 @@ use crate::allocator::{alloc_user, free_user};
 use crate::bricks_const::{FAILURE, RET_CODE_BYTES, SUCCESS};
 use crate::bricks_structs::AttestationResult;
 use crate::bricks_utils::{bricks_memcpy, bricks_strlen};
+use crate::gate_calls::{bricks_gate_call, exit_gate};
 use crate::profiles::check_syscalls_kill;
 use crate::shared_buffer::{bricks_get_shared_pointer, bricks_write_ret_code};
 use crate::syscalls;
@@ -34,9 +35,6 @@ pub fn bricks_syscall_handler() {
         }
         syscalls::PRINT => {
             result = bricks_print_handler(rdi as *mut c_char);
-        }
-        syscalls::GATE_CALL => {
-            result = bricks_gate_call_handler();
         }
         syscalls::WRITE_SHARED => {
             result = bricks_write_shared_handler(rdi as *mut c_char, rsi as u32);
@@ -71,13 +69,6 @@ pub fn bricks_attest_enclave_handler(nonce: u64, result_struct: *mut Attestation
         ref_struct = &mut *result_struct;
     }
     enclave_attestation_tyche(nonce, ref_struct)
-}
-
-use crate::gate_calls::{bricks_gate_call, exit_gate};
-
-pub fn bricks_gate_call_handler() -> u64 {
-    bricks_write_ret_code(syscalls::GATE_CALL as u64);
-    bricks_gate_call()
 }
 
 pub fn bricks_print_handler(buff: *mut c_char) -> u64 {

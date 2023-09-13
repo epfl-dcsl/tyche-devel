@@ -3,7 +3,7 @@ use core::arch::asm;
 use crate::arch;
 use crate::bricks_const::SUCCESS;
 use crate::bricks_structs::{AttestationResult, CALC_REPORT, READ_REPORT};
-use crate::bricks_utils::{bricks_print, copy_to_pub_key};
+use crate::bricks_utils::{bricks_print, copy_to_pub_key, copy_to_signed_data};
 use crate::shared_buffer::bricks_debug;
 
 pub struct TycheCallArgs {
@@ -48,39 +48,23 @@ pub fn enclave_attestation_tyche(nonce: u64, result_struct: &mut AttestationResu
     call_args.arg_1 = nonce as usize;
     call_args.arg_2 = CALC_REPORT;
     call_tyche(&mut call_args);
-    bricks_print("First tyche call");
-    bricks_debug(call_args.value_1 as u64);
-    bricks_debug(call_args.value_2 as u64);
-    bricks_debug(call_args.value_3 as u64);
-    bricks_debug(call_args.value_4 as u64);
-    bricks_debug(call_args.value_5 as u64);
-    bricks_debug(call_args.value_6 as u64);
-    result_struct.pub_key[0] = (nonce & 0xFF) as u8;
-    bricks_debug(result_struct.pub_key[0] as u64);
-    // copy_to_pub_key(call_args.value_1 as u64, 0, y);
-    // copy_to_pub_key(call_args.value_2 as u64, 8, result_struct);
-    // copy_to_pub_key(call_args.value_3 as u64, 16, result_struct);
-    // copy_to_pub_key(call_args.value_4 as u64, 24, result_struct);
-    // copy_to_signed_data(call_args.value_5 as u64, 0, result_struct);
-    // copy_to_signed_data(call_args.value_6 as u64, 8, result_struct);
+    copy_to_pub_key(call_args.value_1 as u64, 0, result_struct);
+    copy_to_pub_key(call_args.value_2 as u64, 8, result_struct);
+    copy_to_pub_key(call_args.value_3 as u64, 16, result_struct);
+    copy_to_pub_key(call_args.value_4 as u64, 24, result_struct);
+    copy_to_signed_data(call_args.value_5 as u64, 0, result_struct);
+    copy_to_signed_data(call_args.value_6 as u64, 8, result_struct);
     call_args.clean_args();
     call_args.vmmcall = ENCLAVE_ATTESTATION;
     call_args.arg_1 = nonce as usize;
     call_args.arg_2 = READ_REPORT;
     call_tyche(&mut call_args);
-    bricks_print("Second tyche call");
-    bricks_debug(call_args.value_1 as u64);
-    bricks_debug(call_args.value_2 as u64);
-    bricks_debug(call_args.value_3 as u64);
-    bricks_debug(call_args.value_4 as u64);
-    bricks_debug(call_args.value_5 as u64);
-    bricks_debug(call_args.value_6 as u64);
-    // copy_to_signed_data(call_args.value_1 as u64, 16, result_struct);
-    // copy_to_signed_data(call_args.value_2 as u64, 24, result_struct);
-    // copy_to_signed_data(call_args.value_3 as u64, 32, result_struct);
-    // copy_to_signed_data(call_args.value_4 as u64, 40, result_struct);
-    // copy_to_signed_data(call_args.value_5 as u64, 48, result_struct);
-    // copy_to_signed_data(call_args.value_6 as u64, 56, result_struct);
+    copy_to_signed_data(call_args.value_1 as u64, 16, result_struct);
+    copy_to_signed_data(call_args.value_2 as u64, 24, result_struct);
+    copy_to_signed_data(call_args.value_3 as u64, 32, result_struct);
+    copy_to_signed_data(call_args.value_4 as u64, 40, result_struct);
+    copy_to_signed_data(call_args.value_5 as u64, 48, result_struct);
+    copy_to_signed_data(call_args.value_6 as u64, 56, result_struct);
     SUCCESS
 }
 

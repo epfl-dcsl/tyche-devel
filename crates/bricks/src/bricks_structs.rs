@@ -4,6 +4,7 @@ pub const CALC_REPORT: usize = 0;
 pub const READ_REPORT: usize = 1;
 
 #[derive(Copy, Clone)]
+#[repr(C, align(16))]
 pub struct AttestationResult {
     pub pub_key: [u8; PUB_KEY_SIZE],
     pub signed_enclave_data: [u8; SIGNED_DATA_SIZE],
