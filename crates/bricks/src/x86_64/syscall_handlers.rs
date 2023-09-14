@@ -49,14 +49,13 @@ pub fn bricks_syscall_handler() {
             _result = bricks_brk_handler(rdi as *mut c_void);
         }
         _ => {
-            // TODO(papa) implement it
             _result = FAILURE;
             unsafe {
                 asm!("hlt");
             }
         }
     }
-    // TODO(papa) return from syscall doesn't work
+    // TODO(papa) return from syscall (user)
     // unsafe {
     //     asm!("sysret");
     // }

@@ -8,7 +8,6 @@ use x86_64::VirtAddr;
 
 use crate::allocator::utils::PAGE_SIZE;
 
-//TODO(papa) should something here be aligned
 pub const DOUBLE_FAULT_IST_INDEX: u16 = 0;
 pub const STACK_SWITCH_INDEX: usize = 0;
 lazy_static! {

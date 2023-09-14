@@ -5,7 +5,8 @@ use crate::shared_buffer::{BRICKS_SHARED_BUFFER, BRICKS_SHARED_BUFFER_SIZE};
 // Introduced by tychools
 pub const BRICKS_INFO_SEGMENT: usize = BRICKS_SHARED_BUFFER + BRICKS_SHARED_BUFFER_SIZE;
 
-// TODO(papa) if there is something that is not u64, conversion will not work
+// if there is something that is not u64, conversion will not work (alignment)
+// easiest for everything to be u64 (8 bytes long)
 #[derive(Copy, Clone)]
 pub struct BricksData {
     memory_pool_start: u64,

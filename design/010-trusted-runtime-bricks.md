@@ -4,7 +4,7 @@
 
 This is an overview of how we want our Trusted runtime (Bricks) works. 
 
-## So far
+## Runtime support so far
 
 So far our enclaves were running in Ring 0 of our vcpu. Communication with Tyche and untrusted part that loaded the enclave was not that easy and the API was not very clear. 
 
@@ -18,17 +18,32 @@ Goal of Bricks is to provide the enclave with support for few things
 
 Bricks will have small startup routine to setup interrupts before giving control to user part of the enclave.
 
+## How is Bricks constructed
+
+Final binary is constructed from two binaries 
+- user binary (C code for now to distinguish user/kernel)
+- Bricks binary (Rust code)
+
+Binaries are merged into single binary using Tychools. [Example of the config file](../C/libraries/tyche-trusted-runtime/manifests/user_kernel.json) that does this.
+
+Start of the final binary is same as start of the Bricks binary in order to do the setup and then transition into the user mode. 
+
+## Tychools - Bricks
+
+Information from Tychools to Bricks is transfered by adding additional segment right below shared buffer for now. The information written there is used to configure some Bricks features, like
+- number of pages reserved for memory pool
+- user starting instruction pointer 
+
 ## Done
 
-So far, things that were implemented in Bricks
+So far, things that were implemented in Bricks (x86)
 - Setting up IDT and GDT using x86_64 crate
 - Setting up system calls using x86_64 crate
 - Syscalls
     - PRINT syscall - being able to print text from the enclave. It is implemented as RPC to untrusted part
-    - WRITE syscall -  being able to write some number of bytes to shared buffer
-    - READ syscall - being able to read some number of bytes from shared buffer
+    - WRITE syscall -  being able to write some number of bytes to shared buffer (similar to copy to user)
+    - READ syscall - being able to read some number of bytes from shared buffer (similar to copy from user)
     - ATTEST ENCLAVE - being able to call Tyche to do the attestation, same what we did for the attestation example 
-    - GATE CALL - giving up control to untrusted part, can be removed, it has no specific purpose except for debugging
     - SBRK - standard Linux **sbrk** system call
     - BRK - standard Linux **brk** system call
 - Profiles - deciding behaviour in compile-time using custom flags
@@ -42,6 +57,17 @@ In order to have memory management inside of trusted runtime, page tables need t
 This is achieved through using tychools, where the option for mapping can be given in the config file.
 
 We can also give Tychools memory segment that is actually going to represent memory it can access and give to the user. This is done in a same manner in which we give shared buffer memory segment to enclave. 
+
+Amount of memory can be configured through Tychools config file by specifying it in Bricks info 
+
+```
+"bricks_info" : {
+    "memory_pool" : true,
+    "memory_pool_size" : 4,
+    "user_stack" : true
+}
+```
+Graphical overview of memory management
 
 ```
 [user part of the enclave]  
@@ -57,12 +83,6 @@ We can also give Tychools memory segment that is actually going to represent mem
                         |                   |
 
 ```
-
-## TODO
-
-- Fixing interrupts globally, not just trt related
-- How can we pass arguments to trusted runtime from tychools
-
 ## Graphical overview
 
 ```
@@ -82,6 +102,11 @@ We can also give Tychools memory segment that is actually going to represent mem
 
                                 
 ```
+
+## TODO
+
+- Adding spinlock for static mut variables
+- Fixing interrupts globally, not just trt related
 
 ## Problems
 
