@@ -2,31 +2,40 @@ use core::arch::asm;
 use core::ffi::{c_char, c_void};
 
 use crate::allocator::{alloc_user, free_user};
+use crate::arch::transition::BRICKS_RSP;
 use crate::bricks_const::{FAILURE, RET_CODE_BYTES, SUCCESS};
 use crate::bricks_structs::AttestationResult;
 use crate::bricks_utils::{bricks_memcpy, bricks_strlen};
 use crate::gate_calls::{bricks_gate_call, exit_gate};
 use crate::profiles::check_syscalls_kill;
-use crate::shared_buffer::{bricks_get_shared_pointer, bricks_write_ret_code};
+use crate::shared_buffer::{bricks_debug, bricks_get_shared_pointer, bricks_write_ret_code};
 use crate::syscalls;
 // ———————————————————————————————— Main syscall handler ————————————————————————————————— //
+// #[no_mangle]
+// pub static mut USER_RSP: usize = 0;
+// #[no_mangle]
+// pub static mut SAVE_RAX: usize = 0;
+// #[no_mangle]
+// pub static mut SAVE_RCX: usize = 0;
+// #[no_mangle]
+// pub static mut SAVE_RDI: usize = 0;
 pub fn bricks_syscall_handler() {
-    if check_syscalls_kill() {
-        exit_gate();
-    }
-    // Guard to make sure cpu halts if someone calls syscall - for now
-    x86_64::instructions::hlt();
     let mut rax: usize;
     let _r10: usize;
     let rdi: usize;
     let rsi: usize;
     let _rdx: usize;
+    let rcx: usize;
     unsafe {
         asm!("mov {}, rax", out(reg) rax);
         asm!("mov {}, rdi", out(reg) rdi);
         asm!("mov {}, rsi", out(reg) rsi);
         asm!("mov {}, rdx", out(reg) _rdx);
         asm!("mov {}, r10", out(reg) _r10);
+        asm!("mov {}, rcx", out(reg) rcx);
+    }
+    if check_syscalls_kill() {
+        exit_gate();
     }
     let _result: u64;
     match rax {
@@ -50,15 +59,16 @@ pub fn bricks_syscall_handler() {
         }
         _ => {
             _result = FAILURE;
-            unsafe {
-                asm!("hlt");
-            }
+            exit_gate();
         }
     }
     // TODO(papa) return from syscall (user)
-    // unsafe {
-    //     asm!("sysret");
-    // }
+    unsafe {
+        // asm!("mov {}, rsp", out(reg)BRICKS_RSP);
+        // asm!("mov rsp, {}", in(reg)USER_RSP);
+        asm!("mov rcx, {}", in(reg) rcx);
+        asm!("sysret");
+    }
 }
 
 // ———————————————————————————————— Helping handlers (logic for handlers) ————————————————————————————————— //
@@ -115,6 +125,10 @@ pub fn bricks_save_syscalls() {
     unsafe {
         MSR_VAL = msr_lstar.read();
     }
+}
+
+extern "C" {
+    fn bricks_syscall_entry();
 }
 
 pub fn bricks_syscalls_init() {

@@ -1,8 +1,10 @@
 use core::ffi::c_void;
 
+use crate::arch::transition::transition_into_user_mode;
 use crate::arch::{bricks_interrupt_setup, bricks_syscals_setup};
 use crate::bricks_testing::bricks_testing;
 use crate::bricks_tychools_data::get_tychools_info;
+use crate::bricks_utils::bricks_print;
 use crate::gate_calls::exit_gate;
 
 #[derive(Copy, Clone)]
@@ -27,7 +29,8 @@ pub extern "C" fn bricks_trusted_main(capa_index: u64, args: *const c_void) {
     get_tychools_info();
     interrupt_setup();
     syscall_setup();
-    // transition_into_user_mode();
+    bricks_print("Transitioning to user mode, good luck...");
+    transition_into_user_mode();
     bricks_testing();
     exit_gate();
 }

@@ -1,6 +1,6 @@
 use core::arch::asm;
 
-use crate::gate_calls::bricks_gate_call;
+use crate::gate_calls::{bricks_gate_call, exit_gate};
 use crate::profiles::{check_exceptions_ignore, check_exceptions_kill};
 use crate::shared_buffer::bricks_write_ret_code;
 
@@ -36,6 +36,7 @@ pub extern "x86-interrupt" fn bricks_x86_64_handler_double(
     _stack_frame: InterruptStackFrame,
     _error_code: u64,
 ) -> ! {
+    exit_gate();
     panic!("Panicking: double fault")
 }
 

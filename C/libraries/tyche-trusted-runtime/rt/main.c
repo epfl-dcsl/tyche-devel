@@ -51,9 +51,8 @@ void test_mm() {
 void user_main()
 {
   // make_exception();
-  test_attestation();
-  test_mm();
-  syscall_print("Tyche");  
-
-  // TODO call the user
+  // test_attestation();
+  // test_mm();
+  syscall_print("Tyche");
+  syscall_print("Tyche 2");
 }

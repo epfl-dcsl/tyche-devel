@@ -2,5 +2,6 @@ trt
 loader
 *.o
 test-trt
+trt-user
 compile_commands.json
 .cache

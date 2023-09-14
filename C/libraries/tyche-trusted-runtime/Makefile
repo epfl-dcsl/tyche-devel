@@ -63,7 +63,8 @@ test-trt : loader trt-user
 	cargo -C $(TYCHOOLS_PATH) install --path . --locked
 	tychools instrument -s manifests/user_kernel.json
 	chmod +x test-trt
-	rm -rf loader trt-user
+	rm -rf loader
+	# rm -rf loader trt-user
 
 install_disk: all
 	mkdir -p $(DISK_PATH)
