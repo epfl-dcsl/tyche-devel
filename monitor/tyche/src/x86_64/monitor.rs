@@ -15,7 +15,7 @@ use stage_two_abi::Manifest;
 use utils::{GuestPhysAddr, HostPhysAddr};
 use vmx::bitmaps::{EptEntryFlags, ExceptionBitmap};
 use vmx::errors::Trapnr;
-use vmx::msr::IA32_LSTAR;
+use vmx::msr::{IA32_LSTAR, IA32_STAR};
 use vmx::{ActiveVmcs, ControlRegister, Register, VmExitInterrupt, REGFILE_SIZE};
 
 use super::cpuid;
@@ -44,6 +44,7 @@ pub struct ContextData {
     // General-purpose registers.
     pub regs: [u64; REGFILE_SIZE],
     // The MSR(s?) we need to save and restore.
+    pub star: u64,
     pub lstar: u64,
     /// Vcpu for this core.
     pub vmcs: Handle<RCFrame>,
@@ -60,6 +61,7 @@ impl ContextData {
         self.save_partial(vcpu);
         vcpu.dump_regs(&mut self.regs);
         self.lstar = unsafe { IA32_LSTAR.read() };
+        self.star = unsafe { IA32_STAR.read() };
         vcpu.flush();
     }
 
@@ -80,6 +82,7 @@ impl ContextData {
         let rc_frame = locked.get(self.vmcs).unwrap();
         vcpu.load_regs(&self.regs);
         unsafe { vmx::msr::Msr::new(IA32_LSTAR.address()).write(self.lstar) };
+        unsafe { vmx::msr::Msr::new(IA32_STAR.address()).write(self.star) };
         vcpu.switch_frame(rc_frame.frame).unwrap();
         // Restore partial must be called AFTER we set a valid frame.
         self.restore_partial(vcpu);
@@ -112,6 +115,7 @@ const EMPTY_CONTEXT: Mutex<ContextData> = Mutex::new(ContextData {
     rsp: usize::max_value(),
     regs: [0; REGFILE_SIZE],
     lstar: u64::max_value(),
+    star: u64::max_value(),
     vmcs: Handle::<RCFrame>::new_invalid(),
 });
 const EMPTY_CONTEXT_ARRAY: [Mutex<ContextData>; NB_CORES] = [EMPTY_CONTEXT; NB_CORES];

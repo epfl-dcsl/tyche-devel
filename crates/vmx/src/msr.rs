@@ -41,6 +41,7 @@ pub const VMX_TRUE_EXIT_CTLS: Msr = Msr::new(0x48F);
 pub const VMX_TRUE_ENTRY_CTLS: Msr = Msr::new(0x490);
 pub const VMX_VMFUNC: Msr = Msr::new(0x491);
 pub const IA32_EFER: Msr = Msr::new(0xC000_0080);
+pub const IA32_STAR: Msr = Msr::new(0xC000_0081);
 pub const IA32_LSTAR: Msr = Msr::new(0xC000_0082);
 
 // —————————————————————————————————— MSR ——————————————————————————————————— //

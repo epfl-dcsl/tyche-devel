@@ -1,4 +1,3 @@
-use core::arch::asm;
 use core::ffi::{c_char, c_void};
 
 use crate::allocator::{alloc_user, free_user};
@@ -7,7 +6,7 @@ use crate::bricks_structs::AttestationResult;
 use crate::bricks_utils::{bricks_memcpy, bricks_strlen};
 use crate::gate_calls::{bricks_gate_call, exit_gate};
 use crate::profiles::check_syscalls_kill;
-use crate::shared_buffer::{bricks_debug, bricks_get_shared_pointer, bricks_write_ret_code};
+use crate::shared_buffer::{bricks_get_shared_pointer, bricks_write_ret_code};
 use crate::syscalls;
 // ———————————————————————————————— Main syscall handler ————————————————————————————————— //
 #[no_mangle]
@@ -137,6 +136,11 @@ pub fn bricks_syscalls_init() {
     unsafe {
         msr_lstar.write(handler_addr);
     }
+
+    let mut msr_star = x86_64::registers::model_specific::Msr::new(STAR as u32);
+    unsafe {
+        msr_star.write(STAR_CONST);
+    }
 }
 
 pub fn bricks_restore_syscalls() {
@@ -147,12 +151,12 @@ pub fn bricks_restore_syscalls() {
 }
 
 // ——————————————————————————————— Syscall related constants ———————————————————————————————— //
+/// /// STAR - register to set Ring 0 and Ring 3 segment base
+pub const STAR: u64 = 0xC0000081;
+pub const USER_BASE: u64 = 0x13;
+pub const KERNEL_BASE: u64 = 0x8;
+pub const STAR_CONST: u64 = 0 + (USER_BASE << 48) + (KERNEL_BASE << 32);
 /// /// The RIP syscall entry for 64 bit software.
 pub const LSTAR: u64 = 0xC0000082;
-/// The RIP syscall entry for compatibility mode
-pub const CSTAR: u64 = 0xC0000083;
-/// low 32 bits syscall flag mask, if a bit is set, clear the corresponding one
-/// in RFLAGS.
-pub const SFMASK_VAL: u64 = 0xC0000084;
 /// Mask for the low/high bits of msr.
 pub const MASK32: u64 = 0xFFFFFFFF;
