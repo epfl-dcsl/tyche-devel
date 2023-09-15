@@ -1,5 +1,7 @@
 use core::arch::asm;
 use core::sync::atomic::{AtomicU64, Ordering};
+
+use crate::arch::syscall_handlers::BRICKS_RSP;
 static USER_RSP: AtomicU64 = AtomicU64::new(0);
 static STACK_SIZE: AtomicU64 = AtomicU64::new(0x2000);
 static USER_RIP: AtomicU64 = AtomicU64::new(0);
@@ -8,8 +10,6 @@ pub fn x86_64_transition_setup(user_rip: u64, user_rsp: u64) {
     USER_RIP.store(user_rip, Ordering::Relaxed);
     USER_RSP.store(user_rsp, Ordering::Relaxed);
 }
-
-pub static mut BRICKS_RSP: usize = 0;
 
 pub fn transition_into_user_mode() {
     unsafe {

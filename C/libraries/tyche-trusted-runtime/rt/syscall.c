@@ -15,6 +15,10 @@ void make_syscall(SyscallArgs* args){
       :
       : "rm" (args->syscall), "rm" (args->arg_1), "rm" (args->arg_2), "rm" (args->arg_3), "rm" (args->arg_4)
       : "rax", "rdi", "rsi", "rdx", "r10", "memory", "cc");
+
+  while(1) {
+
+  }
 }
 
 int syscall_print(char* buff) {

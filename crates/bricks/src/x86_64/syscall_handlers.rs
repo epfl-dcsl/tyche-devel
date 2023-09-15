@@ -2,7 +2,6 @@ use core::arch::asm;
 use core::ffi::{c_char, c_void};
 
 use crate::allocator::{alloc_user, free_user};
-use crate::arch::transition::BRICKS_RSP;
 use crate::bricks_const::{FAILURE, RET_CODE_BYTES, SUCCESS};
 use crate::bricks_structs::AttestationResult;
 use crate::bricks_utils::{bricks_memcpy, bricks_strlen};
@@ -11,28 +10,33 @@ use crate::profiles::check_syscalls_kill;
 use crate::shared_buffer::{bricks_debug, bricks_get_shared_pointer, bricks_write_ret_code};
 use crate::syscalls;
 // ———————————————————————————————— Main syscall handler ————————————————————————————————— //
-// #[no_mangle]
-// pub static mut USER_RSP: usize = 0;
-// #[no_mangle]
-// pub static mut SAVE_RAX: usize = 0;
-// #[no_mangle]
-// pub static mut SAVE_RCX: usize = 0;
-// #[no_mangle]
-// pub static mut SAVE_RDI: usize = 0;
-pub fn bricks_syscall_handler() {
-    let mut rax: usize;
-    let _r10: usize;
+#[no_mangle]
+#[used]
+pub static mut USER_RSP: usize = 0;
+#[no_mangle]
+#[used]
+pub static mut SAVE_RAX: usize = 0;
+#[no_mangle]
+#[used]
+pub static mut SAVE_RCX: usize = 0;
+#[no_mangle]
+#[used]
+pub static mut SAVE_RDI: usize = 0;
+#[no_mangle]
+#[used]
+pub static mut SAVE_RSI: usize = 0;
+#[no_mangle]
+#[used]
+pub static mut BRICKS_RSP: usize = 0;
+#[no_mangle]
+pub extern "C" fn bricks_syscall_handler() {
+    let rax: usize;
     let rdi: usize;
     let rsi: usize;
-    let _rdx: usize;
-    let rcx: usize;
     unsafe {
-        asm!("mov {}, rax", out(reg) rax);
-        asm!("mov {}, rdi", out(reg) rdi);
-        asm!("mov {}, rsi", out(reg) rsi);
-        asm!("mov {}, rdx", out(reg) _rdx);
-        asm!("mov {}, r10", out(reg) _r10);
-        asm!("mov {}, rcx", out(reg) rcx);
+        rax = SAVE_RAX;
+        rdi = SAVE_RDI;
+        rsi = SAVE_RSI;
     }
     if check_syscalls_kill() {
         exit_gate();
@@ -61,13 +65,6 @@ pub fn bricks_syscall_handler() {
             _result = FAILURE;
             exit_gate();
         }
-    }
-    // TODO(papa) return from syscall (user)
-    unsafe {
-        // asm!("mov {}, rsp", out(reg)BRICKS_RSP);
-        // asm!("mov rsp, {}", in(reg)USER_RSP);
-        asm!("mov rcx, {}", in(reg) rcx);
-        asm!("sysret");
     }
 }
 
@@ -133,7 +130,7 @@ extern "C" {
 
 pub fn bricks_syscalls_init() {
     let mut msr_lstar = x86_64::registers::model_specific::Msr::new(LSTAR as u32);
-    let handler_addr = bricks_syscall_handler as u64;
+    let handler_addr = bricks_syscall_entry as u64;
     unsafe {
         msr_lstar.write(handler_addr);
     }
