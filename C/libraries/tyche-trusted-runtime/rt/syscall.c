@@ -15,10 +15,6 @@ void make_syscall(SyscallArgs* args){
       :
       : "rm" (args->syscall), "rm" (args->arg_1), "rm" (args->arg_2), "rm" (args->arg_3), "rm" (args->arg_4)
       : "rax", "rdi", "rsi", "rdx", "r10", "memory", "cc");
-
-  while(1) {
-
-  }
 }
 
 int syscall_print(char* buff) {
@@ -68,6 +64,13 @@ void* bricks_free(void* p) {
   SyscallArgs args;
   args.syscall = BRK;
   args.arg_1 = (arg_t)p;
+  make_syscall(&args);
+  return 0;
+}
+
+int syscall_exit() {
+  SyscallArgs args;
+  args.syscall = EXIT;
   make_syscall(&args);
   return 0;
 }

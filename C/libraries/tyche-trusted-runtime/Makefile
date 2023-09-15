@@ -53,7 +53,7 @@ TYCHOOLS_PATH ?= ../../../crates/tychools/
 
 trt-user: $(CODE_TRT) $(HDRS_TRT) $(RELOC)
 	RUSTFLAGS='-C link-arg=-Tconfigs/x86-linker-rust.x -C link-arg=-nostartfiles -C relocation-model=static' cargo build --manifest-path $(BRICKS_PATH)/Cargo.toml -Zbuild-std=core,alloc -Zbuild-std-features=compiler-builtins-mem --target=x86_64-unknown-linux-gnu --release
-	gcc --entry=user_main -DTYCHE_USER_SPACE=1 -T $(RELOC) -g $(TRT_INCLUDES) -Xlinker --no-relax -nostdlib -static -o $@ $(CODE_TRT)
+	gcc --entry=user_main_wrapper -DTYCHE_USER_SPACE=1 -T $(RELOC) -g $(TRT_INCLUDES) -Xlinker --no-relax -nostdlib -static -o $@ $(CODE_TRT)
 	chmod +x trt-user
 
 loader: $(CODE_APP) $(HDRS_APP)

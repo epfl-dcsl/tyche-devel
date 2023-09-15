@@ -7,6 +7,7 @@
 #define  PRINT 1001
 #define WRITE 1002
 #define READ 1003
+#define EXIT 1006
 
 // ———————————————————————————————— Linux syscall ———————————————————————————————— //
 #define SBRK 1004
@@ -36,4 +37,5 @@ int syscall_write(char* buff, int cnt);
 int syscall_read(char* buff, int cnt);
 void* bricks_malloc(int num_bytes);
 void* bricks_free(void *p);
+int syscall_exit();
 #endif

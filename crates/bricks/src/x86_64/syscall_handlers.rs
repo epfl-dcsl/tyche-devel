@@ -61,6 +61,9 @@ pub extern "C" fn bricks_syscall_handler() {
         syscalls::BRK => {
             _result = bricks_brk_handler(rdi as *mut c_void);
         }
+        syscalls::EXIT => {
+            exit_gate();
+        }
         _ => {
             _result = FAILURE;
             exit_gate();

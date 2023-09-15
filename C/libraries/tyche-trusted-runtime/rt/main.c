@@ -56,3 +56,10 @@ void user_main()
   syscall_print("Tyche");
   syscall_print("Tyche 2");
 }
+
+void user_main_wrapper() {
+  user_main();
+  syscall_exit();
+  // Shouldn't return here, hlt if we do
+  asm volatile("hlt"); //this will produce exception
+}
