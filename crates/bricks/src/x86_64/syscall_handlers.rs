@@ -8,7 +8,9 @@ use crate::gate_calls::{bricks_gate_call, exit_gate};
 use crate::profiles::check_syscalls_kill;
 use crate::shared_buffer::{bricks_get_shared_pointer, bricks_write_ret_code};
 use crate::syscalls;
+
 // ———————————————————————————————— Main syscall handler ————————————————————————————————— //
+
 #[no_mangle]
 #[used]
 pub static mut USER_RSP: usize = 0;
@@ -71,6 +73,7 @@ pub extern "C" fn bricks_syscall_handler() {
 }
 
 // ———————————————————————————————— Helping handlers (logic for handlers) ————————————————————————————————— //
+
 pub fn bricks_attest_enclave_handler(nonce: u64, result_struct: *mut AttestationResult) -> u64 {
     let ref_struct: &mut AttestationResult;
     unsafe {
@@ -151,6 +154,7 @@ pub fn bricks_restore_syscalls() {
 }
 
 // ——————————————————————————————— Syscall related constants ———————————————————————————————— //
+
 /// /// STAR - register to set Ring 0 and Ring 3 segment base
 pub const STAR: u64 = 0xC0000081;
 pub const USER_BASE: u64 = 0x13;

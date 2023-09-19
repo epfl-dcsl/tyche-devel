@@ -75,7 +75,9 @@ pub fn bricks_init_gdt() {
         load_tss(GDT.1.tss_selector);
     }
 }
+
 // ———————————————————————————————— Save/restore idt ————————————————————————————————— //
+
 static mut GDT_SAVE: Option<DescriptorTablePointer> = None;
 
 pub fn bricks_save_idt() {

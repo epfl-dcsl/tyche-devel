@@ -36,7 +36,7 @@ void test_mm() {
   void* next = (void*)0;
   void* prev = (void*)0;
   for(int i = 0; i < 10;i++) {
-    next = bricks_malloc(100); // one page
+    next = bricks_sbrk(100); // one page
     if(next == prev) {
       syscall_print("NULL");
     }
@@ -48,11 +48,8 @@ void test_mm() {
 } 
 
 // ———————————————————————— Entry Point into binary ————————————————————————— //
-void user_main()
-{
-  // make_exception();
-  // test_attestation();
-  // test_mm();
+
+void user_main() {
   syscall_print("Tyche");
   syscall_print("Tyche 2");
 }

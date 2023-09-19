@@ -38,8 +38,9 @@ pub fn bricks_min(a: usize, b: usize) -> usize {
     }
 }
 
-const ARR_SZ: usize = 256;
 pub fn bricks_print(str_print: &'static str) {
+    const ARR_SZ: usize = 256;
+
     let mut char_arr: [u8; ARR_SZ] = [0; ARR_SZ];
     let mut i: usize = 0;
     for chr in str_print.chars() {

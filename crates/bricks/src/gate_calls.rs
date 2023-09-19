@@ -9,7 +9,7 @@ extern "C" {
     fn asm_call_gate(capa_handle: &u64, args: &*const c_void) -> u64;
 }
 
-// Gate call to return to untrusted part
+/// Gate call to return to untrusted part
 pub fn bricks_gate_call() -> u64 {
     let mut result: u64 = FAILURE;
     unsafe {
@@ -22,7 +22,7 @@ pub fn bricks_gate_call() -> u64 {
     result
 }
 
-// Exits enclave with exit code
+/// Exits enclave with exit code
 const EXIT_GATE: u64 = 107;
 pub fn exit_gate() {
     bricks_write_ret_code(EXIT_GATE);

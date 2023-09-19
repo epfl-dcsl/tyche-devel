@@ -8,6 +8,7 @@ pub struct UserAllocator {
     pub virt_start: u64,
     pub virt_size: u64,
 }
+
 // Support for sbrk and brk calls
 impl UserAllocator {
     pub fn malloc(&mut self, num_bytes: u64) -> VirtualAddr {

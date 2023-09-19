@@ -3,7 +3,8 @@
 #include <stdint.h>
 
 // ———————————————————————————————— Interface to make syscalls ————————————————————————————————— //
-void make_syscall(SyscallArgs* args){
+
+void make_syscall(SyscallArgs* args) {
   asm volatile(
       // Setting arguments.
       "movq %0, %%rax\n\t"
@@ -52,7 +53,7 @@ int syscall_read(char* buff, int cnt) {
   return 0;
 }
 
-void* bricks_malloc(int num_bytes) {
+void* bricks_sbrk(int num_bytes) {
   SyscallArgs args;
   args.syscall = SBRK;
   args.arg_1 = (arg_t)num_bytes;
@@ -60,7 +61,7 @@ void* bricks_malloc(int num_bytes) {
   return 0;
 }
 
-void* bricks_free(void* p) {
+void* bricks_brk(void* p) {
   SyscallArgs args;
   args.syscall = BRK;
   args.arg_1 = (arg_t)p;

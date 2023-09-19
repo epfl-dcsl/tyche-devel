@@ -4,7 +4,7 @@
 #include <stdint.h>
 // ———————————————————————————————— Syscalls ———————————————————————————————— //
 #define ATTEST_ENCLAVE 1000
-#define  PRINT 1001
+#define PRINT 1001
 #define WRITE 1002
 #define READ 1003
 #define EXIT 1006
@@ -29,13 +29,13 @@ typedef struct SyscallArgs {
   arg_t arg_2;
   arg_t arg_3;
   arg_t arg_4;
-}SyscallArgs;
+} SyscallArgs;
 // ———————————————————————————————— Syscall functions ———————————————————————————————— //
-int syscall_print(char* buff);
-int syscall_enclave_attestation(int nonce, attestation_struct_t* att_struct);
-int syscall_write(char* buff, int cnt);
-int syscall_read(char* buff, int cnt);
-void* bricks_malloc(int num_bytes);
-void* bricks_free(void *p);
+int syscall_print(char *buff);
+int syscall_enclave_attestation(int nonce, attestation_struct_t *att_struct);
+int syscall_write(char *buff, int cnt);
+int syscall_read(char *buff, int cnt);
+void *bricks_sbrk(int num_bytes);
+void *bricks_brk(void *p);
 int syscall_exit();
 #endif

@@ -117,7 +117,9 @@ fn should_we_map(map: &Option<MappingPageTables>) -> bool {
         false
     }
 }
+
 const DEFAULT_VIRT_ADDR_START: usize = 0x800000000000;
+
 fn map_page_table_virt_addr(map: &Option<MappingPageTables>) -> usize {
     if let Some(mp) = map {
         if let Some(addr) = mp.virt_addr_start {

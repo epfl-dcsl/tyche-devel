@@ -39,7 +39,9 @@ pub fn call_tyche(args: &mut TycheCallArgs) {
 }
 
 // ———————————————————————————————— Helpers to return make tyche calls and return result ————————————————————————————————— //
+
 const ENCLAVE_ATTESTATION: usize = 14;
+
 pub fn enclave_attestation_tyche(nonce: u64, result_struct: &mut AttestationResult) -> u64 {
     let mut call_args = TycheCallArgs::default();
 
@@ -77,6 +79,7 @@ pub fn enclave_attestation_tyche(nonce: u64, result_struct: &mut AttestationResu
 }
 
 // ———————————————————————————————— Implementation for some functions for TycheCallArgs ————————————————————————————————— //
+
 impl Default for TycheCallArgs {
     fn default() -> Self {
         TycheCallArgs {

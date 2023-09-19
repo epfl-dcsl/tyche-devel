@@ -25,6 +25,7 @@ pub fn bricks_init_idt() {
 }
 
 // ———————————————————————————————— Save/restore idt ————————————————————————————————— //
+
 static mut IDT_SAVE: Option<DescriptorTablePointer> = None;
 
 pub fn bricks_save_idt() {

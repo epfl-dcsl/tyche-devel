@@ -8,6 +8,7 @@ const EXCEPTION_CONST: u64 = 111;
 const DIVIDE_ZERO_CONST: u64 = 222;
 
 // ———————————————————————————————— Logic for handlers ————————————————————————————————— //
+
 pub fn bricks_exception_handler() {
     bricks_write_ret_code(EXCEPTION_CONST);
     bricks_gate_call();

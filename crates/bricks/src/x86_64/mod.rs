@@ -22,7 +22,7 @@ pub fn bricks_interrupt_setup() {
     bricks_init_idt();
 }
 
-pub fn bricks_syscals_setup() {
+pub fn bricks_syscall_setup() {
     bricks_save_syscalls();
     bricks_syscalls_init();
 }
