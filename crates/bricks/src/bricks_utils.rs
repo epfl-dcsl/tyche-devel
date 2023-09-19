@@ -3,7 +3,7 @@ use core::ffi::c_char;
 use crate::arch::syscall_handlers::bricks_print_handler;
 use crate::bricks_structs::AttestationResult;
 
-pub fn bricks_memcpy(dst: *mut c_char, src: *mut c_char, cnt: u32) {
+pub unsafe fn bricks_memcpy(dst: *mut c_char, src: *mut c_char, cnt: u32) {
     let mut dst_cp = dst;
     let mut src_cp = src;
     for _ in 0..cnt {
@@ -15,7 +15,7 @@ pub fn bricks_memcpy(dst: *mut c_char, src: *mut c_char, cnt: u32) {
     }
 }
 
-pub fn bricks_strlen(str: *mut c_char) -> u32 {
+pub unsafe fn bricks_strlen(str: *mut c_char) -> u32 {
     let mut buff_cpy = str;
     let mut cnt_chars = 0;
     loop {

@@ -15,8 +15,7 @@ impl UserAllocator {
         let num_p = num_pages(num_bytes);
         let prev_virt_size = self.virt_size;
         for _ in 0..num_p {
-            let (res, addr) = page_allocator::alloc_page();
-            if res {
+            if let Ok(addr) = page_allocator::alloc_page() {
                 arch::page_table_mapper::change_access(&addr, USER_ACCESS);
                 if self.virt_start == 0 {
                     self.virt_start = addr.as_u64();

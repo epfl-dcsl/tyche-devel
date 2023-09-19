@@ -9,42 +9,36 @@ static NUM_PAGES: AtomicUsize = AtomicUsize::new(0);
 static mut ALLOCATED: [bool; NUM_PAGES_MAX] = [false; NUM_PAGES_MAX];
 static MEM_POOL_START: AtomicU64 = AtomicU64::new(0);
 
-pub fn alloc_page() -> (bool, VirtualAddr) {
+pub fn alloc_page() -> Result<VirtualAddr, ()> {
     let num_pages = NUM_PAGES.load(Ordering::Relaxed);
     for i in 0..num_pages {
         unsafe {
             if !ALLOCATED[i] {
                 ALLOCATED[i] = true;
-                return (
-                    true,
-                    VirtualAddr::new(
-                        MEM_POOL_START.load(Ordering::Relaxed) + (i as u64) * PAGE_SIZE,
-                    ),
-                );
+                return Ok(VirtualAddr::new(
+                    MEM_POOL_START.load(Ordering::Relaxed) + (i as u64) * PAGE_SIZE,
+                ));
             }
         }
     }
 
-    (false, VirtualAddr::new(0))
+    Err(())
 }
 
-pub fn alloc_page_back() -> (bool, VirtualAddr) {
+pub fn alloc_page_back() -> Result<VirtualAddr, ()> {
     let num_pages = NUM_PAGES.load(Ordering::Relaxed);
     for i in (0..num_pages).rev() {
         unsafe {
             if !ALLOCATED[i] {
                 ALLOCATED[i] = true;
-                return (
-                    true,
-                    VirtualAddr::new(
-                        MEM_POOL_START.load(Ordering::Relaxed) + (i as u64) * PAGE_SIZE,
-                    ),
-                );
+                return Ok(VirtualAddr::new(
+                    MEM_POOL_START.load(Ordering::Relaxed) + (i as u64) * PAGE_SIZE,
+                ));
             }
         }
     }
 
-    (false, VirtualAddr::new(0))
+    Err(())
 }
 
 fn check_allignment(addr: &VirtualAddr) -> bool {
@@ -63,17 +57,17 @@ fn calc_index(addr: &VirtualAddr) -> usize {
     (addr.as_u64() - MEM_POOL_START.load(Ordering::Relaxed)) as usize / PAGE_SIZE as usize
 }
 
-pub fn free_page(addr: &VirtualAddr) -> bool {
+pub fn free_page(addr: &VirtualAddr) -> Result<(), ()> {
     if !check_allignment(addr) {
-        return false;
+        return Err(());
     }
     let index = calc_index(addr);
     let num_pages = NUM_PAGES.load(Ordering::Relaxed);
     if index >= (num_pages) {
-        return false;
+        return Err(());
     }
     unsafe {
         ALLOCATED[index] = false;
     }
-    true
+    Ok(())
 }

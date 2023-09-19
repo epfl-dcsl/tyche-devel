@@ -85,8 +85,13 @@ pub fn bricks_attest_enclave_handler(nonce: u64, result_struct: *mut Attestation
 pub fn bricks_print_handler(buff: *mut c_char) -> u64 {
     bricks_write_ret_code(syscalls::PRINT as u64);
     let shared_buff_str = bricks_get_shared_pointer(RET_CODE_BYTES);
-    let cnt_chars = bricks_strlen(buff);
-    bricks_memcpy(shared_buff_str, buff, cnt_chars);
+    let cnt_chars: u32;
+    unsafe {
+        cnt_chars = bricks_strlen(buff);
+    }
+    unsafe {
+        bricks_memcpy(shared_buff_str, buff, cnt_chars);
+    }
     bricks_gate_call();
     SUCCESS
 }
@@ -98,14 +103,18 @@ pub fn bricks_write_shared_handler(buff: *mut c_char, cnt: u32) -> u64 {
         *shared_buff_num_bytes = cnt as u64;
     }
     let shared_buff_data = bricks_get_shared_pointer(RET_CODE_BYTES + (u64::BITS as u64) / 8);
-    bricks_memcpy(shared_buff_data, buff, cnt);
+    unsafe {
+        bricks_memcpy(shared_buff_data, buff, cnt);
+    }
     bricks_gate_call();
     SUCCESS
 }
 
 pub fn bricks_read_shared_handler(buff: *mut c_char, cnt: u32) -> u64 {
     let shared_buff_data = bricks_get_shared_pointer(RET_CODE_BYTES);
-    bricks_memcpy(buff, shared_buff_data, cnt);
+    unsafe {
+        bricks_memcpy(buff, shared_buff_data, cnt);
+    }
     SUCCESS
 }
 
