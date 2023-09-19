@@ -50,7 +50,7 @@ impl UserAllocator {
         VirtualAddr::new(self.virt_start + self.virt_size)
     }
 
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         UserAllocator {
             virt_start: 0,
             virt_size: 0,

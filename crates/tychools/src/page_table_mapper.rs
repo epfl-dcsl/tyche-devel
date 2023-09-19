@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 use std::process::abort;
+use std::sync::atomic::Ordering;
 
 use mmu::ptmapper::MAP_PAGE_TABLE;
 use mmu::walker::{Level, WalkNext, Walker};
@@ -85,35 +86,31 @@ pub fn generate_page_tables(
         mapper.map_range(&allocator, virt, HostPhysAddr::new(curr_phys), size, flags);
         curr_phys += size;
     }
-    unsafe {
-        log::debug!(
-            "Done mapping all the segments, we consummed {} extra pages",
-            ADDR_IDX
-        );
-    }
+    log::debug!(
+        "Done mapping all the segments, we consummed {} extra pages",
+        ADDR_IDX.load(Ordering::Relaxed)
+    );
     if map_op {
         let mut virt_page_addr: usize = virt_addr_start;
         log::debug!("Now mapping the pages for page tables");
-        unsafe {
-            let mut cnt = 0;
-            while cnt < ADDR_IDX {
-                let virt_addr = virt_page_addr;
-                let phys_addr = curr_phys;
-                let size: usize = PAGE_SIZE;
-                log::debug!("virt addr {:#x}", virt_addr);
-                log::debug!("phys addr {:#x}", phys_addr);
-                log::debug!("size {:#x}", size);
-                mapper.map_range(
-                    &allocator,
-                    HostVirtAddr::new(virt_addr),
-                    HostPhysAddr::new(phys_addr),
-                    size,
-                    MAP_PAGE_TABLE,
-                );
-                curr_phys += size;
-                virt_page_addr += size;
-                cnt += 1;
-            }
+        let mut cnt = 0;
+        while cnt < ADDR_IDX.load(Ordering::Relaxed) {
+            let virt_addr = virt_page_addr;
+            let phys_addr = curr_phys;
+            let size: usize = PAGE_SIZE;
+            log::debug!("virt addr {:#x}", virt_addr);
+            log::debug!("phys addr {:#x}", phys_addr);
+            log::debug!("size {:#x}", size);
+            mapper.map_range(
+                &allocator,
+                HostVirtAddr::new(virt_addr),
+                HostPhysAddr::new(phys_addr),
+                size,
+                MAP_PAGE_TABLE,
+            );
+            curr_phys += size;
+            virt_page_addr += size;
+            cnt += 1;
         }
     }
     log::debug!(

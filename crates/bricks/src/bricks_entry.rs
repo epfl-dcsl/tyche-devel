@@ -23,14 +23,16 @@ pub extern "C" fn bricks_trusted_main(capa_index: u64, args: *const c_void) {
         args: args,
     };
     let br_frame_curr = br_frame;
+    // SAFETY: this is before transitioning to user mode, during setup
+    // only Bricks is going to enter here, unsafe is for static mut
     unsafe {
         CURRENT_FRAME = Some(br_frame_curr);
     }
     get_tychools_info();
     bricks_interrupt_setup();
     bricks_syscall_setup();
+    // bricks_testing();
     bricks_print("Transitioning to user mode, good luck...");
     transition_into_user_mode();
-    bricks_testing();
     exit_gate();
 }

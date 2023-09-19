@@ -35,7 +35,7 @@ impl BricksAllocator {
         false
     }
 
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         BricksAllocator {
             pages: [0; NUM_PAGES],
             allocated: [false; NUM_PAGES],

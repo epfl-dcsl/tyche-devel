@@ -1,4 +1,4 @@
-use self::bricks_allocator::{BricksAllocator, NUM_PAGES};
+use self::bricks_allocator::BricksAllocator;
 use self::user_allocator::UserAllocator;
 use crate::arch::VirtualAddr;
 
@@ -7,15 +7,9 @@ pub mod page_allocator;
 pub mod user_allocator;
 pub mod utils;
 
-static mut BRICKS_ALLOCATOR: BricksAllocator = BricksAllocator {
-    pages: [0; NUM_PAGES],
-    allocated: [false; NUM_PAGES],
-};
+static mut BRICKS_ALLOCATOR: BricksAllocator = BricksAllocator::new();
 
-static mut USER_ALLOCATOR: UserAllocator = UserAllocator {
-    virt_start: 0,
-    virt_size: 0,
-};
+static mut USER_ALLOCATOR: UserAllocator = UserAllocator::new();
 
 pub fn alloc_user(num_bytes: u64) -> u64 {
     unsafe { USER_ALLOCATOR.malloc(num_bytes).as_u64() }

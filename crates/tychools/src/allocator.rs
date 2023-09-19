@@ -1,4 +1,5 @@
 use std::cell::RefCell;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use mmu::FrameAllocator;
 use utils::{Frame, HostPhysAddr, HostVirtAddr};
@@ -15,7 +16,7 @@ pub struct Page {
     pub data: [u8; PAGE_SIZE],
 }
 
-pub static mut ADDR_IDX: usize = 0;
+pub static ADDR_IDX: AtomicUsize = AtomicUsize::new(0);
 
 pub struct BumpAllocator<const N: usize> {
     pub idx: usize,
@@ -38,9 +39,7 @@ impl<const N: usize> BumpAllocator<N> {
             let idx = self.idx;
             let frame = &mut self.pages[idx].data as *mut u8 as usize;
             self.idx += 1;
-            unsafe {
-                ADDR_IDX += 1;
-            }
+            ADDR_IDX.store(ADDR_IDX.load(Ordering::Relaxed) + 1, Ordering::Relaxed);
             return Some(Frame {
                 phys_addr: HostPhysAddr::new(self.phys_offset + idx * PAGE_SIZE),
                 virt_addr: frame,
