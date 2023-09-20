@@ -12,6 +12,7 @@ static MEM_POOL_START: AtomicU64 = AtomicU64::new(0);
 pub fn alloc_page() -> Result<VirtualAddr, ()> {
     let num_pages = NUM_PAGES.load(Ordering::Relaxed);
     for i in 0..num_pages {
+        // SAFETY: single-threaded, unsafe because of static mut
         unsafe {
             if !ALLOCATED[i] {
                 ALLOCATED[i] = true;
@@ -28,6 +29,7 @@ pub fn alloc_page() -> Result<VirtualAddr, ()> {
 pub fn alloc_page_back() -> Result<VirtualAddr, ()> {
     let num_pages = NUM_PAGES.load(Ordering::Relaxed);
     for i in (0..num_pages).rev() {
+        // SAFETY: single-threaded, unsafe because of static mut
         unsafe {
             if !ALLOCATED[i] {
                 ALLOCATED[i] = true;
@@ -66,6 +68,7 @@ pub fn free_page(addr: &VirtualAddr) -> Result<(), ()> {
     if index >= (num_pages) {
         return Err(());
     }
+    // SAFETY: single-threaded, unsafe because of static mut
     unsafe {
         ALLOCATED[index] = false;
     }

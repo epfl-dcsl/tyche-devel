@@ -11,7 +11,8 @@ pub struct UserAllocator {
 
 // Support for sbrk and brk calls
 impl UserAllocator {
-    pub fn malloc(&mut self, num_bytes: u64) -> VirtualAddr {
+    /// SBRK - returns break address of the data segment
+    pub fn sbrk(&mut self, num_bytes: u64) -> VirtualAddr {
         let num_p = num_pages(num_bytes);
         let prev_virt_size = self.virt_size;
         for _ in 0..num_p {
@@ -26,7 +27,9 @@ impl UserAllocator {
                     self.virt_size -= PAGE_SIZE;
                     let addr_free = VirtualAddr::new(self.virt_start + self.virt_size);
                     arch::page_table_mapper::change_access(&addr_free, KERNEL_ACCESS);
-                    page_allocator::free_page(&addr_free);
+                    if let Err(()) = page_allocator::free_page(&addr_free) {
+                        arch::halt();
+                    }
                 }
                 if self.virt_size == 0 {
                     self.virt_start = 0;
@@ -37,14 +40,17 @@ impl UserAllocator {
         VirtualAddr::new(self.virt_start + self.virt_size)
     }
 
-    pub fn free(&mut self, addr: VirtualAddr) -> VirtualAddr {
+    /// BRK - returns break address of the data segment
+    pub fn brk(&mut self, addr: VirtualAddr) -> VirtualAddr {
         let mut virt_end = self.virt_start + self.virt_size;
         while self.virt_size > 0 && (virt_end - PAGE_SIZE) > addr.as_u64() {
             let addr_free = VirtualAddr::new(virt_end - PAGE_SIZE);
             virt_end -= PAGE_SIZE;
             self.virt_size -= PAGE_SIZE;
             arch::page_table_mapper::change_access(&addr_free, KERNEL_ACCESS);
-            page_allocator::free_page(&addr_free);
+            if let Err(()) = page_allocator::free_page(&addr_free) {
+                arch::halt();
+            }
         }
         VirtualAddr::new(self.virt_start + self.virt_size)
     }

@@ -29,12 +29,14 @@ pub fn bricks_init_idt() {
 static mut IDT_SAVE: Option<DescriptorTablePointer> = None;
 
 pub fn bricks_save_idt() {
+    // SAFETY: x86_64 crate functions sidt is unsafe, contains asm
     unsafe {
         IDT_SAVE = Some(x86_64::instructions::tables::sidt());
     }
 }
 
 pub fn bricks_restore_idt() {
+    // SAFETY: x86_64 crate functions lidt is unsafe, contains asm
     unsafe {
         if let Some(idt_s) = IDT_SAVE {
             x86_64::instructions::tables::lidt(&idt_s);

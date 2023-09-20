@@ -31,8 +31,12 @@ pub extern "C" fn bricks_trusted_main(capa_index: u64, args: *const c_void) {
     get_tychools_info();
     bricks_interrupt_setup();
     bricks_syscall_setup();
+
+    // Remove comment on the next line if you want to test Bricks before transition to user
     // bricks_testing();
+
     bricks_print("Transitioning to user mode, good luck...");
     transition_into_user_mode();
+
     exit_gate();
 }

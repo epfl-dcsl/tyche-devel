@@ -4,6 +4,7 @@ static mut DS_REG: Option<SegmentSelector> = None;
 static mut ES_REG: Option<SegmentSelector> = None;
 static mut SS_REG: Option<SegmentSelector> = None;
 pub fn bricks_save_segments() {
+    // SAFETY: x86_64 crate functions get_reg is unsafe, contains asm
     unsafe {
         DS_REG = Some(DS::get_reg());
         ES_REG = Some(ES::get_reg());
@@ -12,6 +13,7 @@ pub fn bricks_save_segments() {
 }
 
 pub fn bricks_restore_segments() {
+    // SAFETY: x86_64 crate functions set_reg is unsafe, contains asm
     unsafe {
         if let Some(ds_reg) = DS_REG {
             DS::set_reg(ds_reg);

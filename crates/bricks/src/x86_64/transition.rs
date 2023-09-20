@@ -23,6 +23,9 @@ pub fn transition_into_user_mode() {
         USER_RSP_START.load(Ordering::Relaxed) + STACK_SIZE.load(Ordering::Relaxed);
     let code_selector: u64 = CODE_SELECTOR;
     let instr_pointer: u64 = USER_RIP_START.load(Ordering::Relaxed);
+    // in this way you transition to user mode with interrupts disabled
+    // if you want to enable it flags must be flags = flags | 0x200
+    // this was done for easier testing
     unsafe {
         asm!(
             "pushq {0:r}",

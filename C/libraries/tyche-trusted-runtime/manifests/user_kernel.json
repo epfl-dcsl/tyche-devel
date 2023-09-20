@@ -22,7 +22,7 @@
           }
         }
       ],
-      "bricks_info" : {
+      "runtime_info" : {
         "memory_pool" : true,
         "memory_pool_size" : 4,
         "user_stack" : true

@@ -1,6 +1,6 @@
 use core::ffi::{c_char, c_void};
 
-use crate::allocator::{alloc_user, free_user};
+use crate::allocator::{brk_user, sbrk_user};
 use crate::bricks_const::{FAILURE, RET_CODE_BYTES, SUCCESS};
 use crate::bricks_structs::AttestationResult;
 use crate::bricks_utils::{bricks_memcpy, bricks_strlen};
@@ -34,6 +34,8 @@ pub extern "C" fn bricks_syscall_handler() {
     let rax: usize;
     let rdi: usize;
     let rsi: usize;
+    // SAFETY: static mut variables, interrupts are disabled when we are
+    // in handler for now so basically only one thread will enter here
     unsafe {
         rax = SAVE_RAX;
         rdi = SAVE_RDI;
@@ -119,11 +121,11 @@ pub fn bricks_read_shared_handler(buff: *mut c_char, cnt: u32) -> u64 {
 }
 
 pub fn bricks_sbrk_handler(num_bytes: usize) -> u64 {
-    alloc_user(num_bytes as u64)
+    sbrk_user(num_bytes as u64)
 }
 
 pub fn bricks_brk_handler(mem: *mut c_void) -> u64 {
-    free_user(VirtualAddr::new(mem as u64))
+    brk_user(VirtualAddr::new(mem as u64))
 }
 
 // ———————————————————————————————— Save/restore syscalls ————————————————————————————————— //
@@ -133,6 +135,7 @@ use super::VirtualAddr;
 static mut MSR_VAL: u64 = 0;
 pub fn bricks_save_syscalls() {
     let msr_lstar = x86_64::registers::model_specific::Msr::new(LSTAR as u32);
+    // SAFETY: x86_64 crate functions read is unsafe, contains asm
     unsafe {
         MSR_VAL = msr_lstar.read();
     }
@@ -145,6 +148,7 @@ extern "C" {
 pub fn bricks_syscalls_init() {
     let mut msr_lstar = x86_64::registers::model_specific::Msr::new(LSTAR as u32);
     let handler_addr = bricks_syscall_entry as u64;
+    // SAFETY: x86_64 crate functions write is unsafe, contains asm
     unsafe {
         msr_lstar.write(handler_addr);
     }

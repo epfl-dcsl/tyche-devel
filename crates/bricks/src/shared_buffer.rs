@@ -13,6 +13,7 @@ pub fn bricks_get_default_shared_buffer() -> *const c_void {
     BRICKS_SHARED_BUFFER as *const c_void
 }
 
+// function always called by Bricks, offset is not something specified by user
 pub fn bricks_get_shared_pointer(offset: u64) -> *mut c_char {
     ((bricks_get_default_shared_buffer() as u64) + offset) as *mut c_char
 }

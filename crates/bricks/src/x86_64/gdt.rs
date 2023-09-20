@@ -67,6 +67,7 @@ lazy_static! {
 
 pub fn bricks_init_gdt() {
     GDT.0.load();
+    // SAFETY: x86_64 crate functions set_reg is unsafe, contains asm
     unsafe {
         CS::set_reg(GDT.1.kernel_code_selector);
         DS::set_reg(GDT.1.kernel_data_selector);
@@ -81,12 +82,14 @@ pub fn bricks_init_gdt() {
 static mut GDT_SAVE: Option<DescriptorTablePointer> = None;
 
 pub fn bricks_save_idt() {
+    // SAFETY: x86_64 crate functions sgdt is unsafe, contains asm
     unsafe {
         GDT_SAVE = Some(x86_64::instructions::tables::sgdt());
     }
 }
 
 pub fn bricks_restore_idt() {
+    // SAFETY: x86_64 crate functions lgdt is unsafe, contains asm
     unsafe {
         if let Some(gdt_s) = GDT_SAVE {
             x86_64::instructions::tables::lgdt(&gdt_s);

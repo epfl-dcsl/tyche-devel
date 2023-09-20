@@ -21,20 +21,20 @@ pub struct SegmentDescriptor {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct BricksInfo {
+pub struct RuntimeInfo {
     memory_pool: bool,
     memory_pool_size: Option<u64>,
     user_stack: bool,
 }
 
-pub struct BricksData {
+pub struct RuntimeData {
     memory_pool_start: u64,
     memory_pool_size: u64,
     user_rip_start: u64,
     user_stack_start: u64,
 }
 
-impl BricksData {
+impl RuntimeData {
     pub fn to_le_bytes(&self) -> Vec<u8> {
         let mut vec: Vec<u8> = Vec::new();
         vec.extend(self.memory_pool_start.to_le_bytes().to_vec());
@@ -64,7 +64,7 @@ pub struct BinaryInstrumentation {
     /// Extra operations to perform on the binary.
     ops: Option<Vec<BinaryOperation>>,
     /// Bricks info
-    bricks_info: Option<BricksInfo>,
+    runtime_info: Option<RuntimeInfo>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -196,11 +196,11 @@ pub fn parse_binary(
     }
 
     // Apply Bricks info
-    if let Some(bricks_info) = &binary.bricks_info {
+    if let Some(bricks_info) = &binary.runtime_info {
         log::debug!("Bricks info!");
         let mut virt_addr: u64 = BRICKS_DATA_INFO + BRICKS_DATA_INFO_SIZE;
         let virt_addr_info: u64 = BRICKS_DATA_INFO;
-        let mut bricks_data = BricksData {
+        let mut bricks_data = RuntimeData {
             memory_pool_size: 0,
             memory_pool_start: 0,
             user_rip_start: 0,
@@ -354,7 +354,7 @@ pub fn print_enum() {
                 exec: false,
             }),
         ]),
-        bricks_info: None,
+        runtime_info: None,
     };
     let json = serde_json::to_string(&op).unwrap();
     log::info!("The generated json {}", json);
