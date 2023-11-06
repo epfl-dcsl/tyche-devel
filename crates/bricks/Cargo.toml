@@ -16,12 +16,6 @@ features = ["spin_no_std"]
 name = "bricks"
 crate-type = ["bin"]
 
-[profile.dev]
-panic = "abort"
-
-[profile.release]
-panic = "abort"
-
 [features]
 exceptions_behave = []
 syscalls_behave = []

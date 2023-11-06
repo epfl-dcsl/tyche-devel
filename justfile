@@ -41,6 +41,8 @@ check:
 	@touch target/x86_64-unknown-kernel/release/tyche
 
 	# Checking code...
+	cargo check --package capa-engine
+	cargo check --package vmx
 	cargo check {{cargo_args}} {{x86_64}} {{first-stage}}
 	cargo check {{cargo_args}} {{x86_64}} {{tyche}}
 	cargo check {{cargo_args}} {{riscv}}  {{tyche}}
