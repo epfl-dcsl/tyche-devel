@@ -5,7 +5,9 @@ use vmx::bitmaps::EptEntryFlags;
 use vmx::ept::{GIANT_PAGE_SIZE, HUGE_PAGE_SIZE, PAGE_SIZE};
 
 use crate::frame_allocator::FrameAllocator;
-use crate::walker::{Level, WalkNext, Walker};
+use crate::walker::{Address, Level, WalkNext, Walker};
+
+pub const ADDRESS_MASK: u64 = 0x7fffffffff000;
 
 pub struct EptMapper {
     host_offset: usize,
@@ -33,6 +35,10 @@ unsafe impl Walker for EptMapper {
 
     fn root(&mut self) -> (Self::PhysAddr, Level) {
         (self.root, self.level)
+    }
+
+    fn get_phys_addr(entry: u64) -> Self::PhysAddr {
+        Self::PhysAddr::from_u64(entry & ADDRESS_MASK)
     }
 }
 

@@ -176,11 +176,8 @@ pub unsafe trait Walker {
     /// Returns the physical address of the root page (L4).
     fn root(&mut self) -> (Self::PhysAddr, Level);
 
-    /// A mask for extracting an address from a page table entry.
-    fn get_phys_addr(_entry: u64) -> Option<Self::PhysAddr> {
-        log::debug!("Default implementation.");
-        None
-    }
+    /// Extracts the physical address from a page table entry.
+    fn get_phys_addr(_entry: u64) -> Self::PhysAddr;
 
     /// Walk the page tables controlling given address' mapping.
     unsafe fn walk<F>(&mut self, addr: Self::VirtAddr, callback: &mut F) -> Result<(), ()>
@@ -206,7 +203,7 @@ pub unsafe trait Walker {
             } else {
                 return Ok(());
             };
-            phys_addr = (Self::get_phys_addr(*entry)).unwrap();
+            phys_addr = Self::get_phys_addr(*entry);
             //TODO_NEELU - here I think we need & ADDRESS_MASK for both. Confirm this and fix appropriately.
         }
     }
@@ -281,7 +278,7 @@ where
             WalkNext::Continue => {
                 // Recursively process next level entries, if any
                 if let Some(next) = next_level {
-                    let phys_addr = W::get_phys_addr(*entry).unwrap();
+                    let phys_addr = W::get_phys_addr(*entry);
                     let host_virt_addr = walker.translate(phys_addr);
                     let page = as_page(walker, host_virt_addr);
                     walk_range_rec(walker, page, next, addr, end, callback, cleanup)?;

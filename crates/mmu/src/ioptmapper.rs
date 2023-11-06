@@ -2,7 +2,9 @@ use bitflags::bitflags;
 use utils::{GuestPhysAddr, HostPhysAddr, HostVirtAddr};
 
 use crate::frame_allocator::FrameAllocator;
-use crate::walker::{Level, WalkNext, Walker};
+use crate::walker::{Address, Level, WalkNext, Walker};
+
+pub const ADDRESS_MASK: u64 = 0x7fffffffff000;
 
 pub struct IoPtMapper {
     host_offset: usize,
@@ -41,6 +43,10 @@ unsafe impl Walker for IoPtMapper {
 
     fn root(&mut self) -> (Self::PhysAddr, Level) {
         (self.root, Level::L4)
+    }
+
+    fn get_phys_addr(entry: u64) -> Self::PhysAddr {
+        Self::PhysAddr::from_u64(entry & ADDRESS_MASK)
     }
 }
 

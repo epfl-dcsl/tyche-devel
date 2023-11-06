@@ -65,10 +65,8 @@ where
         (self.root, Level::L4)
     }
 
-    fn get_phys_addr(entry: u64) -> Option<Self::PhysAddr> {
-        Some(Self::PhysAddr::from_u64(
-            (entry >> RVPtFlag::flags_count()) << PAGE_OFFSET_WIDTH,
-        ))
+    fn get_phys_addr(entry: u64) -> Self::PhysAddr {
+        Self::PhysAddr::from_u64((entry >> RVPtFlag::flags_count()) << PAGE_OFFSET_WIDTH)
     }
 }
 
