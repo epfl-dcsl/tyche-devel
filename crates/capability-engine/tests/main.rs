@@ -14,13 +14,28 @@ macro_rules! snap {
     };
 }
 
+/// Creates a static CapaEngine and returns a mutable reference
+///
+/// This is required to avoid stack overflow when creating a new engine on the stack, due to the
+/// size of the engine.
+///
+/// # SAFETY:
+/// The macro returns a mutable reference to a global static, thus the usual rules applies.
+/// The macro can be used multiple functions to define multiple engines in the .data section.
+macro_rules! static_engine {
+    () => {{
+        static mut ENGINE: CapaEngine = CapaEngine::new();
+        &mut ENGINE
+    }};
+}
+
 // ——————————————————————————————— Scenarios ———————————————————————————————— //
 
 /// This scenario exercise multiple part of the engine: creating domains and region, sending and
 /// revoking.
 #[test]
 fn scenario_1() {
-    let mut engine = CapaEngine::new();
+    let engine =  unsafe {static_engine!()};
 
     // Create an initial domain with range 0x0 to 0x1000
     let domain = engine.create_manager_domain(permission::ALL).unwrap();
@@ -36,15 +51,15 @@ fn scenario_1() {
         .unwrap();
     snap!(
         "{[0x0, 0x1000 | 1 (0 - 0 - 0 - 0)]}",
-        regions(domain, &engine)
+        regions(domain, engine)
     );
     snap!(
         "{Region([0x0, 0x1000 | AC____])}",
-        capas(domain, &mut engine)
+        capas(domain, engine)
     );
     snap!(
         "{PermissionUpdate(H(0, gen 0)), CreateDomain(H(0, gen 0))}",
-        updates(&mut engine)
+        updates(engine)
     );
 
     // Duplicate the initial range into two regions
@@ -66,13 +81,13 @@ fn scenario_1() {
         .unwrap();
     snap!(
         "{[0x0, 0x200 | 1 (0 - 0 - 0 - 0)] -> [0x300, 0x1000 | 1 (0 - 0 - 0 - 0)]}",
-        regions(domain, &engine),
+        regions(domain, engine),
     );
     snap!(
         "{Region([0x0, 0x1000 | _C____]), Region([0x0, 0x200 | AC____]), Region([0x300, 0x1000 | AC____])}",
-        capas(domain, &mut engine),
+        capas(domain, engine),
     );
-    snap!("{PermissionUpdate(H(0, gen 0))}", updates(&mut engine));
+    snap!("{PermissionUpdate(H(0, gen 0))}", updates(engine));
 
     // Duplicate again
     let (_reg4, _reg5) = engine
@@ -93,13 +108,13 @@ fn scenario_1() {
         .unwrap();
     snap!(
         "{[0x0, 0x200 | 1 (0 - 0 - 0 - 0)] -> [0x300, 0x1000 | 1 (0 - 0 - 0 - 0)]}",
-        regions(domain, &engine),
+        regions(domain, engine),
     );
     snap!(
         "{Region([0x0, 0x1000 | _C____]), Region([0x0, 0x200 | _C____]), Region([0x300, 0x1000 | AC____]), Region([0x0, 0x50 | AC____]), Region([0x50, 0x200 | AC____])}",
-        capas(domain, &mut engine)
+        capas(domain, engine)
     );
-    snap!("{}", updates(&mut engine));
+    snap!("{}", updates(engine));
 
     // Create a new domain and send the inactive region there
     let dom2 = engine.create_domain(domain).unwrap();
@@ -107,50 +122,50 @@ fn scenario_1() {
     engine.send(domain, reg2, dom2).unwrap();
     snap!(
         "{[0x0, 0x200 | 1 (0 - 0 - 0 - 0)] -> [0x300, 0x1000 | 1 (0 - 0 - 0 - 0)]}",
-        regions(domain, &engine),
+        regions(domain, engine),
     );
-    snap!("{}", regions(domain2, &engine));
+    snap!("{}", regions(domain2, engine));
     snap!(
         "{Region([0x0, 0x1000 | _C____]), Region([0x300, 0x1000 | AC____]), Region([0x0, 0x50 | AC____]), Region([0x50, 0x200 | AC____]), Management(2 | _)}",
-        capas(domain, &mut engine)
+        capas(domain, engine)
     );
     snap!(
         "{Region([0x0, 0x200 | _C____])}",
-        capas(domain2, &mut engine)
+        capas(domain2, engine)
     );
-    snap!("{CreateDomain(H(1, gen 0))}", updates(&mut engine));
+    snap!("{CreateDomain(H(1, gen 0))}", updates(engine));
 
     // Revoke the domain owning the active region. This invalidates regions from the first domain
     engine.revoke_domain(domain2).unwrap();
     snap!(
         "{[0x300, 0x1000 | 1 (0 - 0 - 0 - 0)]}",
-        regions(domain, &engine),
+        regions(domain, engine),
     );
     snap!(
         "{Region([0x0, 0x1000 | _C____]), Region([0x300, 0x1000 | AC____])}",
-        capas(domain, &mut engine)
+        capas(domain, engine)
     );
     snap!(
         "{PermissionUpdate(H(0, gen 0)), PermissionUpdate(H(0, gen 0)), RevokeDomain(H(1, gen 0))}",
-        updates(&mut engine)
+        updates(engine)
     );
 
     // Restore the initial region
     engine.restore_region(domain, region).unwrap();
     snap!(
         "{[0x0, 0x1000 | 1 (0 - 0 - 0 - 0)]}",
-        regions(domain, &engine),
+        regions(domain, engine),
     );
     snap!(
         "{Region([0x0, 0x1000 | AC____])}",
-        capas(domain, &mut engine)
+        capas(domain, engine)
     );
-    snap!("{PermissionUpdate(H(0, gen 0))}", updates(&mut engine));
+    snap!("{PermissionUpdate(H(0, gen 0))}", updates(engine));
 }
 
 #[test]
 fn scenario_2() {
-    let mut engine = CapaEngine::new();
+    let engine =  unsafe {static_engine!()};
     let core = 0;
 
     // Create an initial domain with range 0x0 to 0x1000
@@ -168,15 +183,15 @@ fn scenario_2() {
         .unwrap();
     snap!(
         "{[0x0, 0x1000 | 1 (0 - 0 - 0 - 0)]}",
-        regions(domain, &engine)
+        regions(domain, engine)
     );
     snap!(
         "{Region([0x0, 0x1000 | AC____])}",
-        capas(domain, &mut engine)
+        capas(domain, engine)
     );
     snap!(
         "{PermissionUpdate(H(0, gen 0)), TlbShootdown(0), CreateDomain(H(0, gen 0))}",
-        updates(&mut engine)
+        updates(engine)
     );
 
     // Duplicate the initial range into two regions
@@ -198,15 +213,15 @@ fn scenario_2() {
         .unwrap();
     snap!(
         "{[0x0, 0x200 | 1 (0 - 0 - 0 - 0)] -> [0x300, 0x1000 | 1 (0 - 0 - 0 - 0)]}",
-        regions(domain, &engine),
+        regions(domain, engine),
     );
     snap!(
         "{Region([0x0, 0x1000 | _C____]), Region([0x0, 0x200 | AC____]), Region([0x300, 0x1000 | AC____])}",
-        capas(domain, &mut engine),
+        capas(domain, engine),
     );
     snap!(
         "{PermissionUpdate(H(0, gen 0)), TlbShootdown(0)}",
-        updates(&mut engine)
+        updates(engine)
     );
 
     // Create a new domain and send a region there
@@ -215,23 +230,23 @@ fn scenario_2() {
     engine.send(domain, reg2, dom2).unwrap();
     snap!(
         "{[0x300, 0x1000 | 1 (0 - 0 - 0 - 0)]}",
-        regions(domain, &engine),
+        regions(domain, engine),
     );
     snap!(
         "{[0x0, 0x200 | 1 (0 - 0 - 0 - 0)]}",
-        regions(domain2, &engine)
+        regions(domain2, engine)
     );
     snap!(
         "{Region([0x0, 0x1000 | _C____]), Region([0x300, 0x1000 | AC____]), Management(2 | _)}",
-        capas(domain, &mut engine)
+        capas(domain, engine)
     );
     snap!(
         "{Region([0x0, 0x200 | AC____])}",
-        capas(domain2, &mut engine)
+        capas(domain2, engine)
     );
     snap!(
         "{PermissionUpdate(H(1, gen 0)), PermissionUpdate(H(0, gen 0)), TlbShootdown(0), CreateDomain(H(1, gen 0))}",
-        updates(&mut engine)
+        updates(engine)
     );
 
     // Seal domain
@@ -258,7 +273,7 @@ fn scenario_2() {
 
 #[test]
 fn scenario_3() {
-    let mut engine = CapaEngine::new();
+    let engine = unsafe { static_engine!() };
     let core = 0;
 
     // Create initial domain and range memory 0x0 to 0x10000.
@@ -345,27 +360,27 @@ fn scenario_3() {
     let _ = engine.seal(domain, core, encl).unwrap();
     snap!(
         "{[0x1000, 0x2000 | 1 (0 - 0 - 0 - 0)]}",
-        regions(enclave, &engine)
+        regions(enclave, engine)
     );
     // Now delete the enclaves' region.
     engine.revoke(domain, reg1).unwrap();
-    snap!("{}", regions(enclave, &engine));
+    snap!("{}", regions(enclave, engine));
     engine.revoke(domain, encl).unwrap();
     // Test cleanup
     engine.revoke(domain, region).unwrap();
     snap!(
         "{[0x0, 0x10000 | 1 (0 - 0 - 0 - 0)]}",
-        regions(domain, &engine)
+        regions(domain, engine)
     );
     snap!(
         "{Region([0x0, 0x10000 | AC____])}",
-        capas(domain, &mut engine)
+        capas(domain, engine)
     );
 }
 
 #[test]
 fn access_rights_test() {
-    let mut engine = CapaEngine::new();
+    let engine = unsafe { static_engine!() };
     let core = 0;
     // Create initial domain.
     let domain = engine.create_manager_domain(permission::ALL).unwrap();
@@ -383,11 +398,11 @@ fn access_rights_test() {
 
     snap!(
         "{[0x0, 0x100000 | 1 (1 - 1 - 1 - 1)]}",
-        regions(domain, &engine)
+        regions(domain, engine)
     );
     snap!(
         "{Region([0x0, 0x100000 | ACRWXS])}",
-        capas(domain, &mut engine)
+        capas(domain, engine)
     );
     // Try the null segment trick.
     let (_reg1, _reg2) = engine
@@ -409,19 +424,19 @@ fn access_rights_test() {
 
     snap!(
         "{[0x0, 0x100000 | 1 (1 - 1 - 1 - 1)]}",
-        regions(domain, &engine)
+        regions(domain, engine)
     );
-    snap!("{Region([0x0, 0x100000 | _CRWXS]), Region([0x0, 0x0 | _CRWXS]), Region([0x0, 0x100000 | ACRWXS])}", capas(domain, &mut engine));
+    snap!("{Region([0x0, 0x100000 | _CRWXS]), Region([0x0, 0x0 | _CRWXS]), Region([0x0, 0x100000 | ACRWXS])}", capas(domain, engine));
 
     // Now revoke the original capability.
     engine.revoke(domain, region).unwrap();
     snap!(
         "{[0x0, 0x100000 | 1 (1 - 1 - 1 - 1)]}",
-        regions(domain, &engine)
+        regions(domain, engine)
     );
     snap!(
         "{Region([0x0, 0x100000 | ACRWXS])}",
-        capas(domain, &mut engine)
+        capas(domain, engine)
     );
 
     // Now try a duplicate.
@@ -443,21 +458,21 @@ fn access_rights_test() {
         .unwrap();
     snap!(
         "{[0x0, 0x100000 | 2 (2 - 2 - 2 - 2)]}",
-        regions(domain, &engine)
+        regions(domain, engine)
     );
     snap!(
         "{Region([0x0, 0x100000 | _CRWXS]), Region([0x0, 0x100000 | A_RWXS]), Region([0x0, 0x100000 | A_RWXS])}",
-        capas(domain, &mut engine)
+        capas(domain, engine)
     );
     // revoke.
     engine.revoke(domain, region).unwrap();
     snap!(
         "{[0x0, 0x100000 | 1 (1 - 1 - 1 - 1)]}",
-        regions(domain, &engine)
+        regions(domain, engine)
     );
     snap!(
         "{Region([0x0, 0x100000 | ACRWXS])}",
-        capas(domain, &mut engine)
+        capas(domain, engine)
     );
     // Now with different access rights.
     let (reg1, _reg2) = engine
@@ -478,11 +493,11 @@ fn access_rights_test() {
         .unwrap();
     snap!(
         "{[0x0, 0x100000 | 2 (2 - 1 - 1 - 1)]}",
-        regions(domain, &engine)
+        regions(domain, engine)
     );
     snap!(
         "{Region([0x0, 0x100000 | _CRWXS]), Region([0x0, 0x100000 | A_RWXS]), Region([0x0, 0x100000 | A_R___])}",
-        capas(domain, &mut engine)
+        capas(domain, engine)
     );
     // Now pause the read one.
     let (_, _) = engine
@@ -503,21 +518,21 @@ fn access_rights_test() {
         .unwrap();
     snap!(
         "{[0x0, 0x100000 | 1 (1 - 1 - 1 - 1)]}",
-        regions(domain, &engine)
+        regions(domain, engine)
     );
     snap!(
         "{Region([0x0, 0x100000 | _CRWXS]), Region([0x0, 0x100000 | A_RWXS]), Region([0x0, 0x100000 | __R___]), Region([0x0, 0x0 | ______]), Region([0x0, 0x0 | ______])}",
-        capas(domain, &mut engine)
+        capas(domain, engine)
     );
     // Cleanup everything from a higher capa.
     engine.revoke(domain, region).unwrap();
     snap!(
         "{[0x0, 0x100000 | 1 (1 - 1 - 1 - 1)]}",
-        regions(domain, &engine)
+        regions(domain, engine)
     );
     snap!(
         "{Region([0x0, 0x100000 | ACRWXS])}",
-        capas(domain, &mut engine)
+        capas(domain, engine)
     );
 }
 
