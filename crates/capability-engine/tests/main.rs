@@ -35,7 +35,7 @@ macro_rules! static_engine {
 /// revoking.
 #[test]
 fn scenario_1() {
-    let engine =  unsafe {static_engine!()};
+    let engine = unsafe { static_engine!() };
 
     // Create an initial domain with range 0x0 to 0x1000
     let domain = engine.create_manager_domain(permission::ALL).unwrap();
@@ -53,10 +53,7 @@ fn scenario_1() {
         "{[0x0, 0x1000 | 1 (0 - 0 - 0 - 0)]}",
         regions(domain, engine)
     );
-    snap!(
-        "{Region([0x0, 0x1000 | AC____])}",
-        capas(domain, engine)
-    );
+    snap!("{Region([0x0, 0x1000 | AC____])}", capas(domain, engine));
     snap!(
         "{PermissionUpdate(H(0, gen 0)), CreateDomain(H(0, gen 0))}",
         updates(engine)
@@ -129,10 +126,7 @@ fn scenario_1() {
         "{Region([0x0, 0x1000 | _C____]), Region([0x300, 0x1000 | AC____]), Region([0x0, 0x50 | AC____]), Region([0x50, 0x200 | AC____]), Management(2 | _)}",
         capas(domain, engine)
     );
-    snap!(
-        "{Region([0x0, 0x200 | _C____])}",
-        capas(domain2, engine)
-    );
+    snap!("{Region([0x0, 0x200 | _C____])}", capas(domain2, engine));
     snap!("{CreateDomain(H(1, gen 0))}", updates(engine));
 
     // Revoke the domain owning the active region. This invalidates regions from the first domain
@@ -156,16 +150,13 @@ fn scenario_1() {
         "{[0x0, 0x1000 | 1 (0 - 0 - 0 - 0)]}",
         regions(domain, engine),
     );
-    snap!(
-        "{Region([0x0, 0x1000 | AC____])}",
-        capas(domain, engine)
-    );
+    snap!("{Region([0x0, 0x1000 | AC____])}", capas(domain, engine));
     snap!("{PermissionUpdate(H(0, gen 0))}", updates(engine));
 }
 
 #[test]
 fn scenario_2() {
-    let engine =  unsafe {static_engine!()};
+    let engine = unsafe { static_engine!() };
     let core = 0;
 
     // Create an initial domain with range 0x0 to 0x1000
@@ -185,10 +176,7 @@ fn scenario_2() {
         "{[0x0, 0x1000 | 1 (0 - 0 - 0 - 0)]}",
         regions(domain, engine)
     );
-    snap!(
-        "{Region([0x0, 0x1000 | AC____])}",
-        capas(domain, engine)
-    );
+    snap!("{Region([0x0, 0x1000 | AC____])}", capas(domain, engine));
     snap!(
         "{PermissionUpdate(H(0, gen 0)), TlbShootdown(0), CreateDomain(H(0, gen 0))}",
         updates(engine)
@@ -240,10 +228,7 @@ fn scenario_2() {
         "{Region([0x0, 0x1000 | _C____]), Region([0x300, 0x1000 | AC____]), Management(2 | _)}",
         capas(domain, engine)
     );
-    snap!(
-        "{Region([0x0, 0x200 | AC____])}",
-        capas(domain2, engine)
-    );
+    snap!("{Region([0x0, 0x200 | AC____])}", capas(domain2, engine));
     snap!(
         "{PermissionUpdate(H(1, gen 0)), PermissionUpdate(H(0, gen 0)), TlbShootdown(0), CreateDomain(H(1, gen 0))}",
         updates(engine)
@@ -372,10 +357,7 @@ fn scenario_3() {
         "{[0x0, 0x10000 | 1 (0 - 0 - 0 - 0)]}",
         regions(domain, engine)
     );
-    snap!(
-        "{Region([0x0, 0x10000 | AC____])}",
-        capas(domain, engine)
-    );
+    snap!("{Region([0x0, 0x10000 | AC____])}", capas(domain, engine));
 }
 
 #[test]
@@ -400,10 +382,7 @@ fn access_rights_test() {
         "{[0x0, 0x100000 | 1 (1 - 1 - 1 - 1)]}",
         regions(domain, engine)
     );
-    snap!(
-        "{Region([0x0, 0x100000 | ACRWXS])}",
-        capas(domain, engine)
-    );
+    snap!("{Region([0x0, 0x100000 | ACRWXS])}", capas(domain, engine));
     // Try the null segment trick.
     let (_reg1, _reg2) = engine
         .segment_region(
@@ -434,10 +413,7 @@ fn access_rights_test() {
         "{[0x0, 0x100000 | 1 (1 - 1 - 1 - 1)]}",
         regions(domain, engine)
     );
-    snap!(
-        "{Region([0x0, 0x100000 | ACRWXS])}",
-        capas(domain, engine)
-    );
+    snap!("{Region([0x0, 0x100000 | ACRWXS])}", capas(domain, engine));
 
     // Now try a duplicate.
     let (_reg1, _reg2) = engine
@@ -470,10 +446,7 @@ fn access_rights_test() {
         "{[0x0, 0x100000 | 1 (1 - 1 - 1 - 1)]}",
         regions(domain, engine)
     );
-    snap!(
-        "{Region([0x0, 0x100000 | ACRWXS])}",
-        capas(domain, engine)
-    );
+    snap!("{Region([0x0, 0x100000 | ACRWXS])}", capas(domain, engine));
     // Now with different access rights.
     let (reg1, _reg2) = engine
         .segment_region(
@@ -530,10 +503,7 @@ fn access_rights_test() {
         "{[0x0, 0x100000 | 1 (1 - 1 - 1 - 1)]}",
         regions(domain, engine)
     );
-    snap!(
-        "{Region([0x0, 0x100000 | ACRWXS])}",
-        capas(domain, engine)
-    );
+    snap!("{Region([0x0, 0x100000 | ACRWXS])}", capas(domain, engine));
 }
 
 // ————————————————————————————————— Utils —————————————————————————————————— //
