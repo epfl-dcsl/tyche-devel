@@ -55,6 +55,9 @@ test:
 	cargo test --package vmx
 	cargo test --package capa-engine
 
+	{{x86-linker-script}} cargo build {{cargo_args}} {{x86_64}} {{tyche}}
+	{{riscv-linker-script}} cargo build {{cargo_args}} {{riscv}} {{tyche}}
+
 # Format all rust code
 format:
 	cargo fmt
