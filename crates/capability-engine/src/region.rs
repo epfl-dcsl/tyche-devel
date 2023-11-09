@@ -3,7 +3,7 @@ use core::fmt;
 use bitflags::bitflags;
 
 use crate::config::NB_REGIONS_PER_DOMAIN;
-use crate::gen_arena::{GenArena, Handle};
+use crate::gen_arena::{Cleanable, GenArena, Handle};
 use crate::CapaError;
 
 bitflags! {
@@ -78,6 +78,17 @@ impl PermissionChange {
 }
 
 // ———————————————————————————————— Regions ————————————————————————————————— //
+
+const EMPTY_REGION: Region = Region {
+    start: 0,
+    end: 0,
+    read_count: 0,
+    write_count: 0,
+    exec_count: 0,
+    super_count: 0,
+    ref_count: 0,
+    next: None,
+};
 
 #[derive(Debug)]
 pub struct Region {
@@ -157,6 +168,12 @@ impl Region {
     }
 }
 
+impl Cleanable for Region {
+    fn clean(&mut self) {
+        *self = EMPTY_REGION;
+    }
+}
+
 // ————————————————————————————— RegionTracker —————————————————————————————— //
 
 pub struct RegionTracker {
@@ -166,17 +183,6 @@ pub struct RegionTracker {
 
 impl RegionTracker {
     pub const fn new() -> Self {
-        const EMPTY_REGION: Region = Region {
-            start: 0,
-            end: 0,
-            read_count: 0,
-            write_count: 0,
-            exec_count: 0,
-            super_count: 0,
-            ref_count: 0,
-            next: None,
-        };
-
         Self {
             regions: GenArena::new([EMPTY_REGION; NB_REGIONS_PER_DOMAIN]),
             head: None,
@@ -626,6 +632,13 @@ impl RegionTracker {
             tracker: self,
             next: self.head,
         }
+    }
+}
+
+impl Cleanable for RegionTracker {
+    fn clean(&mut self) {
+        self.head = None;
+        self.regions.clean_all();
     }
 }
 
