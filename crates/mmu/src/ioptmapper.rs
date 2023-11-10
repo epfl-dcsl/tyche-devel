@@ -41,9 +41,16 @@ unsafe impl Walker for IoPtMapper {
         HostVirtAddr::new(phys_addr.as_usize() + self.host_offset)
     }
 
+    //#[cfg(not(feature = "visionfive2"))]
     fn root(&mut self) -> (Self::PhysAddr, Level) {
         (self.root, Level::L4)
     }
+
+    /* #[cfg(feature = "visionfive2")]
+    fn root(&mut self) -> (Self::PhysAddr, Level) {
+        todo!();    // Neelu: This is only because we compile all PT mappers to avoid conditional
+                    // compilation. So I had to put a proxy here.
+    } */
 
     fn get_phys_addr(entry: u64) -> Self::PhysAddr {
         Self::PhysAddr::from_u64(entry & ADDRESS_MASK)

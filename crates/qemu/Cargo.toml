@@ -6,8 +6,13 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-uart_16550 = "0.2.0"
+uart_16550 = "0.2.0"    #TODO: Neelu: This can also be made optional, only to be used for targets riscv qemu and x86. 
 spin = "0.5.2"
 
 [target.'cfg(target_arch = "riscv64")'.dependencies]
-riscv_utils = { path = "../riscv_utils/" }
+riscv_serial = { path = "../riscv_serial/", optional = true }
+
+[features]
+visionfive2 = ["dep:riscv_serial"]
+
+

@@ -6,4 +6,4 @@ edition = "2021"
 [dependencies]
 log = { workspace = true }
 spin = { workspace = true }
-qemu = { path = "../qemu/" }
+qemu = { path = "../qemu/"}

@@ -33,7 +33,7 @@ impl Logger {
     fn log(&self, record: &Record) {
         if self.enabled(record.metadata()) {
             _print(core::format_args!(
-                "[{} | {}] {}\n",
+                "[{} | {}] {}\r\n",
                 record.level(),
                 record.target(),
                 record.args()

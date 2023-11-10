@@ -11,3 +11,5 @@ log = { workspace = true }
 spin = { workspace = true }
 riscv_utils = { path = "../riscv_utils/" }
 capa-engine = { path = "../capability-engine/" }
+qemu = { path = "../qemu/" }
+riscv_serial = { path = "../riscv_serial/" }

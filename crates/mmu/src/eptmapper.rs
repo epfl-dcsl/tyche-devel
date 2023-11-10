@@ -44,6 +44,8 @@ unsafe impl Walker for EptMapper {
 
 impl EptMapper {
     /// Creates a new EPT mapper.
+
+    //#[cfg(not(features = "visionfive2"))]
     pub fn new(host_offset: usize, root: HostPhysAddr) -> Self {
         Self {
             host_offset,
@@ -51,6 +53,12 @@ impl EptMapper {
             level: Level::L4,
         }
     }
+    /*
+    #[cfg(features = "visionfive2")]
+        pub fn new(host_offset: usize, root: HostPhysAddr) -> Self {
+            todo!();
+        }
+        */
 
     /// Creates a new EPT mapper that start at the given level.
     pub fn new_at(level: Level, host_offset: usize, root: HostPhysAddr) -> Self {

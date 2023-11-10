@@ -54,8 +54,12 @@ static bool bench_find_switch(capa_index_t* res) {
   assert(res != NULL);
   do {
     capability_t tmp_capa;
-    if (enumerate_capa(next, &next, &tmp_capa) != SUCCESS || next == 0) {
-      goto failure;
+#if defined(CONFIG_RISCV) || defined(__riscv)
+    if (user_enumerate_capa(next, &next, &tmp_capa) != SUCCESS || next == 0) {
+#else 
+    if (enumerate_capa(next, &next, &tmp_capa) != SUCCESS || next == 0) { 
+#endif
+        goto failure;
     }
     /// We found it.
     if (tmp_capa.capa_type == Switch) {
@@ -85,11 +89,17 @@ void run_transition(char* prefix, ubench_config_t *bench) {
 
   // Create the domain.
   sprintf(name, "%s/transition", prefix);
+  //printf("\nCreating domain...\n"); 
   assert(sdk_create_domain(&domain, name, core_mask, ALL_TRAPS, DEFAULT_PERM) == SUCCESS);
 
   // Warmup transition.
+  //printf("\nCalling domain...\n");
   assert(sdk_call_domain(&domain) == SUCCESS);
-	assert(bench_find_switch(&capa_switch));
+
+  //printf("\nAttempt to find switch capa domain...\n");
+  assert(bench_find_switch(&capa_switch));
+
+  //printf("\nFound the switch capa...\n");
 
   // Let's go for the sdk benchmark.
   for (int i = 0; i < bench->outer; i++) {
@@ -108,18 +118,17 @@ void run_transition(char* prefix, ubench_config_t *bench) {
   // Do the same with a raw call.
     assert(take_time(&start));
     for (int j = 0; j < bench->inner; j++) {
-
-#if defined(CONFIG_RISCV) || defined(__riscv)
-    asm volatile(
-        "mv a0, %0\n\t"
-        "mv a1, %1\n\t"
-        "li a7, 0x5479636865\n\t"
-        "ecall\n\t"
-        :
-        : "rm" ((usize)TYCHE_SWITCH), "rm" (capa_switch)
-        : "a0", "a1", "memory");
-#else
       // A raw syscall.
+#if defined(CONFIG_RISCV) || defined(__riscv)
+        asm volatile(
+            "mv a0, %0\n\t"
+            "mv a1, %1\n\t"
+            "li a7, 0x5479636865\n\t"
+            "mret\n\t"
+            :
+            : "rm" ((usize)TYCHE_SWITCH), "rm" (capa_switch)
+            : "a0", "a1", "a7", "memory");
+#else
       asm volatile(
           "movq %0, %%rdi\n\t"
           "movq %1, %%rax\n\t"

@@ -78,6 +78,7 @@ pub fn generate_page_tables(
     melf: &ModifiedELF,
     map_page_tables: &Option<MappingPageTables>,
     riscv_enabled: bool,
+    vf2_enabled: bool,
 ) -> (Vec<u8>, usize, usize) {
     let (map_op, virt_addr_start) = decode_map(map_page_tables);
 
@@ -115,11 +116,24 @@ pub fn generate_page_tables(
             0,
             root.phys_addr,
         ))
-    } else {
-        Mapper::RVMapper(RVPtMapper::<HostPhysAddr, HostVirtAddr>::new(
+    } else if !vf2_enabled {
+        /* Mapper::RVMapper(RVPtMapper::<HostPhysAddr, HostVirtAddr>::new(
             offset,
             0,
             root.phys_addr,
+        )) */
+        Mapper::RVMapper(RVPtMapper::<HostPhysAddr, HostVirtAddr>::new_at(
+            offset,
+            0,
+            root.phys_addr,
+            Level::L3,
+        ))
+    } else {
+        Mapper::RVMapper(RVPtMapper::<HostPhysAddr, HostVirtAddr>::new_at(
+            offset,
+            0,
+            root.phys_addr,
+            Level::L3,
         ))
     };
     let mut curr_phys: usize = 0;
@@ -156,6 +170,7 @@ pub fn generate_page_tables(
                 match mapper {
                     Mapper::RVMapper(ref mut rv_mapper) => {
                         rv_mapper.map_range(&allocator, virt, phys_addr, size, rv_flags);
+                        rv_mapper.debug_range(virt, size, Level::L1);
                     }
                     Mapper::X86Mapper(_) => {
                         log::error!(

@@ -3,13 +3,22 @@
 
 #include "pts_api.h"
 
-#define RISCV64_SV48
+#define RISCV64_SV39
+//#define RISCV64_SV48
 
+#define RISCV39_LEVELS 3
 #define RISCV48_LEVELS 4
 
 // ——————————————————————————— Page Configuration ——————————————————————————— //
 
+#ifdef RISCV64_SV39
+#define PT_VIRT_WIDTH 39ULL
+#endif
+
+#ifdef RISCV64_SV48
 #define PT_VIRT_WIDTH 48ULL
+#endif
+
 #define PT_PHYS_WIDTH 44ULL
 
 /// Valid virtual addresses are 48 bits, valid physical ones 56.
@@ -79,14 +88,17 @@
 
 // ———————————————————————————— Default profile ————————————————————————————— //
 extern const pt_profile_t riscv64_sv48_profile;
+// ———————————————————————————— Additional profile ————————————————————————————— //
+extern const pt_profile_t riscv64_sv39_profile;
+
 // ——————————————————————————————— Functions ———————————————————————————————— //
 
-callback_action_t riscv48_how_visit_leaves(entry_t* entry, level_t level, pt_profile_t* profile);
+callback_action_t riscv_how_visit_leaves(entry_t* entry, level_t level, pt_profile_t* profile);
 
-callback_action_t riscv48_how_visit_present(entry_t* entry, level_t level, pt_profile_t* profile);
+callback_action_t riscv_how_visit_present(entry_t* entry, level_t level, pt_profile_t* profile);
 
-callback_action_t riscv48_how_map(entry_t* entry, level_t level, pt_profile_t* profile);
+callback_action_t riscv_how_map(entry_t* entry, level_t level, pt_profile_t* profile);
 
-entry_t riscv48_next(entry_t entry, level_t curr_level);
+entry_t riscv_next(entry_t entry, level_t curr_level);
 
 #endif /*__INCLUDE_RISCV48_PT_H__*/

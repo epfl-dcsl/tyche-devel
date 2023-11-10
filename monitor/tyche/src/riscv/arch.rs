@@ -15,8 +15,6 @@ pub fn init(hartid: usize) {
         asm!("csrw mscratch, {}", in(reg) TYCHE_STACK_POINTER[hartid]);
     }
 
-    clear_mstatus_sie();
-    set_mstatus_mie();
     // Configuring mtvec direct base address to point to Tyche's trap handler.
     let mtvec_ptr = machine_trap_handler as *const ();
     log::info!("mtvec_ptr to be set by Tyche {:p}", mtvec_ptr);

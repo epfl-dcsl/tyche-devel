@@ -19,6 +19,7 @@ const L1_INDEX_START: u64 = 12;
 
 // —————————————————————————————— Page Levels ——————————————————————————————— //
 
+//#[cfg(not(feature = "visionfive2"))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Level {
     L4,
@@ -27,6 +28,7 @@ pub enum Level {
     L1,
 }
 
+//#[cfg(not(feature = "visionfive2"))]
 impl Level {
     /// Returns the next level (i.e. the level of pages pointed by the entries of the current
     /// level)
@@ -58,6 +60,44 @@ impl Level {
         }
     }
 }
+
+/* #[cfg(feature = "visionfive2")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Level {
+    L3,
+    L2,
+    L1,
+}
+
+#[cfg(feature = "visionfive2")]
+impl Level {
+    /// Returns the next level (i.e. the level of pages pointed by the entries of the current
+    /// level)
+    pub fn next(self) -> Option<Self> {
+        match self {
+            Level::L3 => Some(Level::L2),
+            Level::L2 => Some(Level::L1),
+            Level::L1 => None,
+        }
+    }
+
+    /// Returns the size of the memory region controlled by each entry of this level.
+    pub fn area_size(self) -> u64 {
+        match self {
+            Level::L3 => PAGE_SIZE << 18,
+            Level::L2 => PAGE_SIZE << 9,
+            Level::L1 => PAGE_SIZE,
+        }
+    }
+
+    pub fn mask(self) -> u64 {
+        match self {
+            Level::L3 => !((1 << (L1_INDEX_START + 2 * PAGE_TABLE_INDEX_LEN)) - 1),
+            Level::L2 => !((1 << (L1_INDEX_START + PAGE_TABLE_INDEX_LEN)) - 1),
+            Level::L1 => !((1 << L1_INDEX_START) - 1),
+        }
+    }
+} */
 
 // ——————————————————————————————— Addresses ———————————————————————————————— //
 
@@ -109,10 +149,21 @@ pub trait Address: Sized + Copy + Ord {
         ((self.as_u64() >> L1_INDEX_START) & PAGE_TABLE_INDEX_MASK) as usize
     }
 
+    #[cfg(not(feature = "visionfive2"))]
     /// Returns this address index for a given level.
     fn index(self, level: Level) -> usize {
         match level {
             Level::L4 => self.l4_index(),
+            Level::L3 => self.l3_index(),
+            Level::L2 => self.l2_index(),
+            Level::L1 => self.l1_index(),
+        }
+    }
+
+    #[cfg(feature = "visionfive2")]
+    /// Returns this address index for a given level.
+    fn index(self, level: Level) -> usize {
+        match level {
             Level::L3 => self.l3_index(),
             Level::L2 => self.l2_index(),
             Level::L1 => self.l1_index(),

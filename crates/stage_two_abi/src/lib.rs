@@ -48,6 +48,25 @@ macro_rules! entry_point {
     };
 }
 
+/* #[cfg(all(target_arch = "riscv64", feature = "visionfive2"))]
+/// Signature of the second stage entry point.
+pub type EntryPoint = extern "C" fn(u64, u64, u64, u64) -> !;
+
+/// A transparent wrapper for the entry point which enables type-checking between the first and
+/// second stage.
+#[cfg(all(target_arch = "riscv64", feature = "visionfive2"))]
+#[macro_export]
+macro_rules! entry_point {
+    ($path:path) => {
+        #[no_mangle]
+        pub extern "C" fn _start(hartid: u64, arg1: u64, next_addr: u64, next_mode: u64) -> ! {
+            // Validate the signature of the entry point.
+            let f: fn(u64, u64, u64, u64) -> ! = $path;
+            f(hartid, arg1, next_addr, next_mode);
+        }
+    };
+} */
+
 // ———————————————————————————————— Manifest ———————————————————————————————— //
 
 /// The second stage manifest, describing the state of the system at the time the second stage is

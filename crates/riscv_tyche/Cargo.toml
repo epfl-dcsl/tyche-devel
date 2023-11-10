@@ -6,3 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+riscv_utils = { path = "../riscv_utils/" }
+
+[features]
+visionfive2 = [] 

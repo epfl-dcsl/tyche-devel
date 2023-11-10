@@ -46,6 +46,8 @@ struct SrcDestArgs {
     dst: PathBuf,
     #[arg(short, long, value_name = "RISCV_ENABLED")]
     riscv_enabled: bool,
+    #[arg(short, long, value_name = "VF2_ENABLED")]
+    vf2_enabled: bool,
 }
 
 #[derive(Args)]
@@ -54,6 +56,8 @@ struct FilePath {
     src: PathBuf,
     #[arg(short, long, value_name = "RISCV_ENABLED")]
     riscv_enabled: bool,
+    #[arg(short, long, value_name = "VF2_ENABLED")]
+    vf2_enabled: bool,
 }
 
 #[derive(Args)]
@@ -91,10 +95,10 @@ fn main() {
     let cli = Cli::parse();
     match &cli.command {
         Commands::TychefyBinary(args) => {
-            modify_binary(&args.src, &args.dst, args.riscv_enabled);
+            modify_binary(&args.src, &args.dst, args.riscv_enabled, args.vf2_enabled);
         }
         Commands::Instrument(manifest) => {
-            instrument_with_manifest(&manifest.src, manifest.riscv_enabled);
+            instrument_with_manifest(&manifest.src, manifest.riscv_enabled, manifest.vf2_enabled);
         }
         Commands::PrintPts(args) => {
             print_page_tables(&args.src, args.riscv_enabled);

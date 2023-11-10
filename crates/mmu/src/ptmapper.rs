@@ -59,9 +59,15 @@ where
         HostVirtAddr::new(phys_addr.as_usize() + self.offset + self.host_offset)
     }
 
+    //#[cfg(not(feature = "visionfive2"))]
     fn root(&mut self) -> (Self::PhysAddr, Level) {
         (self.root, Level::L4)
     }
+
+    /* #[cfg(feature = "visionfive2")]
+    fn root(&mut self) -> (Self::PhysAddr, Level) {
+        todo!();
+    } */
 
     fn get_phys_addr(entry: u64) -> Self::PhysAddr {
         Self::PhysAddr::from_u64(entry & ADDRESS_MASK)
@@ -181,6 +187,7 @@ where
         }
     }
 
+    #[cfg(not(feature = "visionfive2"))]
     /// Prints the permissions of page tables for the given range.
     pub fn debug_range(&mut self, virt_addr: VirtAddr, size: usize, dept: Level) {
         unsafe {

@@ -18,7 +18,7 @@ pub fn arch_entry_point(hartid: usize, manifest: RVManifest, log_level: log::Lev
         logger::init(log_level);
 
         log::info!(
-            "============= Hello from Second Stage on Hart ID: {} =============",
+            "============= Hello from Second Stage on Coldboot Hart ID: {} =============",
             hartid
         );
         log::info!(
@@ -42,13 +42,12 @@ pub fn arch_entry_point(hartid: usize, manifest: RVManifest, log_level: log::Lev
         AVAILABLE_HART_MASK.store(available_harts_mask, Ordering::SeqCst);
         NUM_HARTS_AVAILABLE.store(manifest.num_harts, Ordering::SeqCst);
 
+        arch::init(hartid);
         MonitorRiscv::init();
 
         let mut domain = MonitorRiscv::start_initial_domain_on_cpu();
 
         log::info!("Initial domain is ready.");
-
-        arch::init(hartid);
 
         //Set the active domain.
         MonitorRiscv::set_active_dom(hartid, domain);
@@ -69,7 +68,7 @@ pub fn arch_entry_point(hartid: usize, manifest: RVManifest, log_level: log::Lev
             asm!("csrr {}, mideleg", out(reg) mideleg);
         }
 
-        log::debug!(
+        log::info!(
             "MIP: {:x} MIE: {:x} MSTATUS: {:x} MEDELEG: {:x} MIDELEG: {:x}",
             mip,
             mie,
@@ -85,11 +84,13 @@ pub fn arch_entry_point(hartid: usize, manifest: RVManifest, log_level: log::Lev
             manifest.next_addr,
             manifest.next_mode,
         );
+
         qemu::exit(qemu::ExitCode::Success);
     } else {
+        HART_START[hartid].store(false, Ordering::SeqCst);
         log::info!(
-            "============= Hello again from Second Stage on Hart ID: {} =============",
-            hartid
+            "============= Hello again from Second Stage on Warmboot Hart ID: {} HART_START: {}=============",
+            hartid, HART_START[hartid].load(Ordering::SeqCst)
         );
         let mhartid = cpuid();
         log::debug!("========== Warmboot MHARTID: {} ===========", mhartid);
@@ -99,7 +100,6 @@ pub fn arch_entry_point(hartid: usize, manifest: RVManifest, log_level: log::Lev
 
         //spin loop until linux sends an ecall to start the hart.
         while !HART_START[hartid].load(Ordering::SeqCst) {
-            //while true {
             core::hint::spin_loop();
         }
 
@@ -114,7 +114,6 @@ pub fn arch_entry_point(hartid: usize, manifest: RVManifest, log_level: log::Lev
 
         log::info!("Next_addr: {:x} Next_arg1: {:x}", jump_addr, jump_arg);
 
-        //set_mip_ssip();
         let mip: usize;
         let mie: usize;
         let mstatus: usize;
@@ -127,10 +126,9 @@ pub fn arch_entry_point(hartid: usize, manifest: RVManifest, log_level: log::Lev
             asm!("csrr {}, mstatus", out(reg) mstatus);
             asm!("csrr {}, medeleg", out(reg) medeleg);
             asm!("csrr {}, mideleg", out(reg) mideleg);
-            //asm!("csrsi mip, 2");
         }
 
-        log::debug!(
+        log::info!(
             "MIP: {:x} MIE: {:x} MSTATUS: {:x} MEDELEG: {:x} MIDELEG: {:x}",
             mip,
             mie,

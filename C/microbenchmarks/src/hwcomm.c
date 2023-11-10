@@ -60,7 +60,7 @@ void run_hwcomm(char* prefix, ubench_config_t *bench) {
     asm volatile(
         "mv a0, %0\n\t"
         "li a7, 0x5479636865\n\t"
-        "ecall\n\t"
+        "mret\n\t"
         :
         : "rm" ((usize)TYCHE_TEST_CALL)
         : "a0", "a1", "memory");

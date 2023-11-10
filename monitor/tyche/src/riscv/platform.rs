@@ -16,6 +16,8 @@ use riscv_sbi::sbi::EXT_IPI;
 use riscv_utils::*;
 use spin::{Mutex, MutexGuard};
 
+use riscv_tyche::{DOM0_ROOT_REGION_START, DOM0_ROOT_REGION_END, DOM0_ROOT_REGION_2_START, DOM0_ROOT_REGION_2_END};
+
 use crate::arch::cpuid;
 use crate::monitor::{CoreUpdate, Monitor, PlatformState, CAPA_ENGINE, INITIAL_DOMAIN};
 use crate::riscv::context::ContextRiscv;
@@ -137,11 +139,319 @@ pub fn illegal_instruction_handler(
     mip: usize,
     mie: usize,
 ) {
-    panic!(
-        "Illegal Instruction Trap! mepc: {:x} mtval: {:x} mstatus: {:x} mip: {:x} mie: {:x}",
-        mepc, mtval, mstatus, mip, mie
-    );
+    if (mtval & 3) == 3 {
+        if ((mtval & 0x7c) >> 2) == 0x1c {
+            if mtval == 0x10500073 {
+                //WFI
+                println!("Trapped on WFI: MEPC: {:x} RA: {:x} ", mepc, reg_state.ra);
+                //I'm also gonna raise timer interrupts to S-mode, how does that sound?
+                //set_mip_stip();
+            } else {
+                system_opcode_instr(mtval, mstatus, reg_state);
+            }
+        } else {
+            panic!(
+                "Non-Truly Illegal Instruction Trap! mepc: {:x} mtval: {:x}",
+                mepc, mtval
+            );
+        }
+    } else {
+        panic!(
+            "Truly Illegal Instruction Trap! mepc: {:x} mtval: {:x}",
+            mepc, mtval
+        );
+    }
 }
+
+//Todo: Move this to riscv-utils crate -- this is a quite low-level impl. so it's better to
+//modularise it appropriately.
+pub fn misaligned_load_handler(mtval: usize, mepc: usize, reg_state: &mut RegisterState) {
+    //Assumption: No H-mode extension. MTVAL2 and MTINST are zero.
+    //Implies: trapped instr value is zero or special value.
+
+    //println!("Misaligned load handler: mtval {:x} mepc: {:x}", mtval, mepc);
+
+    //get insn....
+    let mut trap_state: TrapState = TrapState {
+        epc: 0,
+        cause: 0,
+        tval: 0,
+    };
+    let mut mtvec = sbi_expected_trap as *const ();
+    let mut mstatus: usize = 0;
+    let mut instr: usize = 0;
+    let mprv_bits: usize = (1 << mstatus::MPRV) | (1 << mstatus::MXR);
+    let instr_len: usize;
+
+    unsafe {
+        asm!(
+        "mv a3, {trap_st}
+        csrrw {tvec}, mtvec, {tvec}
+        csrrs {status}, mstatus, {mprv}
+        lhu {inst}, ({epc})
+        andi a4, {inst}, 3
+        addi a4, a4, -3
+        bne a4, zero, 2f
+        lhu a4, 2({epc})
+        sll a4, a4, 16
+        add {inst}, {inst}, a4
+        2: csrw mstatus, {status}
+        csrw mtvec, {tvec}",
+        trap_st = in(reg) &trap_state,
+        tvec = inout(reg) mtvec,
+        status = inout(reg) mstatus,
+        mprv = in(reg) mprv_bits,
+        inst = inout(reg) instr,
+        epc = in(reg) mepc,
+        out("a3") _,
+        out("a4") _,
+        );
+    }
+
+    //println!("Done reading instr: {:x}", instr);
+
+    if trap_state.cause != 0 {
+        panic!(
+            "Misaligned load handler: Fetch fault {:x} trap epc: {:x}",
+            trap_state.cause, trap_state.epc
+        );
+    }
+
+    if (instr & 0x3) != 0x3 {
+        instr_len = 2;
+    } else {
+        instr_len = 4;
+    }
+
+    let mut len: usize = 0;
+    let mut shift: usize = 0;
+    if (instr & 0x707f) == 0x2003 {
+        //Matching insn_match_lw
+        len = 4;
+        shift = 8 * 4;
+    } else if (instr & 0xe003) == 0x4000 {
+        //Matching insn_match_c_lw
+        len = 4;
+        shift = 8 * 4;
+        instr = (8 + ((instr >> 2) & ((1 << 3) - 1))) << 7; //Todo: Needs to be cleaned - check
+                                                            //insn_match_c_lw (rvc_rs2s << sh_rd)
+    } else {
+        panic!(
+            "Cannot handle this misaligned load! mtval: {:x} mepc: {:x} instr: {:x}",
+            mtval, mepc, instr
+        );
+    }
+
+    //TODO: Is shifting needed?
+
+    //get value....
+    let mut value: usize = 0;
+    let mut tmp_value: u8 = 0;
+    mstatus = 0;
+    mtvec = sbi_expected_trap as *const ();
+    for i in 0..len {
+        let load_address = mtval + i;
+        let mut load_trap_state: TrapState = TrapState {
+            epc: 0,
+            cause: 0,
+            tval: 0,
+        };
+        unsafe {
+            asm!(
+            "mv a3, {trap_st}
+            csrrw {tvec}, mtvec, {tvec}
+            csrrs {status}, mstatus, {mprv}
+            .option push
+            .option norvc
+            lbu {val}, 0({addr})
+            .option pop
+            csrw mstatus, {status}
+            csrw mtvec, {tvec}
+            ",
+            trap_st = in(reg) &load_trap_state,
+            tvec = inout(reg) mtvec,
+            status = inout(reg) mstatus,
+            mprv = in(reg) mprv_bits,
+            val = out(reg) tmp_value,
+            addr = in(reg) load_address,
+            out("a3") _,
+            out("a4") _,
+            );
+        }
+
+        value = (value) | ((tmp_value as usize) << (i * 8));
+        if load_trap_state.cause != 0 {
+            panic!(
+                "Misaligned load handler: Load fault {:x} epc: {:x}",
+                load_trap_state.cause, load_trap_state.epc
+            );
+        }
+    }
+
+    //println!("Misaligned load value{:x}", value);
+
+    set_rd(instr, reg_state, (value << shift) as usize >> shift);
+
+    unsafe {
+        asm!("csrr t0, mepc");
+        asm!("add t0, t0, {}", in(reg) instr_len);
+        asm!("csrw mepc, t0");
+    }
+}
+
+//Todo: There is a lot of repeated code between misaligned load/store handlers. Make it common.
+pub fn misaligned_store_handler(mtval: usize, mepc: usize, reg_state: &mut RegisterState) {
+    //println!("Misaligned store handler: mtval {:x} mepc: {:x}", mtval, mepc);
+
+    //get insn....
+    let mut trap_state: TrapState = TrapState {
+        epc: 0,
+        cause: 0,
+        tval: 0,
+    };
+    let mut mtvec = sbi_expected_trap as *const ();
+    let mut mstatus: usize = 0;
+    let mut instr: usize = 0;
+    let mprv_bits: usize = (1 << mstatus::MPRV) | (1 << mstatus::MXR);
+    let instr_len: usize;
+
+    unsafe {
+        asm!(
+        "mv a3, {trap_st}
+        csrrw {tvec}, mtvec, {tvec}
+        csrrs {status}, mstatus, {mprv}
+        lhu {inst}, ({epc})
+        andi a4, {inst}, 3
+        addi a4, a4, -3
+        bne a4, zero, 2f
+        lhu a4, 2({epc})
+        sll a4, a4, 16
+        add {inst}, {inst}, a4
+        2: csrw mstatus, {status}
+        csrw mtvec, {tvec}",
+        trap_st = in(reg) &trap_state,
+        tvec = inout(reg) mtvec,
+        status = inout(reg) mstatus,
+        mprv = in(reg) mprv_bits,
+        inst = inout(reg) instr,
+        epc = in(reg) mepc,
+        out("a3") _,
+        out("a4") _,
+        );
+    }
+
+    //println!("Done reading instr: {:x}", instr);
+
+    if trap_state.cause != 0 {
+        panic!(
+            "Misaligned store handler: Fetch fault {:x} epc: {:x}",
+            trap_state.cause, trap_state.epc
+        );
+    }
+
+    if (instr & 0x3) != 0x3 {
+        instr_len = 2;
+    } else {
+        instr_len = 4;
+    }
+
+    let mut value: usize = get_rs2(instr, reg_state);
+    //println!("Misaligned store val: {:x}", value);
+
+    let mut len: usize = 0;
+    if (instr & 0x707f) == 0x2023 {
+        //Matching insn_match_sw
+        len = 4;
+    } else if (instr & 0xe003) == 0xc000 {
+        //Matching insn_match_c_sd
+        len = 4;
+        value = 8 + ((instr >> 2) & ((1 << 3) - 1)); //get rs2s
+                                                     //Again a bit of repetition - need to modularise get rs1/rs2/rs2s.
+        let reg_offset = value & 0x1f;
+        let reg_state_ptr = reg_state as *mut RegisterState as *const u64;
+        unsafe {
+            let reg_ptr = reg_state_ptr.offset(reg_offset as isize);
+            value = *reg_ptr as usize;
+        }
+    } else {
+        panic!(
+            "Cannot handle this misaligned store! mtval: {:x} mepc: {:x} instr: {:x}",
+            mtval, mepc, instr
+        );
+    }
+
+    //set value ......
+    mstatus = 0;
+    mtvec = sbi_expected_trap as *const ();
+    for i in 0..len {
+        let store_address = mtval + i;
+        let tmp_value: u8 = (value & 0xff) as u8;
+        value = value >> 8;
+        let mut store_trap_state: TrapState = TrapState {
+            epc: 0,
+            cause: 0,
+            tval: 0,
+        };
+        unsafe {
+            asm!(
+            "mv a3, {trap_st}
+            csrrw {tvec}, mtvec, {tvec}
+            csrrs {status}, mstatus, {mprv}
+            .option push
+            .option norvc
+            sb {val}, 0({addr})
+            .option pop
+            csrw mstatus, {status}
+            csrw mtvec, {tvec}
+            ",
+            trap_st = in(reg) &store_trap_state,
+            tvec = inout(reg) mtvec,
+            status = inout(reg) mstatus,
+            mprv = in(reg) mprv_bits,
+            val = in(reg) tmp_value,
+            addr = in(reg) store_address,
+            out("a3") _,
+            out("a4") _,
+            );
+        }
+
+        if store_trap_state.cause != 0 {
+            panic!(
+                "Misaligned store handler: Store fault {:x} epc: {:x}",
+                store_trap_state.cause, store_trap_state.epc
+            );
+        }
+    }
+
+    //println!("Done storing value: {:x} and instr_len : {}", value, instr_len);
+
+    unsafe {
+        asm!("csrr t0, mepc");
+        asm!("add t0, t0, {}", in(reg) instr_len);
+        asm!("csrw mepc, t0");
+    }
+}
+
+#[repr(align(4))]
+#[naked]
+pub extern "C" fn sbi_expected_trap() {
+    unsafe {
+        asm!(
+            "csrr a4, mepc
+        sd a4, 0*8(a3)
+        csrr a4, mcause
+        sd a4, 1*8(a3)
+        csrr a4, mtval
+        sd a4, 2*8(a3)
+        csrr a4, mepc
+        addi a4, a4, 4
+        csrw mepc, a4
+        mret",
+            options(noreturn)
+        );
+    }
+}
+
 
 // ———————————————————— Platform implementation of State ———————————————————— //
 
@@ -170,12 +480,25 @@ impl PlatformState for StateRiscv {
         CONTEXTS[domain.idx()][core].lock()
     }
 
+    #[cfg(not(feature = "visionfive2"))]
     fn remap_core(core: usize) -> usize {
         core
     }
 
+    #[cfg(not(feature = "visionfive2"))]
     fn remap_core_bitmap(bitmap: u64) -> u64 {
         bitmap
+    }
+
+    #[cfg(feature = "visionfive2")]
+    fn remap_core(core: usize) -> usize {
+        (core + 1) //For linux, hart 1 is cpu 0.
+    }
+
+    #[cfg(feature = "visionfive2")]
+    fn remap_core_bitmap(bitmap: u64) -> u64 {
+        let new_bitmap: u64 = bitmap << 1;
+        new_bitmap
     }
 
     fn max_cpus() -> usize {
@@ -217,10 +540,23 @@ impl PlatformState for StateRiscv {
                 range.start + range.size()
             );
 
+            if pmp_index >= PMP_ENTRIES {
+                panic!("Cannot continue running this domain: PMPOverflow");
+            }
+
             pmp_write_response = pmp_write_compute(pmp_index, range.start, range.size(), XWR_PERM);
 
             if pmp_write_response.write_failed {
-                panic!("PMP Write Not Ok");
+                log::debug!(
+                    "Attempted to compute pmp: {} start: {:x} size: {:x}",
+                    pmp_index,
+                    range.start,
+                    range.size()
+                );
+                panic!(
+                    "PMP Write Not Ok - failure code: {:#?}",
+                    pmp_write_response.failure_code
+                );
             } else {
                 log::debug!("PMP Write Ok");
 
@@ -258,10 +594,6 @@ impl PlatformState for StateRiscv {
                         pmp_write_response.cfg2,
                     );
                     pmp_index = pmp_index + 2;
-                }
-
-                if pmp_index > PMP_ENTRIES {
-                    panic!("Cannot continue running this domain: PMPOverflow");
                 }
             }
         }
@@ -501,8 +833,8 @@ impl MonitorRiscv {
             .create_root_region(
                 domain,
                 AccessRights {
-                    start: 0x80400000, //Linux Root Region Start Address
-                    end: 0x800000000, //17fffffff,   //Linux Root Region End Address - it's currently based on early
+                    start: DOM0_ROOT_REGION_START, //Linux Root Region Start Address
+                    end: DOM0_ROOT_REGION_END, //17fffffff,   //Linux Root Region End Address - it's currently based on early
                     //memory node range detected by linux.
                     //TODO: It should be a part of the manifest.
                     //TODO: Dom0 needs 2 regions - ram region and pcie-mmio region
@@ -517,8 +849,8 @@ impl MonitorRiscv {
             .create_root_region(
                 domain,
                 AccessRights {
-                    start: SIFIVE_TEST_SYSCON_BASE_ADDRESS,
-                    end: PCI_BASE_ADDRESS + PCI_SIZE, //Optimization: Including both PLIC and PCI regions in a single PMP
+                    start: DOM0_ROOT_REGION_2_START,
+                    end: DOM0_ROOT_REGION_2_END, //Optimization: Including both PLIC and PCI regions in a single PMP
                     //entry
                     ops: MEMOPS_ALL,
                 },
@@ -646,10 +978,18 @@ impl MonitorRiscv {
                 aclint_mtimer_set_mtimecmp(hartid, TIMER_EVENT_TICK);
             }
             mcause::MEI => {
-                panic!("MEI");
+                //panic!("MEI");
             }
             mcause::ILLEGAL_INSTRUCTION => {
-                illegal_instruction_handler(mepc, mtval, mstatus, mip, mie);
+                if reg_state.a7 == 0x5479636865 {
+                    log::debug!("Illegal instruction: Tyche call from U-mode using Mret");
+                    //MPP check for U-mode.
+                    assert!((mstatus & (3 << 11)) == 0);
+                    tyche_call_handler(reg_state);
+                    reg_state.a7 = 0;
+                } else {
+                    illegal_instruction_handler(mepc, mtval, mstatus, mip, mie);
+                }
             }
             mcause::ECALL_FROM_SMODE => {
                 if reg_state.a7 == 0x5479636865 {
@@ -669,7 +1009,13 @@ impl MonitorRiscv {
                 }
             }
             mcause::LOAD_ADDRESS_MISALIGNED => {
-                panic!("Load address misaligned.");
+                if reg_state.a7 == 0x5479636865 {
+                    panic!("Got a misaligned load Tyche call");
+                }
+                misaligned_load_handler(mtval, mepc, reg_state);
+            }
+            mcause::STORE_ADDRESS_MISALIGNED => {
+                misaligned_store_handler(mtval, mepc, reg_state);
             }
             mcause::STORE_ACCESS_FAULT
             | mcause::LOAD_ACCESS_FAULT
@@ -693,13 +1039,19 @@ impl MonitorRiscv {
         // Return to the next instruction after the trap.
         // i.e. mepc += 4
         // TODO: This shouldn't happen in case of switch.
-        if (mcause & (1 << 63)) != (1 << 63) {
+        if ((mcause & (1 << 63)) != (1 << 63))
+            && mcause != mcause::LOAD_ADDRESS_MISALIGNED
+            && mcause != mcause::STORE_ADDRESS_MISALIGNED {
+            
             unsafe {
                 asm!("csrr t0, mepc");
                 asm!("addi t0, t0, 0x4");
                 asm!("csrw mepc, t0");
             }
         }
+        // !!! IMPORTANT !!! Neelu: Do this only on Tyche calls? OR go and patch all reg_state uses
+        // to domain ctx -- the latter option is cleaner I think. 
+        // 
         // Load the state from the current domain.
         if let Some(active_domain) = Self::get_active_dom(hartid) {
             StateRiscv::load_current_regs(&active_domain, hartid, reg_state);
@@ -740,12 +1092,14 @@ impl MonitorRiscv {
             }
             Ok(false) => { /*Nothing to do*/ }
             Err(e) => {
-                panic!("Error in vmcall {:?}", e);
+                panic!("Error in Tyche call {:?}", e);
             }
         }
         drop(ctx);
         Self::apply_core_updates(&mut state, &mut active_dom, hartid);
-        // TODO(aghosn): I commented that out because what about switch?
+        // !!! IMPORTANT !!! Neelu: Should I uncomment because *current_domain is updated by
+        // switch! 
+        // TODO(aghosn): I commented that out because what about switch? 
         // set_active_dom(hartid active_dom);
     }
 }

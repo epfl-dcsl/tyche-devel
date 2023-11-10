@@ -240,8 +240,10 @@ static int find_phys_address(tyche_domain_t *domain, usize pn, usize *result, in
 #elif defined(CONFIG_RISCV) || defined(__riscv)
         if (is_page_table_root) {
             *result = slot->physoffset + offset;
+            //ERROR("Fixed PT Root: %lx", *result);
         } else {
             *result = ((slot->physoffset >> PT_PAGE_WIDTH) + (offset >> PT_FLAGS_RESERVED)) << PT_FLAGS_RESERVED;
+            //ERROR("Fixed Normal Page: %lx", *result);
         }
 #endif
         return SUCCESS;
@@ -258,8 +260,10 @@ static int find_phys_address(tyche_domain_t *domain, usize pn, usize *result, in
 #elif defined(CONFIG_RISCV) || defined(__riscv)
         if (is_page_table_root) {
             *result = slot->physoffset + offset;
+            //ERROR("Fixed PT Root: %lx", *result);
         } else {
             *result = ((slot->physoffset >> PT_PAGE_WIDTH) + (offset >> PT_FLAGS_RESERVED)) << PT_FLAGS_RESERVED;
+            //ERROR("Fixed Normal Page: %lx", *result); 
         }
 #endif 
         return SUCCESS;
@@ -441,6 +445,7 @@ failure:
 
 int load_domain(tyche_domain_t* domain)
 {
+    //ERROR("Loading domain");
   usize size = 0;
   usize phys_size = 0;
   domain_mslot_t *slot = NULL;
@@ -512,12 +517,15 @@ int load_domain(tyche_domain_t* domain)
       }
     }
 
+    //ERROR("About to fix PTs Loading domain");
+
     // Fix the page tables here.
     // We need to go through and compute the offset of addresses in segments.
     // We should have the guarantee that start and end fall within the same
     // memory slot by construction for the moment (provided we don't have 2^11
     // pages in the page tables).
     if (seg.p_type == PAGE_TABLES_CONF || seg.p_type == PAGE_TABLES_SB) {
+        //ERROR("Loading domain - fixing segment PTs");
       // We hope the page tables are aligned, let's do a quick check.
       if (seg_offset != 0) {
         ERROR("Page tables are not page aligned");
@@ -531,12 +539,14 @@ int load_domain(tyche_domain_t* domain)
             uint64_t page = (*start & PT_PHYS_PAGE_MASK);
             int is_pipe = (*start & PT_PAGE_PIPE) == PT_PAGE_PIPE;
             usize fixed_addr = 0;
+            //ERROR("About to find phys_addr for %lx", page);
             if (find_phys_address(domain, page, &fixed_addr, is_pipe, 0) != SUCCESS) {
               ERROR("Unable to find the physaddress for %lx", page);
               goto failure;
             }
             *start &= ~(PT_PHYS_PAGE_MASK);
             *start |= (uint64_t) fixed_addr;
+            //ERROR("Address fixed to: %lx",*start);
             // Remove the pipe.
             if (is_pipe) {
               *start &= ~(PT_PAGE_PIPE);

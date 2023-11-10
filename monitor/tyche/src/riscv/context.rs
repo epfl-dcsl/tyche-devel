@@ -6,4 +6,5 @@ pub struct ContextRiscv {
     pub mepc: usize,
     pub sp: usize,
     pub medeleg: usize,
+    pub mstatus: usize,
 }

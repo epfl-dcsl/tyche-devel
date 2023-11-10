@@ -17,6 +17,7 @@ pub struct RVPtMapper<PhysAddr, VirtAddr> {
     offset: usize,
     root: PhysAddr,
     _virt: PhantomData<VirtAddr>, //Neelu: What is this used for?
+    level: Level,
 }
 
 bitflags! {
@@ -62,9 +63,16 @@ where
         HostVirtAddr::new(phys_addr.as_usize() + self.offset + self.host_offset)
     }
 
+    //#[cfg(not(feature = "visionfive2"))]
     fn root(&mut self) -> (Self::PhysAddr, Level) {
-        (self.root, Level::L4)
+        (self.root, self.level)
     }
+
+    /*#[cfg(feature = "visionfive2")]
+        fn root(&mut self) -> (Self::PhysAddr, Level) {
+            (self.root, Level::L3)
+        }
+    */
 
     fn get_phys_addr(entry: u64) -> Self::PhysAddr {
         Self::PhysAddr::from_u64((entry >> RVPtFlag::flags_count()) << PAGE_OFFSET_WIDTH)
@@ -82,6 +90,17 @@ where
             offset,
             root,
             _virt: PhantomData,
+            level: Level::L4,
+        }
+    }
+
+    pub fn new_at(host_offset: usize, offset: usize, root: PhysAddr, level: Level) -> Self {
+        Self {
+            host_offset,
+            offset,
+            root,
+            _virt: PhantomData,
+            level,
         }
     }
 
@@ -126,6 +145,7 @@ where
         prot: RVPtFlag,
     ) {
         // Align physical address first
+        //log::info!("virt_addr: {:x} phys_addr: {:x} size: {:x}", virt_addr, phys_addr, size);
         let phys_addr = PhysAddr::from_usize(phys_addr.as_usize() & PAGE_MASK);
         let offset = self.offset;
         unsafe {
@@ -152,6 +172,7 @@ where
                         if (addr.as_usize() + PageSize::GIANT.bits() <= end)
                             && (phys % (PageSize::GIANT.bits() as u64) == 0)
                         {
+                            log::info!("Mapping a 1 GB region");
                             //Make sure protection bits have either read or execute set - to
                             //denote a leaf PTE.
                             *entry = ((phys >> PAGE_OFFSET_WIDTH) << RVPtFlag::flags_count())
@@ -165,9 +186,11 @@ where
                     }
                     // Opportunity to map a 2MB region.
                     if level == Level::L2 {
+                        // log::info!("Mapping a 2 MB region");
                         if (addr.as_usize() + PageSize::HUGE.bits() <= end)
                             && (phys % (PageSize::HUGE.bits() as u64) == 0)
                         {
+                            log::info!("Mapping a 2 MB region");
                             *entry = ((phys >> PAGE_OFFSET_WIDTH) << RVPtFlag::flags_count())
                                 | prot.bits();
                             assert!(
@@ -178,9 +201,12 @@ where
                         }
                     }
                     if level == Level::L1 {
+                        log::info!("Mapping a normal region");
                         assert!(phys % (PageSize::NORMAL.bits() as u64) == 0);
-                        *entry =
-                            ((phys >> PAGE_OFFSET_WIDTH) << RVPtFlag::flags_count()) | prot.bits();
+                        *entry = ((phys >> PAGE_OFFSET_WIDTH) << RVPtFlag::flags_count())
+                            | prot.bits()
+                            | RVPtFlag::ACCESSED.bits()
+                            | RVPtFlag::DIRTY.bits();
                         assert!(
                             *entry & RVPtFlag::READ.bits() != 0
                                 || *entry & RVPtFlag::EXECUTE.bits() != 0
@@ -207,6 +233,7 @@ where
         }
     }
 
+    //#[cfg(not(feature = "visionfive2"))]
     /// Prints the permissions of page tables for the given range.
     pub fn debug_range(&mut self, virt_addr: VirtAddr, size: usize, dept: Level) {
         unsafe {
@@ -252,4 +279,48 @@ where
             .expect("Failed to print PTs");
         }
     }
+    /*
+    #[cfg(feature = "visionfive2")]
+        /// Prints the permissions of page tables for the given range.
+        pub fn debug_range(&mut self, virt_addr: VirtAddr, size: usize, dept: Level) {
+            unsafe {
+                self.walk_range(
+                    virt_addr,
+                    VirtAddr::from_usize(virt_addr.as_usize() + size),
+                    &mut |addr, entry, level| {
+                        let flags = RVPtFlag::from_bits_truncate(*entry);
+                        let phys = (*entry >> RVPtFlag::flags_count()) << PAGE_OFFSET_WIDTH;
+
+                        // Do not go too deep
+                        match (dept, level) {
+                            (Level::L3, Level::L2) | (Level::L3, Level::L1) => return WalkNext::Leaf,
+                            (Level::L2, Level::L1) => return WalkNext::Leaf,
+                            _ => (),
+                        };
+
+                        // Print if present
+                        if flags.contains(RVPtFlag::VALID) {
+                            let padding = match level {
+                                Level::L3 => "  ",
+                                Level::L2 => "    ",
+                                Level::L1 => "      ",
+                            };
+                            log::info!(
+                                "{}{:?} Virt: 0x{:x} - Phys: 0x{:x} - {:?}\n",
+                                padding,
+                                level,
+                                addr.as_usize(),
+                                phys,
+                                flags
+                            );
+                            WalkNext::Continue
+                        } else {
+                            WalkNext::Leaf
+                        }
+                    },
+                )
+                .expect("Failed to print PTs");
+            }
+        }
+     */
 }

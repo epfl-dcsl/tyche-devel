@@ -348,8 +348,10 @@ impl ModifiedELF {
         flags: u32,
         map_page_tables: &Option<MappingPageTables>,
         riscv_enabled: bool,
+        vf2_enabled: bool,
     ) {
-        let (pts, nb_pages, cr3) = generate_page_tables(self, map_page_tables, riscv_enabled);
+        let (pts, nb_pages, cr3) =
+            generate_page_tables(self, map_page_tables, riscv_enabled, vf2_enabled);
         let tpe = if security == Security::Confidential {
             TychePhdrTypes::PageTablesConf
         } else {
@@ -359,6 +361,7 @@ impl ModifiedELF {
             Some(cr3 as u64),
             tpe as u32,
             flags,
+            //NEELU: object::elf::PF_R | object::elf::PF_W | object::elf::PF_X,
             nb_pages * PAGE_SIZE,
             &pts,
         );

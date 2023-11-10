@@ -9,6 +9,7 @@ build_features      := "-Zbuild-std-features=compiler-builtins-mem"
 cargo_args          := build_std + " " + build_features
 x86-linker-script   := "RUSTFLAGS='-C link-arg=-Tconfigs/x86-linker-script.x'"
 riscv-linker-script := "RUSTFLAGS='-C link-arg=-Tconfigs/riscv-linker-script.x'"
+vf2-linker-script   := "RUSTFLAGS='-C link-arg=-Tconfigs/vf2-riscv-linker-script.x'"
 first-stage         := "--package s1 --features=s1/second-stage"
 tyche               := "--package tyche"
 rawc                := "--features=s1/guest_rawc"
@@ -139,6 +140,11 @@ build-riscv:
 	{{riscv-linker-script}} cargo build {{cargo_args}} {{riscv}} {{tyche}} --release
 	./opensbi-stage1/run_build.sh
 
+# Build the monitor for RISC-V64
+build-riscv-vf2:
+	{{vf2-linker-script}} cargo build {{cargo_args}}  --features "visionfive2" {{riscv}} {{tyche}} --release
+
+
 ## ——————————————————————————— Linux Kernel Build ——————————————————————————— ##
 
 # Build linux image.
@@ -264,7 +270,7 @@ _tpm:
 	fi
 
 run_riscv:
-	{{qemu-riscv}} -nographic -drive "file={{drive-riscv}},format=raw,if=virtio" -cpu rv64,h=true -M virt -m 4G -bios {{bios-riscv}} -kernel {{kernel-riscv}} -append "root=/dev/vda1 rw console=ttyS0 earlycon=sbi quiet" -smp 1 {{dev-riscv}} 
+	{{qemu-riscv}} -nographic -drive "file={{drive-riscv}},format=raw,if=virtio" -cpu rv64,h=true -M virt -m 4G -bios {{bios-riscv}} -kernel {{kernel-riscv}} -append "root=/dev/vda1 rw console=ttyS0 earlycon=sbi quiet" -smp 2 {{dev-riscv}} 
 
 run_riscv_gdb: 
 	{{qemu-riscv}} -nographic -drive "file={{drive-riscv}},format=raw,if=virtio" -cpu rv64,h=true -M virt -m 4G -bios {{bios-riscv}} -kernel {{kernel-riscv}} -append "root=/dev/vda1 rw console=ttyS0 earlycon=sbi quiet" -smp 1 {{dev-riscv}} -gdb tcp::1234 -S 

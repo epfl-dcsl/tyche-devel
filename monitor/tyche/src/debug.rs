@@ -27,8 +27,8 @@ macro_rules! print {
 
 #[macro_export]
 macro_rules! println {
-    () => ($crate::print!("\n"));
-    ($($arg:tt)*) => ($crate::print!("{}\n", core::format_args!($($arg)*)))
+    () => ($crate::print!("\r\n"));
+    ($($arg:tt)*) => ($crate::print!("{}\r\n", core::format_args!($($arg)*)))
 }
 
 // —————————————————————————————————— Qemu —————————————————————————————————— //

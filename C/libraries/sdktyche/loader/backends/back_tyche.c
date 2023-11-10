@@ -262,7 +262,7 @@ int backend_td_init_vcpu(tyche_domain_t* domain, usize core_idx)
     ERROR("Unable to set the stack for the vcpu.");
     goto failure;
   }
-  // Set the rip.
+  // Set the cr3.
   msg.idx = REG_GP_CR3;
   msg.value = vcpu->cr3; 
   if (ioctl(domain->handle, TYCHE_SET_DOMAIN_CORE_CONFIG, &msg) != SUCCESS) {

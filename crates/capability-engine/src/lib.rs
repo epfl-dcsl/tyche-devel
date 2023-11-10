@@ -571,6 +571,12 @@ impl CapaEngine {
     ) -> Option<(CapaInfo, NextCapaToken)> {
         let (index, next_token) =
             domain::next_capa(domain, token, &self.regions, &mut self.domains)?;
+
+        /* match self.domains[domain].get(index).ok()?.as_switch() {
+            Ok(_) => log::info!("Hello!! We are Enumerating a Switch Capa"),
+            _ => (),
+        } */
+
         let capa = self.domains[domain].get(index).unwrap();
         let info = capa.info(&self.regions, &self.domains)?;
         Some((info, next_token))

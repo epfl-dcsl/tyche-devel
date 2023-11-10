@@ -656,7 +656,8 @@ pub trait Monitor<T: PlatformState + 'static> {
                 res[1] = to_revoke.as_usize();
                 return Ok(true);
             }
-            calls::REVOKE => {
+            // There are no aliases on riscv so we just ignore the alias info.
+            calls::REVOKE | calls::REVOKE_ALIASED_REGION => {
                 log::trace!("Revoke on core {}", cpuid());
                 Self::do_revoke(state, domain, LocalCapa::new(args[0]))?;
                 return Ok(true);
@@ -771,9 +772,31 @@ pub trait Monitor<T: PlatformState + 'static> {
                 return Ok(true);
             }
             calls::SELF_CONFIG => {
-                todo!("Implement")
+                // !!! IMPORTANT !!! Neelu: This needs to be platform-specific! 
+                //This part will not change the context of the domain - it's essentially only being
+                //used to deleg/undeleg ecalls from u-mode at the moment.
+                /* log::debug!("Self config for hart {} ", hartid);
+                let context = monitor::get_context(active_dom, hartid);
+                let field = RiscVField::from_usize(arg_1).unwrap();
+                if field == RiscVField::Medeleg {
+                    let updated_medeleg;
+                    if arg_2 == !(1 << 8) {
+                        updated_medeleg = (context.medeleg & arg_2);
+                    } else if arg_2 == (1 << 8) {
+                        updated_medeleg = (context.medeleg | arg_2);
+                    } else {
+                        panic!("Unexpected changes to medeleg!");
+                    }
+                    write_medeleg(updated_medeleg);
+                    log::debug!("Done setting medeleg to 0x{:x}.", updated_medeleg);
+                    reg_state.a0 = 0;
+                } else {
+                    log::debug!("Self config does not support setting this field!");
+                    reg_state.a0 = 1;
+                } */
             }
-            calls::REVOKE_ALIASED_REGION => {
+            // !!! IMPORTANT !!! Neelu: Do we keep this one or just use revoked? 
+            /* calls::REVOKE_ALIASED_REGION => {
                 log::trace!("Revoke aliased region on core {}", cpuid());
                 Self::do_revoke_region(
                     state,
@@ -785,7 +808,7 @@ pub trait Monitor<T: PlatformState + 'static> {
                 )
                 .unwrap();
                 return Ok(true);
-            }
+            } */ 
             calls::SERIALIZE_ATTESTATION => {
                 let written = Self::do_serialize_attestation(state, domain, args[0], args[1])?;
                 res[0] = written;

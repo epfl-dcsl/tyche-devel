@@ -7,19 +7,20 @@ edition = "2021"
 default = []
 vga = ["dep:vga"] # Print to VGA text mode
 bare_metal = []
+visionfive2 = ["dep:riscv_serial","stage_two_abi/visionfive2","qemu/visionfive2","riscv_pmp/visionfive2","riscv_tyche/visionfive2"]
 
 [dependencies]
 log = { workspace = true }
 spin = { workspace = true }
-utils = { path = "../../crates/utils/" }
 debug = { version = "0.1.0", path = "../../crates/debug" }
 logger = { path = "../../crates/logger/" }
 stage_two_abi = { path = "../../crates/stage_two_abi" }
 mmu = { version = "0.1.0", path = "../../crates/mmu" }
-vga = { path = "../../crates/vga/", optional = true }
 arena = {path = "../../crates/arena"}
 capa-engine = {path = "../../crates/capability-engine/"}
 attestation = {path = "../../crates/attestation/"}
+#Todo: should it be x86 specific?
+utils = { path = "../../crates/utils/" }
 # TODO: move the untrusted dependencies behing a feature flag
 qemu = { path = "../../crates/qemu/" }
 
@@ -28,6 +29,7 @@ qemu = { path = "../../crates/qemu/" }
 vtd = { path = "../../crates/vtd" }
 vmx = { version = "0.1.0", path = "../../crates/vmx" }
 x2apic= { path = "../../crates/x2apic/" }
+vga = { path = "../../crates/vga/", optional = true }
 
 [target.'cfg(target_arch = "riscv64")'.dependencies]
 riscv_utils = { path = "../../crates/riscv_utils/" }
@@ -35,4 +37,5 @@ riscv_tyche = { path = "../../crates/riscv_tyche/" }
 riscv_csrs = { path = "../../crates/riscv_csrs/" }
 riscv_sbi = { path = "../../crates/riscv_sbi/" }
 riscv_pmp = { path = "../../crates/riscv_pmp/" }
+riscv_serial = { path = "../../crates/riscv_serial/" , optional = true }
 

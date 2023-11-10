@@ -1,4 +1,4 @@
-use riscv_utils::PAGING_MODE_SV48;
+use riscv_utils::{PAGING_MODE_SV39, PAGING_MODE_SV48};
 
 use crate::riscv::context::ContextRiscv;
 
@@ -18,10 +18,7 @@ impl RiscVField {
             0x00006802 => Some(Self::Satp),
             0x0000681c => Some(Self::Sp),
             0x0000681e => Some(Self::Mepc),
-            _ => {
-                log::error!("Unknown field value, you should check that {:x}", v);
-                None
-            }
+            _ => None,
         }
     }
     pub fn is_valid(v: usize) -> bool {
@@ -40,16 +37,19 @@ impl RiscVField {
                 log::debug!("Setting medeleg to {:x}", context.medeleg);
             }
             Self::Satp => {
-                context.satp = (value >> 12) | PAGING_MODE_SV48;
+                context.satp = (value >> 12) | PAGING_MODE_SV39;
                 log::debug!("Setting satp to {:x}", context.satp);
             }
             Self::Sp => {
-                context.sp = value;
+                let mut val = (value >> 3) << 3; //Forcing it to be 8 bytes aligned.
+                context.sp = val;
                 log::debug!("Setting sp to {:x}", context.sp);
             }
             Self::Mepc => {
-                context.mepc = value - 0x4; //Todo: This is a temporary hack - because before returning
-                                            //there's an mepc+4.
+                context.mepc = value - 0x4; //This is because before returning
+                                            //there's an mepc+4. A flag can be added to
+                                            //determine before returning whether to inc by 4 or
+                                            //not. This works for now.
                 log::debug!("Setting mepc to {:x}", context.mepc);
             }
         }

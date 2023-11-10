@@ -1,11 +1,9 @@
 [package]
-name = "riscv_utils"
+name = "riscv_serial"
 version = "0.1.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-log = { workspace = true }
-qemu = { path = "../qemu/" }
-riscv_csrs = { path = "../riscv_csrs/" }
+spin = "0.5.2"

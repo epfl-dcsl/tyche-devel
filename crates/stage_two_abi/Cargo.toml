@@ -10,3 +10,6 @@ edition = "2021"
 
 [target.'cfg(target_arch = "riscv64")'.dependencies]
 riscv_tyche = { path = "../riscv_tyche/" }
+
+[features]
+visionfive2 = []

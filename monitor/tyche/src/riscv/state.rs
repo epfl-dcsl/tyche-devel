@@ -10,7 +10,7 @@ use riscv_pmp::{
 };
 use riscv_utils::{
     read_medeleg, read_mepc, read_mscratch, read_satp, toggle_supervisor_interrupts, write_medeleg,
-    write_mepc, write_mscratch, write_satp, RegisterState, NUM_HARTS,
+    write_mepc, write_mscratch, write_satp, RegisterState, NUM_HARTS, read_mstatus,
 };
 use spin::{Mutex, MutexGuard};
 
@@ -37,6 +37,7 @@ const EMPTY_CONTEXT: Mutex<ContextRiscv> = Mutex::new(ContextRiscv {
     mepc: 0,
     sp: 0,
     medeleg: 0,
+    mstatus: 0,
 });
 
 const EMPTY_CONTEXT_ARRAY: [Mutex<ContextRiscv>; NB_CORES] = [EMPTY_CONTEXT; NB_CORES];
@@ -111,12 +112,24 @@ impl StateRiscv {
         current_ctx.sp = read_mscratch(); //Recall that this is where the sp is saved.
         current_ctx.satp = read_satp();
         current_ctx.medeleg = read_medeleg();
+        current_ctx.mstatus = read_mstatus();
 
         //Switch domain
         write_satp(next_ctx.satp);
         write_mscratch(next_ctx.sp);
         write_mepc(next_ctx.mepc);
         write_medeleg(next_ctx.medeleg); //TODO: This needs to be part of Trap/UpdateTrap.
+        
+        if next_ctx.mstatus != 0 {
+            //So basically if it doesn't explicitly get set by the manager, it
+            //will not be changed. And from next time onwards, it will be
+            //restored based on the value saved (for the current_ctx) ....
+            //For TD1, this means it will always run in the mode that switches
+            //to the domain for the first time from TD0.
+            //If that mode is U-mode, good luck because page tables don't
+            //expect that.
+            write_mstatus(next_ctx.mstatus);
+        }
 
         // Propagate the state from the child, see drivers/tyche/src/domain.c exit frame.
         next_ctx.reg_state.a2 = current_ctx.mepc;
@@ -133,9 +146,9 @@ impl StateRiscv {
         if (next_domain.data_init_done) {
             Self::update_pmps(next_domain);
         } else {
-            panic!("THIS SHOULD NEVER HAPPEN!");
-            let mut engine = CAPA_ENGINE.lock();
-            Self::update_permission(domain, &mut engine);
+            panic!("SOMETHING WENT WRONG! There's been an attempt to execute a domain which hasn't been completely initialized yet.");
+            //let mut engine = CAPA_ENGINE.lock();
+            //Self::update_permission(domain, &mut engine);
         }
     }
 

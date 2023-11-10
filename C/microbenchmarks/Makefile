@@ -10,6 +10,7 @@ else ifeq ($(ARCH), riscv)
 	GCC = riscv64-unknown-linux-gnu-gcc
 	KVM = 0
 	ARCH_FLAGS=-DCONFIG_RISCV
+	ALIGN_FLAGS=-Wl,--section-start=.data=0x16000 
 endif
 
 ifeq ($(KVM), 1)
@@ -95,6 +96,10 @@ ifeq ($(KVM), 1)
 	APP_INCLUDES+=-I$(CONTALLOC)/include 
 endif
 
+ifeq ($(ARCH), riscv)
+	APP_INCLUDES+=-pthread
+endif
+
 ## ————————————————————— Configuration for the install —————————————————————— ##
 ifeq ($(ARCH), x86)
 DISK_PATH ?= /tmp/mount/tyche/benchmarks/
@@ -119,11 +124,12 @@ mock_dom: $(CODE_DOM)
 
 # Transition domain
 trans_dom: $(CODE_TRANS) $(HDRS_TRANS)
-	$(GCC) $(ARCH_FLAGS) -DTYCHE_USER_SPACE=2 -g $(COMMON_INCLUDES) -nostdlib -static -o $@ $(CODE_TRANS)
+	$(GCC) $(ARCH_FLAGS) -DTYCHE_USER_SPACE=2 -g $(COMMON_INCLUDES) -nostdlib -static -o $@ $(CODE_TRANS) $(ALIGN_FLAGS)
 
 sandboxes: mock_app mock_dom
 	mkdir -p bin/sandboxes
-	cargo -C $(TYCHOOLS_PATH) install --path . --locked -Z unstable-options
+	cargo -C $(TYCHOOLS_PATH) install --path . --locked -Z unstable-options 
+
 	tychools instrument -s manifests/sandboxes/8k.json $(TYCHOOLS_ARG)
 	tychools instrument -s manifests/sandboxes/16k.json $(TYCHOOLS_ARG)
 	tychools instrument -s manifests/sandboxes/32k.json $(TYCHOOLS_ARG)

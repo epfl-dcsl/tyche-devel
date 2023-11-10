@@ -758,7 +758,7 @@ dependencies = [
 name = "qemu"
 version = "0.1.0"
 dependencies = [
- "riscv_utils",
+ "riscv_serial",
  "spin 0.5.2",
  "uart_16550",
 ]
@@ -798,20 +798,34 @@ version = "0.1.0"
 dependencies = [
  "capa-engine",
  "log",
+ "qemu",
  "riscv_csrs",
+ "riscv_serial",
  "riscv_utils",
  "spin 0.9.4",
 ]
 
 [[package]]
+name = "riscv_serial"
+version = "0.1.0"
+dependencies = [
+ "spin 0.5.2",
+]
+
+[[package]]
 name = "riscv_tyche"
 version = "0.1.0"
+dependencies = [
+ "riscv_utils",
+]
 
 [[package]]
 name = "riscv_utils"
 version = "0.1.0"
 dependencies = [
  "log",
+ "qemu",
+ "riscv_csrs",
 ]
 
 [[package]]
@@ -1113,6 +1127,7 @@ dependencies = [
  "riscv_csrs",
  "riscv_pmp",
  "riscv_sbi",
+ "riscv_serial",
  "riscv_tyche",
  "riscv_utils",
  "spin 0.9.4",

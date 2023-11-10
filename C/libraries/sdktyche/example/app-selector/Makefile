@@ -123,10 +123,10 @@ enclave: $(CODE_DOMAIN) $(HDRS_DOMAIN)
 
 app_selector: app enclave
 	echo "Building app_selector for RISCV"
-	cargo -C $(TYCHOOLS_PATH) install --path . --locked -Z unstable-options
+	cargo -C $(TYCHOOLS_PATH) install --path . --locked -Z unstable-options 
 	tychools instrument -s manifests/default.json --riscv-enabled
 	chmod +x app_selector
-	rm app enclave
+	#rm app enclave
 
 install_disk: all
 	# TODO: Update this after Tychools has been patched for RISC-V 

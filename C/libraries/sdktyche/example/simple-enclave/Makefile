@@ -135,7 +135,7 @@ enclave: $(CODE_ENCLAVE) $(HDRS_ENCLAVE)
 	$(GCC) -DTYCHE_USER_SPACE=2 -DTYCHE_ENCLAVE=1 -DCONFIG_RISCV=1 -g $(COMMON_INCLUDES) -nostdlib -static -o $@ $(CODE_ENCLAVE) -Wl,--section-start=.data=0x16000
 
 enclave_iso: app enclave
-	cargo -C $(TYCHOOLS_PATH) install --path . --locked 
+	cargo -C $(TYCHOOLS_PATH) install --path . --locked
 	tychools instrument -s manifests/enclave_iso.json --riscv-enabled  
 	chmod +x enclave_iso
 	rm app enclave
