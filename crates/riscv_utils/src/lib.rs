@@ -22,7 +22,7 @@ pub const PAGING_MODE_SV48: usize = 0x9000000000000000;
 #[derive(Copy, Clone, Debug)]
 pub struct RegisterState {
     pub ra: usize,
-    pub a0: usize,
+    pub a0: isize,
     pub a1: usize,
     pub a2: usize,
     pub a3: usize,

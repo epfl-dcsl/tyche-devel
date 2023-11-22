@@ -11,7 +11,7 @@ use tyche::{arch, println};
 
 entry_point!(tyche_entry_point);
 
-const LOG_LEVEL: LevelFilter = LevelFilter::Info;
+const LOG_LEVEL: LevelFilter = LevelFilter::Debug;
 
 #[cfg(target_arch = "x86_64")]
 fn tyche_entry_point() -> ! {

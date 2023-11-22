@@ -107,8 +107,9 @@ pub extern "C" fn exit_handler_failed() {
 // In RISC-V, any trap to machine mode will lead to this function being called (via the machine_trap_handler)
 
 pub fn handle_exit(reg_state: &mut RegisterState) {
-    let mut ret: usize = 0;
+    let mut ret: isize = 0;
     let mut err: usize = 0;
+    let mut out_val: usize = 0;
     let mut mcause: usize;
     let mut mepc: usize;
     let mut mstatus: usize;
@@ -162,7 +163,9 @@ pub fn handle_exit(reg_state: &mut RegisterState) {
                 //Tyche call
                 misaligned_load_handler(reg_state);
             } else {
-                ecall_handler(&mut ret, &mut err, reg_state.a0, reg_state.a6, reg_state.a7);
+                ecall_handler(&mut ret, &mut err, &mut out_val, reg_state.a0.try_into().unwrap(), reg_state.a6, reg_state.a7);
+                reg_state.a0 = ret;
+                reg_state.a1 = out_val;
             }
         }
         mcause::LOAD_ADDRESS_MISALIGNED => {
@@ -225,7 +228,7 @@ pub fn illegal_instruction_handler(mepc: usize, mstatus: usize) {
 pub fn misaligned_load_handler(reg_state: &mut RegisterState) {
     if reg_state.a7 == 0x5479636865 {
         //It's a Tyche Call
-        let tyche_call: usize = reg_state.a0;
+        let tyche_call: usize = reg_state.a0.try_into().unwrap();
         let arg_1: usize = reg_state.a1;
         let arg_2: usize = reg_state.a2;
         let arg_3: usize = reg_state.a3;

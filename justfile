@@ -246,6 +246,9 @@ _tpm:
 run_riscv:
 	{{qemu-riscv}} -nographic -drive "file={{drive-riscv}},format=raw,if=virtio" -cpu rv64,h=true -M virt -m 4G -bios {{bios-riscv}} -kernel {{kernel-riscv}} -append "root=/dev/vda1 rw console=ttyS0 earlycon=sbi quiet" -smp 1 {{dev-riscv}} 
 
+run_riscv_4harts:
+    {{qemu-riscv}} -nographic -drive "file={{drive-riscv}},format=raw,if=virtio" -cpu rv64,h=true -M virt -m 4G -bios {{bios-riscv}} -kernel {{kernel-riscv}} -append "root=/dev/vda1 rw console=ttyS0 earlycon=sbi quiet" -smp 4 {{dev-riscv}}
+
 run_riscv_gdb: 
 	{{qemu-riscv}} -nographic -drive "file={{drive-riscv}},format=raw,if=virtio" -cpu rv64,h=true -M virt -m 4G -bios {{bios-riscv}} -kernel {{kernel-riscv}} -append "root=/dev/vda1 rw console=ttyS0 earlycon=sbi quiet" -smp 1 {{dev-riscv}} -gdb tcp::1234 -S 
 	
