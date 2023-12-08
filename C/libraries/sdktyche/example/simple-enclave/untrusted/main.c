@@ -47,8 +47,10 @@ failure:
 
 void call_tychools(nonce_t nonce, unsigned long long offset) {
   char cmd[256];
+  // TODO: detect architecture to run the proper command (e.g. remove --riscv-enabled on non-riscv platforms)
   sprintf(cmd, "sudo chmod ugo+rx tychools;./tychools attestation --att-src=file_tychools.txt --src-bin=enclave_iso --offset=0x%llx --nonce=0x%x --riscv-enabled", offset, nonce);
   LOG("cmd %s", cmd);
+  LOG("WARNING: for now this assume we run on RISC-V! Update code for x86");
   system(cmd);
 }
 
