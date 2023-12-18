@@ -407,9 +407,9 @@ pub(crate) fn insert_capa(
             // Run the garbage collection and retry
             free_invalid_capas(domain, regions, domains);
             let Some(idx) = domains[domain].free_list.allocate() else {
-                    log::trace!("Could not insert capa in domain: out of memory");
-                    return Err(CapaError::OutOfMemory);
-                };
+                log::trace!("Could not insert capa in domain: out of memory");
+                return Err(CapaError::OutOfMemory);
+            };
             idx
         }
     };

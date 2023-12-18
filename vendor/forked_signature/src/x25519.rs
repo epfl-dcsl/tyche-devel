@@ -310,6 +310,3 @@ mod from_ed25519 {
         }
     }
 }
-
-#[cfg(not(feature = "disable-signatures"))]
-pub use from_ed25519::*;

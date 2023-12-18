@@ -144,17 +144,15 @@ pub(crate) fn duplicate(
     let is_confidential = capa.is_confidential && !overlap(access_left, access_right);
 
     // Allocate the two region capas
-    let Some(left) = regions.allocate(
-        RegionCapa::new(domain_handle, access_left)
-            .set_confidential(is_confidential)
-    ) else {
+    let Some(left) = regions
+        .allocate(RegionCapa::new(domain_handle, access_left).set_confidential(is_confidential))
+    else {
         log::info!("Ouf of memory during left allocation on duplicate");
         return Err(CapaError::OutOfMemory);
     };
-    let Some(right) = regions.allocate(
-        RegionCapa::new(domain_handle, access_right)
-            .set_confidential(is_confidential)
-    ) else {
+    let Some(right) = regions
+        .allocate(RegionCapa::new(domain_handle, access_right).set_confidential(is_confidential))
+    else {
         log::info!("Ouf of memory during right allocation on duplicate");
         // Cleanup previous allocation
         regions.free(left);

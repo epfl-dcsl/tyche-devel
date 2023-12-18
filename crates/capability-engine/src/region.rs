@@ -396,7 +396,9 @@ impl RegionTracker {
         start: usize,
         tracker: &mut TrackerPool,
     ) -> (Option<Handle<Region>>, Option<Handle<Region>>) {
-        let Some(mut closest) = self.head else {return (None, None)} ;
+        let Some(mut closest) = self.head else {
+            return (None, None);
+        };
 
         if tracker[closest].start > start {
             // The first region already starts at a higher address

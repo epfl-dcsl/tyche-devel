@@ -6,7 +6,7 @@ use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use allocator::FrameAllocator;
 use capa_engine::{Domain, Handle};
 use stage_two_abi::{GuestInfo, Manifest};
-pub use vmx::{ActiveVmcs, ControlRegister, VmxError as BackendError};
+pub use vmx::{ActiveVmcs, ControlRegister};
 
 use super::guest::VmxState;
 use super::{arch, cpuid, launch_guest, monitor, vmx_helper};
@@ -177,7 +177,6 @@ unsafe fn create_vcpu(info: &GuestInfo) -> (VmxState, Handle<Domain>) {
         .create_vm_unsafe(vmcs_frame)
         .expect("Failed to create VMCS");
     let mut vcpu = vmcs.set_as_active().expect("Failed to set VMCS as active");
-    drop(allocator);
     vmx_helper::init_vcpu(&mut vcpu, info);
     let domain = monitor::init_vcpu(&mut vcpu);
     (VmxState { vcpu, vmxon }, domain)
