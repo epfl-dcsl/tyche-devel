@@ -68,7 +68,7 @@ pub(crate) fn restore(
 ) -> Result<(), CapaError> {
     log::trace!("Restoring {:?}", handle);
 
-    let capa = &mut regions[handle];
+    let capa = regions.get_mut(handle).ok_or(CapaError::InvalidCapa)?;
     let domain = capa.domain;
     let right = capa.right;
     let left = capa.left;
@@ -128,7 +128,7 @@ pub(crate) fn duplicate(
 ) -> Result<(LocalCapa, LocalCapa), CapaError> {
     log::trace!("Duplicating {:?}", handle);
 
-    let capa = &regions[handle];
+    let capa = regions.get(handle).ok_or(CapaError::InvalidCapa)?;
     let domain_handle = capa.domain;
     // Ensure that the operation is valid
     if capa.left.is_some() || capa.right.is_some() {
@@ -200,7 +200,7 @@ pub(crate) fn send(
 ) -> Result<(), CapaError> {
     log::trace!("Sending region {:?}", handle);
 
-    let capa = &mut regions[handle];
+    let capa = regions.get_mut(handle).ok_or(CapaError::InvalidCapa)?;
     let old_domain = capa.domain;
     capa.domain = domain;
 

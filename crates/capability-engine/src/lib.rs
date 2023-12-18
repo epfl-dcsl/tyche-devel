@@ -47,6 +47,7 @@ pub enum CapaError {
     InvalidInstall,
     InternalRegionError,
     InvalidRegion,
+    InvalidCapa,
     WrongCapabilityType,
     CapabilityDoesNotExist,
     AlreadySealed,
