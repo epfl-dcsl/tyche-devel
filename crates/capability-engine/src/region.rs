@@ -63,6 +63,12 @@ pub struct AccessRights {
     pub ops: MemOps,
 }
 
+impl AccessRights {
+    pub fn is_valid(&self) -> bool {
+        self.start <= self.end
+    }
+}
+
 #[derive(Clone, Copy)]
 pub enum PermissionChange {
     None,
@@ -291,6 +297,12 @@ impl RegionTracker {
         tracker: &mut TrackerPool,
     ) -> Result<PermissionChange, CapaError> {
         log::trace!("Adding region [0x{:x}, 0x{:x}]", start, end);
+
+        assert!(start <= end);
+        if start == end {
+            // return immediately, nothing to do
+            return Ok(PermissionChange::None);
+        }
 
         // There is no region yet, insert head and exit
         let Some(head) = self.head else {

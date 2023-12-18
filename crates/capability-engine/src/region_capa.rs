@@ -269,7 +269,9 @@ fn apply_uninstall(
 }
 
 fn is_valid_duplicate(region: &RegionCapa, left: AccessRights, right: AccessRights) -> bool {
-    contains(region, left)
+    left.is_valid()
+        && right.is_valid()
+        && contains(region, left)
         && contains(region, right)
         && region.access.ops.contains(left.ops)
         && region.access.ops.contains(right.ops)
