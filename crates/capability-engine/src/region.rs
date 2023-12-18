@@ -218,6 +218,12 @@ impl RegionTracker {
     ) -> Result<PermissionChange, CapaError> {
         log::trace!("Removing region [0x{:x}, 0x{:x}]", start, end);
 
+        assert!(start <= end);
+        if start == end {
+            // Empty region: nothing to do
+            return Ok(PermissionChange::None);
+        }
+
         let (Some(mut bound), mut prev) = self.find_lower_bound(start, tracker) else {
             log::trace!("Region does not exist");
             return Err(CapaError::InvalidRegion);
