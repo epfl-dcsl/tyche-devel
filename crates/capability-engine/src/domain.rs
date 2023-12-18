@@ -5,7 +5,7 @@ use crate::capa::{Capa, IntoCapa};
 use crate::config::{NB_CAPAS_PER_DOMAIN, NB_DOMAINS};
 use crate::free_list::FreeList;
 use crate::gen_arena::{Cleanable, GenArena};
-use crate::region::{PermissionChange, RegionTracker};
+use crate::region::{PermissionChange, RegionTracker, TrackerPool};
 use crate::update::{Update, UpdateBuffer};
 use crate::utils::BitmapIterator;
 use crate::{region_capa, AccessRights, CapaError, Handle, RegionPool};
@@ -277,7 +277,7 @@ impl Domain {
         }
     }
 
-    pub fn regions(&self) -> &RegionTracker {
+    pub(crate) fn regions(&self) -> &RegionTracker {
         &self.regions
     }
 
@@ -545,6 +545,7 @@ pub(crate) fn activate_region(
     access: AccessRights,
     domains: &mut DomainPool,
     updates: &mut UpdateBuffer,
+    tracker: &mut TrackerPool,
 ) -> Result<(), CapaError> {
     let dom = &mut domains[domain];
 
@@ -554,7 +555,7 @@ pub(crate) fn activate_region(
     }
     let change = dom
         .regions
-        .add_region(access.start, access.end, access.ops)?;
+        .add_region(access.start, access.end, access.ops, tracker)?;
     if let PermissionChange::Some = change {
         dom.emit_shootdown(updates);
         updates.push(Update::PermissionUpdate { domain });
@@ -568,6 +569,7 @@ pub(crate) fn deactivate_region(
     access: AccessRights,
     domains: &mut DomainPool,
     updates: &mut UpdateBuffer,
+    tracker: &mut TrackerPool,
 ) -> Result<(), CapaError> {
     let dom = &mut domains[domain];
 
@@ -578,7 +580,7 @@ pub(crate) fn deactivate_region(
 
     let change = dom
         .regions
-        .remove_region(access.start, access.end, access.ops)?;
+        .remove_region(access.start, access.end, access.ops, tracker)?;
     if let PermissionChange::Some = change {
         dom.emit_shootdown(updates);
         updates.push(Update::PermissionUpdate { domain });
@@ -650,6 +652,7 @@ pub(crate) fn revoke(
     handle: DomainHandle,
     regions: &mut RegionPool,
     domains: &mut DomainPool,
+    tracker: &mut TrackerPool,
     updates: &mut UpdateBuffer,
 ) -> Result<(), CapaError> {
     log::trace!("Revoke domain {}", handle);
@@ -668,7 +671,7 @@ pub(crate) fn revoke(
     let mut token = NextCapaToken::new();
     while let Some((capa, next_token)) = next_capa(handle, token, regions, domains) {
         token = next_token;
-        revoke_capa(handle, capa, regions, domains, updates)?;
+        revoke_capa(handle, capa, regions, domains, tracker, updates)?;
     }
 
     domains.free(handle);
@@ -680,6 +683,7 @@ pub(crate) fn revoke_capa(
     local: LocalCapa,
     regions: &mut RegionPool,
     domains: &mut DomainPool,
+    tracker: &mut TrackerPool,
     updates: &mut UpdateBuffer,
 ) -> Result<(), CapaError> {
     let domain = &mut domains[handle];
@@ -693,10 +697,10 @@ pub(crate) fn revoke_capa(
 
         // Those capa cause revocation side effects
         Capa::Region(region) => {
-            region_capa::restore(region, regions, domains, updates)?;
+            region_capa::restore(region, regions, domains, tracker, updates)?;
         }
         Capa::Management(domain) => {
-            revoke(domain, regions, domains, updates)?;
+            revoke(domain, regions, domains, tracker, updates)?;
         }
     }
 

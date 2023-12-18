@@ -1,7 +1,7 @@
 use std::fmt::Write;
 
 use capa_engine::{
-    permission, AccessRights, CapaEngine, Domain, Handle, MemOps, NextCapaToken, RegionTracker,
+    permission, AccessRights, CapaEngine, Domain, Handle, MemOps, NextCapaToken, RegionIterator,
     MEMOPS_ALL,
 };
 
@@ -508,8 +508,8 @@ fn access_rights_test() {
 
 // ————————————————————————————————— Utils —————————————————————————————————— //
 
-fn regions(domain: Handle<Domain>, engine: &CapaEngine) -> &RegionTracker {
-    engine[domain].regions()
+fn regions(domain: Handle<Domain>, engine: &CapaEngine) -> RegionIterator {
+    engine.get_domain_regions(domain).expect("Invalid domain")
 }
 
 fn capas(domain: Handle<Domain>, engine: &mut CapaEngine) -> String {

@@ -2,7 +2,7 @@ use core::fmt;
 
 use bitflags::bitflags;
 
-use crate::config::NB_REGIONS_PER_DOMAIN;
+use crate::config::NB_TRACKER;
 use crate::gen_arena::{Cleanable, GenArena, Handle};
 use crate::CapaError;
 
@@ -79,7 +79,9 @@ impl PermissionChange {
 
 // ———————————————————————————————— Regions ————————————————————————————————— //
 
-const EMPTY_REGION: Region = Region {
+pub(crate) type TrackerPool = GenArena<Region, NB_TRACKER>;
+
+pub(crate) const EMPTY_REGION: Region = Region {
     start: 0,
     end: 0,
     read_count: 0,
@@ -177,22 +179,18 @@ impl Cleanable for Region {
 // ————————————————————————————— RegionTracker —————————————————————————————— //
 
 pub struct RegionTracker {
-    regions: GenArena<Region, NB_REGIONS_PER_DOMAIN>,
     head: Option<Handle<Region>>,
 }
 
 impl RegionTracker {
     pub const fn new() -> Self {
-        Self {
-            regions: GenArena::new([EMPTY_REGION; NB_REGIONS_PER_DOMAIN]),
-            head: None,
-        }
+        Self { head: None }
     }
 
-    pub fn get_refcount(&self, start: usize, end: usize) -> usize {
+    pub fn get_refcount(&self, start: usize, end: usize, tracker: &TrackerPool) -> usize {
         let mut count = 0;
 
-        for (_, region) in self {
+        for (_, region) in self.iter(tracker) {
             if region.end <= start {
                 continue;
             } else if region.start >= end {
@@ -210,50 +208,51 @@ impl RegionTracker {
         start: usize,
         end: usize,
         ops: MemOps,
+        tracker: &mut TrackerPool,
     ) -> Result<PermissionChange, CapaError> {
         log::trace!("Removing region [0x{:x}, 0x{:x}]", start, end);
 
-        let (Some(mut bound), mut prev) = self.find_lower_bound(start) else {
+        let (Some(mut bound), mut prev) = self.find_lower_bound(start, tracker) else {
             log::trace!("Region does not exist");
             return Err(CapaError::InvalidRegion);
         };
 
         // Check if we need a split for the start.
-        if self.regions[bound].start < start {
+        if tracker[bound].start < start {
             prev = Some(bound);
-            bound = self.split_region_at(bound, start)?;
+            bound = self.split_region_at(bound, start, tracker)?;
         }
         // Check if we need a split for the end.
-        if self.regions[bound].end > end {
-            let _ = self.split_region_at(bound, end)?;
+        if tracker[bound].end > end {
+            let _ = self.split_region_at(bound, end, tracker)?;
         }
 
         assert_eq!(
-            self.regions[bound].start, start,
+            tracker[bound].start, start,
             "Remove region must specify exact boundaries"
         );
 
         let mut change = PermissionChange::None;
         let mut next = bound;
-        while self.regions[next].start < end {
-            let mut update = self.decrease_refcount(next);
-            update.update(self.decrease_ops(next, ops));
+        while tracker[next].start < end {
+            let mut update = self.decrease_refcount(next, tracker);
+            update.update(self.decrease_ops(next, ops, tracker));
             change.update(update);
 
             // Free regions with ref_count 0.
-            if self.regions[next].ref_count == 0 {
+            if tracker[next].ref_count == 0 {
                 // Remove the element from the list.
-                let to_visit = self.regions[next].next;
+                let to_visit = tracker[next].next;
                 match prev {
                     Some(handle) => {
-                        self.regions[handle].next = self.regions[next].next;
+                        tracker[handle].next = tracker[next].next;
                     }
                     None => {
-                        self.head = self.regions[next].next;
+                        self.head = tracker[next].next;
                     }
                 }
                 // Free the region.
-                self.regions.free(next);
+                tracker.free(next);
 
                 // Update next.
                 match to_visit {
@@ -268,7 +267,7 @@ impl RegionTracker {
                 // End of free block.
             }
 
-            match &self.regions[next].next {
+            match &tracker[next].next {
                 Some(handle) => {
                     prev = Some(next);
                     next = *handle;
@@ -278,8 +277,9 @@ impl RegionTracker {
                 }
             }
         }
+
         // coalesce.
-        self.coalesce();
+        self.coalesce(tracker);
         Ok(change)
     }
 
@@ -288,52 +288,54 @@ impl RegionTracker {
         start: usize,
         end: usize,
         ops: MemOps,
+        tracker: &mut TrackerPool,
     ) -> Result<PermissionChange, CapaError> {
         log::trace!("Adding region [0x{:x}, 0x{:x}]", start, end);
 
         // There is no region yet, insert head and exit
         let Some(head) = self.head else {
-            self.insert_head(start, end, ops)?;
+            self.insert_head(start, end, ops, tracker)?;
             return Ok(PermissionChange::Some);
         };
 
         let mut change = PermissionChange::None;
         let (mut previous, mut cursor) =
-            if let (Some(lower_bound), _) = self.find_lower_bound(start) {
-                let region = &self.regions[lower_bound];
+            if let (Some(lower_bound), _) = self.find_lower_bound(start, tracker) {
+                let region = &tracker[lower_bound];
                 if start == region.start {
                     // Regions have the same start
                     let (previous, update) =
-                        self.partial_add_region_overlapping(start, end, lower_bound, ops)?;
+                        self.partial_add_region_overlapping(start, end, lower_bound, ops, tracker)?;
                     change.update(update);
-                    let cursor = self.regions[previous].end;
+                    let cursor = tracker[previous].end;
                     (previous, cursor)
                 } else if region.contains(start) {
                     // Region start in the middle of the lower bound region
-                    self.split_region_at(lower_bound, start)?;
+                    self.split_region_at(lower_bound, start, tracker)?;
                     (lower_bound, start)
                 } else {
                     // Region starts after lower bound region
                     (lower_bound, start)
                 }
             } else {
-                let head = &self.regions[head];
+                let head = &tracker[head];
                 let cursor = core::cmp::min(end, head.start);
-                let previous = self.insert_head(start, cursor, ops)?;
+                let previous = self.insert_head(start, cursor, ops, tracker)?;
                 change = PermissionChange::Some;
                 (previous, cursor)
             };
 
         // Add the remaining portions of the region
         while cursor < end {
-            let (next, update) = self.partial_add_region_after(cursor, end, previous, ops)?;
+            let (next, update) =
+                self.partial_add_region_after(cursor, end, previous, ops, tracker)?;
             previous = next;
             change.update(update);
-            cursor = self.regions[previous].end;
+            cursor = tracker[previous].end;
         }
 
         // Coalesce.
-        self.coalesce();
+        self.coalesce(tracker);
         Ok(change)
     }
 
@@ -343,8 +345,9 @@ impl RegionTracker {
         end: usize,
         after: Handle<Region>,
         ops: MemOps,
+        tracker: &mut TrackerPool,
     ) -> Result<(Handle<Region>, PermissionChange), CapaError> {
-        let region = &mut self.regions[after];
+        let region = &mut tracker[after];
 
         assert!(start < end, "Tried to add invalid region");
         assert!(region.end <= start, "Invalid add_region_after");
@@ -352,16 +355,16 @@ impl RegionTracker {
         // Check how much of the region can fit before the next one
         let mut end = end;
         if let Some(next_handle) = region.next {
-            let next = &mut self.regions[next_handle];
+            let next = &mut tracker[next_handle];
             if start == next.start {
                 // Overlapping
-                return self.partial_add_region_overlapping(start, end, next_handle, ops);
+                return self.partial_add_region_overlapping(start, end, next_handle, ops, tracker);
             } else if end > next.start {
                 // Fit as much as possible
                 end = next.start;
             }
         }
-        self.insert_after(start, end, ops, after)
+        self.insert_after(start, end, ops, after, tracker)
     }
 
     fn partial_add_region_overlapping(
@@ -370,33 +373,38 @@ impl RegionTracker {
         end: usize,
         overlapping: Handle<Region>,
         ops: MemOps,
+        tracker: &mut TrackerPool,
     ) -> Result<(Handle<Region>, PermissionChange), CapaError> {
-        let region = &self.regions[overlapping];
+        let region = &tracker[overlapping];
         assert!(
             region.start == start,
             "Region is not overlapping from the start"
         );
 
         if end < region.end {
-            self.split_region_at(overlapping, end)?;
+            self.split_region_at(overlapping, end, tracker)?;
         }
-        let mut change = self.increase_refcount(overlapping);
-        change.update(self.increase_ops(overlapping, ops));
+        let mut change = self.increase_refcount(overlapping, tracker);
+        change.update(self.increase_ops(overlapping, ops, tracker));
         Ok((overlapping, change))
     }
 
     /// Returns a handle to the region with the closest (inferior or equal) start address.
     /// First value is the closest, second is the previous element.
-    fn find_lower_bound(&self, start: usize) -> (Option<Handle<Region>>, Option<Handle<Region>>) {
+    fn find_lower_bound(
+        &self,
+        start: usize,
+        tracker: &mut TrackerPool,
+    ) -> (Option<Handle<Region>>, Option<Handle<Region>>) {
         let Some(mut closest) = self.head else {return (None, None)} ;
 
-        if self.regions[closest].start > start {
+        if tracker[closest].start > start {
             // The first region already starts at a higher address
             return (None, None);
         }
         let mut prev = None;
         let mut iter = None;
-        for (handle, region) in self {
+        for (handle, region) in self.iter(tracker) {
             if region.start <= start {
                 prev = iter;
                 closest = handle
@@ -415,8 +423,9 @@ impl RegionTracker {
         &mut self,
         handle: Handle<Region>,
         at: usize,
+        tracker: &mut TrackerPool,
     ) -> Result<Handle<Region>, CapaError> {
-        let region = &self.regions[handle];
+        let region = &tracker[handle];
         assert!(
             region.contains(at),
             "Tried to split at an address that is not contained in the region"
@@ -433,13 +442,13 @@ impl RegionTracker {
             ref_count: region.ref_count,
             next: region.next,
         };
-        let second_half_handle = self.regions.allocate(second_half).ok_or_else(|| {
+        let second_half_handle = tracker.allocate(second_half).ok_or_else(|| {
             log::error!("Unable to allocate new region!");
             CapaError::OutOfMemory
         })?;
 
         // Update the first half
-        let region = &mut self.regions[handle];
+        let region = &mut tracker[handle];
         region.end = at;
         region.next = Some(second_half_handle);
 
@@ -454,24 +463,24 @@ impl RegionTracker {
         end: usize,
         ops: MemOps,
         after: Handle<Region>,
+        tracker: &mut TrackerPool,
     ) -> Result<(Handle<Region>, PermissionChange), CapaError> {
-        let region = &self.regions[after];
+        let region = &tracker[after];
         assert!(start >= region.end, "Regions should be sorted by addresses");
         if let Some(next) = region.next {
             assert!(
-                end <= self.regions[next].start,
+                end <= tracker[next].start,
                 "Regions should be sorted by addresses"
             );
         }
 
-        let handle = self
-            .regions
+        let handle = tracker
             .allocate(Region::new(start, end, ops).set_next(region.next))
             .ok_or_else(|| {
                 log::trace!("Unable to allocate new region!");
                 CapaError::OutOfMemory
             })?;
-        let region = &mut self.regions[after];
+        let region = &mut tracker[after];
         region.next = Some(handle);
 
         // There is alway a permission change in this case
@@ -483,16 +492,17 @@ impl RegionTracker {
         start: usize,
         end: usize,
         ops: MemOps,
+        tracker: &mut TrackerPool,
     ) -> Result<Handle<Region>, CapaError> {
         if let Some(head) = self.head {
             assert!(
-                self.regions[head].start >= end,
+                tracker[head].start >= end,
                 "Region should be sorted by address"
             );
         }
 
         let region = Region::new(start, end, ops).set_next(self.head);
-        let handle = self.regions.allocate(region).ok_or_else(|| {
+        let handle = tracker.allocate(region).ok_or_else(|| {
             log::trace!("Unable to allocate new region!");
             CapaError::OutOfMemory
         })?;
@@ -500,8 +510,12 @@ impl RegionTracker {
         Ok(handle)
     }
 
-    fn increase_refcount(&mut self, handle: Handle<Region>) -> PermissionChange {
-        let region = &mut self.regions[handle];
+    fn increase_refcount(
+        &mut self,
+        handle: Handle<Region>,
+        tracker: &mut TrackerPool,
+    ) -> PermissionChange {
+        let region = &mut tracker[handle];
         region.ref_count += 1;
 
         if region.ref_count == 1 {
@@ -511,8 +525,13 @@ impl RegionTracker {
         }
     }
 
-    fn increase_ops(&mut self, handle: Handle<Region>, ops: MemOps) -> PermissionChange {
-        let region = &mut self.regions[handle];
+    fn increase_ops(
+        &mut self,
+        handle: Handle<Region>,
+        ops: MemOps,
+        tracker: &mut TrackerPool,
+    ) -> PermissionChange {
+        let region = &mut tracker[handle];
         let mut change = PermissionChange::None;
         if ops.contains(MemOps::READ) {
             region.read_count += 1;
@@ -541,8 +560,12 @@ impl RegionTracker {
         return change;
     }
 
-    fn decrease_refcount(&mut self, handle: Handle<Region>) -> PermissionChange {
-        let region = &mut self.regions[handle];
+    fn decrease_refcount(
+        &mut self,
+        handle: Handle<Region>,
+        tracker: &mut TrackerPool,
+    ) -> PermissionChange {
+        let region = &mut tracker[handle];
         region.ref_count = region.ref_count.checked_sub(1).unwrap();
 
         if region.ref_count == 0 {
@@ -552,8 +575,13 @@ impl RegionTracker {
         }
     }
 
-    fn decrease_ops(&mut self, handle: Handle<Region>, ops: MemOps) -> PermissionChange {
-        let region = &mut self.regions[handle];
+    fn decrease_ops(
+        &mut self,
+        handle: Handle<Region>,
+        ops: MemOps,
+        tracker: &mut TrackerPool,
+    ) -> PermissionChange {
+        let region = &mut tracker[handle];
         let mut change = PermissionChange::None;
         if ops.contains(MemOps::READ) {
             region.read_count = region.read_count.checked_sub(1).unwrap();
@@ -582,54 +610,56 @@ impl RegionTracker {
         return change;
     }
 
-    fn coalesce(&mut self) {
+    fn coalesce(&mut self, tracker: &mut TrackerPool) {
         if self.head == None {
             // Nothing to do.
             return;
         }
         let mut prev = self.head.unwrap();
-        let mut curr = self.regions[prev].next;
+        let mut curr = tracker[prev].next;
 
         // Go through the list.
         while curr != None {
             let current = curr.unwrap();
-            if self.regions[prev].end == self.regions[current].start
-                && (self.regions[prev].same_counts(&self.regions[current])
-                    || self.regions[current].start == self.regions[current].end
-                    || self.regions[prev].start == self.regions[prev].end)
+            if tracker[prev].end == tracker[current].start
+                && (tracker[prev].same_counts(&tracker[current])
+                    || tracker[current].start == tracker[current].end
+                    || tracker[prev].start == tracker[prev].end)
             {
                 // Coalesce
-                if self.regions[prev].start == self.regions[prev].end {
-                    self.regions[prev].ref_count = self.regions[current].ref_count;
+                if tracker[prev].start == tracker[prev].end {
+                    tracker[prev].ref_count = tracker[current].ref_count;
                 }
-                self.regions[prev].next = self.regions[current].next;
-                self.regions[prev].end = self.regions[current].end;
-                self.regions.free(curr.unwrap());
-                curr = self.regions[prev].next;
+                tracker[prev].next = tracker[current].next;
+                tracker[prev].end = tracker[current].end;
+                tracker.free(curr.unwrap());
+                curr = tracker[prev].next;
                 continue;
             }
             prev = curr.unwrap();
-            curr = self.regions[current].next;
+            curr = tracker[current].next;
         }
     }
 
-    pub fn iter(&self) -> RegionIterator {
+    pub fn iter<'a>(&'a self, pool: &'a TrackerPool) -> RegionIterator<'a> {
         RegionIterator {
-            tracker: self,
+            pool,
             next: self.head,
         }
     }
 
-    pub fn iter_from(&self, start: Option<Handle<Region>>) -> RegionIterator {
-        RegionIterator {
-            tracker: self,
-            next: start,
-        }
+    pub fn iter_from<'a>(
+        &'a self,
+        start: Option<Handle<Region>>,
+        pool: &'a TrackerPool,
+    ) -> RegionIterator<'a> {
+        RegionIterator { pool, next: start }
     }
 
-    pub fn permissions(&self) -> PermissionIterator {
+    pub fn permissions<'a>(&'a self, pool: &'a TrackerPool) -> PermissionIterator<'a> {
         PermissionIterator {
             tracker: self,
+            pool,
             next: self.head,
         }
     }
@@ -638,14 +668,14 @@ impl RegionTracker {
 impl Cleanable for RegionTracker {
     fn clean(&mut self) {
         self.head = None;
-        self.regions.clean_all();
     }
 }
 
 // ———————————————————————————— Region Iterators ———————————————————————————— //
 
+#[derive(Clone)]
 pub struct RegionIterator<'a> {
-    tracker: &'a RegionTracker,
+    pool: &'a TrackerPool,
     next: Option<Handle<Region>>,
 }
 
@@ -654,25 +684,17 @@ impl<'a> Iterator for RegionIterator<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         let handle = self.next?;
-        let region = &self.tracker.regions[handle];
+        let region = &self.pool[handle];
 
         self.next = region.next;
         Some((handle, region))
     }
 }
 
-impl<'a> IntoIterator for &'a RegionTracker {
-    type Item = (Handle<Region>, &'a Region);
-    type IntoIter = RegionIterator<'a>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.iter()
-    }
-}
-
 /// An iterator over a domain's memory access permissions.
 pub struct PermissionIterator<'a> {
     tracker: &'a RegionTracker,
+    pool: &'a TrackerPool,
     next: Option<Handle<Region>>,
 }
 
@@ -695,7 +717,7 @@ impl<'a> Iterator for PermissionIterator<'a> {
         // Get the first valid region
         let mut handle = None;
         let mut start = None;
-        for (h, region) in self.tracker.iter_from(self.next) {
+        for (h, region) in self.tracker.iter_from(self.next, self.pool) {
             if region.ref_count > 0 {
                 handle = Some(h);
                 start = Some(region.start);
@@ -708,12 +730,12 @@ impl<'a> Iterator for PermissionIterator<'a> {
             return None;
         };
         let (end, ops) = {
-            let reg = &self.tracker.regions[handle.unwrap()];
+            let reg = &self.pool[handle.unwrap()];
             (reg.end, reg.get_ops())
         };
 
         let mut next = None;
-        for (handle, _region) in self.tracker.iter_from(handle).skip(1) {
+        for (handle, _region) in self.tracker.iter_from(handle, self.pool).skip(1) {
             //TODO(aghosn) charly had some optimization here that I had to remove.
             //We can put something correct here in the future.
             next = Some(handle);
@@ -760,111 +782,154 @@ mod tests {
 
     #[test]
     fn region_pool() {
-        let mut regions = RegionTracker::new();
-        regions.add_region(0x100, 0x1000, MEMOPS_ALL).unwrap();
+        let mut tracker = RegionTracker::new();
+        let mut pool = TrackerPool::new([EMPTY_REGION; NB_TRACKER]);
+        tracker
+            .add_region(0x100, 0x1000, MEMOPS_ALL, &mut pool)
+            .unwrap();
 
         // Should return None if there is no lower bound region
-        assert_eq!(regions.find_lower_bound(0x50), (None, None));
+        assert_eq!(tracker.find_lower_bound(0x50, &mut pool), (None, None));
 
-        let head = regions.head;
-        assert_eq!(regions.find_lower_bound(0x100), (head, None));
-        assert_eq!(regions.find_lower_bound(0x200), (head, None));
+        let head = tracker.head;
+        assert_eq!(tracker.find_lower_bound(0x100, &mut pool), (head, None));
+        assert_eq!(tracker.find_lower_bound(0x200, &mut pool), (head, None));
     }
 
     #[test]
     fn region_add() {
         // Region is added as head
-        let mut pool = RegionTracker::new();
-        pool.add_region(0x300, 0x400, MEMOPS_ALL).unwrap();
-        snap("{[0x300, 0x400 | 1 (1 - 1 - 1 - 1)]}", &pool);
-        pool.add_region(0x100, 0x200, MEMOPS_ALL).unwrap();
+        let mut tracker = RegionTracker::new();
+        let mut pool = TrackerPool::new([EMPTY_REGION; NB_TRACKER]);
+        tracker
+            .add_region(0x300, 0x400, MEMOPS_ALL, &mut pool)
+            .unwrap();
+        snap("{[0x300, 0x400 | 1 (1 - 1 - 1 - 1)]}", &tracker.iter(&pool));
+        tracker
+            .add_region(0x100, 0x200, MEMOPS_ALL, &mut pool)
+            .unwrap();
         snap(
             "{[0x100, 0x200 | 1 (1 - 1 - 1 - 1)] -> [0x300, 0x400 | 1 (1 - 1 - 1 - 1)]}",
-            &pool,
+            &tracker.iter(&pool),
         );
 
         // Region is added as head, but overlap
-        let mut pool = RegionTracker::new();
-        pool.add_region(0x200, 0x400, MEMOPS_ALL).unwrap();
-        snap("{[0x200, 0x400 | 1 (1 - 1 - 1 - 1)]}", &pool);
-        pool.add_region(0x100, 0x300, MEMOPS_ALL).unwrap();
+        let mut tracker = RegionTracker::new();
+        tracker
+            .add_region(0x200, 0x400, MEMOPS_ALL, &mut pool)
+            .unwrap();
+        snap("{[0x200, 0x400 | 1 (1 - 1 - 1 - 1)]}", &tracker.iter(&pool));
+        tracker
+            .add_region(0x100, 0x300, MEMOPS_ALL, &mut pool)
+            .unwrap();
         snap(
             "{[0x100, 0x200 | 1 (1 - 1 - 1 - 1)] -> [0x200, 0x300 | 2 (2 - 2 - 2 - 2)] -> [0x300, 0x400 | 1 (1 - 1 - 1 - 1)]}",
-            &pool,
+            &tracker.iter(&pool),
         );
 
         // Region is completely included
-        let mut pool = RegionTracker::new();
-        pool.add_region(0x100, 0x400, MEMOPS_ALL).unwrap();
-        snap("{[0x100, 0x400 | 1 (1 - 1 - 1 - 1)]}", &pool);
-        pool.add_region(0x200, 0x300, MEMOPS_ALL).unwrap();
+        let mut tracker = RegionTracker::new();
+        tracker
+            .add_region(0x100, 0x400, MEMOPS_ALL, &mut pool)
+            .unwrap();
+        snap("{[0x100, 0x400 | 1 (1 - 1 - 1 - 1)]}", &tracker.iter(&pool));
+        tracker
+            .add_region(0x200, 0x300, MEMOPS_ALL, &mut pool)
+            .unwrap();
         snap(
             "{[0x100, 0x200 | 1 (1 - 1 - 1 - 1)] -> [0x200, 0x300 | 2 (2 - 2 - 2 - 2)] -> [0x300, 0x400 | 1 (1 - 1 - 1 - 1)]}",
-            &pool,
+            &tracker.iter(&pool),
         );
 
         // Region is bridging two existing one
-        let mut pool = RegionTracker::new();
-        pool.add_region(0x100, 0x400, MEMOPS_ALL).unwrap();
-        snap("{[0x100, 0x400 | 1 (1 - 1 - 1 - 1)]}", &pool);
-        pool.add_region(0x500, 0x1000, MEMOPS_ALL).unwrap();
+        let mut tracker = RegionTracker::new();
+        tracker
+            .add_region(0x100, 0x400, MEMOPS_ALL, &mut pool)
+            .unwrap();
+        snap("{[0x100, 0x400 | 1 (1 - 1 - 1 - 1)]}", &tracker.iter(&pool));
+        tracker
+            .add_region(0x500, 0x1000, MEMOPS_ALL, &mut pool)
+            .unwrap();
         snap(
             "{[0x100, 0x400 | 1 (1 - 1 - 1 - 1)] -> [0x500, 0x1000 | 1 (1 - 1 - 1 - 1)]}",
-            &pool,
+            &tracker.iter(&pool),
         );
-        pool.add_region(0x200, 0x600, MEMOPS_ALL).unwrap();
-        snap("{[0x100, 0x200 | 1 (1 - 1 - 1 - 1)] -> [0x200, 0x400 | 2 (2 - 2 - 2 - 2)] -> [0x400, 0x500 | 1 (1 - 1 - 1 - 1)] -> [0x500, 0x600 | 2 (2 - 2 - 2 - 2)] -> [0x600, 0x1000 | 1 (1 - 1 - 1 - 1)]}", &pool);
+        tracker
+            .add_region(0x200, 0x600, MEMOPS_ALL, &mut pool)
+            .unwrap();
+        snap("{[0x100, 0x200 | 1 (1 - 1 - 1 - 1)] -> [0x200, 0x400 | 2 (2 - 2 - 2 - 2)] -> [0x400, 0x500 | 1 (1 - 1 - 1 - 1)] -> [0x500, 0x600 | 2 (2 - 2 - 2 - 2)] -> [0x600, 0x1000 | 1 (1 - 1 - 1 - 1)]}", &tracker.iter(&pool));
 
         // Region is overlapping two adjacent regions
-        let mut pool = RegionTracker::new();
-        pool.add_region(0x200, 0x300, MEMOPS_ALL).unwrap();
-        snap("{[0x200, 0x300 | 1 (1 - 1 - 1 - 1)]}", &pool);
-        pool.add_region(0x300, 0x400, MEMOPS_ALL).unwrap();
-        snap("{[0x200, 0x400 | 1 (1 - 1 - 1 - 1)]}", &pool);
-        pool.add_region(0x100, 0x500, MEMOPS_ALL).unwrap();
+        let mut tracker = RegionTracker::new();
+        tracker
+            .add_region(0x200, 0x300, MEMOPS_ALL, &mut pool)
+            .unwrap();
+        snap("{[0x200, 0x300 | 1 (1 - 1 - 1 - 1)]}", &tracker.iter(&pool));
+        tracker
+            .add_region(0x300, 0x400, MEMOPS_ALL, &mut pool)
+            .unwrap();
+        snap("{[0x200, 0x400 | 1 (1 - 1 - 1 - 1)]}", &tracker.iter(&pool));
+        tracker
+            .add_region(0x100, 0x500, MEMOPS_ALL, &mut pool)
+            .unwrap();
         snap(
             "{[0x100, 0x200 | 1 (1 - 1 - 1 - 1)] -> [0x200, 0x400 | 2 (2 - 2 - 2 - 2)] -> [0x400, 0x500 | 1 (1 - 1 - 1 - 1)]}",
-            &pool,
+            &tracker.iter(&pool),
         );
 
         // Region is added twice
-        let mut pool = RegionTracker::new();
-        pool.add_region(0x100, 0x200, MEMOPS_ALL).unwrap();
-        snap("{[0x100, 0x200 | 1 (1 - 1 - 1 - 1)]}", &pool);
-        pool.add_region(0x100, 0x200, MEMOPS_ALL).unwrap();
-        snap("{[0x100, 0x200 | 2 (2 - 2 - 2 - 2)]}", &pool);
+        let mut tracker = RegionTracker::new();
+        tracker
+            .add_region(0x100, 0x200, MEMOPS_ALL, &mut pool)
+            .unwrap();
+        snap("{[0x100, 0x200 | 1 (1 - 1 - 1 - 1)]}", &tracker.iter(&pool));
+        tracker
+            .add_region(0x100, 0x200, MEMOPS_ALL, &mut pool)
+            .unwrap();
+        snap("{[0x100, 0x200 | 2 (2 - 2 - 2 - 2)]}", &tracker.iter(&pool));
 
         // Regions have the same end
-        let mut pool = RegionTracker::new();
-        pool.add_region(0x200, 0x300, MEMOPS_ALL).unwrap();
-        snap("{[0x200, 0x300 | 1 (1 - 1 - 1 - 1)]}", &pool);
-        pool.add_region(0x100, 0x300, MEMOPS_ALL).unwrap();
+        let mut tracker = RegionTracker::new();
+        tracker
+            .add_region(0x200, 0x300, MEMOPS_ALL, &mut pool)
+            .unwrap();
+        snap("{[0x200, 0x300 | 1 (1 - 1 - 1 - 1)]}", &tracker.iter(&pool));
+        tracker
+            .add_region(0x100, 0x300, MEMOPS_ALL, &mut pool)
+            .unwrap();
         snap(
             "{[0x100, 0x200 | 1 (1 - 1 - 1 - 1)] -> [0x200, 0x300 | 2 (2 - 2 - 2 - 2)]}",
-            &pool,
+            &tracker.iter(&pool),
         );
     }
 
     #[test]
     fn refcount() {
-        let mut pool = RegionTracker::new();
-        pool.add_region(0x100, 0x300, MEMOPS_ALL).unwrap();
-        pool.add_region(0x600, 0x1000, MEMOPS_ALL).unwrap();
-        pool.add_region(0x200, 0x400, MEMOPS_ALL).unwrap();
-        snap("{[0x100, 0x200 | 1 (1 - 1 - 1 - 1)] -> [0x200, 0x300 | 2 (2 - 2 - 2 - 2)] -> [0x300, 0x400 | 1 (1 - 1 - 1 - 1)] -> [0x600, 0x1000 | 1 (1 - 1 - 1 - 1)]}", &pool);
+        let mut tracler = RegionTracker::new();
+        let mut pool = TrackerPool::new([EMPTY_REGION; NB_TRACKER]);
+        tracler
+            .add_region(0x100, 0x300, MEMOPS_ALL, &mut pool)
+            .unwrap();
+        tracler
+            .add_region(0x600, 0x1000, MEMOPS_ALL, &mut pool)
+            .unwrap();
+        tracler
+            .add_region(0x200, 0x400, MEMOPS_ALL, &mut pool)
+            .unwrap();
+        snap("{[0x100, 0x200 | 1 (1 - 1 - 1 - 1)] -> [0x200, 0x300 | 2 (2 - 2 - 2 - 2)] -> [0x300, 0x400 | 1 (1 - 1 - 1 - 1)] -> [0x600, 0x1000 | 1 (1 - 1 - 1 - 1)]}", &tracler.iter(&pool));
 
-        assert_eq!(pool.get_refcount(0x0, 0x50), 0);
-        assert_eq!(pool.get_refcount(0x0, 0x100), 0);
-        assert_eq!(pool.get_refcount(0x0, 0x150), 1);
-        assert_eq!(pool.get_refcount(0x100, 0x200), 1);
-        assert_eq!(pool.get_refcount(0x100, 0x250), 2);
-        assert_eq!(pool.get_refcount(0x0, 0x250), 2);
-        assert_eq!(pool.get_refcount(0x100, 0x400), 2);
-        assert_eq!(pool.get_refcount(0x100, 0x500), 2);
-        assert_eq!(pool.get_refcount(0x400, 0x500), 0);
-        assert_eq!(pool.get_refcount(0x450, 0x500), 0);
-        assert_eq!(pool.get_refcount(0x400, 0x2000), 1);
-        assert_eq!(pool.get_refcount(0x1500, 0x2000), 0);
+        assert_eq!(tracler.get_refcount(0x0, 0x50, &pool), 0);
+        assert_eq!(tracler.get_refcount(0x0, 0x100, &pool), 0);
+        assert_eq!(tracler.get_refcount(0x0, 0x150, &pool), 1);
+        assert_eq!(tracler.get_refcount(0x100, 0x200, &pool), 1);
+        assert_eq!(tracler.get_refcount(0x100, 0x250, &pool), 2);
+        assert_eq!(tracler.get_refcount(0x0, 0x250, &pool), 2);
+        assert_eq!(tracler.get_refcount(0x100, 0x400, &pool), 2);
+        assert_eq!(tracler.get_refcount(0x100, 0x500, &pool), 2);
+        assert_eq!(tracler.get_refcount(0x400, 0x500, &pool), 0);
+        assert_eq!(tracler.get_refcount(0x450, 0x500, &pool), 0);
+        assert_eq!(tracler.get_refcount(0x400, 0x2000, &pool), 1);
+        assert_eq!(tracler.get_refcount(0x1500, 0x2000, &pool), 0);
     }
 }
 
@@ -876,10 +941,10 @@ impl fmt::Display for AccessRights {
     }
 }
 
-impl fmt::Display for RegionTracker {
+impl<'a> fmt::Display for RegionIterator<'a> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{{")?;
-        for (_, region) in self {
+        for (_, region) in self.clone() {
             write!(
                 f,
                 "[0x{:x}, 0x{:x} | {} ({} - {} - {} - {})]",

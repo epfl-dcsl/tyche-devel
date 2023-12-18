@@ -1,7 +1,7 @@
 use crate::config::NB_REGIONS;
 use crate::domain::{insert_capa, Domain, DomainPool, LocalCapa};
 use crate::gen_arena::{GenArena, Handle};
-use crate::region::{AccessRights, MemOps};
+use crate::region::{AccessRights, MemOps, TrackerPool};
 use crate::update::UpdateBuffer;
 use crate::{domain, CapaError};
 
@@ -63,6 +63,7 @@ pub(crate) fn restore(
     handle: Handle<RegionCapa>,
     regions: &mut RegionPool,
     domains: &mut DomainPool,
+    tracker: &mut TrackerPool,
     updates: &mut UpdateBuffer,
 ) -> Result<(), CapaError> {
     log::trace!("Restoring {:?}", handle);
@@ -73,13 +74,13 @@ pub(crate) fn restore(
     let left = capa.left;
 
     capa.is_active = true;
-    apply_install(capa, domain, domains, updates)?;
+    apply_install(capa, domain, domains, updates, tracker)?;
 
     if let Some(right) = right {
-        revoke(right, regions, domains, updates)?;
+        revoke(right, regions, domains, updates, tracker)?;
     }
     if let Some(left) = left {
-        revoke(left, regions, domains, updates)?;
+        revoke(left, regions, domains, updates, tracker)?;
     }
 
     let capa = &mut regions[handle];
@@ -94,6 +95,7 @@ pub(crate) fn revoke(
     regions: &mut RegionPool,
     domains: &mut DomainPool,
     updates: &mut UpdateBuffer,
+    tracker: &mut TrackerPool,
 ) -> Result<(), CapaError> {
     log::trace!("Revoking {:?}", handle);
 
@@ -102,14 +104,14 @@ pub(crate) fn revoke(
     let right = capa.right;
     let left = capa.left;
 
-    apply_uninstall(capa, domain, domains, updates)?;
+    apply_uninstall(capa, domain, domains, updates, tracker)?;
     regions.free(handle);
 
     if let Some(right) = right {
-        revoke(right, regions, domains, updates)?;
+        revoke(right, regions, domains, updates, tracker)?;
     }
     if let Some(left) = left {
-        revoke(left, regions, domains, updates)?;
+        revoke(left, regions, domains, updates, tracker)?;
     }
 
     Ok(())
@@ -119,6 +121,7 @@ pub(crate) fn duplicate(
     handle: Handle<RegionCapa>,
     regions: &mut RegionPool,
     domains: &mut DomainPool,
+    tracker: &mut TrackerPool,
     updates: &mut UpdateBuffer,
     access_left: AccessRights,
     access_right: AccessRights,
@@ -179,9 +182,9 @@ pub(crate) fn duplicate(
     capa.right = Some(right);
 
     // TODO: can be optimized in some cases (e.g. the two new regions cover the exact same memory)
-    apply_install(&regions[left], domain_handle, domains, updates)?;
-    apply_install(&regions[right], domain_handle, domains, updates)?;
-    apply_uninstall(&regions[handle], domain_handle, domains, updates)?;
+    apply_install(&regions[left], domain_handle, domains, updates, tracker)?;
+    apply_install(&regions[right], domain_handle, domains, updates, tracker)?;
+    apply_uninstall(&regions[handle], domain_handle, domains, updates, tracker)?;
 
     // Deactivate capa
     regions[handle].is_active = false;
@@ -193,6 +196,7 @@ pub(crate) fn send(
     handle: Handle<RegionCapa>,
     regions: &mut RegionPool,
     domains: &mut DomainPool,
+    tracker: &mut TrackerPool,
     updates: &mut UpdateBuffer,
     domain: Handle<Domain>,
 ) -> Result<(), CapaError> {
@@ -202,8 +206,8 @@ pub(crate) fn send(
     let old_domain = capa.domain;
     capa.domain = domain;
 
-    apply_uninstall(capa, old_domain, domains, updates)?;
-    apply_install(capa, domain, domains, updates)?;
+    apply_uninstall(capa, old_domain, domains, updates, tracker)?;
+    apply_install(capa, domain, domains, updates, tracker)?;
 
     Ok(())
 }
@@ -213,6 +217,7 @@ pub(crate) fn install(
     domain: Handle<Domain>,
     regions: &mut RegionPool,
     domains: &mut DomainPool,
+    tracker: &mut TrackerPool,
     updates: &mut UpdateBuffer,
 ) -> Result<LocalCapa, CapaError> {
     log::trace!("Installing {:?}", handle);
@@ -223,7 +228,7 @@ pub(crate) fn install(
     }
 
     let local_capa = insert_capa(domain, handle, regions, domains)?;
-    apply_install(&mut regions[handle], domain, domains, updates)?;
+    apply_install(&mut regions[handle], domain, domains, updates, tracker)?;
 
     Ok(local_capa)
 }
@@ -233,6 +238,7 @@ fn apply_install(
     domain_handle: Handle<Domain>,
     domains: &mut DomainPool,
     updates: &mut UpdateBuffer,
+    tracker: &mut TrackerPool,
 ) -> Result<(), CapaError> {
     if !capa.is_active {
         return Ok(());
@@ -240,7 +246,7 @@ fn apply_install(
 
     // No need to activate the region if it is not active.
     if domains.get(domain_handle).is_some() && capa.is_active {
-        domain::activate_region(domain_handle, capa.access, domains, updates)?;
+        domain::activate_region(domain_handle, capa.access, domains, updates, tracker)?;
     }
 
     Ok(())
@@ -251,13 +257,14 @@ fn apply_uninstall(
     domain_handle: Handle<Domain>,
     domains: &mut DomainPool,
     updates: &mut UpdateBuffer,
+    tracker: &mut TrackerPool,
 ) -> Result<(), CapaError> {
     if !capa.is_active {
         return Ok(());
     }
 
     if domains.get(domain_handle).is_some() && capa.is_active {
-        domain::deactivate_region(domain_handle, capa.access, domains, updates)?;
+        domain::deactivate_region(domain_handle, capa.access, domains, updates, tracker)?;
     }
 
     Ok(())

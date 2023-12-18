@@ -267,7 +267,7 @@ pub fn do_debug() {
             next_capa = next_next_capa;
             log::debug!(" - {}", info);
         }
-        log::debug!("{}", engine[domain].regions());
+        log::debug!("{}", engine.get_domain_regions(domain).unwrap());
     }
 }
 
@@ -478,7 +478,7 @@ fn update_permission(domain_handle: Handle<Domain>, engine: &mut MutexGuard<Capa
     clear_pmp();
     let mut pmp_write_result: Result<PMPAddressingMode, PMPErrorCode>;
     let mut pmp_index = FROZEN_PMP_ENTRIES;
-    for range in engine[domain_handle].regions().permissions() {
+    for range in engine.get_domain_permissions(domain_handle).unwrap() {
         if !range.ops.contains(MemOps::READ) {
             log::error!("there is a region without read permission: {}", range);
             continue;

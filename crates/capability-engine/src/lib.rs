@@ -20,7 +20,10 @@ use cores::{Core, CoreList};
 use domain::{insert_capa, remove_capa, DomainHandle, DomainPool};
 pub use domain::{permission, Bitmaps, Domain, LocalCapa, NextCapaToken};
 pub use gen_arena::{GenArena, Handle};
-pub use region::{AccessRights, MemOps, RegionTracker, MEMOPS_ALL};
+pub use region::{
+    AccessRights, MemOps, MemoryPermission, Region, RegionIterator, RegionTracker, MEMOPS_ALL,
+};
+use region::{TrackerPool, EMPTY_REGION};
 use region_capa::{RegionCapa, RegionPool};
 use update::UpdateBuffer;
 pub use update::{Buffer, Update};
@@ -31,8 +34,8 @@ use crate::domain::{core_bits, switch_bits, trap_bits};
 pub mod config {
     pub const NB_DOMAINS: usize = 32;
     pub const NB_CAPAS_PER_DOMAIN: usize = 128;
-    pub const NB_REGIONS_PER_DOMAIN: usize = 64;
-    pub const NB_REGIONS: usize = 256;
+    pub const NB_REGIONS: usize = 1024;
+    pub const NB_TRACKER: usize = 1024;
     pub const NB_UPDATES: usize = 128;
     pub const NB_CORES: usize = 32; // NOTE: Can't be greater than 64 as we use 64 bits bitmaps.
 }
@@ -65,6 +68,7 @@ pub struct CapaEngine {
     cores: CoreList,
     domains: DomainPool,
     regions: RegionPool,
+    tracker: TrackerPool,
     updates: UpdateBuffer,
     id_counter: usize,
 }
@@ -79,6 +83,7 @@ impl CapaEngine {
             cores: [EMPTY_CORE; config::NB_CORES],
             domains: GenArena::new([EMPTY_DOMAIN; config::NB_DOMAINS]),
             regions: GenArena::new([EMPTY_CAPA; config::NB_REGIONS]),
+            tracker: GenArena::new([EMPTY_REGION; config::NB_TRACKER]),
             updates: UpdateBuffer::new(),
             id_counter: 0,
         }
@@ -162,6 +167,7 @@ impl CapaEngine {
             domain,
             &mut self.regions,
             &mut self.domains,
+            &mut self.tracker,
             &mut self.updates,
         )
     }
@@ -183,6 +189,7 @@ impl CapaEngine {
                     domain,
                     &mut self.regions,
                     &mut self.domains,
+                    &mut self.tracker,
                     &mut self.updates,
                 )?;
                 Ok(capa)
@@ -204,6 +211,7 @@ impl CapaEngine {
             region,
             &mut self.regions,
             &mut self.domains,
+            &mut self.tracker,
             &mut self.updates,
         )
     }
@@ -228,6 +236,7 @@ impl CapaEngine {
             region,
             &mut self.regions,
             &mut self.domains,
+            &mut self.tracker,
             &mut self.updates,
             access_left,
             access_right,
@@ -280,6 +289,7 @@ impl CapaEngine {
                     region,
                     &mut self.regions,
                     &mut self.domains,
+                    &mut self.tracker,
                     &mut self.updates,
                     to,
                 )?;
@@ -355,6 +365,7 @@ impl CapaEngine {
                 region,
                 &mut self.regions,
                 &mut self.domains,
+                &mut self.tracker,
                 &mut self.updates,
             ),
             // All other are simply revoked
@@ -363,6 +374,7 @@ impl CapaEngine {
                 capa,
                 &mut self.regions,
                 &mut self.domains,
+                &mut self.tracker,
                 &mut self.updates,
             ),
         }
@@ -474,6 +486,26 @@ impl CapaEngine {
         capa: LocalCapa,
     ) -> Result<Handle<Domain>, CapaError> {
         self.domains[domain].get(capa)?.as_domain()
+    }
+
+    pub fn get_domain_regions<'a>(
+        &'a self,
+        domain: Handle<Domain>,
+    ) -> Result<RegionIterator<'a>, CapaError> {
+        let Some(domain) = self.domains.get(domain) else {
+            return Err(CapaError::InvalidValue);
+        };
+        Ok(domain.regions().iter(&self.tracker))
+    }
+
+    pub fn get_domain_permissions<'a>(
+        &'a self,
+        domain: Handle<Domain>,
+    ) -> Result<impl Iterator<Item = MemoryPermission> + 'a, CapaError> {
+        let Some(domain) = self.domains.get(domain) else {
+            return Err(CapaError::InvalidValue);
+        };
+        Ok(domain.regions().permissions(&self.tracker))
     }
 
     pub fn pop_update(&mut self) -> Option<Update> {

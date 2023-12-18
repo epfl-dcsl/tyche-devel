@@ -397,7 +397,10 @@ pub fn do_debug() {
             next_capa = next_next_capa;
             log::trace!(" - {}", info);
         }
-        log::trace!("{}", engine[domain].regions());
+        log::trace!(
+            "{}",
+            engine.get_domain_regions(domain).expect("Invalid domain")
+        );
     }
 }
 
@@ -650,7 +653,7 @@ fn update_domain_ept(domain_handle: Handle<Domain>, engine: &mut MutexGuard<Capa
         ept_root.phys_addr,
     );
 
-    for range in engine[domain_handle].regions().permissions() {
+    for range in engine.get_domain_permissions(domain_handle).unwrap() {
         if !range.ops.contains(MemOps::READ) {
             log::error!("there is a region without read permission: {}", range);
             continue;
@@ -696,7 +699,7 @@ fn update_domain_iopt(domain_handle: Handle<Domain>, engine: &mut MutexGuard<Cap
     );
 
     // Traverse all regions of the I/O domain and maps them into the new iopt
-    for range in engine[domain_handle].regions().permissions() {
+    for range in engine.get_domain_permissions(domain_handle).unwrap() {
         if !range.ops.contains(MemOps::READ) {
             log::error!("there is a region without read permission: {}", range);
             continue;

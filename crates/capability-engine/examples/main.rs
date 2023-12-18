@@ -1,4 +1,4 @@
-use capa_engine::{permission, AccessRights, CapaEngine, Domain, Handle, MemOps, MEMOPS_ALL};
+use capa_engine::{permission, AccessRights, CapaEngine, Domain, Handle, MemOps};
 use simple_logger::SimpleLogger;
 
 fn main() {
@@ -9,22 +9,7 @@ fn main() {
         .init()
         .unwrap();
 
-    // bar();
     foo();
-}
-
-#[allow(unused)]
-fn bar() {
-    let mut pool = capa_engine::RegionTracker::new();
-
-    pool.add_region(0x200, 0x300, MEMOPS_ALL).unwrap();
-    println!("{}", &pool);
-    pool.add_region(0x300, 0x400, MEMOPS_ALL).unwrap();
-    println!("{}", &pool);
-    pool.add_region(0x100, 0x500, MEMOPS_ALL).unwrap();
-    println!("{}", &pool);
-    pool.remove_region(0x200, 0x400, MEMOPS_ALL).unwrap();
-    println!("{}", &pool);
 }
 
 #[allow(unused)]
@@ -108,12 +93,19 @@ fn display(_engine: &CapaEngine) {
     // println!("{}", engine.get_regions());
 }
 
-fn display_domain(domain: Handle<Domain>, engine: &CapaEngine) {
-    let domain = &engine[domain];
-    println!("Domain {} {}", domain.id(), domain.regions());
+fn display_domain(handle: Handle<Domain>, engine: &CapaEngine) {
+    let domain = &engine[handle];
+    println!(
+        "Domain {} {}",
+        domain.id(),
+        &engine.get_domain_regions(handle).expect("Invalid domain")
+    );
     print!("         {{");
     let mut first = true;
-    for area in domain.regions().permissions() {
+    for area in engine
+        .get_domain_permissions(handle)
+        .expect("Invalid domain")
+    {
         if first {
             first = false;
         } else {
