@@ -1,7 +1,7 @@
 # Justfile, see documentation here:
 # https://github.com/casey/just
 
-toolchain           := "nightly-2023-03-01"
+toolchain           := "nightly-2023-12-01"
 x86_64              := "--target configs/x86_64-unknown-kernel.json"
 riscv               := "--target configs/riscv-unknown-kernel.json"
 build_std           := "-Zbuild-std=core,alloc"
