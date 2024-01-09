@@ -5,12 +5,14 @@ use core::fmt;
 use crate::domain::{Domain, DomainPool};
 use crate::gen_arena::Handle;
 use crate::region_capa::{RegionCapa, RegionPool};
+use crate::segment::NewRegionCapa;
 use crate::{CapaError, MemOps};
 
 #[derive(Clone, Copy, Debug)]
 pub enum Capa {
     None,
     Region(Handle<RegionCapa>),
+    NewRegion(Handle<NewRegionCapa>),
     Management(Handle<Domain>),
     #[allow(dead_code)] // TODO: remove once channels are implemented
     Channel(Handle<Domain>),
@@ -141,6 +143,13 @@ impl Capa {
         }
     }
 
+    pub fn as_new_region(self) -> Result<Handle<NewRegionCapa>, CapaError> {
+        match self {
+            Capa::NewRegion(region) => Ok(region),
+            _ => Err(CapaError::WrongCapabilityType),
+        }
+    }
+
     pub fn as_management(self) -> Result<Handle<Domain>, CapaError> {
         match self {
             Capa::Management(domain) => Ok(domain),
@@ -184,6 +193,9 @@ impl Capa {
                     ops: region.access.ops,
                 })
             }
+            Capa::NewRegion(_) => {
+                todo!();
+            }
             Capa::Management(h) => {
                 let domain = &domains[h];
                 Some(CapaInfo::Management {
@@ -214,6 +226,12 @@ pub trait IntoCapa {
 impl IntoCapa for Handle<RegionCapa> {
     fn into_capa(self) -> Capa {
         Capa::Region(self)
+    }
+}
+
+impl IntoCapa for Handle<NewRegionCapa> {
+    fn into_capa(self) -> Capa {
+        Capa::NewRegion(self)
     }
 }
 

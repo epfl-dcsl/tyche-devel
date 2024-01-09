@@ -26,10 +26,11 @@ pub use region::{
 };
 use region::{TrackerPool, EMPTY_REGION};
 use region_capa::{RegionCapa, RegionPool};
+use segment::NewRegionPool;
 use update::UpdateBuffer;
 pub use update::{Buffer, Update};
 
-use crate::domain::{core_bits, switch_bits, trap_bits};
+use crate::{domain::{core_bits, switch_bits, trap_bits}, segment::EMPTY_NEW_REGION_CAPA};
 
 /// Configuration for the static Capa Engine size.
 pub mod config {
@@ -70,6 +71,7 @@ pub struct CapaEngine {
     cores: CoreList,
     domains: DomainPool,
     regions: RegionPool,
+    new_regions: NewRegionPool,
     tracker: TrackerPool,
     updates: UpdateBuffer,
     id_counter: usize,
@@ -85,6 +87,7 @@ impl CapaEngine {
             cores: [EMPTY_CORE; config::NB_CORES],
             domains: GenArena::new([EMPTY_DOMAIN; config::NB_DOMAINS]),
             regions: GenArena::new([EMPTY_CAPA; config::NB_REGIONS]),
+            new_regions: GenArena::new([EMPTY_NEW_REGION_CAPA; config::NB_REGIONS]),
             tracker: GenArena::new([EMPTY_REGION; config::NB_TRACKER]),
             updates: UpdateBuffer::new(),
             id_counter: 0,
@@ -218,6 +221,58 @@ impl CapaEngine {
         )
     }
 
+    pub fn alias_region(
+        &mut self,
+        domain: Handle<Domain>,
+        region: LocalCapa,
+        access: AccessRights,
+    ) -> Result<LocalCapa, CapaError> {
+        // Enforce permissions
+        domain::has_config(
+            domain,
+            &self.domains,
+            domain::Bitmaps::PERMISSION,
+            permission::CARVE,
+        )?;
+
+        let region = self.domains[domain].get(region)?.as_new_region()?;
+        let handle = segment::alias(
+            region,
+            &mut self.new_regions,
+            &mut self.regions,
+            &mut self.domains,
+            &mut self.tracker,
+            &mut self.updates,
+            access,
+        )?;
+        Ok(handle)
+    }
+
+    pub fn carve_region(
+        &mut self,
+        domain: Handle<Domain>,
+        region: LocalCapa,
+        access: AccessRights,
+    ) -> Result<LocalCapa, CapaError> {
+        // Enforce permissions
+        domain::has_config(
+            domain,
+            &self.domains,
+            domain::Bitmaps::PERMISSION,
+            permission::CARVE,
+        )?;
+
+        let region = self.domains[domain].get(region)?.as_new_region()?;
+        let handle = segment::carve(
+            region,
+            &mut self.new_regions,
+            &mut self.regions,
+            &mut self.domains,
+            access,
+        )?;
+        Ok(handle)
+    }
+
     pub fn segment_region(
         &mut self,
         domain: Handle<Domain>,
@@ -295,6 +350,9 @@ impl CapaEngine {
                     &mut self.updates,
                     to,
                 )?;
+            }
+            Capa::NewRegion(_) => {
+                todo!();
             }
             Capa::Management(domain) => {
                 // TODO: check that no cycles are created

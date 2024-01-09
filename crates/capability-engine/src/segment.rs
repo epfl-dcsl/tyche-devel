@@ -1,13 +1,12 @@
 //! Region Capabilities
 
 use crate::config::NB_REGIONS;
-use crate::domain::DomainPool;
+use crate::domain::{activate_region, insert_capa, DomainPool};
 use crate::region::TrackerPool;
 use crate::region_capa::RegionPool;
 use crate::update::UpdateBuffer;
-use crate::{AccessRights, CapaError, Domain, GenArena, Handle};
+use crate::{AccessRights, CapaError, Domain, GenArena, Handle, LocalCapa};
 
-pub type NewRegionHandle = Handle<NewRegionCapa>;
 pub(crate) type NewRegionPool = GenArena<NewRegionCapa, NB_REGIONS>;
 pub const EMPTY_NEW_REGION_CAPA: NewRegionCapa = NewRegionCapa::new_invalid();
 
@@ -71,14 +70,23 @@ impl NewRegionCapa {
 pub fn alias(
     handle: Handle<NewRegionCapa>,
     regions: &mut NewRegionPool,
+    old_regions: &mut RegionPool,
     domains: &mut DomainPool,
     tracker: &mut TrackerPool,
     updates: &mut UpdateBuffer,
     access: AccessRights,
-) -> Result<Handle<NewRegionCapa>, CapaError> {
+) -> Result<LocalCapa, CapaError> {
+    let region = &regions[handle];
+    let domain = region.domain;
+
+    // Check capacity
+    // TODO
+
     let new_handle = alias_region(handle, regions, access)?;
-    // TODO: update tracker
-    Ok(new_handle)
+    let local_capa = insert_capa(domain, new_handle, old_regions, domains)?;
+    activate_region(domain, access, domains, updates, tracker)?;
+
+    Ok(local_capa)
 }
 
 /// Create a new child region and append it to the parent.
@@ -99,6 +107,27 @@ fn alias_region(
     let new_handle = regions.allocate(new_region).ok_or(CapaError::OutOfMemory)?;
     insert_child(handle, new_handle, regions);
     Ok(new_handle)
+}
+
+pub fn carve(
+    handle: Handle<NewRegionCapa>,
+    regions: &mut NewRegionPool,
+    old_regions: &mut RegionPool,
+    domains: &mut DomainPool,
+    access: AccessRights,
+) -> Result<LocalCapa, CapaError> {
+    let region = &regions[handle];
+    let domain = region.domain;
+
+    // Check capacity
+    // TODO
+
+    let new_handle = carve_region(handle, regions, access)?;
+    let local_capa = insert_capa(domain, new_handle, old_regions, domains)?;
+    // No need to update tracker here, the domain lost access to the new region one time ang
+    // gained it back at the same time.
+
+    Ok(local_capa)
 }
 
 /// Create a new child region and append it to the parent.
@@ -183,6 +212,7 @@ fn validate_child_list(region: Handle<NewRegionCapa>, regions: &NewRegionPool) {
     let mut cursor = regions[region].child_list_head;
     let mut prev_access: Option<AccessRights> = None;
 
+    // TODO: check for overlap with carved regions.
     while let Some(h) = cursor {
         let current = &regions[h];
 
@@ -198,10 +228,6 @@ fn validate_child_list(region: Handle<NewRegionCapa>, regions: &NewRegionPool) {
         cursor = current.next_sibling;
         prev_access = Some(current.access.clone());
     }
-}
-
-fn contains(region: &NewRegionCapa, access: AccessRights) -> bool {
-    region.access.start <= access.start && region.access.end >= access.end
 }
 
 /// Checks that a region with the provided access rights can be carved from the parent.

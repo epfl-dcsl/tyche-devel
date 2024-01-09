@@ -20,9 +20,11 @@ pub mod permission {
     pub const SPAWN:     u64 = 1 << 0;
     pub const SEND:      u64 = 1 << 1;
     pub const DUPLICATE: u64 = 1 << 2;
+    pub const ALIAS:     u64 = 1 << 3;
+    pub const CARVE:     u64 = 1 << 4;
 
     /// All possible permissions
-    pub const ALL:  u64 = SPAWN | SEND | DUPLICATE;
+    pub const ALL:  u64 = SPAWN | SEND | DUPLICATE | ALIAS | CARVE;
     /// None of the existing permissions
     pub const NONE: u64 = 0;
 }
@@ -328,6 +330,7 @@ impl Domain {
         match self.capas[idx] {
             Capa::None => false,
             Capa::Region(handle) => regions.get(handle).is_some(),
+            Capa::NewRegion(_) => todo!(),
             Capa::Management(handle) => domains.get(handle).is_some(),
             Capa::Channel(handle) => domains.get(handle).is_some(),
             Capa::Switch { to, .. } => domains.get(to).is_some(),
@@ -447,6 +450,7 @@ fn free_invalid_capas(domain: Handle<Domain>, regions: &mut RegionPool, domains:
         let is_invalid = match capa {
             Capa::None => true,
             Capa::Region(h) => regions.get(h).is_none(),
+            Capa::NewRegion(_) => todo!(),
             Capa::Management(h) => domains.get(h).is_none(),
             Capa::Channel(h) => domains.get(h).is_none(),
             Capa::Switch { to, .. } => domains.get(to).is_none(),
@@ -516,7 +520,7 @@ pub(crate) fn duplicate_capa(
 
     match capa {
         // Capa that can not be duplicated
-        Capa::None | Capa::Region(_) | Capa::Management(_) | Capa::Switch { .. } => {
+        Capa::None | Capa::Region(_) | Capa::NewRegion(_) | Capa::Management(_) | Capa::Switch { .. } => {
             return Err(CapaError::CannotDuplicate);
         }
         Capa::Channel(_) => {
@@ -698,6 +702,9 @@ pub(crate) fn revoke_capa(
         // Those capa cause revocation side effects
         Capa::Region(region) => {
             region_capa::restore(region, regions, domains, tracker, updates)?;
+        }
+        Capa::NewRegion(_) => {
+            todo!();
         }
         Capa::Management(domain) => {
             revoke(domain, regions, domains, tracker, updates)?;
