@@ -2,6 +2,7 @@
 
 mod capa;
 mod cores;
+mod debug;
 mod domain;
 mod free_list;
 mod gen_arena;
@@ -30,7 +31,8 @@ use segment::NewRegionPool;
 use update::UpdateBuffer;
 pub use update::{Buffer, Update};
 
-use crate::{domain::{core_bits, switch_bits, trap_bits}, segment::EMPTY_NEW_REGION_CAPA};
+use crate::domain::{core_bits, switch_bits, trap_bits};
+use crate::segment::EMPTY_NEW_REGION_CAPA;
 
 /// Configuration for the static Capa Engine size.
 pub mod config {
