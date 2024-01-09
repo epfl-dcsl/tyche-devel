@@ -6,6 +6,7 @@ use crate::region::TrackerPool;
 use crate::region_capa::RegionPool;
 use crate::update::UpdateBuffer;
 use crate::{AccessRights, CapaError, Domain, GenArena, Handle, LocalCapa};
+use crate::debug::debug_check;
 
 pub(crate) type NewRegionPool = GenArena<NewRegionCapa, NB_REGIONS>;
 pub const EMPTY_NEW_REGION_CAPA: NewRegionCapa = NewRegionCapa::new_invalid();
@@ -83,6 +84,7 @@ pub fn alias(
     // TODO
 
     let new_handle = alias_region(handle, regions, access)?;
+    debug_check!(validate_child_list(handle, regions));
     let local_capa = insert_capa(domain, new_handle, old_regions, domains)?;
     activate_region(domain, access, domains, updates, tracker)?;
 
@@ -123,6 +125,7 @@ pub fn carve(
     // TODO
 
     let new_handle = carve_region(handle, regions, access)?;
+    debug_check!(validate_child_list(handle, regions));
     let local_capa = insert_capa(domain, new_handle, old_regions, domains)?;
     // No need to update tracker here, the domain lost access to the new region one time ang
     // gained it back at the same time.
@@ -207,22 +210,61 @@ fn insert_child(
 }
 
 /// Panics if the child list is malformed.
+#[allow(dead_code)] // Used only in test builds
 fn validate_child_list(region: Handle<NewRegionCapa>, regions: &NewRegionPool) {
     let parent_access = regions[region].access;
     let mut cursor = regions[region].child_list_head;
     let mut prev_access: Option<AccessRights> = None;
+    let mut last_alias: Option<usize> = None;
+    let mut last_carve: Option<usize> = None;
 
     // TODO: check for overlap with carved regions.
     while let Some(h) = cursor {
         let current = &regions[h];
 
+        // Check ordering
         if let Some(prev_access) = prev_access {
-            if prev_access.start > current.access.start {
-                panic!("Child list is not properly sorted");
-            }
+            assert!(
+                prev_access.start <= current.access.start,
+                "Child list is not properly sorted"
+            )
         }
-        if parent_access.start > current.access.start || parent_access.end < current.access.end {
-            panic!("Child is not contain within parent region");
+
+        // Check that child is contained within parent
+        assert!(
+            parent_access.start <= current.access.start && parent_access.end >= current.access.end,
+            "Child is not contain within parent region"
+        );
+
+        // Check overlap rules
+        match current.kind {
+            RegionKind::Root => panic!("Root region can't be a child"),
+            RegionKind::Alias => {
+                if let Some(last_carve) = last_carve {
+                    assert!(
+                        current.access.start >= last_carve,
+                        "Alias overlaps a carved region"
+                    );
+                }
+                let prev_last_alias = if let Some(x) = last_alias { x } else { 0 };
+                last_alias = Some(core::cmp::max(prev_last_alias, current.access.end));
+            }
+            RegionKind::Carve => {
+                if let Some(last_carve) = last_carve {
+                    assert!(
+                        current.access.start >= last_carve,
+                        "Carve overlaps another carved region"
+                    );
+                }
+                if let Some(last_alias) = last_alias {
+                    assert!(
+                        current.access.start >= last_alias,
+                        "Carve overlaps an aliased region"
+                    );
+                }
+                let prev_last_carve = if let Some(x) = last_carve { x } else { 0 };
+                last_carve = Some(core::cmp::max(prev_last_carve, current.access.end));
+            }
         }
 
         cursor = current.next_sibling;
