@@ -7,6 +7,7 @@ mod free_list;
 mod gen_arena;
 mod region;
 mod region_capa;
+mod segment;
 mod update;
 mod utils;
 

@@ -67,6 +67,26 @@ impl AccessRights {
     pub fn is_valid(&self) -> bool {
         self.start <= self.end
     }
+
+    pub fn new_is_valid(&self) -> bool {
+        self.start <= self.end
+    }
+
+    pub const fn none() -> Self {
+        Self {
+            start: 0,
+            end: 0,
+            ops: MemOps::NONE,
+        }
+    }
+
+    pub fn overlap(&self, other: &AccessRights) -> bool {
+        if other.end > self.start && other.start < self.end {
+            return true;
+        }
+
+        false
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -950,6 +970,30 @@ mod tests {
         assert_eq!(tracler.get_refcount(0x450, 0x500, &pool), 0);
         assert_eq!(tracler.get_refcount(0x400, 0x2000, &pool), 1);
         assert_eq!(tracler.get_refcount(0x1500, 0x2000, &pool), 0);
+    }
+
+    fn dummy_access(start: usize, end: usize) -> AccessRights {
+        AccessRights {
+            start,
+            end,
+            ops: MEMOPS_ALL,
+        }
+    }
+
+    #[test]
+    fn overlap() {
+        let access = dummy_access(10, 20);
+
+        assert!(access.overlap(&dummy_access(5, 15)));
+        assert!(access.overlap(&dummy_access(12, 18)));
+        assert!(access.overlap(&dummy_access(15, 25)));
+        assert!(access.overlap(&dummy_access(10, 20)));
+        assert!(access.overlap(&dummy_access(5, 25)));
+
+        assert!(!access.overlap(&dummy_access(2, 8)));
+        assert!(!access.overlap(&dummy_access(22, 28)));
+        assert!(!access.overlap(&dummy_access(2, 10)));
+        assert!(!access.overlap(&dummy_access(20, 28)));
     }
 }
 
