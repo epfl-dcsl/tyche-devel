@@ -506,6 +506,126 @@ fn access_rights_test() {
     snap!("{Region([0x0, 0x100000 | ACRWXS])}", capas(domain, engine));
 }
 
+#[test]
+fn new_capa() {
+    let engine = unsafe { static_engine!() };
+    let core = 0;
+
+    // Create initial domain
+    let d0 = engine.create_manager_domain(permission::ALL).unwrap();
+    let _ctx = engine.start_domain_on_core(d0, core).unwrap();
+
+    // Create two new domains
+    let d1 = engine.create_domain(d0).unwrap();
+    let d2 = engine.create_domain(d0).unwrap();
+    snap!("{Management(2 | _), Management(3 | _)}", capas(d0, engine));
+    let d1_capa = engine.get_domain_capa(d0, d1).unwrap();
+    let d2_capa = engine.get_domain_capa(d0, d2).unwrap();
+
+    // Create initial region
+    let r0 = engine
+        .create_new_root_region(
+            d0,
+            AccessRights {
+                start: 0,
+                end: 0x100,
+                ops: MEMOPS_ALL,
+            },
+        )
+        .unwrap();
+    snap!(
+        "{Management(2 | _), Management(3 | _), Region([0x0, 0x100 | CRWXS])}",
+        capas(d0, engine)
+    );
+    snap!("{[0x0, 0x100 | 1 (1 - 1 - 1 - 1)]}", regions(d0, engine));
+
+    // Alias and carve some regions
+    let r1 = engine
+        .alias_region(d0, r0, dummy_access(0x10, 0x20))
+        .unwrap();
+    snap!(
+        "{Management(2 | _), Management(3 | _), Region([0x0, 0x100 | CRWXS]), Region([0x10, 0x20 | _RWXS])}",
+        capas(d0, engine)
+    );
+    snap!("{[0x0, 0x10 | 1 (1 - 1 - 1 - 1)] -> [0x10, 0x20 | 2 (2 - 2 - 2 - 2)] -> [0x20, 0x100 | 1 (1 - 1 - 1 - 1)]}", regions(d0, engine));
+
+    let r2 = engine
+        .carve_region(d0, r0, dummy_access(0x30, 0x50))
+        .unwrap();
+    let r3 = engine
+        .alias_region(d0, r2, dummy_access(0x40, 0x50))
+        .unwrap();
+    let r4 = engine
+        .carve_region(d0, r0, dummy_access(0x60, 0x80))
+        .unwrap();
+    snap!(
+        "{Management(2 | _), Management(3 | _), Region([0x0, 0x100 | CRWXS]), Region([0x10, 0x20 | _RWXS]), Region([0x30, 0x50 | CRWXS]), Region([0x40, 0x50 | _RWXS]), Region([0x60, 0x80 | CRWXS])}",
+        capas(d0, engine)
+    );
+    snap!("{[0x0, 0x10 | 1 (1 - 1 - 1 - 1)] -> [0x10, 0x20 | 2 (2 - 2 - 2 - 2)] -> [0x20, 0x40 | 1 (1 - 1 - 1 - 1)] -> [0x40, 0x50 | 2 (2 - 2 - 2 - 2)] -> [0x50, 0x100 | 1 (1 - 1 - 1 - 1)]}", regions(d0, engine));
+
+    // Send some of the regions
+    engine.send(d0, r1, d1).unwrap();
+    snap!(
+        "{Management(2 | _), Management(3 | _), Region([0x0, 0x100 | CRWXS]), Region([0x30, 0x50 | CRWXS]), Region([0x40, 0x50 | _RWXS]), Region([0x60, 0x80 | CRWXS])}",
+        capas(d0, engine)
+    );
+    snap!("{[0x0, 0x40 | 1 (1 - 1 - 1 - 1)] -> [0x40, 0x50 | 2 (2 - 2 - 2 - 2)] -> [0x50, 0x100 | 1 (1 - 1 - 1 - 1)]}", regions(d0, engine));
+    snap!("{Region([0x10, 0x20 | _RWXS])}", capas(d1_capa, engine));
+    snap!(
+        "{[0x10, 0x20 | 1 (1 - 1 - 1 - 1)]}",
+        regions(d1_capa, engine)
+    );
+    engine.send(d0, r2, d1).unwrap();
+    snap!(
+        "{Management(2 | _), Management(3 | _), Region([0x0, 0x100 | CRWXS]), Region([0x40, 0x50 | _RWXS]), Region([0x60, 0x80 | CRWXS])}",
+        capas(d0, engine)
+    );
+    snap!(
+        "{[0x0, 0x30 | 1 (1 - 1 - 1 - 1)] -> [0x40, 0x100 | 1 (1 - 1 - 1 - 1)]}",
+        regions(d0, engine)
+    );
+    snap!(
+        "{Region([0x10, 0x20 | _RWXS]), Region([0x30, 0x50 | CRWXS])}",
+        capas(d1_capa, engine)
+    );
+    snap!(
+        "{[0x10, 0x20 | 1 (1 - 1 - 1 - 1)] -> [0x30, 0x50 | 1 (1 - 1 - 1 - 1)]}",
+        regions(d1_capa, engine)
+    );
+    engine.send(d0, r3, d2).unwrap();
+    snap!(
+        "{Management(2 | _), Management(3 | _), Region([0x0, 0x100 | CRWXS]), Region([0x60, 0x80 | CRWXS])}",
+        capas(d0, engine)
+    );
+    snap!(
+        "{[0x0, 0x30 | 1 (1 - 1 - 1 - 1)] -> [0x50, 0x100 | 1 (1 - 1 - 1 - 1)]}",
+        regions(d0, engine)
+    );
+    snap!("{Region([0x40, 0x50 | _RWXS])}", capas(d2_capa, engine));
+    snap!(
+        "{[0x40, 0x50 | 1 (1 - 1 - 1 - 1)]}",
+        regions(d2_capa, engine)
+    );
+    engine.send(d0, r4, d2).unwrap();
+    snap!(
+        "{Management(2 | _), Management(3 | _), Region([0x0, 0x100 | CRWXS])}",
+        capas(d0, engine)
+    );
+    snap!(
+        "{[0x0, 0x30 | 1 (1 - 1 - 1 - 1)] -> [0x50, 0x60 | 1 (1 - 1 - 1 - 1)] -> [0x80, 0x100 | 1 (1 - 1 - 1 - 1)]}",
+        regions(d0, engine)
+    );
+    snap!(
+        "{Region([0x40, 0x50 | _RWXS]), Region([0x60, 0x80 | CRWXS])}",
+        capas(d2_capa, engine)
+    );
+    snap!(
+        "{[0x40, 0x50 | 1 (1 - 1 - 1 - 1)] -> [0x60, 0x80 | 1 (1 - 1 - 1 - 1)]}",
+        regions(d2_capa, engine)
+    );
+}
+
 // ————————————————————————————————— Utils —————————————————————————————————— //
 
 fn regions(domain: Handle<Domain>, engine: &CapaEngine) -> RegionIterator {
@@ -546,4 +666,12 @@ fn updates(engine: &mut CapaEngine) -> String {
 
     buff.write_str("}").unwrap();
     buff
+}
+
+fn dummy_access(start: usize, end: usize) -> AccessRights {
+    AccessRights {
+        start,
+        end,
+        ops: MEMOPS_ALL,
+    }
 }

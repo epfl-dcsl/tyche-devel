@@ -172,6 +172,7 @@ impl CapaEngine {
     pub fn revoke_domain(&mut self, domain: Handle<Domain>) -> Result<(), CapaError> {
         domain::revoke(
             domain,
+            &mut self.new_regions,
             &mut self.regions,
             &mut self.domains,
             &mut self.tracker,
@@ -206,6 +207,25 @@ impl CapaEngine {
                 Err(CapaError::OutOfMemory)
             }
         }
+    }
+
+    pub fn create_new_root_region(
+        &mut self,
+        domain: DomainHandle,
+        access: AccessRights,
+    ) -> Result<LocalCapa, CapaError> {
+        log::trace!("Create new root region");
+
+        self.domains.get(domain).ok_or(CapaError::InvalidCapa)?;
+        segment::create_root_region(
+            domain,
+            &mut self.new_regions,
+            &mut self.regions,
+            &mut self.domains,
+            &mut self.tracker,
+            &mut self.updates,
+            access,
+        )
     }
 
     pub fn restore_region(
@@ -335,6 +355,7 @@ impl CapaEngine {
         //TODO(all) as some code might fail below, we should not remove the capa
         // first.
         let to = self.domains[domain].get(to)?.as_channel()?;
+        self.domains[to].has_capacity_for(1)?; // Check capacity
         let capa = remove_capa(domain, capa, &mut self.domains)?;
         match capa {
             // No side effect for those capas
@@ -353,8 +374,15 @@ impl CapaEngine {
                     to,
                 )?;
             }
-            Capa::NewRegion(_) => {
-                todo!();
+            Capa::NewRegion(region) => {
+                segment::send(
+                    region,
+                    &mut self.new_regions,
+                    &mut self.domains,
+                    &mut self.tracker,
+                    &mut self.updates,
+                    to,
+                )?;
             }
             Capa::Management(domain) => {
                 // TODO: check that no cycles are created
@@ -362,13 +390,8 @@ impl CapaEngine {
             }
         }
 
-        // Move the capa to the new domain
-        let Ok(_) = insert_capa(to, capa, &mut self.regions, &mut self.domains) else {
-            log::info!("Send failed, receiving domain is out of memory");
-            // Insert capa back, this should never fail as removed it just before
-            insert_capa(domain, capa, &mut self.regions, &mut self.domains).unwrap();
-            return Err(CapaError::OutOfMemory);
-        };
+        // Move the capa to the new domain, can't fail as we checked for capacity already.
+        insert_capa(to, capa, &mut self.regions, &mut self.domains).unwrap();
 
         Ok(())
     }
@@ -434,6 +457,7 @@ impl CapaEngine {
             _ => domain::revoke_capa(
                 domain,
                 capa,
+                &mut self.new_regions,
                 &mut self.regions,
                 &mut self.domains,
                 &mut self.tracker,
@@ -523,10 +547,15 @@ impl CapaEngine {
         domain: Handle<Domain>,
         token: NextCapaToken,
     ) -> Option<(CapaInfo, NextCapaToken)> {
-        let (index, next_token) =
-            domain::next_capa(domain, token, &self.regions, &mut self.domains)?;
+        let (index, next_token) = domain::next_capa(
+            domain,
+            token,
+            &self.new_regions,
+            &self.regions,
+            &mut self.domains,
+        )?;
         let capa = self.domains[domain].get(index).unwrap();
-        let info = capa.info(&self.regions, &self.domains)?;
+        let info = capa.info(&self.new_regions, &self.regions, &self.domains)?;
         Some((info, next_token))
     }
 

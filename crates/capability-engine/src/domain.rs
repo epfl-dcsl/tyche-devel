@@ -6,6 +6,7 @@ use crate::config::{NB_CAPAS_PER_DOMAIN, NB_DOMAINS};
 use crate::free_list::FreeList;
 use crate::gen_arena::{Cleanable, GenArena};
 use crate::region::{PermissionChange, RegionTracker, TrackerPool};
+use crate::segment::NewRegionPool;
 use crate::update::{Update, UpdateBuffer};
 use crate::utils::BitmapIterator;
 use crate::{region_capa, AccessRights, CapaError, Handle, RegionPool};
@@ -326,11 +327,17 @@ impl Domain {
         self.is_io
     }
 
-    fn is_valid(&self, idx: usize, regions: &RegionPool, domains: &DomainPool) -> bool {
+    fn is_valid(
+        &self,
+        idx: usize,
+        regions: &NewRegionPool,
+        old_regions: &RegionPool,
+        domains: &DomainPool,
+    ) -> bool {
         match self.capas[idx] {
             Capa::None => false,
-            Capa::Region(handle) => regions.get(handle).is_some(),
-            Capa::NewRegion(_) => todo!(),
+            Capa::Region(handle) => old_regions.get(handle).is_some(),
+            Capa::NewRegion(handle) => regions.get(handle).is_some(),
             Capa::Management(handle) => domains.get(handle).is_some(),
             Capa::Channel(handle) => domains.get(handle).is_some(),
             Capa::Switch { to, .. } => domains.get(to).is_some(),
@@ -638,7 +645,8 @@ pub(crate) fn find_trap_handler(
 pub(crate) fn next_capa(
     domain_handle: Handle<Domain>,
     token: NextCapaToken,
-    regions: &RegionPool,
+    regions: &NewRegionPool,
+    old_regions: &RegionPool,
     domains: &mut DomainPool,
 ) -> Option<(LocalCapa, NextCapaToken)> {
     let mut idx = token.idx;
@@ -646,7 +654,7 @@ pub(crate) fn next_capa(
     while idx < len {
         let domain = &domains[domain_handle];
         if !domain.free_list.is_free(idx) {
-            if domain.is_valid(idx, regions, domains) {
+            if domain.is_valid(idx, regions, old_regions, domains) {
                 // Found a valid capa
                 let next_token = NextCapaToken { idx: idx + 1 };
                 return Some((LocalCapa::new(idx), next_token));
@@ -667,7 +675,8 @@ pub(crate) fn next_capa(
 
 pub(crate) fn revoke(
     handle: DomainHandle,
-    regions: &mut RegionPool,
+    regions: &mut NewRegionPool,
+    old_regions: &mut RegionPool,
     domains: &mut DomainPool,
     tracker: &mut TrackerPool,
     updates: &mut UpdateBuffer,
@@ -686,9 +695,17 @@ pub(crate) fn revoke(
 
     // Drop all capabilities
     let mut token = NextCapaToken::new();
-    while let Some((capa, next_token)) = next_capa(handle, token, regions, domains) {
+    while let Some((capa, next_token)) = next_capa(handle, token, regions, old_regions, domains) {
         token = next_token;
-        revoke_capa(handle, capa, regions, domains, tracker, updates)?;
+        revoke_capa(
+            handle,
+            capa,
+            regions,
+            old_regions,
+            domains,
+            tracker,
+            updates,
+        )?;
     }
 
     domains.free(handle);
@@ -698,7 +715,8 @@ pub(crate) fn revoke(
 pub(crate) fn revoke_capa(
     handle: Handle<Domain>,
     local: LocalCapa,
-    regions: &mut RegionPool,
+    regions: &mut NewRegionPool,
+    old_regions: &mut RegionPool,
     domains: &mut DomainPool,
     tracker: &mut TrackerPool,
     updates: &mut UpdateBuffer,
@@ -714,13 +732,13 @@ pub(crate) fn revoke_capa(
 
         // Those capa cause revocation side effects
         Capa::Region(region) => {
-            region_capa::restore(region, regions, domains, tracker, updates)?;
+            region_capa::restore(region, old_regions, domains, tracker, updates)?;
         }
         Capa::NewRegion(_) => {
             todo!();
         }
         Capa::Management(domain) => {
-            revoke(domain, regions, domains, tracker, updates)?;
+            revoke(domain, regions, old_regions, domains, tracker, updates)?;
         }
     }
 

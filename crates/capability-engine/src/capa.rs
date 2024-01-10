@@ -5,7 +5,7 @@ use core::fmt;
 use crate::domain::{Domain, DomainPool};
 use crate::gen_arena::Handle;
 use crate::region_capa::{RegionCapa, RegionPool};
-use crate::segment::NewRegionCapa;
+use crate::segment::{NewRegionCapa, NewRegionPool};
 use crate::{CapaError, MemOps};
 
 #[derive(Clone, Copy, Debug)]
@@ -28,6 +28,12 @@ pub enum CapaInfo {
         start: usize,
         end: usize,
         active: bool,
+        confidential: bool,
+        ops: MemOps,
+    },
+    NewRegion {
+        start: usize,
+        end: usize,
         confidential: bool,
         ops: MemOps,
     },
@@ -68,6 +74,20 @@ impl CapaInfo {
                 }
                 flags |= ops.bits() << 2;
                 capa_type = capa_type::REGION;
+            }
+            CapaInfo::NewRegion {
+                start,
+                end,
+                confidential,
+                ops,
+            } => {
+                v1 = *start;
+                v2 = *end;
+                if *confidential {
+                    flags |= 1 << 1;
+                }
+                flags |= ops.bits() << 2;
+                capa_type = capa_type::NEW_REGION;
             }
             CapaInfo::Management { domain_id, sealed } => {
                 v1 = *domain_id;
@@ -129,6 +149,7 @@ pub mod capa_type {
     pub const MANAGEMENT: u8 = 1;
     pub const CHANNEL:    u8 = 2;
     pub const SWITCH:     u8 = 3; 
+    pub const NEW_REGION: u8 = 4;
 }
 
 impl Capa {
@@ -180,11 +201,16 @@ impl Capa {
         }
     }
 
-    pub(crate) fn info(self, regions: &RegionPool, domains: &DomainPool) -> Option<CapaInfo> {
+    pub(crate) fn info(
+        self,
+        regions: &NewRegionPool,
+        old_regions: &RegionPool,
+        domains: &DomainPool,
+    ) -> Option<CapaInfo> {
         match self {
             Capa::None => None,
             Capa::Region(h) => {
-                let region = &regions[h];
+                let region = &old_regions[h];
                 Some(CapaInfo::Region {
                     start: region.access.start,
                     end: region.access.end,
@@ -193,8 +219,14 @@ impl Capa {
                     ops: region.access.ops,
                 })
             }
-            Capa::NewRegion(_) => {
-                todo!();
+            Capa::NewRegion(h) => {
+                let region = &regions[h];
+                Some(CapaInfo::NewRegion {
+                    start: region.access.start,
+                    end: region.access.end,
+                    confidential: region.is_confidential,
+                    ops: region.access.ops,
+                })
             }
             Capa::Management(h) => {
                 let domain = &domains[h];
@@ -261,6 +293,15 @@ impl fmt::Display for CapaInfo {
                     "Region([0x{:x}, 0x{:x} | {}{}{}])",
                     start, end, a, c, ops
                 )
+            }
+            CapaInfo::NewRegion {
+                start,
+                end,
+                confidential,
+                ops,
+            } => {
+                let c = if *confidential { 'C' } else { '_' };
+                write!(f, "Region([0x{:x}, 0x{:x} | {}{}])", start, end, c, ops)
             }
             CapaInfo::Management { domain_id, sealed } => {
                 let s = if *sealed { 'S' } else { '_' };

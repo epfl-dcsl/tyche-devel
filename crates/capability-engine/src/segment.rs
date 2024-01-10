@@ -2,7 +2,7 @@
 
 use crate::config::NB_REGIONS;
 use crate::debug::debug_check;
-use crate::domain::{activate_region, insert_capa, DomainPool};
+use crate::domain::{activate_region, deactivate_region, insert_capa, DomainPool};
 use crate::region::TrackerPool;
 use crate::region_capa::RegionPool;
 use crate::update::UpdateBuffer;
@@ -68,7 +68,56 @@ impl NewRegionCapa {
     }
 }
 
-pub fn alias(
+pub(crate) fn create_root_region(
+    domain: Handle<Domain>,
+    regions: &mut NewRegionPool,
+    old_regions: &mut RegionPool,
+    domains: &mut DomainPool,
+    tracker: &mut TrackerPool,
+    updates: &mut UpdateBuffer,
+    access: AccessRights,
+) -> Result<LocalCapa, CapaError> {
+    // Check capacity (one region + one local handle)
+    regions.has_capacity_for(1)?;
+    domains[domain].has_capacity_for(1)?;
+
+    // Validate region
+    if !access.new_is_valid() {
+        return Err(CapaError::InvalidOperation);
+    }
+
+    // Create and insert capa
+    let region = regions
+        .allocate(NewRegionCapa::new(domain, RegionKind::Root, access).confidential(true))
+        .unwrap();
+    let local_capa = insert_capa(domain, region, old_regions, domains)?;
+    activate_region(domain, access, domains, updates, tracker)?;
+
+    Ok(local_capa)
+}
+
+pub(crate) fn send(
+    handle: Handle<NewRegionCapa>,
+    regions: &mut NewRegionPool,
+    domains: &mut DomainPool,
+    tracker: &mut TrackerPool,
+    updates: &mut UpdateBuffer,
+    domain: Handle<Domain>,
+) -> Result<(), CapaError> {
+    log::trace!("Sending region {:?}", handle);
+
+    let capa = regions.get_mut(handle).ok_or(CapaError::InvalidCapa)?;
+    let access = capa.access;
+    let old_domain = capa.domain;
+    capa.domain = domain;
+
+    deactivate_region(old_domain, access, domains, updates, tracker)?;
+    activate_region(domain, access, domains, updates, tracker)?;
+
+    Ok(())
+}
+
+pub(crate) fn alias(
     handle: Handle<NewRegionCapa>,
     regions: &mut NewRegionPool,
     old_regions: &mut RegionPool,
@@ -112,7 +161,7 @@ fn alias_region(
     Ok(new_handle)
 }
 
-pub fn carve(
+pub(crate) fn carve(
     handle: Handle<NewRegionCapa>,
     regions: &mut NewRegionPool,
     old_regions: &mut RegionPool,

@@ -89,7 +89,7 @@ impl AccessRights {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub enum PermissionChange {
     None,
     Some,
