@@ -337,6 +337,15 @@ impl Domain {
         }
     }
 
+    /// Return OK if the arena has enough capacity for `count` objects, Err otherwise.
+    pub fn has_capacity_for(&self, count: usize) -> Result<(), CapaError> {
+        if self.free_list.capacity() >= count {
+            Ok(())
+        } else {
+            Err(CapaError::OutOfMemory)
+        }
+    }
+
     pub fn set_hash(&mut self, hash: HashEnclave) {
         self.attestation_hash = Some(hash);
     }
@@ -520,7 +529,11 @@ pub(crate) fn duplicate_capa(
 
     match capa {
         // Capa that can not be duplicated
-        Capa::None | Capa::Region(_) | Capa::NewRegion(_) | Capa::Management(_) | Capa::Switch { .. } => {
+        Capa::None
+        | Capa::Region(_)
+        | Capa::NewRegion(_)
+        | Capa::Management(_)
+        | Capa::Switch { .. } => {
             return Err(CapaError::CannotDuplicate);
         }
         Capa::Channel(_) => {

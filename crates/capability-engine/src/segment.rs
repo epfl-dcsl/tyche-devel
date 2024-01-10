@@ -1,12 +1,12 @@
 //! Region Capabilities
 
 use crate::config::NB_REGIONS;
+use crate::debug::debug_check;
 use crate::domain::{activate_region, insert_capa, DomainPool};
 use crate::region::TrackerPool;
 use crate::region_capa::RegionPool;
 use crate::update::UpdateBuffer;
 use crate::{AccessRights, CapaError, Domain, GenArena, Handle, LocalCapa};
-use crate::debug::debug_check;
 
 pub(crate) type NewRegionPool = GenArena<NewRegionCapa, NB_REGIONS>;
 pub const EMPTY_NEW_REGION_CAPA: NewRegionCapa = NewRegionCapa::new_invalid();
@@ -80,8 +80,9 @@ pub fn alias(
     let region = &regions[handle];
     let domain = region.domain;
 
-    // Check capacity
-    // TODO
+    // Check capacity (1 region + 1 local capa)
+    regions.has_capacity_for(1)?;
+    domains[domain].has_capacity_for(1)?;
 
     let new_handle = alias_region(handle, regions, access)?;
     debug_check!(validate_child_list(handle, regions));
@@ -121,8 +122,9 @@ pub fn carve(
     let region = &regions[handle];
     let domain = region.domain;
 
-    // Check capacity
-    // TODO
+    // Check capacity (1 region + 1 local capa)
+    regions.has_capacity_for(1)?;
+    domains[domain].has_capacity_for(1)?;
 
     let new_handle = carve_region(handle, regions, access)?;
     debug_check!(validate_child_list(handle, regions));
@@ -218,7 +220,6 @@ fn validate_child_list(region: Handle<NewRegionCapa>, regions: &NewRegionPool) {
     let mut last_alias: Option<usize> = None;
     let mut last_carve: Option<usize> = None;
 
-    // TODO: check for overlap with carved regions.
     while let Some(h) = cursor {
         let current = &regions[h];
 

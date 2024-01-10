@@ -17,6 +17,9 @@ pub(crate) struct FreeList<const N: usize> {
 
     /// The next free block, if any.
     head: u32,
+
+    /// A count used to check remaining capacity
+    count: u32,
 }
 
 impl<const N: usize> FreeList<N> {
@@ -28,21 +31,28 @@ impl<const N: usize> FreeList<N> {
             free_list[i] = NextFree::Free(next);
             i += 1;
         }
-        Self { free_list, head: 0 }
+        Self {
+            free_list,
+            head: 0,
+            count: 0,
+        }
     }
 
+    /// Return the index of the allocated slot.
     pub fn allocate(&mut self) -> Option<usize> {
         let head = self.head as usize;
         match self.free_list[head] {
             NextFree::Free(next) => {
                 self.head = next;
                 self.free_list[head] = NextFree::NotFree;
+                self.count = self.count.checked_add(1).unwrap();
                 Some(head)
             }
             NextFree::NotFree => None,
         }
     }
 
+    /// Free a used slot.
     pub fn free(&mut self, idx: usize) {
         // Safety check
         if self.free_list[idx] != NextFree::NotFree {
@@ -52,10 +62,18 @@ impl<const N: usize> FreeList<N> {
         // Insert back into free list
         self.free_list[idx] = NextFree::Free(self.head);
         self.head = idx as u32;
+        // Update count
+        self.count = self.count.checked_sub(1).unwrap();
     }
 
+    /// Check if a slot is free.
     pub fn is_free(&self, idx: usize) -> bool {
         self.free_list[idx] != NextFree::NotFree
+    }
+
+    /// Return the remaining capacity.
+    pub fn capacity(&self) -> usize {
+        N.checked_sub(self.count as usize).unwrap()
     }
 }
 
@@ -96,5 +114,40 @@ impl<'a, const N: usize> IntoIterator for &'a FreeList<N> {
             free_list: self,
             next: 0,
         }
+    }
+}
+
+// ————————————————————————————————— Tests —————————————————————————————————— //
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn capacity() {
+        let mut list: FreeList<10> = FreeList::new();
+        assert_eq!(list.capacity(), 10);
+
+        // Insert a few items
+        assert_eq!(list.allocate(), Some(0));
+        assert_eq!(list.capacity(), 9);
+        assert_eq!(list.allocate(), Some(1));
+        assert_eq!(list.capacity(), 8);
+        assert_eq!(list.allocate(), Some(2));
+        assert_eq!(list.capacity(), 7);
+        assert_eq!(list.allocate(), Some(3));
+        assert_eq!(list.capacity(), 6);
+
+        // Free a few items
+        list.free(2);
+        assert_eq!(list.capacity(), 7);
+        list.free(1);
+        assert_eq!(list.capacity(), 8);
+
+        // Insert back items
+        assert_eq!(list.allocate(), Some(1));
+        assert_eq!(list.capacity(), 7);
+        assert_eq!(list.allocate(), Some(2));
+        assert_eq!(list.capacity(), 6);
     }
 }

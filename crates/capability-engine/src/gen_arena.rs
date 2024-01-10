@@ -4,6 +4,7 @@ use core::marker::PhantomData;
 use core::ops::{Index, IndexMut};
 
 use super::free_list::{FreeList, FreeListIterator};
+use crate::CapaError;
 
 pub trait Cleanable {
     /// Reset self to a known good default value.
@@ -97,6 +98,15 @@ impl<T, const N: usize> GenArena<T, N> {
             Some(&self.store[idx])
         } else {
             None
+        }
+    }
+
+    /// Return OK if the arena has enough capacity for `count` objects, Err otherwise.
+    pub fn has_capacity_for(&self, count: usize) -> Result<(), CapaError> {
+        if self.free_list.capacity() >= count {
+            Ok(())
+        } else {
+            Err(CapaError::OutOfMemory)
         }
     }
 }
