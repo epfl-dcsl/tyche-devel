@@ -6,7 +6,7 @@ use crate::config::{NB_CAPAS_PER_DOMAIN, NB_DOMAINS};
 use crate::free_list::FreeList;
 use crate::gen_arena::{Cleanable, GenArena};
 use crate::region::{PermissionChange, RegionTracker, TrackerPool};
-use crate::segment::NewRegionPool;
+use crate::segment::{NewRegionPool, self};
 use crate::update::{Update, UpdateBuffer};
 use crate::utils::BitmapIterator;
 use crate::{region_capa, AccessRights, CapaError, Handle, RegionPool};
@@ -734,8 +734,8 @@ pub(crate) fn revoke_capa(
         Capa::Region(region) => {
             region_capa::restore(region, old_regions, domains, tracker, updates)?;
         }
-        Capa::NewRegion(_) => {
-            todo!();
+        Capa::NewRegion(region) => {
+            segment::revoke(region, regions, domains, tracker, updates)?;
         }
         Capa::Management(domain) => {
             revoke(domain, regions, old_regions, domains, tracker, updates)?;

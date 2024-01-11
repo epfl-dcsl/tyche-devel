@@ -1,8 +1,8 @@
 use std::fmt::Write;
 
 use capa_engine::{
-    permission, AccessRights, CapaEngine, Domain, Handle, MemOps, NextCapaToken, RegionIterator,
-    MEMOPS_ALL,
+    permission, AccessRights, CapaEngine, Domain, Handle, LocalCapa, MemOps, NextCapaToken,
+    RegionIterator, MEMOPS_ALL, CapaError,
 };
 
 /// Snapshot testing
@@ -624,6 +624,37 @@ fn new_capa() {
         "{[0x40, 0x50 | 1 (1 - 1 - 1 - 1)] -> [0x60, 0x80 | 1 (1 - 1 - 1 - 1)]}",
         regions(d2_capa, engine)
     );
+
+    // Revoke some regions
+    engine.revoke(d1_capa, LocalCapa::new(0)).unwrap();
+    snap!("{Region([0x30, 0x50 | CRWXS])}", capas(d1_capa, engine));
+    snap!(
+        "{[0x30, 0x50 | 1 (1 - 1 - 1 - 1)]}",
+        regions(d1_capa, engine)
+    );
+    snap!(
+        "{[0x0, 0x30 | 1 (1 - 1 - 1 - 1)] -> [0x50, 0x60 | 1 (1 - 1 - 1 - 1)] -> [0x80, 0x100 | 1 (1 - 1 - 1 - 1)]}",
+        regions(d0, engine)
+    );
+    engine.revoke(d1_capa, LocalCapa::new(1)).unwrap();
+    snap!("{}", capas(d1_capa, engine));
+    snap!("{}", regions(d1_capa, engine));
+    snap!("{Region([0x60, 0x80 | CRWXS])}", capas(d2_capa, engine));
+    snap!(
+        "{[0x60, 0x80 | 1 (1 - 1 - 1 - 1)]}",
+        regions(d2_capa, engine)
+    );
+    snap!(
+        "{[0x0, 0x60 | 1 (1 - 1 - 1 - 1)] -> [0x80, 0x100 | 1 (1 - 1 - 1 - 1)]}",
+        regions(d0, engine)
+    );
+    engine.revoke(d2_capa, LocalCapa::new(1)).unwrap();
+    snap!("{}", capas(d2_capa, engine));
+    snap!("{}", regions(d2_capa, engine));
+    snap!("{[0x0, 0x100 | 1 (1 - 1 - 1 - 1)]}", regions(d0, engine));
+
+    // Can't revoke root
+    assert_eq!(engine.revoke(d0, LocalCapa::new(2)), Err(CapaError::InvalidOperation));
 }
 
 // ————————————————————————————————— Utils —————————————————————————————————— //

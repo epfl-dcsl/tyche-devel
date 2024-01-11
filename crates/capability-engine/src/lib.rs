@@ -453,6 +453,10 @@ impl CapaEngine {
                 &mut self.tracker,
                 &mut self.updates,
             ),
+            // Root regions can't be revoked.
+            Capa::NewRegion(region) if self.new_regions[region].is_root() => {
+                Err(CapaError::InvalidOperation)
+            }
             // All other are simply revoked
             _ => domain::revoke_capa(
                 domain,

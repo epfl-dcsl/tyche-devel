@@ -13,8 +13,8 @@ pub const EMPTY_NEW_REGION_CAPA: NewRegionCapa = NewRegionCapa::new_invalid();
 
 pub enum RegionKind {
     Root,
-    Alias,
-    Carve,
+    Alias(Handle<NewRegionCapa>),
+    Carve(Handle<NewRegionCapa>),
 }
 
 pub struct NewRegionCapa {
@@ -51,7 +51,14 @@ impl NewRegionCapa {
 
     pub fn is_carved(&self) -> bool {
         match self.kind {
-            RegionKind::Carve => true,
+            RegionKind::Carve(_) => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_root(&self) -> bool {
+        match self.kind {
+            RegionKind::Root => true,
             _ => false,
         }
     }
@@ -155,7 +162,7 @@ fn alias_region(
     }
 
     let new_region =
-        NewRegionCapa::new(domain_handle, RegionKind::Alias, access).confidential(false);
+        NewRegionCapa::new(domain_handle, RegionKind::Alias(handle), access).confidential(false);
     let new_handle = regions.allocate(new_region).ok_or(CapaError::OutOfMemory)?;
     insert_child(handle, new_handle, regions);
     Ok(new_handle)
@@ -198,11 +205,56 @@ fn carve_region(
         return Err(CapaError::InvalidOperation);
     }
 
-    let new_region =
-        NewRegionCapa::new(domain_handle, RegionKind::Carve, access).confidential(is_confidential);
+    let new_region = NewRegionCapa::new(domain_handle, RegionKind::Carve(handle), access)
+        .confidential(is_confidential);
     let new_handle = regions.allocate(new_region).ok_or(CapaError::OutOfMemory)?;
     insert_child(handle, new_handle, regions);
     Ok(new_handle)
+}
+
+pub(crate) fn revoke(
+    handle: Handle<NewRegionCapa>,
+    regions: &mut NewRegionPool,
+    domains: &mut DomainPool,
+    tracker: &mut TrackerPool,
+    updates: &mut UpdateBuffer,
+) -> Result<(), CapaError> {
+    let region = &regions[handle];
+    let parent = match region.kind {
+        RegionKind::Root => panic!("Trying to revoke a root region"),
+        RegionKind::Alias(h) => h,
+        RegionKind::Carve(h) => h,
+    };
+
+    // Recursively free all of this regions's children
+    while let Some(child) = regions[handle].child_list_head {
+        // Remove the first child from the linked list until we exhaust it
+        revoke(child, regions, domains, tracker, updates)?;
+    }
+
+    // Remove capability
+    remove_child(parent, handle, regions);
+
+    // Update permissions
+    let region = &regions[handle];
+    deactivate_region(region.domain, region.access, domains, updates, tracker)?;
+    if region.is_carved() {
+        // Also update parent's permissions
+        let parent_region = &regions[parent];
+        activate_region(
+            parent_region.domain,
+            region.access,
+            domains,
+            updates,
+            tracker,
+        )?;
+    }
+
+    // Definitively free the handle
+    regions.free(handle);
+    debug_check!(validate_child_list(parent, regions));
+
+    Ok(())
 }
 
 /// Insert a child capability in the sorted linked list, while maintaining the ordering.
@@ -260,6 +312,27 @@ fn insert_child(
     }
 }
 
+/// Remove a child capability from the parent's linked list.
+fn remove_child(
+    parent: Handle<NewRegionCapa>,
+    child: Handle<NewRegionCapa>,
+    regions: &mut NewRegionPool,
+) {
+    // If child is the head of the list
+    if regions[parent].child_list_head == Some(child) {
+        regions[parent].child_list_head = regions[child].next_sibling;
+        return;
+    }
+
+    // TODO: use backlink for faster removal.
+    // But for now I prefer simplicity over performance
+    let prev_handle = HandleIterator::child_list(parent, regions)
+        .find(|h| regions[*h].next_sibling == Some(child))
+        .expect("Malformed linked list");
+    let next_handle = regions[child].next_sibling;
+    regions[prev_handle].next_sibling = next_handle;
+}
+
 /// Panics if the child list is malformed.
 #[allow(dead_code)] // Used only in test builds
 fn validate_child_list(region: Handle<NewRegionCapa>, regions: &NewRegionPool) {
@@ -289,7 +362,8 @@ fn validate_child_list(region: Handle<NewRegionCapa>, regions: &NewRegionPool) {
         // Check overlap rules
         match current.kind {
             RegionKind::Root => panic!("Root region can't be a child"),
-            RegionKind::Alias => {
+            RegionKind::Alias(parent) => {
+                assert!(parent == region, "Invalid parent");
                 if let Some(last_carve) = last_carve {
                     assert!(
                         current.access.start >= last_carve,
@@ -299,7 +373,8 @@ fn validate_child_list(region: Handle<NewRegionCapa>, regions: &NewRegionPool) {
                 let prev_last_alias = if let Some(x) = last_alias { x } else { 0 };
                 last_alias = Some(core::cmp::max(prev_last_alias, current.access.end));
             }
-            RegionKind::Carve => {
+            RegionKind::Carve(parent) => {
+                assert!(parent == region, "Invalid parent");
                 if let Some(last_carve) = last_carve {
                     assert!(
                         current.access.start >= last_carve,
@@ -362,6 +437,8 @@ fn check_carve(
     true
 }
 
+// ———————————————————————————————— Iterator ———————————————————————————————— //
+
 struct RegionIterator<'a> {
     next: Option<Handle<NewRegionCapa>>,
     regions: &'a NewRegionPool,
@@ -386,6 +463,32 @@ impl<'a> Iterator for RegionIterator<'a> {
         Some(region)
     }
 }
+
+struct HandleIterator<'a> {
+    next: Option<Handle<NewRegionCapa>>,
+    regions: &'a NewRegionPool,
+}
+
+impl<'a> HandleIterator<'a> {
+    fn child_list(parent: Handle<NewRegionCapa>, regions: &'a NewRegionPool) -> Self {
+        HandleIterator {
+            next: regions[parent].child_list_head,
+            regions,
+        }
+    }
+}
+
+impl<'a> Iterator for HandleIterator<'a> {
+    type Item = Handle<NewRegionCapa>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let next = self.next?;
+        self.next = self.regions[next].next_sibling;
+        Some(next)
+    }
+}
+
+// ————————————————————————————————— Tests —————————————————————————————————— //
 
 #[cfg(test)]
 mod tests {
