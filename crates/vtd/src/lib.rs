@@ -90,10 +90,6 @@ impl Iommu {
         self.addr = addr as *mut u8;
     }
 
-    pub fn get_addr(&self) -> *mut u8 {
-        self.addr
-    }
-
     pub fn update_root_table_addr(&mut self) {
         self.execute_oneshoot_command(Command::SET_ROOT_PTR);
     }
