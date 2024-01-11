@@ -20,7 +20,7 @@ use vtd::Iommu;
 use super::cpuid;
 use super::guest::VmxState;
 use super::init::NB_BOOTED_CORES;
-use crate::allocator::allocator;
+use crate::allocator::{allocator, PAGE_SIZE};
 use crate::attestation_domain::{attest_domain, calculate_attestation_hash};
 use crate::rcframe::{drop_rc, RCFrame, RCFramePool, EMPTY_RCFRAME};
 // ————————————————————————— Statics & Backend Data ————————————————————————— //
@@ -138,6 +138,16 @@ pub fn init(manifest: &'static Manifest) {
             domain,
             AccessRights {
                 start: 0,
+                end: manifest.iommu as usize,
+                ops: MEMOPS_ALL,
+            },
+        )
+        .unwrap();
+    engine
+        .create_root_region(
+            domain,
+            AccessRights {
+                start: (manifest.iommu + PAGE_SIZE) as usize,
                 end: manifest.poffset as usize,
                 ops: MEMOPS_ALL,
             },
