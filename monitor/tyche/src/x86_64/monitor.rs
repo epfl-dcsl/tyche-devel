@@ -133,6 +133,13 @@ pub fn init(manifest: &'static Manifest) {
     let mut engine = CAPA_ENGINE.lock();
     let domain = engine.create_manager_domain(permission::ALL).unwrap();
     apply_updates(&mut engine);
+
+    // set the iommu base address before applying the updates of the EPT mapping for the domain
+    if manifest.iommu != 0 {
+        let mut iommu = IOMMU.lock();
+        iommu.set_addr(manifest.iommu as usize);
+    }
+
     engine
         .create_root_region(
             domain,
@@ -153,11 +160,6 @@ pub fn init(manifest: &'static Manifest) {
     let io_domain = engine.create_io_domain(domain).unwrap();
     let mut initial_io_domain = IO_DOMAIN.lock();
     *initial_io_domain = Some(io_domain);
-
-    if manifest.iommu != 0 {
-        let mut iommu = IOMMU.lock();
-        iommu.set_addr(manifest.iommu as usize);
-    }
 }
 
 pub fn init_vcpu(vcpu: &mut ActiveVmcs<'static>) -> Handle<Domain> {
@@ -677,6 +679,17 @@ fn update_domain_ept(domain_handle: Handle<Domain>, engine: &mut MutexGuard<Capa
             flags,
         )
     }
+
+    // unmap the IOMMU from the domain: note that we've already disabled IOMMU on Linux through
+    // kernel command line, so Linux should not touch this range of address
+    let iommu = IOMMU.lock();
+    mapper.unmap_range(
+        allocator,
+        GuestPhysAddr::new(iommu.get_addr() as usize),
+        4096,
+        ept_root.phys_addr,
+        allocator.get_physical_offset().as_usize(),
+    );
 
     domain.ept = Some(ept_root.phys_addr);
 }
