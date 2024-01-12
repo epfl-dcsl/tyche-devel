@@ -1,8 +1,8 @@
 use std::fmt::Write;
 
 use capa_engine::{
-    permission, AccessRights, CapaEngine, Domain, Handle, LocalCapa, MemOps, NextCapaToken,
-    RegionIterator, MEMOPS_ALL, CapaError,
+    permission, AccessRights, CapaEngine, CapaError, Domain, Handle, LocalCapa, MemOps,
+    NextCapaToken, RegionIterator, MEMOPS_ALL,
 };
 
 /// Snapshot testing
@@ -654,7 +654,10 @@ fn new_capa() {
     snap!("{[0x0, 0x100 | 1 (1 - 1 - 1 - 1)]}", regions(d0, engine));
 
     // Can't revoke root
-    assert_eq!(engine.revoke(d0, LocalCapa::new(2)), Err(CapaError::InvalidOperation));
+    assert_eq!(
+        engine.revoke(d0, LocalCapa::new(2)),
+        Err(CapaError::InvalidOperation)
+    );
 }
 
 // ————————————————————————————————— Utils —————————————————————————————————— //

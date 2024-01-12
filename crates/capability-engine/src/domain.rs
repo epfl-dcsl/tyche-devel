@@ -6,7 +6,7 @@ use crate::config::{NB_CAPAS_PER_DOMAIN, NB_DOMAINS};
 use crate::free_list::FreeList;
 use crate::gen_arena::{Cleanable, GenArena};
 use crate::region::{PermissionChange, RegionTracker, TrackerPool};
-use crate::segment::{NewRegionPool, self};
+use crate::segment::{self, NewRegionPool};
 use crate::update::{Update, UpdateBuffer};
 use crate::utils::BitmapIterator;
 use crate::{region_capa, AccessRights, CapaError, Handle, RegionPool};
