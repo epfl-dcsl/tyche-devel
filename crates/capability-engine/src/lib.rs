@@ -8,6 +8,7 @@ mod free_list;
 mod gen_arena;
 mod region;
 mod region_capa;
+mod remapper;
 mod segment;
 mod update;
 mod utils;
@@ -27,6 +28,7 @@ pub use region::{
 };
 use region::{TrackerPool, EMPTY_REGION};
 use region_capa::{RegionCapa, RegionPool};
+pub use remapper::Remapper;
 use segment::NewRegionPool;
 use update::UpdateBuffer;
 pub use update::{Buffer, Update};

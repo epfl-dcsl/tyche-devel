@@ -732,12 +732,14 @@ impl<'a> Iterator for RegionIterator<'a> {
 }
 
 /// An iterator over a domain's memory access permissions.
+#[derive(Clone)]
 pub struct PermissionIterator<'a> {
     tracker: &'a RegionTracker,
     pool: &'a TrackerPool,
     next: Option<Handle<Region>>,
 }
 
+#[derive(Clone, Copy)]
 pub struct MemoryPermission {
     pub start: usize,
     pub end: usize,
@@ -792,13 +794,7 @@ impl<'a> Iterator for PermissionIterator<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// Snapshot testing
-    ///
-    /// Checks that the given struct matches the provided snapshot.
-    fn snap<T: core::fmt::Display>(snap: &str, obj: T) {
-        assert_eq!(snap, &format!("{}", obj));
-    }
+    use crate::debug::snap;
 
     #[test]
     fn region() {
