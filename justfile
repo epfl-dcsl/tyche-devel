@@ -133,10 +133,6 @@ build-riscv:
 
 ## ——————————————————————————— Linux Kernel Build ——————————————————————————— ##
 
-# Build linux image.
-build-linux:
-	make -C linux-image/
-
 build-linux-x86:
 	@just _build-linux-common x86
 
@@ -209,11 +205,11 @@ _init-ramfs-common ARCH:
 	# sudo mknod ./builds/ramfs-{{ARCH}}/dev/console c 5 1
 
 # Build the ramfs, packing all the userspace binaries
-build-ramfs:
+build-ramfs-x86:
 	cargo build --package libtyche --target=x86_64-unknown-linux-musl --release
-	cp target/x86_64-unknown-linux-musl/release/tyche linux-image/builds/initramfs/x86-busybox/bin/
+	cp target/x86_64-unknown-linux-musl/release/tyche ./builds/ramfs-x86/bin/
 
-	@just build-linux
+	@just build-linux-x86
 
 # Build the monitor for bare metal platform
 build-metal-no-guest:
