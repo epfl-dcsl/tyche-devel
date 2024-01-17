@@ -2,19 +2,18 @@ name: Rust
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "main", "ci" ]
   pull_request:
     branches: [ "main" ]
 
 env:
   CARGO_TERM_COLOR: always
-  RUSTFLAGS: --deny warnings
 
 jobs:
   Test:
-
     runs-on: ubuntu-22.04
-
+    env:
+      RUSTFLAGS: --deny warnings
     steps:
     - uses: actions/checkout@v3
     - uses: extractions/setup-just@v1 # Install `just`
@@ -24,6 +23,12 @@ jobs:
       run: just check
     - name: Test
       run: just test
-        # TODO: KVM is not supported on Github-provided VMs
-        # - name: No-Guest
-        #   run: just no-guest && just no-guest | grep Success
+
+  Qemu:
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v3
+      - name: Setup
+        run: mkdir -p builds/linux-x86 && cp ~/vmlinux builds/linux-x86 && cp ~/OVMF-pure-efi.fd .
+      - name: Linux
+        run: timeout 15m just linux
