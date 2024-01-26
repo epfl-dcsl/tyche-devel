@@ -1,14 +1,14 @@
 use core::arch::asm;
-
-use qemu::println;
-use riscv_utils::read_mscratch;
+use core::sync::atomic::Ordering;
+use riscv_utils::{read_mscratch, RegisterState, HART_START, HART_START_ADDR, HART_START_ARG1, aclint_mswi_send_ipi};
 
 use crate::{sbi, TYCHE_SBI_VERSION, sbi_ext_base, sbi_ext_hsm};
 
-pub fn ecall_handler(mut ret: &mut isize, mut err: &mut usize, mut out_val: &mut usize, a0: usize, a6: usize, a7: usize) {
+pub fn ecall_handler(mut ret: &mut isize, mut err: &mut usize, mut out_val: &mut usize, reg_state: RegisterState) {
     //println!("ecall handler a7: {:x}",a7);
-    match a7 {
-        sbi::EXT_BASE => sbi_ext_base_handler(&mut ret, &mut err, &mut out_val, a0, a6),
+    match reg_state.a7 {
+        sbi::EXT_BASE => sbi_ext_base_handler(&mut ret, &mut err, &mut out_val, reg_state.a0.try_into().unwrap(), reg_state.a6),
+        sbi::EXT_HSM => sbi_ext_hsm_handler(&mut ret, &mut err, &mut out_val, reg_state.a0.try_into().unwrap(), reg_state.a1, reg_state.a2, reg_state.a6),
         _ => ecall_handler_failed(),
     }
 }
@@ -30,6 +30,27 @@ pub fn sbi_ext_base_handler(ret: &mut isize, _err: &mut usize, out_val: &mut usi
     }
 }
 
+pub fn sbi_ext_hsm_handler(ret: &mut isize, _err: &mut usize, out_val: &mut usize, a0: usize, a1: usize, a2: usize, a6: usize) {
+    //Todo: Need to support various HSM extension calls - for now just processing hart start 
+    if a0 > 3 {
+        log::info!("Invalid hart id!");
+        return;
+    }
+
+    match a6 {
+        sbi_ext_hsm::HART_START => {
+            log::info!("SBI_HSM_HART_START!");
+            //unsafe { asm!("csrsi mip, 2"); }
+            //a0: hartid, a1: start_addr, a2: arg1
+            HART_START_ADDR[a0].store(a1, Ordering::SeqCst);    
+            HART_START_ARG1[a0].store(a2, Ordering::SeqCst); 
+            HART_START[a0].store(true, Ordering::SeqCst);
+            aclint_mswi_send_ipi(a0);
+        } 
+        _ => ecall_handler_failed(),
+    }
+} 
+
 pub fn get_sbi_spec_version() -> isize {
     let mut spec_ver: isize;
 
@@ -49,11 +70,13 @@ pub fn probe(a0: usize, a6: usize) -> (isize, usize) {
         sbi::EXT_HSM => {
             match a6 {
                 sbi_ext_hsm::HART_SUSPEND => {
+                    log::info!("Hart_suspend");
                     ret = 0;
                     out_val=1;
                     //sbi_hsm_hart_suspend();
                 }
                 sbi_ext_hsm::HART_START | sbi_ext_hsm::HART_STOP | sbi_ext_hsm::HART_GET_STATUS => {
+                    log::info!("Hart start/stop/status");
                     ret = 0; 
                     out_val = 0;
                 }
@@ -62,12 +85,12 @@ pub fn probe(a0: usize, a6: usize) -> (isize, usize) {
         }
         sbi::EXT_TIME | sbi::EXT_IPI => {
             ret = 1;
-            println!("PROBING sbi::EXT_TIME/IPI.")
+            log::info!("PROBING sbi::EXT_TIME/IPI.")
         }
         //Handlers for the corresponding ecall are not yet implemented.
         sbi::EXT_RFENCE => {
             ret = 1;
-            println!("PROBING sbi::EXT_RFENCE")
+            log::info!("PROBING sbi::EXT_RFENCE")
         }
         sbi::EXT_SRST => ret = sbi_ext_srst_probe(a0),
         _ => ecall_handler_failed(),
@@ -115,7 +138,7 @@ pub fn get_m_x_id(a6: usize) -> isize {
         sbi_ext_base::GET_MIMPID => unsafe {
             asm!("csrr {}, mimpid", out(reg) ret);
         },
-        _ => println!("Invalid get_m_x_id request!"),
+        _ => log::info!("Invalid get_m_x_id request!"),
     }
     //println!("Returning m_x_id {:x}",ret);
     return ret;
@@ -129,5 +152,5 @@ pub fn sbi_ext_srst_probe(_a0: usize) -> isize {
 
 pub fn ecall_handler_failed() {
     //TODO: Print information about requested ecall.
-    println!("Cannot service SBI ecall - invalid ecall/Not supported by Tyche.");
+    log::info!("Cannot service SBI ecall - invalid ecall/Not supported by Tyche.");
 }

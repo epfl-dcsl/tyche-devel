@@ -1,4 +1,4 @@
-use core::arch::asm;
+/* use core::arch::asm;
 
 use qemu::println;
 use riscv_csrs::*;
@@ -151,4 +151,4 @@ pub fn trap_handler(reg_state: &mut RegisterState) {
     }
     reg_state.a0 = 0x0;
     reg_state.a1 = ret;
-}
+} */

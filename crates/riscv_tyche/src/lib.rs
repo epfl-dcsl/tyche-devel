@@ -7,4 +7,4 @@ pub const TYCHE_SIZE_NAPOT: usize = 14;
 //tyche stack pointer
 //Should be fine as long as Tyche size doesn't exceed half an MB.
 //TODO: Need to protect it. Perhaps protect entire 1 MB memory region?
-pub static TYCHE_STACK_POINTER: usize = 0x80390000;
+pub static TYCHE_STACK_POINTER: [usize; 4] = [0x80390000, 0x8038b000, 0x80386000, 0x80381000];

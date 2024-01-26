@@ -22,10 +22,10 @@ use crate::println;
 pub enum BackendError {}
 
 // launch the initial domain.
-pub fn launch_guest(hartid: u64, arg1: u64, next_addr: u64, next_mode: u64) {
+pub fn launch_guest(hartid: usize, arg1: usize, next_addr: usize, next_mode: usize) {
     // 0. TODO: Sanity check for next_mode and misa-extension.
 
-    println!("============= Launching Linux from Tyche =============");
+    log::info!("============= Launching Linux from Tyche =============");
 
     // 1. Update MSTATUS - MPP=01 (S-mode), and MPIE = 0.
     let mut mstatus: usize;
@@ -46,7 +46,7 @@ pub fn launch_guest(hartid: u64, arg1: u64, next_addr: u64, next_mode: u64) {
         asm!("csrw mstatus, {}", in(reg) mstatus);
     }
 
-    // 2. Update MEPC to next_addr
+    // 2. Update MEPC to next_addr 
     //mepc::write(next_addr);
     unsafe {
         asm!("csrw mepc, {}",
@@ -89,7 +89,7 @@ pub fn hlt() -> ! {
 
 pub fn exit_qemu(exit_code: ExitCode) {
     // TODO: find exit address
-    const RISCV_EXIT_ADDR: u64 = 0xdeadbeef;
+    const RISCV_EXIT_ADDR: usize = 0xdeadbeef;
 
     unsafe {
         let exit_code = exit_code as u32;
@@ -103,10 +103,17 @@ pub fn exit_qemu(exit_code: ExitCode) {
 
 /// Architecture specific initialization.
 pub fn init() {
-    arch::init();
+    //Todo: This is a dead function - clean it up!
+    // log::info!("*\n*\n*\n*\n*\n*\n*\n******* Called this init ********\n*\n*\n*\n*\n*\n*\n*");
+    //    arch::init();
 }
 
 pub fn cpuid() -> usize {
-    return 0; //Works only for 1 core implementation
-              //todo!();
+    let hartid: usize; 
+
+    unsafe { 
+        asm!("csrr {}, mhartid", out(reg) hartid);
+    }
+
+    hartid
 }

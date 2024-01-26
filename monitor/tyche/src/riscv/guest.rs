@@ -4,7 +4,7 @@ use capa_engine::{Bitmaps, Domain, Handle, LocalCapa, NextCapaToken};
 use riscv_csrs::*;
 use riscv_pmp::clear_pmp;
 use riscv_sbi::ecall::ecall_handler;
-use riscv_utils::RegisterState;
+use riscv_utils::{RegisterState, process_ipi};
 
 use super::monitor;
 use crate::arch::cpuid;
@@ -119,6 +119,7 @@ pub fn handle_exit(reg_state: &mut RegisterState) {
     let mut mip: usize = 0;
     let mut mideleg: usize = 0;
     let mut satp: usize = 0;
+    let hartid: usize = cpuid();
 
     unsafe {
         asm!("csrr {}, mcause", out(reg) mcause);
@@ -131,8 +132,10 @@ pub fn handle_exit(reg_state: &mut RegisterState) {
         asm!("csrr {}, satp", out(reg)satp);
     }
 
+    log::debug!("###### TRAP FROM HART {} ######", hartid);
+
     log::debug!(
-        "Trap arguments: mcause {:x}, mepc {:x} mstatus {:x} mtval {:x} mie {:x} mip {:x} mideleg {:x} ra {:x} a0 {:x} a1 {:x} a2 {:x} a3 {:x} a4 {:x} a5 {:x} a6 {:x} a7 {:x} satp: {:x}",
+        "mcause {:x}, mepc {:x} mstatus {:x} mtval {:x} mie {:x} mip {:x} mideleg {:x} ra {:x} a0 {:x} a1 {:x} a2 {:x} a3 {:x} a4 {:x} a5 {:x} a6 {:x} a7 {:x} satp: {:x}",
         mcause,
         mepc,
         mstatus,
@@ -152,9 +155,13 @@ pub fn handle_exit(reg_state: &mut RegisterState) {
         satp
     );
 
+
     // Check which trap it is
     // mcause register holds the cause of the machine mode trap
     match mcause {
+        mcause::MSWI => {
+            process_ipi();
+        }
         mcause::ILLEGAL_INSTRUCTION => {
             illegal_instruction_handler(mepc, mstatus);
         }
@@ -163,7 +170,7 @@ pub fn handle_exit(reg_state: &mut RegisterState) {
                 //Tyche call
                 misaligned_load_handler(reg_state);
             } else {
-                ecall_handler(&mut ret, &mut err, &mut out_val, reg_state.a0.try_into().unwrap(), reg_state.a6, reg_state.a7);
+                ecall_handler(&mut ret, &mut err, &mut out_val, *reg_state);
                 reg_state.a0 = ret;
                 reg_state.a1 = out_val;
             }
@@ -187,6 +194,7 @@ pub fn handle_exit(reg_state: &mut RegisterState) {
         //Default - just print whatever information you can about the trap.
     }
 
+    log::debug!("Returning from Trap on Hart {}", hartid);
     // Return to the next instruction after the trap.
     // i.e. mepc += 4
     // TODO: This shouldn't happen in case of switch.

@@ -10,16 +10,16 @@ use riscv_utils::*;
 use crate::println;
 use crate::riscv::guest::machine_trap_handler;
 
-pub fn init() {
+pub fn init(hartid: usize) {
     unsafe {
-        asm!("csrw mscratch, {}", in(reg) TYCHE_STACK_POINTER);
+        asm!("csrw mscratch, {}", in(reg) TYCHE_STACK_POINTER[hartid]);
     }
 
     clear_mstatus_xie();
 
     //Configuring mtvec direct base address to point to Tyche's trap handler.
     let mtvec_ptr = machine_trap_handler as *const ();
-    println!("mtvec_ptr to be set by Tyche {:p}", mtvec_ptr);
+    log::info!("mtvec_ptr to be set by Tyche {:p}", mtvec_ptr);
     set_mtvec(mtvec_ptr);
 }
 
@@ -35,5 +35,5 @@ pub fn set_mtvec(addr: *const ()) {
         asm!("csrr {}, mtvec", out(reg) mtvec);
     }
 
-    println!("Updated mtvec {:x}", mtvec);
+    log::info!("Updated mtvec {:x}", mtvec);
 }

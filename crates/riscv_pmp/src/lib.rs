@@ -73,13 +73,13 @@ pub fn pmp_write(
     region_size: usize,
     region_perm: usize,
 ) -> Result<PMPAddressingMode, PMPErrorCode> {
-    log::debug!(
+    /* log::debug!(
         "Writing PMP with args: {}, {:x}, {:x}, {:x}",
         csr_index,
         region_addr,
         region_addr + region_size,
         region_perm
-    );
+    ); */
     //This will ensure that the index is in expected range
     if csr_index >= PMP_ENTRIES {
         return Err(PMPErrorCode::InvalidIndex);
@@ -116,7 +116,7 @@ pub fn pmp_write(
     //TODO
     //if ((region_addr & (region_size - 1)) == 0) && ((region_size & (region_size - 1)) == 0) {
     if addressing_mode == PMPAddressingMode::NAPOT {
-        log::debug!("NAPOT Addressing Mode csr_index {} region_size: {:x} log_2_region_size: {:x} addr: {:x}", csr_index, region_size, log_2_region_size, region_addr);
+        //log::debug!("NAPOT Addressing Mode csr_index {} region_size: {:x} log_2_region_size: {:x} addr: {:x}", csr_index, region_size, log_2_region_size, region_addr);
         let addrmask: usize = (1 << (log_2_region_size - 2)) - 1; //NAPOT encoding
         pmpaddr = (region_addr >> 2) & !addrmask;
         pmpaddr = pmpaddr | (addrmask >> 1); //To add the 0 before the 1s.
@@ -127,7 +127,7 @@ pub fn pmp_write(
         //unsafe { asm!("csrw pmpaddr{idx}, {}", in(reg) pmpaddr, idx = const { csr_index }); }
     } else {
         //TOR addressing mode    //TODO: NA4 addressing mode!
-        log::debug!("TOR Addressing Mode csr_index: {}", csr_index);
+        //log::debug!("TOR Addressing Mode csr_index: {}", csr_index);
         if csr_index == (PMP_ENTRIES - 1) {
             //Last PMP entry - Don't have enough PMP entries for protecting this region with TOR addressing mode.
             return Err(PMPErrorCode::InvalidIndex);
@@ -140,12 +140,12 @@ pub fn pmp_write(
         //PMP granularity?
         addressing_mode = PMPAddressingMode::TOR;
         pmpcfg = region_perm | ((addressing_mode as usize) << 3);
-        log::debug!(
+        /* log::debug!(
             "PMPADDR value {:x} for index {:x} PMPCFG value {:x}",
             pmpaddr,
             csr_index_2,
             pmpcfg
-        );
+        ); */
         pmpcfg_write(csr_index_2, pmpcfg);
         pmpaddr_csr_write(csr_index_2, pmpaddr >> 2);
         //unsafe { asm!("csrw pmpaddr{}, {}", in(reg) csr_index_2, in(reg) pmpaddr); }
@@ -154,12 +154,12 @@ pub fn pmp_write(
         pmpcfg = 0;
         pmpaddr = region_addr;
         //>> 2;
-        log::debug!(
+        /* log::debug!(
             "PMPADDR value {:x} for index {:x} PMPCFG value {:x}",
             pmpaddr,
             csr_index,
             pmpcfg
-        );
+        ); */
         pmpcfg_write(csr_index, pmpcfg);
         pmpaddr_csr_write(csr_index, pmpaddr >> 2);
         //unsafe { asm!("csrw pmpaddr{}, {}", in(reg) csr_index, in(reg) pmpaddr); }
@@ -228,12 +228,12 @@ fn pmpcfg_write(index: usize, value: usize) -> PMPErrorCode {
 
     pmpcfg = pmpcfg | (value << (index_pos * 8));
 
-    log::debug!(
+    /* log::debug!(
         "Writing to index: {:x} pmpcfg: {} value: {:x}",
         index,
         pmpcfg,
         value
-    );
+    );*/
     pmpcfg_csr_write(index, pmpcfg);
 
     //Sfence after writing the PMP.

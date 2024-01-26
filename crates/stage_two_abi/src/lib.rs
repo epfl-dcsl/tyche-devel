@@ -28,7 +28,7 @@ macro_rules! entry_point {
 
 #[cfg(target_arch = "riscv64")]
 /// Signature of the second stage entry point.
-pub type EntryPoint = extern "C" fn(u64, u64, u64, u64) -> !;
+pub type EntryPoint = extern "C" fn(usize, usize, usize, usize, bool) -> !;
 
 /// A transparent wrapper for the entry point which enables type-checking between the first and
 /// second stage.
@@ -37,10 +37,10 @@ pub type EntryPoint = extern "C" fn(u64, u64, u64, u64) -> !;
 macro_rules! entry_point {
     ($path:path) => {
         #[no_mangle]
-        pub extern "C" fn _start(hartid: u64, arg1: u64, next_addr: u64, next_mode: u64) -> ! {
+        pub extern "C" fn _start(hartid: usize, arg1: usize, next_addr: usize, next_mode: usize, coldboot: bool) -> ! {
             // Validate the signature of the entry point.
-            let f: fn(u64, u64, u64, u64) -> ! = $path;
-            f(hartid, arg1, next_addr, next_mode);
+            let f: fn(usize, usize, usize, usize, bool) -> ! = $path;
+            f(hartid, arg1, next_addr, next_mode, coldboot);
         }
     };
 }

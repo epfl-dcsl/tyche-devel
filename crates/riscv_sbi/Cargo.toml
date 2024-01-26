@@ -7,5 +7,5 @@ edition = "2021"
 
 [dependencies]
 riscv_csrs = { path = "../riscv_csrs/" }
-qemu = { path = "../qemu/" }
+log = { workspace = true }
 riscv_utils = { path = "../riscv_utils/" }

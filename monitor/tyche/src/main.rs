@@ -19,9 +19,9 @@ fn tyche_entry_point() -> ! {
 }
 
 #[cfg(target_arch = "riscv64")]
-fn tyche_entry_point(hartid: u64, arg1: u64, next_addr: u64, next_mode: u64) -> ! {
-    logger::init(LOG_LEVEL);
-    arch::arch_entry_point(hartid, arg1, next_addr, next_mode, LOG_LEVEL);
+fn tyche_entry_point(hartid: usize, arg1: usize, next_addr: usize, next_mode: usize, coldboot: bool) -> ! {
+    //logger::init(LOG_LEVEL);
+    arch::arch_entry_point(hartid, arg1, next_addr, next_mode, coldboot, LOG_LEVEL);
 }
 
 #[panic_handler]

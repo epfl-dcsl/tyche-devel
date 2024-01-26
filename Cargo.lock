@@ -790,7 +790,7 @@ dependencies = [
 name = "riscv_sbi"
 version = "0.1.0"
 dependencies = [
- "qemu",
+ "log",
  "riscv_csrs",
  "riscv_utils",
 ]
