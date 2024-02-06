@@ -14,9 +14,6 @@ pub enum Update {
         init: bool,
         core_map: u64,
     },
-    TlbShootdown {
-        core: usize,
-    },
     RevokeDomain {
         domain: Handle<Domain>,
     },
@@ -106,7 +103,6 @@ impl fmt::Display for Update {
             }
             Update::RevokeDomain { domain } => write!(f, "RevokeDomain({})", domain),
             Update::CreateDomain { domain } => write!(f, "CreateDomain({})", domain),
-            Update::TlbShootdown { core } => write!(f, "TlbShootdown({})", core),
             Update::Switch { domain, core, .. } => write!(f, "Switch({}, core {})", domain, core),
             Update::Trap {
                 manager,

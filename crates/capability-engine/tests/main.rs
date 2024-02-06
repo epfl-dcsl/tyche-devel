@@ -178,7 +178,7 @@ fn scenario_2() {
     );
     snap!("{Region([0x0, 0x1000 | AC____])}", capas(domain, engine));
     snap!(
-        "{PermissionUpdate(H(0, gen 0)), TlbShootdown(0), CreateDomain(H(0, gen 0))}",
+        "{PermissionUpdate(H(0, gen 0)), CreateDomain(H(0, gen 0))}",
         updates(engine)
     );
 
@@ -207,10 +207,7 @@ fn scenario_2() {
         "{Region([0x0, 0x1000 | _C____]), Region([0x0, 0x200 | AC____]), Region([0x300, 0x1000 | AC____])}",
         capas(domain, engine),
     );
-    snap!(
-        "{PermissionUpdate(H(0, gen 0)), TlbShootdown(0)}",
-        updates(engine)
-    );
+    snap!("{PermissionUpdate(H(0, gen 0))}", updates(engine));
 
     // Create a new domain and send a region there
     let dom2 = engine.create_domain(domain).unwrap();
@@ -230,7 +227,7 @@ fn scenario_2() {
     );
     snap!("{Region([0x0, 0x200 | AC____])}", capas(domain2, engine));
     snap!(
-        "{PermissionUpdate(H(1, gen 0)), PermissionUpdate(H(0, gen 0)), TlbShootdown(0), CreateDomain(H(1, gen 0))}",
+        "{PermissionUpdate(H(1, gen 0)), PermissionUpdate(H(0, gen 0)), CreateDomain(H(1, gen 0))}",
         updates(engine)
     );
 

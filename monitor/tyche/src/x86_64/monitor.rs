@@ -565,10 +565,6 @@ fn apply_updates(engine: &mut MutexGuard<CapaEngine>) {
                     info,
                 });
             }
-            capa_engine::Update::TlbShootdown { core } => {
-                let mut core_updates = CORE_UPDATES[core as usize].lock();
-                core_updates.push(CoreUpdate::TlbShootdown);
-            }
             capa_engine::Update::UpdateTraps { trap, core } => {
                 let mut core_updates = CORE_UPDATES[core as usize].lock();
                 core_updates.push(CoreUpdate::UpdateTrap { bitmap: !trap });

@@ -105,7 +105,6 @@ fn apply_updates(engine: &mut CapaEngine, s: &mut State) {
     while let Some(update) = engine.pop_update() {
         match update {
             capa_engine::Update::PermissionUpdate { .. } => (),
-            capa_engine::Update::TlbShootdown { .. } => (),
             capa_engine::Update::RevokeDomain { .. } => (),
             capa_engine::Update::CreateDomain { .. } => (),
             capa_engine::Update::Switch { domain, .. } => {
