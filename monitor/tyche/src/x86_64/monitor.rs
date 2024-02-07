@@ -475,6 +475,9 @@ fn post_ept_update(core_id: usize, cores: u64, domain: &Handle<Domain>) {
         core_cnt
     );
 
+    // Only the initiating core have access to this routine after gaining the atomic boolean
+    // variable. All of the operations here are serialized until the point we release the atomic
+    // boolean
     unsafe {
         TLB_FLUSH_BARRIERS[domain.idx()] = Some(spin::barrier::Barrier::new(core_cnt as usize));
     }
