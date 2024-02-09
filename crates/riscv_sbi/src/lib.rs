@@ -5,15 +5,17 @@
 //SBI Trap Related
 
 pub mod ecall;
+pub mod ipi;
+pub mod rfence;
 
-pub const TYCHE_SBI_VERSION: isize = 0x10001;
+pub const TYCHE_SBI_VERSION: usize = 0x10001;
 
 pub mod sbi {
-    pub const ECALL_IMPID: isize = 0x1;
-    pub const ECALL_VERSION_MINOR: isize = 0;
-    pub const ECALL_VERSION_MAJOR: isize = 1;
-    pub const SPEC_VERSION_MAJOR_MASK: isize = 0x7f;
-    pub const SPEC_VERSION_MAJOR_OFFSET: isize = 24;
+    pub const ECALL_IMPID: usize = 0x1;
+    pub const ECALL_VERSION_MINOR: usize = 0;
+    pub const ECALL_VERSION_MAJOR: usize = 1;
+    pub const SPEC_VERSION_MAJOR_MASK: usize = 0x7f;
+    pub const SPEC_VERSION_MAJOR_OFFSET: usize = 24;
     pub const EXT_BASE: usize = 0x10;
     pub const EXT_TIME: usize = 0x54494D45;
     pub const EXT_IPI: usize = 0x735049;

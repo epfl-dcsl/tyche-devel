@@ -4,6 +4,9 @@ use core::arch::asm;
 
 use core::sync::atomic::{AtomicBool, AtomicUsize};
 
+pub const NUM_HARTS: usize = 2;
+pub const AVAILABLE_HART_MASK: usize = 0x3;
+
 //uart base address
 pub const SERIAL_PORT_BASE_ADDRESS: usize = 0x1000_0000;
 
@@ -26,18 +29,20 @@ pub const ACLINT_MSWI_WORD_SIZE: usize = 4;
 
 const FALSE: AtomicBool = AtomicBool::new(false);
 //Todo: Replace with num_cores
-pub static HART_START: [AtomicBool; 4] = [FALSE; 4];
+pub static HART_START: [AtomicBool; NUM_HARTS] = [FALSE; NUM_HARTS];
 
 const ZERO: AtomicUsize = AtomicUsize::new(0);
 
-pub static HART_START_ADDR: [AtomicUsize; 4] = [ZERO; 4];
-pub static HART_START_ARG1: [AtomicUsize; 4] = [ZERO; 4]; 
+pub static HART_START_ADDR: [AtomicUsize; NUM_HARTS] = [ZERO; NUM_HARTS];
+pub static HART_START_ARG1: [AtomicUsize; NUM_HARTS] = [ZERO; NUM_HARTS]; 
+
+pub static HART_IPI_SYNC: [AtomicUsize; NUM_HARTS] = [ZERO; NUM_HARTS];
 
 #[derive(Copy, Clone, Debug)]
 pub struct RegisterState {
     pub ra: usize,
     pub a0: isize,
-    pub a1: usize,
+    pub a1: isize,
     pub a2: usize,
     pub a3: usize,
     pub a4: usize,
@@ -251,14 +256,14 @@ pub fn set_mip_ssip() {
         asm!("csrr {}, mip", out(reg) mip);
     }
 
-    mip = mip | 0x2;    //Note: Assuming MIE.SEIP is set. Not sure if a check is needed. 
+    mip = mip | 0x2;    //Note: Assuming MIE.SEIE is set. Not sure if a check is needed. 
 
     unsafe {
         asm!("csrw mip, {}", in(reg) mip);
     }
 }
 
-pub fn aclint_mswi_send_ipi(target_hartid: usize) {
+/* pub fn aclint_mswi_send_ipi(target_hartid: usize) {
     let target_addr: usize = ACLINT_MSWI_BASE_ADDR + target_hartid * ACLINT_MSWI_WORD_SIZE;  
     unsafe {
         asm!("sw {}, 0({})", in(reg) 1, in(reg) target_addr);
@@ -284,4 +289,4 @@ pub fn process_ipi() {
     }
     aclint_mswi_clear_ipi(target_hartid);
     set_mip_ssip();
-}
+} */

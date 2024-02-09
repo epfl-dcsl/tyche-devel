@@ -392,7 +392,7 @@ pub fn apply_core_updates(
                 );
 
                 current_reg_state.a0 = 0x0;
-                current_reg_state.a1 = return_capa.as_usize();
+                current_reg_state.a1 = return_capa.as_usize() as isize;
                 *current_domain = domain;
             }
             CoreUpdate::Trap {

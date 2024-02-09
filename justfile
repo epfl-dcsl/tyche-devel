@@ -130,6 +130,7 @@ build:
 # Build the monitor for RISC-V64
 build-riscv:
 	{{riscv-linker-script}} cargo build {{cargo_args}} {{riscv}} {{tyche}} --release
+	./opensbi-stage1/run_build.sh
 
 ## ——————————————————————————— Linux Kernel Build ——————————————————————————— ##
 

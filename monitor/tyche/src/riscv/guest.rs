@@ -4,7 +4,8 @@ use capa_engine::{Bitmaps, Domain, Handle, LocalCapa, NextCapaToken};
 use riscv_csrs::*;
 use riscv_pmp::clear_pmp;
 use riscv_sbi::ecall::ecall_handler;
-use riscv_utils::{RegisterState, process_ipi};
+use riscv_utils::{RegisterState}; 
+use riscv_sbi::ipi::process_ipi;
 
 use super::monitor;
 use crate::arch::cpuid;
@@ -132,7 +133,7 @@ pub fn handle_exit(reg_state: &mut RegisterState) {
         asm!("csrr {}, satp", out(reg)satp);
     }
 
-    log::debug!("###### TRAP FROM HART {} ######", hartid);
+    /* log::debug!("###### TRAP FROM HART {} ######", hartid);
 
     log::debug!(
         "mcause {:x}, mepc {:x} mstatus {:x} mtval {:x} mie {:x} mip {:x} mideleg {:x} ra {:x} a0 {:x} a1 {:x} a2 {:x} a3 {:x} a4 {:x} a5 {:x} a6 {:x} a7 {:x} satp: {:x}",
@@ -153,7 +154,7 @@ pub fn handle_exit(reg_state: &mut RegisterState) {
         reg_state.a6,
         reg_state.a7,
         satp
-    );
+    ); */
 
 
     // Check which trap it is
@@ -172,7 +173,7 @@ pub fn handle_exit(reg_state: &mut RegisterState) {
             } else {
                 ecall_handler(&mut ret, &mut err, &mut out_val, *reg_state);
                 reg_state.a0 = ret;
-                reg_state.a1 = out_val;
+                reg_state.a1 = out_val as isize;
             }
         }
         mcause::LOAD_ADDRESS_MISALIGNED => {
@@ -194,14 +195,16 @@ pub fn handle_exit(reg_state: &mut RegisterState) {
         //Default - just print whatever information you can about the trap.
     }
 
-    log::debug!("Returning from Trap on Hart {}", hartid);
+    //log::debug!("Returning from Trap on Hart {}", hartid);
     // Return to the next instruction after the trap.
     // i.e. mepc += 4
     // TODO: This shouldn't happen in case of switch.
-    unsafe {
-        asm!("csrr t0, mepc");
-        asm!("addi t0, t0, 0x4");
-        asm!("csrw mepc, t0");
+    if (mcause & (1 << 63)) != (1 << 63) { 
+        unsafe {
+            asm!("csrr t0, mepc");
+            asm!("addi t0, t0, 0x4");
+            asm!("csrw mepc, t0");
+        }
     }
 }
 
@@ -237,7 +240,7 @@ pub fn misaligned_load_handler(reg_state: &mut RegisterState) {
     if reg_state.a7 == 0x5479636865 {
         //It's a Tyche Call
         let tyche_call: usize = reg_state.a0.try_into().unwrap();
-        let arg_1: usize = reg_state.a1;
+        let arg_1: usize = reg_state.a1.try_into().unwrap();
         let arg_2: usize = reg_state.a2;
         let arg_3: usize = reg_state.a3;
         let arg_4: usize = reg_state.a4;
@@ -255,7 +258,7 @@ pub fn misaligned_load_handler(reg_state: &mut RegisterState) {
                 log::debug!("Create Domain");
                 let capa = monitor::do_create_domain(active_dom).expect("TODO");
                 reg_state.a0 = 0x0;
-                reg_state.a1 = capa.as_usize();
+                reg_state.a1 = capa.as_usize() as isize;
                 //TODO: Ok(HandlerResult::Resume) There is no main loop to check what happened
                 //here, do we need a wrapper to determine when we crash? For all cases except Exit,
                 //not yet. Must be handled after addition of more exception handling in Tyche.
@@ -304,7 +307,7 @@ pub fn misaligned_load_handler(reg_state: &mut RegisterState) {
                 log::debug!("Seal Domain");
                 let capa = monitor::do_seal(active_dom, LocalCapa::new(arg_1)).expect("TODO");
                 reg_state.a0 = 0x0;
-                reg_state.a1 = capa.as_usize();
+                reg_state.a1 = capa.as_usize() as isize;
             }
             calls::SHARE => {
                 log::debug!("Share");
@@ -332,7 +335,7 @@ pub fn misaligned_load_handler(reg_state: &mut RegisterState) {
                 )
                 .expect("TODO");
                 reg_state.a0 = 0x0;
-                reg_state.a1 = left.as_usize();
+                reg_state.a1 = left.as_usize() as isize;
                 reg_state.a2 = right.as_usize();
             }
             calls::REVOKE => {
@@ -344,7 +347,7 @@ pub fn misaligned_load_handler(reg_state: &mut RegisterState) {
                 log::debug!("Duplicate");
                 let capa = monitor::do_duplicate(active_dom, LocalCapa::new(arg_1)).expect("TODO");
                 reg_state.a0 = 0x0;
-                reg_state.a1 = capa.as_usize();
+                reg_state.a1 = capa.as_usize() as isize;
             }
             calls::ENUMERATE => {
                 log::debug!("Enumerate");
@@ -352,7 +355,7 @@ pub fn misaligned_load_handler(reg_state: &mut RegisterState) {
                     monitor::do_enumerate(active_dom, NextCapaToken::from_usize(arg_1))
                 {
                     let (v1, v2, v3) = info.serialize();
-                    reg_state.a1 = v1 as usize;
+                    reg_state.a1 = v1 as isize;
                     reg_state.a2 = v2 as usize;
                     reg_state.a3 = v3 as usize;
                     reg_state.a4 = next.as_usize();
@@ -376,7 +379,7 @@ pub fn misaligned_load_handler(reg_state: &mut RegisterState) {
                     if arg_2 == 0 {
                         reg_state.a1 = usize::from_le_bytes(
                             report.public_key.as_slice()[0..8].try_into().unwrap(),
-                        );
+                        ) as isize;
                         reg_state.a2 = usize::from_le_bytes(
                             report.public_key.as_slice()[8..16].try_into().unwrap(),
                         );
@@ -401,7 +404,7 @@ pub fn misaligned_load_handler(reg_state: &mut RegisterState) {
                             report.signed_enclave_data.as_slice()[16..24]
                                 .try_into()
                                 .unwrap(),
-                        );
+                        ) as isize;
                         reg_state.a2 = usize::from_le_bytes(
                             report.signed_enclave_data.as_slice()[24..32]
                                 .try_into()
