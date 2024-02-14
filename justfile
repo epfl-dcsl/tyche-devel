@@ -257,7 +257,7 @@ run_riscv_ramfs:
         {{qemu-riscv}} -nographic -cpu rv64,h=true -M virt -m 4G -bios {{bios-riscv}} -kernel {{kernel-riscv}} -append "root=/dev/ram rw console=ttyS0 earlycon=sbi quiet" -smp 2
 
 run_riscv_2harts:
-	{{qemu-riscv}} -nographic -drive "file={{drive-riscv}},format=raw,if=virtio" -cpu rv64,h=true -M virt -m 4G -bios {{bios-riscv}} -kernel {{kernel-riscv}} -append "root=/dev/vda1 rw console=ttyS0 earlycon=sbi loglevel=7" -smp 2 {{dev-riscv}} 
+	{{qemu-riscv}} -nographic -drive "file={{drive-riscv}},format=raw,if=virtio" -cpu rv64,h=true -M virt -m 4G -bios {{bios-riscv}} -kernel {{kernel-riscv}} -append "root=/dev/vda1 rw console=ttyS0 earlycon=sbi loglevel=6" -smp 2 {{dev-riscv}} 
 
 #-gdb tcp::1234 -S
 

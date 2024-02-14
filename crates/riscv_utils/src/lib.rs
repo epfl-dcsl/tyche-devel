@@ -2,7 +2,7 @@
 
 use core::arch::asm;
 
-use core::sync::atomic::{AtomicBool, AtomicUsize};
+use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 pub const NUM_HARTS: usize = 2;
 pub const AVAILABLE_HART_MASK: usize = 0x3;
@@ -27,6 +27,11 @@ pub const PAGING_MODE_SV48: usize = 0x9000000000000000;
 pub const ACLINT_MSWI_BASE_ADDR: usize = 0x2000000;
 pub const ACLINT_MSWI_WORD_SIZE: usize = 4; 
 
+pub const ACLINT_MTIMECMP_BASE_ADDR: usize = 0x2004000;
+pub const ACLINT_MTIMECMP_SIZE: usize = 8;
+
+pub const TIMER_EVENT_TICK: usize = 10000000;
+
 const FALSE: AtomicBool = AtomicBool::new(false);
 //Todo: Replace with num_cores
 pub static HART_START: [AtomicBool; NUM_HARTS] = [FALSE; NUM_HARTS];
@@ -40,6 +45,8 @@ pub static HART_IPI_SYNC: [AtomicUsize; NUM_HARTS] = [ZERO; NUM_HARTS];
 
 pub static IPI_TYPE_SMODE: [AtomicBool; NUM_HARTS] = [FALSE; NUM_HARTS];
 pub static IPI_TYPE_TLB: [AtomicBool; NUM_HARTS] = [FALSE; NUM_HARTS];
+
+static last_timer_tick: [AtomicUsize; NUM_HARTS] = [ZERO; NUM_HARTS];
 
 #[derive(Copy, Clone, Debug)]
 pub struct RegisterState {
@@ -189,6 +196,32 @@ pub fn clear_mstatus_xie() {
     }
 }
 
+pub fn clear_mstatus_sie() {
+    unsafe {
+        asm!(
+            "li t0, 0x2",
+            "not t1, t0",
+            "csrr t2, mstatus",
+            "and t2, t2, t1",
+            "csrw mstatus, t2",
+        );
+    }
+}
+
+pub fn set_mstatus_mie() {
+    let mut mstatus: usize;
+
+    unsafe {
+        asm!("csrr {}, mstatus", out(reg) mstatus);
+    }
+
+    mstatus = mstatus | 0x8;
+
+    unsafe {
+        asm!("csrw mstatus, {}", in(reg) mstatus);
+    }
+}
+
 pub fn clear_mstatus_spie() {
     unsafe {
         asm!(
@@ -263,6 +296,47 @@ pub fn set_mip_ssip() {
 
     unsafe {
         asm!("csrw mip, {}", in(reg) mip);
+    }
+}
+
+pub fn aclint_mtimer_set_mtimecmp(target_hartid: usize, value: usize) {
+    let target_addr: usize = ACLINT_MTIMECMP_BASE_ADDR + target_hartid * ACLINT_MTIMECMP_SIZE;
+    let val = value + last_timer_tick[target_hartid].load(Ordering::SeqCst);
+    last_timer_tick[target_hartid].store(val, Ordering::SeqCst);  
+    
+    log::info!("[Hart {}] Setting mtimecmp at addr {:x} with value: {:x}", target_hartid, target_addr, val);
+    unsafe {
+        asm!("sw {}, 0({})", in(reg) val, in(reg) target_addr);
+    }
+    set_mie_mtie();
+}
+
+pub fn set_mie_mtie() {
+    let mut mie: usize;
+
+    unsafe {
+        asm!("csrr {}, mie", out(reg) mie);
+    }
+
+    mie = mie | 0x80;     
+
+    unsafe {
+        asm!("csrw mie, {}", in(reg) mie);
+    }
+ 
+}
+
+pub fn clear_mie_mtie() {
+    let mut mie: usize;
+
+    unsafe {
+        asm!("csrr {}, mie", out(reg) mie);
+    }
+
+    mie = mie & !(0x80);     
+
+    unsafe {
+        asm!("csrw mie, {}", in(reg) mie);
     }
 }
 

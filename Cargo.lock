@@ -804,6 +804,9 @@ version = "0.1.0"
 [[package]]
 name = "riscv_utils"
 version = "0.1.0"
+dependencies = [
+ "log",
+]
 
 [[package]]
 name = "rsdp"

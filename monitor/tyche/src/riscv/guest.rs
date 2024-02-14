@@ -5,7 +5,7 @@ use riscv_csrs::*;
 use riscv_pmp::clear_pmp;
 use riscv_sbi::ecall::ecall_handler;
 use riscv_sbi::sbi::EXT_IPI;
-use riscv_utils::{RegisterState}; 
+use riscv_utils::{RegisterState, clear_mie_mtie, aclint_mtimer_set_mtimecmp, TIMER_EVENT_TICK}; 
 use riscv_sbi::ipi::process_ipi;
 
 use super::monitor;
@@ -164,8 +164,13 @@ pub fn handle_exit(reg_state: &mut RegisterState) {
         mcause::MSWI => {
             process_ipi(hartid);
         }
-        mcause::MTI | mcause::MEI => {
-            panic!("MTI/MEI");
+        mcause::MTI => {
+            clear_mie_mtie();
+            log::info!("\nHART {} MTIMER: MEPC: {:x} RA: {:x}\n", hartid, mepc, reg_state.ra);
+            aclint_mtimer_set_mtimecmp(hartid, TIMER_EVENT_TICK);
+        }
+        mcause::MEI => {
+            panic!("MEI");
         }
         mcause::ILLEGAL_INSTRUCTION => {
             illegal_instruction_handler(mepc, mtval, mstatus, mip, mie);
@@ -176,9 +181,9 @@ pub fn handle_exit(reg_state: &mut RegisterState) {
                 misaligned_load_handler(reg_state);
             } else {
 
-                if(reg_state.a7 == EXT_IPI) {
-                    log::debug!("[HART {}] EXT_IPI_ECALL MEPC: {:x} RA {:x}",hartid, mepc, reg_state.ra);
-                }
+                //if(reg_state.a7 == EXT_IPI) {
+                    //log::debug!("[HART {}] EXT_IPI_ECALL MEPC: {:x} RA {:x}",hartid, mepc, reg_state.ra);
+                //}
 
                 ecall_handler(&mut ret, &mut err, &mut out_val, *reg_state);
                 reg_state.a0 = ret;
