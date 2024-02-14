@@ -38,6 +38,9 @@ pub static HART_START_ARG1: [AtomicUsize; NUM_HARTS] = [ZERO; NUM_HARTS];
 
 pub static HART_IPI_SYNC: [AtomicUsize; NUM_HARTS] = [ZERO; NUM_HARTS];
 
+pub static IPI_TYPE_SMODE: [AtomicBool; NUM_HARTS] = [FALSE; NUM_HARTS];
+pub static IPI_TYPE_TLB: [AtomicBool; NUM_HARTS] = [FALSE; NUM_HARTS];
+
 #[derive(Copy, Clone, Debug)]
 pub struct RegisterState {
     pub ra: usize,

@@ -22,6 +22,8 @@ pub mod mcause {
     pub const LOAD_PAGE_FAULT: usize = 13;
     pub const STORE_PAGE_FAULT: usize = 15;
     pub const MSWI: usize = (1 << 63) | 3;
+    pub const MTI: usize = (1 << 63) | 7;
+    pub const MEI: usize = (1 << 63) | 11;
 }
 
 pub mod pmpcfg {

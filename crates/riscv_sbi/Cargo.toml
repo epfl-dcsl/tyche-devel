@@ -8,4 +8,6 @@ edition = "2021"
 [dependencies]
 riscv_csrs = { path = "../riscv_csrs/" }
 log = { workspace = true }
+spin = { workspace = true }
 riscv_utils = { path = "../riscv_utils/" }
+capa-engine = { path = "../capability-engine/" }

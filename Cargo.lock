@@ -790,9 +790,11 @@ dependencies = [
 name = "riscv_sbi"
 version = "0.1.0"
 dependencies = [
+ "capa-engine",
  "log",
  "riscv_csrs",
  "riscv_utils",
+ "spin 0.9.4",
 ]
 
 [[package]]

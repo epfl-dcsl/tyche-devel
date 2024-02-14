@@ -4,6 +4,7 @@ use capa_engine::{Bitmaps, Domain, Handle, LocalCapa, NextCapaToken};
 use riscv_csrs::*;
 use riscv_pmp::clear_pmp;
 use riscv_sbi::ecall::ecall_handler;
+use riscv_sbi::sbi::EXT_IPI;
 use riscv_utils::{RegisterState}; 
 use riscv_sbi::ipi::process_ipi;
 
@@ -98,10 +99,10 @@ pub extern "C" fn machine_trap_handler() {
     }
 }
 
-pub extern "C" fn exit_handler_failed() {
+pub extern "C" fn exit_handler_failed(mcause: usize) {
     // TODO: Currently, interrupts must be getting redirected here too. Confirm this and then fix
     // it.
-    log::info!("*******WARNING: Cannot handle this trap!*******");
+    panic!("*******WARNING: Cannot handle this trap with mcause: {:x} !*******", mcause);
 }
 
 // Exit handler - equivalent to x86 handle_exit for its guest.
@@ -161,16 +162,24 @@ pub fn handle_exit(reg_state: &mut RegisterState) {
     // mcause register holds the cause of the machine mode trap
     match mcause {
         mcause::MSWI => {
-            process_ipi();
+            process_ipi(hartid);
+        }
+        mcause::MTI | mcause::MEI => {
+            panic!("MTI/MEI");
         }
         mcause::ILLEGAL_INSTRUCTION => {
-            illegal_instruction_handler(mepc, mstatus);
+            illegal_instruction_handler(mepc, mtval, mstatus, mip, mie);
         }
         mcause::ECALL_FROM_SMODE => {
             if reg_state.a7 == 0x5479636865 {
                 //Tyche call
                 misaligned_load_handler(reg_state);
             } else {
+
+                if(reg_state.a7 == EXT_IPI) {
+                    log::debug!("[HART {}] EXT_IPI_ECALL MEPC: {:x} RA {:x}",hartid, mepc, reg_state.ra);
+                }
+
                 ecall_handler(&mut ret, &mut err, &mut out_val, *reg_state);
                 reg_state.a0 = ret;
                 reg_state.a1 = out_val as isize;
@@ -191,7 +200,7 @@ pub fn handle_exit(reg_state: &mut RegisterState) {
             //log::debug!("Page Fault Caught.");
             panic!("Page Fault!");
         }
-        _ => exit_handler_failed(),
+        _ => exit_handler_failed(mcause),
         //Default - just print whatever information you can about the trap.
     }
 
@@ -208,7 +217,7 @@ pub fn handle_exit(reg_state: &mut RegisterState) {
     }
 }
 
-pub fn illegal_instruction_handler(mepc: usize, mstatus: usize) {
+pub fn illegal_instruction_handler(mepc: usize, mtval: usize, mstatus: usize, mip: usize, mie: usize) {
     /* let mut mepc_instr_opcode: usize = 0;
 
     // Read the instruction which caused the trap. (mepc points to the VA of this instruction).
@@ -233,7 +242,7 @@ pub fn illegal_instruction_handler(mepc: usize, mstatus: usize) {
         mepc_instr_opcode
     ); */
 
-    panic!("Illegal Instruction Trap!");
+    panic!("Illegal Instruction Trap! mepc: {:x} mtval: {:x} mstatus: {:x} mip: {:x} mie: {:x}", mepc, mtval, mstatus, mip, mie);
 }
 
 pub fn misaligned_load_handler(reg_state: &mut RegisterState) {
