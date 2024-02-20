@@ -6,7 +6,8 @@ use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use allocator::FrameAllocator;
 use capa_engine::{Domain, Handle};
 use stage_two_abi::{GuestInfo, Manifest};
-pub use vmx::{ActiveVmcs, ControlRegister};
+use vmx::fields::VmcsField;
+pub use vmx::ActiveVmcs;
 
 use super::guest::VmxState;
 use super::{arch, cpuid, launch_guest, monitor, vmx_helper};
@@ -152,9 +153,10 @@ unsafe fn wait_on_mailbox(manifest: &Manifest, vcpu: &mut ActiveVmcs<'static>, c
     );
 
     // Set RIP entry point
-    vcpu.set_nat(vmx::fields::GuestStateNat::Rip, wakeup_vector as usize)
-        .ok();
-    vcpu.set_cr(ControlRegister::Cr3, manifest.smp.wakeup_cr3 as usize);
+    vcpu.set(VmcsField::GuestRip, wakeup_vector as usize)
+        .unwrap();
+    vcpu.set(VmcsField::GuestCr3, manifest.smp.wakeup_cr3 as usize)
+        .unwrap();
 
     (mp_mailbox as *mut u16).write_volatile(0);
 }
@@ -177,7 +179,8 @@ unsafe fn create_vcpu(info: &GuestInfo) -> (VmxState, Handle<Domain>) {
         .create_vm_unsafe(vmcs_frame)
         .expect("Failed to create VMCS");
     let mut vcpu = vmcs.set_as_active().expect("Failed to set VMCS as active");
-    vmx_helper::init_vcpu(&mut vcpu, info);
+    drop(allocator);
     let domain = monitor::init_vcpu(&mut vcpu);
+    vmx_helper::init_vcpu(&mut vcpu, info, &mut monitor::get_context(domain, cpuid()));
     (VmxState { vcpu, vmxon }, domain)
 }

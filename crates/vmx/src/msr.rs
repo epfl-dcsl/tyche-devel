@@ -68,6 +68,12 @@ impl Msr {
     /// effects.
     #[inline]
     pub unsafe fn read(&self) -> u64 {
+        let (low, high): (u32, u32) = self.read_raw();
+        ((high as u64) << 32) | (low as u64)
+    }
+
+    #[inline]
+    pub unsafe fn read_raw(&self) -> (u32, u32) {
         let (high, low): (u32, u32);
         asm!(
             "rdmsr",
@@ -75,7 +81,7 @@ impl Msr {
             out("eax") low, out("edx") high,
             options(nomem, nostack, preserves_flags),
         );
-        ((high as u64) << 32) | (low as u64)
+        (low, high)
     }
 
     /// Writes 64 bits to MSR register.

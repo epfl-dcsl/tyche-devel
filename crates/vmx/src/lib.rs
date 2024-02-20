@@ -22,13 +22,13 @@ use bitmaps::{
     exit_qualification, EntryControls, ExceptionBitmap, ExitControls, PinbasedControls,
     PrimaryControls, SecondaryControls,
 };
-use fields::traits::*;
-use fields::GuestState32Ro;
+use fields::{VmcsField, VmcsFieldType};
 pub use utils::{Frame, GuestPhysAddr, GuestVirtAddr, HostPhysAddr, HostVirtAddr};
 
 pub use crate::errors::{
     InterruptionType, VmExitInterrupt, VmxError, VmxExitReason, VmxFieldError,
 };
+use crate::fields::REGFILE_SIZE;
 
 /// Mask for keeping only the 32 lower bits.
 const LOW_32_BITS_MASK: u64 = (1 << 32) - 1;
@@ -38,6 +38,12 @@ const CPUID_ECX_VMX_MASK: u32 = 1 << 5;
 
 /// CPUID mask for INVPCID support
 pub const CPUID_EBX_X64_FEATURE_INVPCID: u32 = 1 << 10;
+
+/// CPUID mask for TPAUSE support
+pub const CPUID_ECX_X64_WAITPGK: u32 = 1 << 5;
+
+/// CPUID mask for rdpkru
+pub const CPUID_ECX_X64_OSPKE: u32 = 1 << 4;
 
 // ————————————————————————————— VMX Operations ————————————————————————————— //
 
@@ -229,7 +235,6 @@ impl Vmxon {
 
         Ok(VmcsRegion {
             frame,
-            regs: [0; 15],
             msr_bitmaps: None,
             _lifetime: PhantomData,
             _not_sync: PhantomData,
@@ -249,8 +254,6 @@ impl Vmxon {
 
 /// A region containing information about a VM.
 pub struct VmcsRegion<'vmx> {
-    // Set of registers to save/restore
-    regs: [u64; REGFILE_SIZE],
     /// The frame used by the region.
     frame: Frame,
     /// The MSR read and write bitmaps.
@@ -286,13 +289,6 @@ impl<'vmx> VmcsRegion<'vmx> {
     pub fn set_frame(&mut self, frame: Frame) {
         self.frame = frame;
     }
-
-    pub fn get_regs(&self) -> &[u64; REGFILE_SIZE] {
-        &self.regs
-    }
-    pub fn set_regs(&mut self, src: &[u64; REGFILE_SIZE]) {
-        self.regs.copy_from_slice(src);
-    }
 }
 
 impl<'vmx> ActiveVmcs<'vmx> {
@@ -300,14 +296,6 @@ impl<'vmx> ActiveVmcs<'vmx> {
     pub fn deactivate(self) -> Result<VmcsRegion<'vmx>, VmxError> {
         unsafe { raw::vmclear(self.region.frame.phys_addr.as_u64())? };
         Ok(self.region)
-    }
-
-    pub fn dump_regs(&self, dest: &mut [u64; REGFILE_SIZE]) {
-        dest.clone_from(self.region.get_regs());
-    }
-
-    pub fn load_regs(&mut self, src: &[u64; REGFILE_SIZE]) {
-        self.region.set_regs(src);
     }
 
     pub fn flush(&mut self) {
@@ -321,6 +309,12 @@ impl<'vmx> ActiveVmcs<'vmx> {
         self.launched = false;
     }
 
+    pub fn reload(&self) {
+        unsafe {
+            raw::vmptrld(self.region.frame.phys_addr.as_u64()).expect("Unable to reset the vmptr");
+        }
+    }
+
     pub fn copy_into(&mut self, mut dest: Frame) {
         if self.launched {
             self.flush();
@@ -332,6 +326,10 @@ impl<'vmx> ActiveVmcs<'vmx> {
         dest.as_mut().copy_from_slice(self.region.frame().as_ref());
     }
 
+    pub fn load_from(&mut self, src: Frame) {
+        self.region.frame.as_mut().copy_from_slice(src.as_ref());
+    }
+
     pub fn frame(&self) -> &Frame {
         self.region.frame()
     }
@@ -340,95 +338,30 @@ impl<'vmx> ActiveVmcs<'vmx> {
         // Save the state of the current VM.
         self.flush();
         self.region.set_frame(dest);
-        unsafe { raw::vmptrld(self.region.frame().phys_addr.as_u64())? };
+        match unsafe { raw::vmptrld(self.region.frame().phys_addr.as_u64()) } {
+            Err(e) => {
+                log::error!(
+                    "Failed switch frame {:?}: {:x?} ",
+                    e,
+                    self.region.frame().phys_addr.as_u64()
+                );
+                Err(e)
+            }
+            Ok(()) => Ok(()),
+        }?;
         self.launched = false;
         Ok(())
     }
 
-    /// Returns a given register.
-    pub fn get(&self, register: Register) -> u64 {
-        match register {
-            // SAFETY: We know that these registers always exits and that there is an active VMCS.
-            Register::Rsp => unsafe { fields::GuestStateNat::Rsp.vmread().unwrap() as u64 },
-            Register::Rip => unsafe { fields::GuestStateNat::Rip.vmread().unwrap() as u64 },
-            _ => self.region.regs[register as usize],
-        }
-    }
-
-    ///s Set a given register.
-    pub fn set(&mut self, register: Register, value: u64) {
-        match register {
-            // SAFETY: We know that these registers always exits and that there is an active VMCS.
-            Register::Rsp => unsafe { fields::GuestStateNat::Rsp.vmwrite(value as usize).unwrap() },
-            Register::Rip => unsafe { fields::GuestStateNat::Rip.vmwrite(value as usize).unwrap() },
-            _ => self.region.regs[register as usize] = value,
-        };
-    }
-
-    /// Sets a given control register.
-    pub fn set_cr(&mut self, register: ControlRegister, value: usize) {
-        // SAFETY: all the fields exists on all architecture, except Cr8 which is only available on
-        // x86_64.
-        unsafe {
-            match register {
-                ControlRegister::Cr0 => fields::GuestStateNat::Cr0.vmwrite(value),
-                ControlRegister::Cr3 => fields::GuestStateNat::Cr3.vmwrite(value),
-                ControlRegister::Cr4 => fields::GuestStateNat::Cr4.vmwrite(value),
-                ControlRegister::Cr8 => todo!("Handle Cr8"),
-            }
-        }
-        .unwrap();
-    }
-
-    /// Returns a given control register.
-    pub fn get_cr(&self, register: ControlRegister) -> usize {
-        // SAFETY: all the fields exists on all architecture, except Cr8 which is only available on
-        // x86_64.
-        unsafe {
-            match register {
-                ControlRegister::Cr0 => fields::GuestStateNat::Cr0.vmread(),
-                ControlRegister::Cr3 => fields::GuestStateNat::Cr3.vmread(),
-                ControlRegister::Cr4 => fields::GuestStateNat::Cr4.vmread(),
-                ControlRegister::Cr8 => todo!("Handle Cr8"),
-            }
-        }
-        .unwrap()
-    }
-
-    pub fn set16(&mut self, field: fields::GuestState16, value: u16) -> Result<(), VmxError> {
-        unsafe { field.vmwrite(value) }
-    }
-
-    pub fn get16(&self, field: fields::GuestState16) -> Result<u16, VmxError> {
+    /// Get VMCS Field.
+    pub fn get(&self, field: VmcsField) -> Result<usize, VmxError> {
         unsafe { field.vmread() }
     }
 
-    pub fn set32(&mut self, field: fields::GuestState32, value: u32) -> Result<(), VmxError> {
-        unsafe { field.vmwrite(value) }
-    }
-
-    pub fn get32(&self, field: fields::GuestState32) -> Result<u32, VmxError> {
-        unsafe { field.vmread() }
-    }
-
-    pub fn set64(&mut self, field: fields::GuestState64, value: u64) -> Result<(), VmxError> {
-        unsafe { field.vmwrite(value) }
-    }
-
-    pub fn get64(&self, field: fields::GuestState64) -> Result<u64, VmxError> {
-        unsafe { field.vmread() }
-    }
-
-    pub fn set_nat(&mut self, field: fields::GuestStateNat, value: usize) -> Result<(), VmxError> {
-        unsafe { field.vmwrite(value) }
-    }
-
-    pub fn get_nat(&self, field: fields::GuestStateNat) -> Result<usize, VmxError> {
-        unsafe { field.vmread() }
-    }
-
-    pub fn get_ctrlnat(&self, field: fields::CtrlNat) -> Result<usize, VmxError> {
-        unsafe { field.vmread() }
+    /// Set VMCS Field.
+    pub fn set(&mut self, field: VmcsField, value: usize) -> Result<(), VmxError> {
+        unsafe { field.vmwrite(value) }?;
+        Ok(())
     }
 
     /// Set guest RIP to the next instruction.
@@ -437,20 +370,20 @@ impl<'vmx> ActiveVmcs<'vmx> {
     /// lenght is not updated until VM exits again.
     pub fn next_instruction(&mut self) -> Result<(), VmxError> {
         // TODO: Chech that instr-len is availlable on all CPU, remove Result if that's the case.
-        let instr_len = unsafe { fields::GuestState32Ro::VmExitInstructionLength.vmread()? as u64 };
-        let rip = self.get(Register::Rip);
-        Ok(self.set(Register::Rip, rip + instr_len))
+        let instr_len = unsafe { VmcsField::VmExitInstructionLen.vmread()? };
+        let rip = self.get(VmcsField::GuestRip)?;
+        self.set(VmcsField::GuestRip, rip + instr_len)
     }
 
     /// Returns the exit reason.
     pub fn exit_reason(&self) -> Result<VmxExitReason, VmxError> {
-        let reason = unsafe { fields::GuestState32Ro::ExitReason.vmread() }?;
+        let reason = unsafe { VmcsField::VmExitReason.vmread() }?;
         Ok(VmxExitReason::from_u16((reason & 0xFFFF) as u16))
     }
 
     /// Returns the exit qualification.
     pub fn exit_qualification(&self) -> Result<VmxExitQualification, VmxError> {
-        let qualification = unsafe { fields::GuestStateNatRo::ExitQualification.vmread() }?;
+        let qualification = unsafe { VmcsField::ExitQualification.vmread() }?;
         Ok(VmxExitQualification { raw: qualification })
     }
 
@@ -459,8 +392,8 @@ impl<'vmx> ActiveVmcs<'vmx> {
     /// This field is set on VM exits due to EPT violations and EPT misconfigurations.
     /// See section 27.2.1 for details of when and how this field is used.
     pub fn guest_phys_addr(&self) -> Result<GuestPhysAddr, VmxError> {
-        let guest_phys_addr = unsafe { fields::GuestState64Ro::GuestPhysAddr.vmread() }?;
-        Ok(GuestPhysAddr::new(guest_phys_addr as usize))
+        let guest_phys_addr = unsafe { VmcsField::GuestPhysicalAddress.vmread() }?;
+        Ok(GuestPhysAddr::new(guest_phys_addr))
     }
 
     /// Returns the guest virtual address.
@@ -468,14 +401,13 @@ impl<'vmx> ActiveVmcs<'vmx> {
     /// This field is set for some VM exits. See section 27.2.1 for details of when and how this
     /// field is used.
     pub fn guest_linear_addr(&self) -> Result<GuestVirtAddr, VmxError> {
-        let guest_virt_addr = unsafe { fields::GuestStateNatRo::GuestLinearAddr.vmread() }?;
+        let guest_virt_addr = unsafe { VmcsField::GuestLinearAddress.vmread() }?;
         Ok(GuestVirtAddr::new(guest_virt_addr))
     }
 
     pub fn interrupt_info(&self) -> Result<Option<VmExitInterrupt>, VmxError> {
-        let mut info = VmExitInterrupt::from_u32(unsafe {
-            fields::GuestState32Ro::VmExitInterruptInfo.vmread()?
-        });
+        let mut info =
+            VmExitInterrupt::from_u32(unsafe { VmcsField::VmExitIntrInfo.vmread()? } as u32);
         if !info.valid() {
             return Ok(None);
         }
@@ -483,7 +415,7 @@ impl<'vmx> ActiveVmcs<'vmx> {
         if info.error_code_valid() {
             _ = info.set_error_code(unsafe {
                 {
-                    fields::GuestState32Ro::VmExitInterruptErrCode.vmread()?
+                    VmcsField::VmExitIntrErrorCode.vmread()? as u32
                 }
             });
         }
@@ -500,7 +432,7 @@ impl<'vmx> ActiveVmcs<'vmx> {
         frame: Frame,
     ) -> Result<&mut msr::MsrBitmaps, VmxError> {
         debug_assert_eq!(core::mem::size_of::<msr::MsrBitmaps>(), 0x1000);
-        fields::Ctrl64::MsrBitmaps.vmwrite(frame.phys_addr.as_u64())?;
+        VmcsField::MsrBitmap.vmwrite(frame.phys_addr.as_usize())?;
         self.region.msr_bitmaps = NonNull::new(frame.virt_addr as *mut msr::MsrBitmaps);
         if let Some(mut bitmap) = self.region.msr_bitmaps {
             Ok(bitmap.as_mut())
@@ -524,9 +456,12 @@ impl<'vmx> ActiveVmcs<'vmx> {
     /// SAFETY: the VMCS must be properly configured so that the host can resume execution in a
     /// sensible environment. A simple way of ensuring that is to save the current environment as
     /// host state.
-    pub unsafe fn launch(&mut self) -> Result<VmxExitReason, VmxError> {
+    pub unsafe fn launch(
+        &mut self,
+        regs: &mut [usize; REGFILE_SIZE],
+    ) -> Result<VmxExitReason, VmxError> {
         self.launched = true;
-        raw::vmlaunch(self)?;
+        raw::vmlaunch(self, regs)?;
         self.exit_reason()
     }
 
@@ -535,16 +470,22 @@ impl<'vmx> ActiveVmcs<'vmx> {
     /// SAFETY: the VMCS must be properly configured so that the host can resume execution in a
     /// sensible environment. A simple way of ensuring that is to save the current environment as
     /// host state.
-    pub unsafe fn resume(&mut self) -> Result<VmxExitReason, VmxError> {
-        raw::vmresume(self)?;
+    pub unsafe fn resume(
+        &mut self,
+        regs: &mut [usize; REGFILE_SIZE],
+    ) -> Result<VmxExitReason, VmxError> {
+        raw::vmresume(self, regs)?;
         self.exit_reason()
     }
 
-    pub unsafe fn run(&mut self) -> Result<VmxExitReason, VmxError> {
+    pub unsafe fn run(
+        &mut self,
+        regs: &mut [usize; REGFILE_SIZE],
+    ) -> Result<VmxExitReason, VmxError> {
         if self.launched {
-            self.resume()
+            self.resume(regs)
         } else {
-            self.launch()
+            self.launch(regs)
         }
     }
 
@@ -556,7 +497,7 @@ impl<'vmx> ActiveVmcs<'vmx> {
                 PinbasedControls::all().bits(),
                 msr::VMX_PINBASED_CTLS,
                 msr::VMX_TRUE_PINBASED_CTLS,
-                fields::Ctrl32::PinBasedExecCtrls,
+                VmcsField::PinBasedVmExecControl,
             )
             .map_err(|err| err.set_field(VmxFieldError::PinBasedControls))
         }
@@ -564,8 +505,8 @@ impl<'vmx> ActiveVmcs<'vmx> {
 
     /// Returns the pin-based controls
     pub fn get_pin_based_ctrls(&self) -> Result<PinbasedControls, VmxError> {
-        let ctrls = unsafe { fields::Ctrl32::PinBasedExecCtrls.vmread()? };
-        Ok(PinbasedControls::from_bits_truncate(ctrls))
+        let ctrls = unsafe { VmcsField::PinBasedVmExecControl.vmread()? };
+        Ok(PinbasedControls::from_bits_truncate(ctrls as u32))
     }
 
     /// Sets the primary processor-based controls.
@@ -576,7 +517,7 @@ impl<'vmx> ActiveVmcs<'vmx> {
                 PrimaryControls::all().bits(),
                 msr::VMX_PROCBASED_CTLS,
                 msr::VMX_TRUE_PROCBASED_CTLS,
-                fields::Ctrl32::PrimaryProcBasedExecCtrls,
+                VmcsField::CpuBasedVmExecControl,
             )
             .map_err(|err| err.set_field(VmxFieldError::PrimaryControls))
         }
@@ -584,8 +525,8 @@ impl<'vmx> ActiveVmcs<'vmx> {
 
     /// Returns the primary processor-based controls.
     pub fn get_primary_ctrls(&self) -> Result<PrimaryControls, VmxError> {
-        let ctrls = unsafe { fields::Ctrl32::PrimaryProcBasedExecCtrls.vmread()? };
-        Ok(PrimaryControls::from_bits_truncate(ctrls))
+        let ctrls = unsafe { VmcsField::CpuBasedVmExecControl.vmread()? };
+        Ok(PrimaryControls::from_bits_truncate(ctrls as u32))
     }
 
     /// Sets the secondary processor-based controls.
@@ -594,14 +535,14 @@ impl<'vmx> ActiveVmcs<'vmx> {
             let spec = msr::VMX_PROCBASED_CTLS2.read();
             let new_flags = Self::get_ctls(flags.bits(), spec, SecondaryControls::all().bits())
                 .map_err(|err| err.set_field(VmxFieldError::SecondaryControls))?;
-            fields::Ctrl32::SecondaryProcBasedVmExecCtrls.vmwrite(new_flags)
+            VmcsField::SecondaryVmExecControl.vmwrite(new_flags as usize)
         }
     }
 
     /// Returns the secondary processor-based controls.
     pub fn get_secondary_ctrls(&self) -> Result<SecondaryControls, VmxError> {
-        let ctrls = unsafe { fields::Ctrl32::SecondaryProcBasedVmExecCtrls.vmread()? };
-        Ok(SecondaryControls::from_bits_truncate(ctrls))
+        let ctrls = unsafe { VmcsField::SecondaryVmExecControl.vmread()? };
+        Ok(SecondaryControls::from_bits_truncate(ctrls as u32))
     }
 
     /// Sets the VM exit controls.
@@ -612,7 +553,7 @@ impl<'vmx> ActiveVmcs<'vmx> {
                 ExitControls::all().bits(),
                 msr::VMX_EXIT_CTLS,
                 msr::VMX_TRUE_EXIT_CTLS,
-                fields::Ctrl32::VmExitCtrls,
+                VmcsField::VmExitControls,
             )
             .map_err(|err| err.set_field(VmxFieldError::ExitControls))
         }
@@ -620,8 +561,8 @@ impl<'vmx> ActiveVmcs<'vmx> {
 
     /// Returns the VM exit controls
     pub fn get_vm_exit_ctrls(&self) -> Result<ExitControls, VmxError> {
-        let ctrls = unsafe { fields::Ctrl32::VmExitCtrls.vmread()? };
-        Ok(ExitControls::from_bits_truncate(ctrls))
+        let ctrls = unsafe { VmcsField::VmExitControls.vmread()? };
+        Ok(ExitControls::from_bits_truncate(ctrls as u32))
     }
 
     /// Sets the VM entry controls.
@@ -632,7 +573,7 @@ impl<'vmx> ActiveVmcs<'vmx> {
                 EntryControls::all().bits(),
                 msr::VMX_ENTRY_CTLS,
                 msr::VMX_TRUE_ENTRY_CTLS,
-                fields::Ctrl32::VmEntryCtrls,
+                VmcsField::VmEntryControls,
             )
             .map_err(|err| err.set_field(VmxFieldError::EntryControls))
         }
@@ -640,15 +581,15 @@ impl<'vmx> ActiveVmcs<'vmx> {
 
     /// Returns the VM entry controls.
     pub fn get_vm_entry_cntrls(&self) -> Result<EntryControls, VmxError> {
-        let ctrls = unsafe { fields::Ctrl32::VmEntryCtrls.vmread()? };
-        Ok(EntryControls::from_bits_truncate(ctrls))
+        let ctrls = unsafe { VmcsField::VmEntryControls.vmread()? };
+        Ok(EntryControls::from_bits_truncate(ctrls as u32))
     }
 
     /// Sets the VM Entry interruption information field.
     pub fn set_vm_entry_interruption_information(&mut self, flags: u32) -> Result<(), VmxError> {
         unsafe {
-            fields::Ctrl32::VmEntryIntInfoField
-                .vmwrite(flags)
+            VmcsField::VmEntryIntrInfoField
+                .vmwrite(flags as usize)
                 .map_err(|err| err.set_field(VmxFieldError::VmEntryIntInfoField))
         }
     }
@@ -661,72 +602,48 @@ impl<'vmx> ActiveVmcs<'vmx> {
         self.set_vm_entry_interruption_information(interrupt.as_u32())?;
         // According to the documentation we need to write the instruction length.
         unsafe {
-            let instr_len = GuestState32Ro::VmExitInstructionLength.vmread()?;
-            fields::Ctrl32::VmEntryInstrLength.vmwrite(instr_len)?;
+            let instr_len = VmcsField::VmExitInstructionLen.vmread()?;
+            VmcsField::VmEntryInstructionLen.vmwrite(instr_len as usize)?;
         }
 
         // Check if we need to set an error code.
         if interrupt.error_code_valid() {
             unsafe {
-                fields::Ctrl32::VmEntryExceptErrCode.vmwrite(interrupt.error_code())?;
+                VmcsField::VmEntryExceptionErrorCode.vmwrite(interrupt.error_code() as usize)?;
             }
         }
         Ok(())
     }
 
-    /// Sets the Cr0 guest/host mask.
-    ///
-    /// Bits set to 1 will be read from the Cr0 shadow and modification attempt wills cause VM
-    /// exits.
-    pub fn set_cr0_mask(&mut self, cr0_mask: usize) -> Result<(), VmxError> {
-        unsafe { fields::CtrlNat::Cr0Mask.vmwrite(cr0_mask) }
-    }
-
-    /// Sets the Cr4 guest/host mask.
-    ///
-    /// Bits set to 1 will be read from the Cr4 shadow and modification attempt wills cause VM
-    /// exits.
-    pub fn set_cr4_mask(&mut self, cr4_mask: usize) -> Result<(), VmxError> {
-        unsafe { fields::CtrlNat::Cr4Mask.vmwrite(cr4_mask) }
-    }
-
-    /// Sets the Cr0 read shadow.
-    pub fn set_cr0_shadow(&mut self, cr0_shadow: usize) -> Result<(), VmxError> {
-        unsafe { fields::CtrlNat::Cr0ReadShadow.vmwrite(cr0_shadow) }
-    }
-
-    /// Sets the Cr4 read shadow.
-    pub fn set_cr4_shadow(&mut self, cr4_shadow: usize) -> Result<(), VmxError> {
-        unsafe { fields::CtrlNat::Cr4ReadShadow.vmwrite(cr4_shadow) }
-    }
-
     /// Sets the exception bitmap.
     pub fn set_exception_bitmap(&mut self, bitmap: ExceptionBitmap) -> Result<(), VmxError> {
         // TODO: is there a list of allowed settings?
-        unsafe { fields::Ctrl32::ExceptionBitmap.vmwrite(bitmap.bits()) }
+        self.set(VmcsField::ExceptionBitmap, bitmap.bits() as usize)
     }
+
     /// Gets the exception bitmap.
     pub fn get_exception_bitmap(&self) -> Result<ExceptionBitmap, VmxError> {
-        let bitmap = unsafe { fields::Ctrl32::ExceptionBitmap.vmread()? };
-        Ok(ExceptionBitmap::from_bits_truncate(bitmap))
+        let bitmap = self.get(VmcsField::ExceptionBitmap)?;
+        Ok(ExceptionBitmap::from_bits_truncate(bitmap as u32))
     }
 
     /// Sets the extended page table (EPT) pointer.
     pub fn set_ept_ptr(&mut self, ept_ptr: HostPhysAddr) -> Result<(), VmxError> {
-        unsafe { fields::Ctrl64::EptPtr.vmwrite(ept_ptr.as_u64()) }
+        let result = self.set(VmcsField::EptPointer, ept_ptr.as_usize());
+        result
     }
 
     pub fn get_ept_ptr(&self) -> Result<u64, VmxError> {
-        unsafe { fields::Ctrl64::EptPtr.vmread() }
+        Ok(self.get(VmcsField::EptPointer)? as u64)
     }
 
     /// Sets the EPTP address list.
     pub fn set_eptp_list(&mut self, eptp_list: &ept::EptpList) -> Result<(), VmxError> {
-        unsafe { fields::Ctrl64::EptpListAddr.vmwrite(eptp_list.get_ptr().as_u64()) }
+        self.set(VmcsField::EptpListAddress, eptp_list.get_ptr().as_usize())
     }
 
     pub fn get_eptp_list(&self) -> Result<u64, VmxError> {
-        unsafe { fields::Ctrl64::EptpListAddr.vmread() }
+        Ok(self.get(VmcsField::EptpListAddress)? as u64)
     }
 
     /// Enable the vmfunc controls.
@@ -734,22 +651,29 @@ impl<'vmx> ActiveVmcs<'vmx> {
         let allowed_vmfuncs = available_vmfuncs()?;
         Self::validate_flags_allowed(flags.bits(), allowed_vmfuncs.bits())
             .map_err(|err| err.set_field(VmxFieldError::VmFuncControls))?;
-        unsafe { fields::Ctrl64::VmFuncCtrls.vmwrite(1) }
+        self.set(VmcsField::VmFunctionControl, 1)
     }
 
     /// Sets a control setting for the current VMCS.
     ///
-    /// Raw flags is a raw 32 bits bitflag vector, known is the birflags of bits known by the VMM,
+    /// Raw flags is a raw 32 bits bitflag vector, known is the bitflag of bits known by the VMM,
     /// spec and true_spec MSRs are the MSRs containing the supported features of the current CPU.
     ///
     /// See Intel SDM Vol 3D Appending A.3.1 for allowed settings explanation.
+    /// TODO the above description doesn't make sense haha.
     unsafe fn set_ctrls(
         raw_flags: u32,
         known: u32,
         spec_msr: msr::Msr,
         true_spec_msr: msr::Msr,
-        control: fields::Ctrl32,
+        control: VmcsField,
     ) -> Result<(), VmxError> {
+        if control.tpe() != VmcsFieldType::Control {
+            panic!(
+                "Attempting to set non-control field as control: {:?}",
+                control
+            );
+        }
         let vmx_info = get_vmx_info();
         let spec = spec_msr.read();
         let new_flags = if vmx_info.support_true_ctls {
@@ -759,7 +683,7 @@ impl<'vmx> ActiveVmcs<'vmx> {
             Self::get_ctls(raw_flags, spec, known)?
         };
 
-        control.vmwrite(new_flags)
+        control.vmwrite(new_flags as usize)
     }
 
     /// Computes the control bits when there is no support for true controls.
@@ -825,230 +749,275 @@ impl<'vmx> core::fmt::Debug for ActiveVmcs<'vmx> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         writeln!(f, "VMCS {{")?;
         writeln!(f, "    registers {{")?;
-        writeln!(f, "        rax: {:#x}", self.get(Register::Rax))?;
-        writeln!(f, "        rbx: {:#x}", self.get(Register::Rbx))?;
-        writeln!(f, "        rcx: {:#x}", self.get(Register::Rcx))?;
-        writeln!(f, "        rdx: {:#x}", self.get(Register::Rdx))?;
-        writeln!(f, "        rip: {:#x}", self.get(Register::Rip))?;
-        writeln!(f, "        rsp: {:#x}", self.get(Register::Rsp))?;
-        writeln!(f, "        rbp: {:#x}", self.get(Register::Rbp))?;
-        writeln!(f, "        rsi: {:#x}", self.get(Register::Rsi))?;
-        writeln!(f, "        rdi: {:#x}", self.get(Register::Rdi))?;
-        writeln!(f, "        r8:  {:#x}", self.get(Register::R8))?;
-        writeln!(f, "        r9:  {:#x}", self.get(Register::R9))?;
-        writeln!(f, "        r10: {:#x}", self.get(Register::R10))?;
-        writeln!(f, "        r11: {:#x}", self.get(Register::R11))?;
-        writeln!(f, "        r12: {:#x}", self.get(Register::R12))?;
-        writeln!(f, "        r13: {:#x}", self.get(Register::R13))?;
-        writeln!(f, "        r14: {:#x}", self.get(Register::R14))?;
-        writeln!(f, "        r15: {:#x}", self.get(Register::R15))?;
-        writeln!(f, "        cr0: {:#x}", self.get_cr(ControlRegister::Cr0))?;
-        writeln!(f, "        cr3: {:#x}", self.get_cr(ControlRegister::Cr3))?;
-        writeln!(f, "        cr4: {:#x}", self.get_cr(ControlRegister::Cr4))?;
+        writeln!(
+            f,
+            "        rip: {:#x}",
+            self.get(VmcsField::GuestRip).unwrap()
+        )?;
+        writeln!(
+            f,
+            "        rsp: {:#x}",
+            self.get(VmcsField::GuestRsp).unwrap()
+        )?;
+        writeln!(
+            f,
+            "        cr0: {:#x}",
+            self.get(VmcsField::GuestCr0).unwrap()
+        )?;
+        writeln!(
+            f,
+            "        cr3: {:#x}",
+            self.get(VmcsField::GuestCr3).unwrap()
+        )?;
+        writeln!(
+            f,
+            "        cr4: {:#x}",
+            self.get(VmcsField::GuestCr4).unwrap()
+        )?;
         writeln!(
             f,
             "        cs.sel: {:#x}",
-            self.get16(fields::GuestState16::CsSelector).unwrap()
+            self.get(VmcsField::GuestCsSelector).unwrap()
         )?;
         writeln!(
             f,
             "        cs.base: {:#x}",
-            self.get_nat(fields::GuestStateNat::CsBase).unwrap()
+            self.get(VmcsField::GuestCsBase).unwrap()
         )?;
         writeln!(
             f,
             "        cs.limit: {:#x}",
-            self.get32(fields::GuestState32::CsLimit).unwrap()
+            self.get(VmcsField::GuestCsLimit).unwrap()
         )?;
         writeln!(
             f,
             "        cs.ar: {:#x}",
-            self.get32(fields::GuestState32::CsAccessRights).unwrap()
+            self.get(VmcsField::GuestCsArBytes).unwrap()
         )?;
         writeln!(
             f,
             "        ds.sel: {:#x}",
-            self.get16(fields::GuestState16::DsSelector).unwrap()
+            self.get(VmcsField::GuestDsSelector).unwrap()
         )?;
         writeln!(
             f,
             "        ds.base: {:#x}",
-            self.get_nat(fields::GuestStateNat::DsBase).unwrap()
+            self.get(VmcsField::GuestDsBase).unwrap()
         )?;
         writeln!(
             f,
             "        ds.limit: {:#x}",
-            self.get32(fields::GuestState32::DsLimit).unwrap()
+            self.get(VmcsField::GuestDsLimit).unwrap()
         )?;
         writeln!(
             f,
             "        ds.ar: {:#x}",
-            self.get32(fields::GuestState32::DsAccessRights).unwrap()
+            self.get(VmcsField::GuestDsArBytes).unwrap()
         )?;
         writeln!(
             f,
             "        es.sel: {:#x}",
-            self.get16(fields::GuestState16::EsSelector).unwrap()
+            self.get(VmcsField::GuestEsSelector).unwrap()
         )?;
         writeln!(
             f,
             "        es.base: {:#x}",
-            self.get_nat(fields::GuestStateNat::EsBase).unwrap()
+            self.get(VmcsField::GuestEsBase).unwrap()
         )?;
         writeln!(
             f,
             "        es.limit: {:#x}",
-            self.get32(fields::GuestState32::EsLimit).unwrap()
+            self.get(VmcsField::GuestEsLimit).unwrap()
         )?;
         writeln!(
             f,
             "        es.ar: {:#x}",
-            self.get32(fields::GuestState32::EsAccessRights).unwrap()
+            self.get(VmcsField::GuestEsArBytes).unwrap()
         )?;
         writeln!(
             f,
             "        fs.sel: {:#x}",
-            self.get16(fields::GuestState16::FsSelector).unwrap()
+            self.get(VmcsField::GuestFsSelector).unwrap()
         )?;
         writeln!(
             f,
             "        fs.base: {:#x}",
-            self.get_nat(fields::GuestStateNat::FsBase).unwrap()
+            self.get(VmcsField::GuestFsBase).unwrap()
         )?;
         writeln!(
             f,
             "        fs.limit: {:#x}",
-            self.get32(fields::GuestState32::FsLimit).unwrap()
+            self.get(VmcsField::GuestFsLimit).unwrap()
         )?;
         writeln!(
             f,
             "        fs.ar: {:#x}",
-            self.get32(fields::GuestState32::FsAccessRights).unwrap()
+            self.get(VmcsField::GuestFsArBytes).unwrap()
         )?;
         writeln!(
             f,
             "        gs.sel: {:#x}",
-            self.get16(fields::GuestState16::GsSelector).unwrap()
+            self.get(VmcsField::GuestGsSelector).unwrap()
         )?;
         writeln!(
             f,
             "        gs.base: {:#x}",
-            self.get_nat(fields::GuestStateNat::GsBase).unwrap()
+            self.get(VmcsField::GuestGsBase).unwrap()
         )?;
         writeln!(
             f,
             "        gs.limit: {:#x}",
-            self.get32(fields::GuestState32::GsLimit).unwrap()
+            self.get(VmcsField::GuestGsLimit).unwrap()
         )?;
         writeln!(
             f,
             "        gs.ar: {:#x}",
-            self.get32(fields::GuestState32::GsAccessRights).unwrap()
+            self.get(VmcsField::GuestGsArBytes).unwrap()
         )?;
         writeln!(
             f,
             "        ss.sel: {:#x}",
-            self.get16(fields::GuestState16::SsSelector).unwrap()
+            self.get(VmcsField::GuestSsSelector).unwrap()
         )?;
         writeln!(
             f,
             "        ss.base: {:#x}",
-            self.get_nat(fields::GuestStateNat::SsBase).unwrap()
+            self.get(VmcsField::GuestSsBase).unwrap()
         )?;
         writeln!(
             f,
             "        ss.limit: {:#x}",
-            self.get32(fields::GuestState32::SsLimit).unwrap()
+            self.get(VmcsField::GuestSsLimit).unwrap()
         )?;
         writeln!(
             f,
             "        ss.ar: {:#x}",
-            self.get32(fields::GuestState32::SsAccessRights).unwrap()
+            self.get(VmcsField::GuestSsArBytes).unwrap()
         )?;
         writeln!(
             f,
             "        ldt.sel: {:#x}",
-            self.get16(fields::GuestState16::LdtrSelector).unwrap()
+            self.get(VmcsField::GuestLdtrSelector).unwrap()
         )?;
         writeln!(
             f,
             "        ldt.base: {:#x}",
-            self.get_nat(fields::GuestStateNat::LdtrBase).unwrap()
+            self.get(VmcsField::GuestLdtrBase).unwrap()
         )?;
         writeln!(
             f,
             "        ldt.limit: {:#x}",
-            self.get32(fields::GuestState32::LdtrLimit).unwrap()
+            self.get(VmcsField::GuestLdtrLimit).unwrap()
         )?;
         writeln!(
             f,
             "        ldt.ar: {:#x}",
-            self.get32(fields::GuestState32::LdtrAccessRights).unwrap()
+            self.get(VmcsField::GuestLdtrArBytes).unwrap()
         )?;
         writeln!(
             f,
             "        tr.sel: {:#x}",
-            self.get16(fields::GuestState16::TrSelector).unwrap()
+            self.get(VmcsField::GuestTrSelector).unwrap()
         )?;
         writeln!(
             f,
             "        tr.base: {:#x}",
-            self.get_nat(fields::GuestStateNat::TrBase).unwrap()
+            self.get(VmcsField::GuestTrBase).unwrap()
         )?;
         writeln!(
             f,
             "        tr.limit: {:#x}",
-            self.get32(fields::GuestState32::TrLimit).unwrap()
+            self.get(VmcsField::GuestTrLimit).unwrap()
         )?;
         writeln!(
             f,
             "        tr.ar: {:#x}",
-            self.get32(fields::GuestState32::TrAccessRights).unwrap()
+            self.get(VmcsField::GuestTrArBytes).unwrap()
         )?;
         writeln!(
             f,
             "        idt.base: {:#x}",
-            self.get_nat(fields::GuestStateNat::IdtrBase).unwrap()
+            self.get(VmcsField::GuestIdtrBase).unwrap()
         )?;
         writeln!(
             f,
             "        idt.limit: {:#x}",
-            self.get32(fields::GuestState32::IdtrLimit).unwrap()
+            self.get(VmcsField::GuestIdtrLimit).unwrap()
         )?;
         writeln!(
             f,
             "        gdt.base: {:#x}",
-            self.get_nat(fields::GuestStateNat::GdtrBase).unwrap()
+            self.get(VmcsField::GuestGdtrBase).unwrap()
         )?;
         writeln!(
             f,
             "        gdt.limit: {:#x}",
-            self.get32(fields::GuestState32::GdtrLimit).unwrap()
+            self.get(VmcsField::GuestGdtrLimit).unwrap()
         )?;
         writeln!(
             f,
             "        cr0 read shadow: {:#x}",
-            self.get_ctrlnat(fields::CtrlNat::Cr0ReadShadow).unwrap()
+            self.get(VmcsField::Cr0ReadShadow).unwrap()
         )?;
         writeln!(
             f,
             "        cr0 mask: {:#x}",
-            self.get_ctrlnat(fields::CtrlNat::Cr0Mask).unwrap()
+            self.get(VmcsField::Cr0GuestHostMask).unwrap()
+        )?;
+        writeln!(
+            f,
+            "        host cr0: {:#x}",
+            self.get(VmcsField::HostCr0).unwrap()
         )?;
         writeln!(
             f,
             "        cr4 read shadow: {:#x}",
-            self.get_ctrlnat(fields::CtrlNat::Cr4ReadShadow).unwrap()
+            self.get(VmcsField::Cr4ReadShadow).unwrap()
         )?;
         writeln!(
             f,
             "        cr4 mask: {:#x}",
-            self.get_ctrlnat(fields::CtrlNat::Cr4Mask).unwrap()
+            self.get(VmcsField::Cr4GuestHostMask).unwrap()
+        )?;
+        writeln!(
+            f,
+            "        host cr4: {:#x}",
+            self.get(VmcsField::HostCr4).unwrap()
         )?;
         writeln!(
             f,
             "        ia32_efer: {:#x}",
-            self.get64(fields::GuestState64::Ia32Efer).unwrap()
+            self.get(VmcsField::GuestIa32Efer).unwrap()
+        )?;
+        writeln!(
+            f,
+            "        rflags: {:#x}",
+            self.get(VmcsField::GuestRflags).unwrap()
+        )?;
+        writeln!(
+            f,
+            "        sysenter_eip: {:#x}",
+            self.get(VmcsField::GuestSysenterEip).unwrap()
+        )?;
+        writeln!(
+            f,
+            "        sysenter_cs: {:#x}",
+            self.get(VmcsField::GuestSysenterCs).unwrap()
+        )?;
+        writeln!(
+            f,
+            "        sysenter_esp: {:#x}",
+            self.get(VmcsField::GuestSysenterEsp).unwrap()
+        )?;
+        writeln!(
+            f,
+            "        ia32_pat: {:#x}",
+            self.get(VmcsField::GuestIa32Pat).unwrap()
+        )?;
+        writeln!(
+            f,
+            "        Vm exit interrupt info: {:#x}",
+            self.get(VmcsField::VmExitIntrInfo).unwrap()
         )?;
         writeln!(
             f,
@@ -1072,58 +1041,72 @@ impl<'vmx> core::fmt::Debug for ActiveVmcs<'vmx> {
         )?;
         writeln!(
             f,
-            "        VMCS SeconaryControls: {:?}",
+            "        VMCS SecondaryControls: {:?}",
             self.get_secondary_ctrls().ok()
+        )?;
+        writeln!(
+            f,
+            "        VMCS ExceptionBitmap: {:?}",
+            self.get_exception_bitmap().ok()
+        )?;
+        writeln!(
+            f,
+            "        Timer Value: {:x}",
+            self.get(VmcsField::VmxPreemptionTimerValue).unwrap()
+        )?;
+        writeln!(
+            f,
+            "        MsrBitmap: {:x}",
+            self.get(VmcsField::MsrBitmap).unwrap()
+        )?;
+        writeln!(
+            f,
+            "        VmExitMsrStoreCount: {:x}",
+            self.get(VmcsField::VmExitMsrStoreCount).unwrap()
+        )?;
+        writeln!(
+            f,
+            "        VmEntryMsrLoadCount: {:x}",
+            self.get(VmcsField::VmEntryMsrLoadCount).unwrap()
+        )?;
+        writeln!(
+            f,
+            "        MsrExitStoreAddr: {:x}",
+            self.get(VmcsField::VmExitMsrStoreAddr).unwrap()
         )?;
         writeln!(f, "        EPT Ptr: {:#x}", self.get_ept_ptr().unwrap())?;
         writeln!(f, "        EPTP List: {:#x}", self.get_eptp_list().unwrap())?;
+        writeln!(
+            f,
+            "        PostedInterruptAddr: {:#x}",
+            self.get(VmcsField::PostedIntrDescAddr).unwrap()
+        )?;
+        writeln!(
+            f,
+            "        VirtualProcessorId: {:?}",
+            self.get(VmcsField::VirtualProcessorId).unwrap()
+        )?;
+        writeln!(
+            f,
+            "        TPR threshold: {:x?}",
+            self.get(VmcsField::TprThreshold).unwrap()
+        )?;
+        writeln!(
+            f,
+            "        IdtVectoringInfoField: {:x?}",
+            self.get(VmcsField::IdtVectoringInfoField).unwrap()
+        )?;
+        writeln!(
+            f,
+            "        IdtVectoringErrorCode: {:x?}",
+            self.get(VmcsField::IdtVectoringErrorCode).unwrap()
+        )?;
         writeln!(f, "    }}")?;
         writeln!(f, "}}")?;
 
         Ok(())
     }
 }
-
-// ——————————————————————————————— Registers ———————————————————————————————— //
-
-/// Virtual CPU registers.
-///
-//  WARNING: inline assembly depends on the register values, don't change them without updating
-//  corresponding assembly!
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[repr(u8)]
-pub enum Register {
-    // Stored in register array
-    Rax = 0,
-    Rbx = 1,
-    Rcx = 2,
-    Rdx = 3,
-    Rbp = 4,
-    Rsi = 5,
-    Rdi = 6,
-    R8 = 7,
-    R9 = 8,
-    R10 = 9,
-    R11 = 10,
-    R12 = 11,
-    R13 = 12,
-    R14 = 13,
-    R15 = 14,
-
-    // Stored in VMCS
-    Rsp = 15,
-    Rip = 16,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ControlRegister {
-    Cr0,
-    Cr3,
-    Cr4,
-    Cr8,
-}
-
-pub const REGFILE_SIZE: usize = 15;
 
 // —————————————————————————— Exit Qualifications ——————————————————————————— //
 
@@ -1146,30 +1129,29 @@ impl VmxExitQualification {
     pub fn control_register_accesses(self) -> exit_qualification::ControlRegisterAccesses {
         let cr_id = self.raw & 0b1111;
         let cr = match cr_id {
-            0 => ControlRegister::Cr0,
-            3 => ControlRegister::Cr3,
-            4 => ControlRegister::Cr4,
-            8 => ControlRegister::Cr8,
+            0 => VmcsField::GuestCr0,
+            3 => VmcsField::GuestCr3,
+            4 => VmcsField::GuestCr4,
             _ => todo!("Handle unknown control register"),
         };
         let reg_id = (self.raw >> 8) & 0b1111;
         let reg = match reg_id {
-            0 => Register::Rax,
-            1 => Register::Rcx,
-            2 => Register::Rdx,
-            3 => Register::Rbx,
-            4 => Register::Rsp,
-            5 => Register::Rbp,
-            6 => Register::Rsi,
-            7 => Register::Rdi,
-            8 => Register::R8,
-            9 => Register::R9,
-            10 => Register::R10,
-            11 => Register::R11,
-            12 => Register::R12,
-            13 => Register::R13,
-            14 => Register::R14,
-            15 => Register::R15,
+            0 => VmcsField::GuestRax,
+            1 => VmcsField::GuestRcx,
+            2 => VmcsField::GuestRdx,
+            3 => VmcsField::GuestRbx,
+            4 => VmcsField::GuestRsp,
+            5 => VmcsField::GuestRbp,
+            6 => VmcsField::GuestRsi,
+            7 => VmcsField::GuestRdi,
+            8 => VmcsField::GuestR8,
+            9 => VmcsField::GuestR9,
+            10 => VmcsField::GuestR10,
+            11 => VmcsField::GuestR11,
+            12 => VmcsField::GuestR12,
+            13 => VmcsField::GuestR13,
+            14 => VmcsField::GuestR14,
+            15 => VmcsField::GuestR15,
             _ => unreachable!("Can't happen, masked with 4 lowest bits"),
         };
         let payload = ((self.raw >> 16) & 0xFFFF) as u16;

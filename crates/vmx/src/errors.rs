@@ -299,7 +299,11 @@ impl VmExitInterrupt {
         res |= itype.as_u32() << 8;
         if code.is_some()
             && itype == InterruptionType::HardwareException
-            && (vcpu.get_cr(crate::ControlRegister::Cr0) & 1 == 1)
+            && (vcpu
+                .get(crate::fields::VmcsField::GuestCr0)
+                .expect("Unable to read cr0")
+                & 1
+                == 1)
             && unsafe { msr::VMX_BASIC.read() & (1 << 56) == 0 }
             && (vector == Trapnr::DoubleFault
                 || vector == Trapnr::InvalidTSS
@@ -666,5 +670,30 @@ impl Trapnr {
             trapnr = trapnr >> 1;
         }
         value
+    }
+
+    pub fn from_u8(v: u8) -> Option<Trapnr> {
+        match v {
+            0 => Some(Self::DivideError),
+            2 => Some(Self::NMI),
+            3 => Some(Self::Breakpoint),
+            4 => Some(Self::Overflow),
+            5 => Some(Self::BoundRangeExceeded),
+            6 => Some(Self::InvalidOpcode),
+            7 => Some(Self::DeviceNotAvailable),
+            8 => Some(Self::DoubleFault),
+            10 => Some(Self::InvalidTSS),
+            11 => Some(Self::SegmentNotPresentFault),
+            12 => Some(Self::StackSegmentFault),
+            13 => Some(Self::GeneralProtectionFault),
+            14 => Some(Self::PageFault),
+            16 => Some(Self::FPUError),
+            17 => Some(Self::AlignmentCheck),
+            18 => Some(Self::MachineCheck),
+            19 => Some(Self::SIMDException),
+            20 => Some(Self::VirtualizationException),
+            21 => Some(Self::Reserved),
+            _ => None,
+        }
     }
 }

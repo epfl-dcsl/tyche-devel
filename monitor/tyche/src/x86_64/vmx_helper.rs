@@ -5,16 +5,22 @@ use core::arch::asm;
 
 use stage_two_abi::GuestInfo;
 use vmx::bitmaps::{
-    EntryControls, ExceptionBitmap, ExitControls, PinbasedControls, PrimaryControls,
-    SecondaryControls,
+    EntryControls, ExitControls, PinbasedControls, PrimaryControls, SecondaryControls,
 };
-use vmx::fields::traits::*;
-use vmx::{fields, secondary_controls_capabilities, ActiveVmcs, Register, VmxError};
+use vmx::fields::VmcsField;
+use vmx::{secondary_controls_capabilities, ActiveVmcs, VmxError};
 
 use super::arch;
+use super::context::Contextx86;
 use crate::allocator::{allocator, FrameAllocator};
 
-pub unsafe fn init_vcpu<'vmx>(vcpu: &mut ActiveVmcs<'vmx>, info: &GuestInfo) {
+pub const MSR_IA32_CR_PAT_DEFAULT: usize = 0x0007040600070406;
+
+pub unsafe fn init_vcpu<'vmx>(
+    vcpu: &mut ActiveVmcs<'vmx>,
+    info: &GuestInfo,
+    context: &mut Contextx86,
+) {
     let allocator = allocator();
     default_vmcs_config(vcpu, info, false);
     let bit_frame = allocator
@@ -25,16 +31,28 @@ pub unsafe fn init_vcpu<'vmx>(vcpu: &mut ActiveVmcs<'vmx>, info: &GuestInfo) {
         .initialize_msr_bitmaps(bit_frame)
         .expect("Failed to install MSR bitmaps");
     msr_bitmaps.allow_all();
-    vcpu.set_nat(fields::GuestStateNat::Rip, info.rip).ok();
-    vcpu.set_nat(fields::GuestStateNat::Cr3, info.cr3).ok();
-    vcpu.set_nat(fields::GuestStateNat::Rsp, info.rsp).ok();
-    vcpu.set(Register::Rsi, info.rsi as u64);
+    context
+        .set(VmcsField::GuestRip, info.rip, Some(vcpu))
+        .unwrap();
+    context
+        .set(VmcsField::GuestCr3, info.cr3, Some(vcpu))
+        .unwrap();
+    context
+        .set(VmcsField::GuestRsp, info.rsp, Some(vcpu))
+        .unwrap();
+    context
+        .set(VmcsField::GuestRsi, info.rsi, Some(vcpu))
+        .unwrap();
     // VMXE flags, required during VMX operations.
     let vmxe = 1 << 13;
     let cr4 = 0xA0 | vmxe;
-    vcpu.set_nat(fields::GuestStateNat::Cr4, cr4).unwrap();
-    vcpu.set_cr4_mask(vmxe).unwrap();
-    vcpu.set_cr4_shadow(vmxe).unwrap();
+    context.set(VmcsField::GuestCr4, cr4, Some(vcpu)).unwrap();
+    context
+        .set(VmcsField::Cr4GuestHostMask, vmxe, Some(vcpu))
+        .unwrap();
+    context
+        .set(VmcsField::Cr4ReadShadow, vmxe, Some(vcpu))
+        .unwrap();
     vmx::check::check().expect("check error");
 }
 
@@ -50,11 +68,17 @@ fn default_vmcs_config(vmcs: &mut ActiveVmcs, info: &GuestInfo, switching: bool)
             vmcs.set_vm_exit_ctrls(
                 ExitControls::HOST_ADDRESS_SPACE_SIZE
                     | ExitControls::LOAD_IA32_EFER
-                    | ExitControls::SAVE_IA32_EFER,
+                    | ExitControls::SAVE_IA32_EFER
+                    | ExitControls::SAVE_IA32_PAT
+                    | ExitControls::LOAD_IA32_PAT,
             )
         })
         .and_then(|_| {
-            vmcs.set_vm_entry_ctrls(EntryControls::IA32E_MODE_GUEST | EntryControls::LOAD_IA32_EFER)
+            vmcs.set_vm_entry_ctrls(
+                EntryControls::IA32E_MODE_GUEST
+                    | EntryControls::LOAD_IA32_EFER
+                    | EntryControls::LOAD_IA32_PAT,
+            )
         })
         .and_then(|_| vmcs.set_exception_bitmap(ExceptionBitmap::empty()))
         .and_then(|_| save_host_state(vmcs, info))
@@ -78,14 +102,24 @@ fn default_vmcs_config(vmcs: &mut ActiveVmcs, info: &GuestInfo, switching: bool)
         secondary_ctrls |= SecondaryControls::ENABLE_XSAVES_XRSTORS;
     }
     secondary_ctrls |= cpuid_secondary_controls();
-    log::info!("2'Ctrl: {:?}", vmcs.set_secondary_ctrls(secondary_ctrls));
+    log::info!(
+        "2'Ctrl {:b}, {:b}",
+        secondary_ctrls,
+        vmx::secondary_controls_capabilities().expect("meh")
+    );
+    vmcs.set_secondary_ctrls(secondary_ctrls)
+        .expect("Error setting secondary controls");
+
+    // For linux if we want to be able to save/restore pat. No clue why.
+    vmcs.set(VmcsField::GuestIa32Pat, MSR_IA32_CR_PAT_DEFAULT)
+        .expect("Unable to set PAT");
 }
 
 fn configure_msr() -> Result<(), VmxError> {
     unsafe {
-        fields::Ctrl32::VmExitMsrLoadCount.vmwrite(0)?;
-        fields::Ctrl32::VmExitMsrStoreCount.vmwrite(0)?;
-        fields::Ctrl32::VmEntryMsrLoadCount.vmwrite(0)?;
+        VmcsField::VmExitMsrLoadCount.vmwrite(0)?;
+        VmcsField::VmExitMsrStoreCount.vmwrite(0)?;
+        VmcsField::VmEntryMsrLoadCount.vmwrite(0)?;
     }
 
     Ok(())
@@ -100,66 +134,66 @@ fn setup_guest(vcpu: &mut ActiveVmcs, info: &GuestInfo) -> Result<(), VmxError> 
     let cr4: usize;
     unsafe {
         asm!("mov {}, cr0", out(reg) cr0, options(nomem, nostack, preserves_flags));
-        vcpu.set_nat(fields::GuestStateNat::Cr0, cr0)?;
+        vcpu.set(VmcsField::GuestCr0, cr0)?;
         asm!("mov {}, cr3", out(reg) cr3, options(nomem, nostack, preserves_flags));
-        vcpu.set_nat(fields::GuestStateNat::Cr3, cr3)?;
+        vcpu.set(VmcsField::GuestCr3, cr3)?;
         asm!("mov {}, cr4", out(reg) cr4, options(nomem, nostack, preserves_flags));
-        vcpu.set_nat(fields::GuestStateNat::Cr4, cr4)?;
+        vcpu.set(VmcsField::GuestCr4, cr4)?;
     }
 
     // Segments selectors
-    vcpu.set16(fields::GuestState16::EsSelector, 0)?;
-    vcpu.set16(fields::GuestState16::CsSelector, 0)?;
-    vcpu.set16(fields::GuestState16::SsSelector, 0)?;
-    vcpu.set16(fields::GuestState16::DsSelector, 0)?;
-    vcpu.set16(fields::GuestState16::FsSelector, 0)?;
-    vcpu.set16(fields::GuestState16::GsSelector, 0)?;
-    vcpu.set16(fields::GuestState16::TrSelector, 0)?;
-    vcpu.set16(fields::GuestState16::LdtrSelector, 0)?;
+    vcpu.set(VmcsField::GuestEsSelector, 0)?;
+    vcpu.set(VmcsField::GuestCsSelector, 0)?;
+    vcpu.set(VmcsField::GuestSsSelector, 0)?;
+    vcpu.set(VmcsField::GuestDsSelector, 0)?;
+    vcpu.set(VmcsField::GuestFsSelector, 0)?;
+    vcpu.set(VmcsField::GuestGsSelector, 0)?;
+    vcpu.set(VmcsField::GuestTrSelector, 0)?;
+    vcpu.set(VmcsField::GuestLdtrSelector, 0)?;
     // Segments access rights
-    vcpu.set32(fields::GuestState32::EsAccessRights, 0xC093)?;
-    vcpu.set32(fields::GuestState32::CsAccessRights, 0xA09B)?;
-    vcpu.set32(fields::GuestState32::SsAccessRights, 0x10000)?;
-    vcpu.set32(fields::GuestState32::DsAccessRights, 0xC093)?;
-    vcpu.set32(fields::GuestState32::FsAccessRights, 0x10000)?;
-    vcpu.set32(fields::GuestState32::GsAccessRights, 0x10000)?;
-    vcpu.set32(fields::GuestState32::TrAccessRights, 0x8B)?;
-    vcpu.set32(fields::GuestState32::LdtrAccessRights, 0x10000)?;
+    vcpu.set(VmcsField::GuestEsArBytes, 0xC093)?;
+    vcpu.set(VmcsField::GuestCsArBytes, 0xA09B)?;
+    vcpu.set(VmcsField::GuestSsArBytes, 0x10000)?;
+    vcpu.set(VmcsField::GuestDsArBytes, 0xC093)?;
+    vcpu.set(VmcsField::GuestFsArBytes, 0x10000)?;
+    vcpu.set(VmcsField::GuestGsArBytes, 0x10000)?;
+    vcpu.set(VmcsField::GuestTrArBytes, 0x8B)?;
+    vcpu.set(VmcsField::GuestLdtrArBytes, 0x10000)?;
     // Segments limits
-    vcpu.set32(fields::GuestState32::EsLimit, 0xFFFF)?;
-    vcpu.set32(fields::GuestState32::CsLimit, 0xFFFF)?;
-    vcpu.set32(fields::GuestState32::SsLimit, 0xFFFF)?;
-    vcpu.set32(fields::GuestState32::DsLimit, 0xFFFF)?;
-    vcpu.set32(fields::GuestState32::FsLimit, 0xFFFF)?;
-    vcpu.set32(fields::GuestState32::GsLimit, 0xFFFF)?;
-    vcpu.set32(fields::GuestState32::TrLimit, 0xFF)?; // At least 0x67
-    vcpu.set32(fields::GuestState32::LdtrLimit, 0xFFFF)?;
-    vcpu.set32(fields::GuestState32::GdtrLimit, 0xFFFF)?;
-    vcpu.set32(fields::GuestState32::IdtrLimit, 0xFFFF)?;
+    vcpu.set(VmcsField::GuestEsLimit, 0xFFFF)?;
+    vcpu.set(VmcsField::GuestCsLimit, 0xFFFF)?;
+    vcpu.set(VmcsField::GuestSsLimit, 0xFFFF)?;
+    vcpu.set(VmcsField::GuestDsLimit, 0xFFFF)?;
+    vcpu.set(VmcsField::GuestFsLimit, 0xFFFF)?;
+    vcpu.set(VmcsField::GuestGsLimit, 0xFFFF)?;
+    vcpu.set(VmcsField::GuestTrLimit, 0xFF)?; // At least 0x67
+    vcpu.set(VmcsField::GuestLdtrLimit, 0xFFFF)?;
+    vcpu.set(VmcsField::GuestGdtrLimit, 0xFFFF)?;
+    vcpu.set(VmcsField::GuestIdtrLimit, 0xFFFF)?;
     // Segments bases
-    vcpu.set_nat(fields::GuestStateNat::EsBase, 0)?;
-    vcpu.set_nat(fields::GuestStateNat::CsBase, 0)?;
-    vcpu.set_nat(fields::GuestStateNat::SsBase, 0)?;
-    vcpu.set_nat(fields::GuestStateNat::DsBase, 0)?;
-    vcpu.set_nat(fields::GuestStateNat::FsBase, 0)?;
-    vcpu.set_nat(fields::GuestStateNat::GsBase, 0)?;
-    vcpu.set_nat(fields::GuestStateNat::TrBase, 0)?;
-    vcpu.set_nat(fields::GuestStateNat::LdtrBase, 0)?;
-    vcpu.set_nat(fields::GuestStateNat::GdtrBase, 0)?;
-    vcpu.set_nat(fields::GuestStateNat::IdtrBase, 0)?;
+    vcpu.set(VmcsField::GuestEsBase, 0)?;
+    vcpu.set(VmcsField::GuestCsBase, 0)?;
+    vcpu.set(VmcsField::GuestSsBase, 0)?;
+    vcpu.set(VmcsField::GuestDsBase, 0)?;
+    vcpu.set(VmcsField::GuestFsBase, 0)?;
+    vcpu.set(VmcsField::GuestGsBase, 0)?;
+    vcpu.set(VmcsField::GuestTrBase, 0)?;
+    vcpu.set(VmcsField::GuestLdtrBase, 0)?;
+    vcpu.set(VmcsField::GuestGdtrBase, 0)?;
+    vcpu.set(VmcsField::GuestIdtrBase, 0)?;
 
     // MSRs
-    if fields::GuestState64::Ia32Efer.is_unsupported() {
+    if VmcsField::GuestIa32Efer.is_unsupported() {
         log::warn!("Ia32Efer field is not supported");
     }
-    vcpu.set64(fields::GuestState64::Ia32Efer, info.efer)?;
-    vcpu.set_nat(fields::GuestStateNat::Rflags, 0x2)?;
+    vcpu.set(VmcsField::GuestIa32Efer, info.efer as usize)?;
+    vcpu.set(VmcsField::GuestRflags, 0x2)?;
 
-    vcpu.set32(fields::GuestState32::ActivityState, 0)?;
-    vcpu.set64(fields::GuestState64::VmcsLinkPtr, u64::max_value())?;
-    vcpu.set16(fields::GuestState16::InterruptStatus, 0)?;
+    vcpu.set(VmcsField::GuestActivityState, 0)?;
+    vcpu.set(VmcsField::VmcsLinkPointer, usize::max_value())?;
+    vcpu.set(VmcsField::GuestIntrStatus, 0)?;
     // vcpu.set16(fields::GuestState16::PmlIndex, 0)?; // <- Not supported on dev server
-    vcpu.set32(fields::GuestState32::VmxPreemptionTimerValue, 0)?;
+    vcpu.set(VmcsField::VmxPreemptionTimerValue, 0)?;
 
     Ok(())
 }
@@ -167,9 +201,18 @@ fn setup_guest(vcpu: &mut ActiveVmcs, info: &GuestInfo) -> Result<(), VmxError> 
 /// Returns optional secondary controls depending on the host cpuid.
 fn cpuid_secondary_controls() -> SecondaryControls {
     let mut controls = SecondaryControls::empty();
+    let capabilities = vmx::secondary_controls_capabilities()
+        .expect("Unable to read secondary controls capabilities");
     let cpuid = unsafe { platform::x86_64::__cpuid(7) };
-    if cpuid.ebx & vmx::CPUID_EBX_X64_FEATURE_INVPCID != 0 {
+    if (cpuid.ebx & vmx::CPUID_EBX_X64_FEATURE_INVPCID != 0)
+        && (capabilities.bits() & SecondaryControls::ENABLE_INVPCID.bits() != 0)
+    {
         controls |= SecondaryControls::ENABLE_INVPCID;
+    }
+    if (cpuid.ecx & vmx::CPUID_ECX_X64_WAITPGK != 0)
+        && (capabilities.bits() & SecondaryControls::ENABLE_USER_WAIT_PAUSE.bits() != 0)
+    {
+        controls |= SecondaryControls::ENABLE_USER_WAIT_PAUSE;
     }
     return controls;
 }
@@ -190,21 +233,21 @@ fn save_host_state<'vmx>(_vmcs: &mut ActiveVmcs<'vmx>, info: &GuestInfo) -> Resu
     }
 
     unsafe {
-        fields::HostState16::CsSelector.vmwrite(info.cs)?;
-        fields::HostState16::DsSelector.vmwrite(info.ds)?;
-        fields::HostState16::EsSelector.vmwrite(info.es)?;
-        fields::HostState16::FsSelector.vmwrite(info.fs)?;
-        fields::HostState16::GsSelector.vmwrite(info.gs)?;
-        fields::HostState16::SsSelector.vmwrite(info.ss)?;
-        fields::HostState16::TrSelector.vmwrite(tr)?;
+        VmcsField::HostCsSelector.vmwrite(info.cs as usize)?;
+        VmcsField::HostDsSelector.vmwrite(info.ds as usize)?;
+        VmcsField::HostEsSelector.vmwrite(info.es as usize)?;
+        VmcsField::HostFsSelector.vmwrite(info.fs as usize)?;
+        VmcsField::HostGsSelector.vmwrite(info.gs as usize)?;
+        VmcsField::HostSsSelector.vmwrite(info.ss as usize)?;
+        VmcsField::HostTrSelector.vmwrite(tr as usize)?;
 
         // NOTE: those might throw an exception depending on the CPU features, let's just
         // ignore them for now.
         // VmcsHostStateNat::FsBase.vmwrite(FS::read_base().as_u64() as usize)?;
         // VmcsHostStateNat::GsBase.vmwrite(GS::read_base().as_u64() as usize)?;
 
-        fields::HostStateNat::IdtrBase.vmwrite(idt.base as usize)?;
-        fields::HostStateNat::GdtrBase.vmwrite(gdt.base as usize)?;
+        VmcsField::HostIdtrBase.vmwrite(idt.base as usize)?;
+        VmcsField::HostGdtrBase.vmwrite(gdt.base as usize)?;
 
         // Save TR base
         // let tr_offset = (tr >> 3) as usize;
@@ -217,7 +260,8 @@ fn save_host_state<'vmx>(_vmcs: &mut ActiveVmcs<'vmx>, info: &GuestInfo) -> Resu
 
     // MSRs
     unsafe {
-        fields::HostState64::Ia32Efer.vmwrite(info.efer)?;
+        VmcsField::HostIa32Efer.vmwrite(info.efer as usize)?;
+        VmcsField::HostIa32Pat.vmwrite(MSR_IA32_CR_PAT_DEFAULT)?;
     }
 
     // Control registers
@@ -228,8 +272,56 @@ fn save_host_state<'vmx>(_vmcs: &mut ActiveVmcs<'vmx>, info: &GuestInfo) -> Resu
         asm!("mov {}, cr0", out(reg) cr0, options(nomem, nostack, preserves_flags));
         asm!("mov {}, cr3", out(reg) cr3, options(nomem, nostack, preserves_flags));
         asm!("mov {}, cr4", out(reg) cr4, options(nomem, nostack, preserves_flags));
-        fields::HostStateNat::Cr0.vmwrite(cr0)?;
-        fields::HostStateNat::Cr3.vmwrite(cr3)?;
-        fields::HostStateNat::Cr4.vmwrite(cr4)
+        VmcsField::HostCr0.vmwrite(cr0)?;
+        VmcsField::HostCr3.vmwrite(cr3)?;
+        VmcsField::HostCr4.vmwrite(cr4)
+    }
+}
+
+/// Use this to dump the state.
+/// TODO: make this whole thing cleaner. We have duplicated code.
+pub fn dump_host_state<'vmx>(
+    _vmcs: &mut ActiveVmcs<'vmx>,
+    values: &mut [usize; 13],
+) -> Result<(), VmxError> {
+    // NOTE: See section 24.5 of volume 3C.
+    unsafe {
+        values[0] = VmcsField::HostCsSelector.vmread()?;
+        values[1] = VmcsField::HostDsSelector.vmread()?;
+        values[2] = VmcsField::HostEsSelector.vmread()?;
+        values[3] = VmcsField::HostFsSelector.vmread()?;
+        values[4] = VmcsField::HostGsSelector.vmread()?;
+        values[5] = VmcsField::HostSsSelector.vmread()?;
+        values[6] = VmcsField::HostTrSelector.vmread()?;
+        values[7] = VmcsField::HostIdtrBase.vmread()?;
+        values[8] = VmcsField::HostGdtrBase.vmread()?;
+        values[9] = VmcsField::HostIa32Efer.vmread()?;
+        values[10] = VmcsField::HostCr0.vmread()?;
+        values[11] = VmcsField::HostCr3.vmread()?;
+        values[12] = VmcsField::HostCr4.vmread()?;
+    }
+    Ok(())
+}
+
+/// Saves the host state (control registers, segments...), so that they are restored on VM Exit.
+pub fn load_host_state<'vmx>(
+    _vmcs: &mut ActiveVmcs<'vmx>,
+    values: &mut [usize; 13],
+) -> Result<(), VmxError> {
+    // NOTE: See section 24.5 of volume 3C.
+    unsafe {
+        VmcsField::HostCsSelector.vmwrite(values[0])?;
+        VmcsField::HostDsSelector.vmwrite(values[1])?;
+        VmcsField::HostEsSelector.vmwrite(values[2])?;
+        VmcsField::HostFsSelector.vmwrite(values[3])?;
+        VmcsField::HostGsSelector.vmwrite(values[4])?;
+        VmcsField::HostSsSelector.vmwrite(values[5])?;
+        VmcsField::HostTrSelector.vmwrite(values[6])?;
+        VmcsField::HostIdtrBase.vmwrite(values[7])?;
+        VmcsField::HostGdtrBase.vmwrite(values[8])?;
+        VmcsField::HostIa32Efer.vmwrite(values[9])?;
+        VmcsField::HostCr0.vmwrite(values[10])?;
+        VmcsField::HostCr3.vmwrite(values[11])?;
+        VmcsField::HostCr4.vmwrite(values[12])
     }
 }

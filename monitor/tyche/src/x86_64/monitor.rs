@@ -16,11 +16,14 @@ use spin::{Mutex, MutexGuard};
 use stage_two_abi::Manifest;
 use utils::{GuestPhysAddr, HostPhysAddr, HostVirtAddr};
 use vmx::bitmaps::{EptEntryFlags, ExceptionBitmap};
-use vmx::errors::Trapnr;
-use vmx::msr::{IA32_LSTAR, IA32_STAR};
-use vmx::{ActiveVmcs, ControlRegister, Register, VmExitInterrupt, REGFILE_SIZE};
+use vmx::fields::VmcsField;
+use vmx::{ActiveVmcs, VmExitInterrupt};
 use vtd::Iommu;
 
+use super::context::{
+    Cache, Context16x86, Context32x86, Context64x86, ContextGpx86, ContextNatx86, Contextx86,
+    DirtyRegGroups,
+};
 use super::cpuid;
 use super::guest::VmxState;
 use super::init::NB_BOOTED_CORES;
@@ -34,7 +37,7 @@ static IO_DOMAIN: Mutex<Option<LocalCapa>> = Mutex::new(None);
 static INITIAL_DOMAIN: Mutex<Option<Handle<Domain>>> = Mutex::new(None);
 static DOMAINS: [Mutex<DomainData>; NB_DOMAINS] = [EMPTY_DOMAIN; NB_DOMAINS];
 static CORE_UPDATES: [Mutex<Buffer<CoreUpdate>>; NB_CORES] = [EMPTY_UPDATE_BUFFER; NB_CORES];
-static CONTEXTS: [[Mutex<ContextData>; NB_CORES]; NB_DOMAINS] = [EMPTY_CONTEXT_ARRAY; NB_DOMAINS];
+static CONTEXTS: [[Mutex<Contextx86>; NB_CORES]; NB_DOMAINS] = [EMPTY_CONTEXT_ARRAY; NB_DOMAINS];
 static RC_VMCS: Mutex<RCFramePool> =
     Mutex::new(GenArena::new([EMPTY_RCFRAME; { NB_DOMAINS * NB_CORES }]));
 const BARRIER: Option<Barrier> = None;
@@ -46,58 +49,6 @@ pub struct DomainData {
     ept: Option<HostPhysAddr>,
     ept_old: Option<HostPhysAddr>,
     iopt: Option<HostPhysAddr>,
-}
-
-pub struct ContextData {
-    pub cr3: usize,
-    pub rip: usize,
-    pub rsp: usize,
-    // General-purpose registers.
-    pub regs: [u64; REGFILE_SIZE],
-    // The MSR(s?) we need to save and restore.
-    pub star: u64,
-    pub lstar: u64,
-    /// Vcpu for this core.
-    pub vmcs: Handle<RCFrame>,
-}
-
-impl ContextData {
-    pub fn save_partial(&mut self, vcpu: &ActiveVmcs<'static>) {
-        self.cr3 = vcpu.get_cr(ControlRegister::Cr3);
-        self.rip = vcpu.get(Register::Rip) as usize;
-        self.rsp = vcpu.get(Register::Rsp) as usize;
-    }
-
-    pub fn save(&mut self, vcpu: &mut ActiveVmcs<'static>) {
-        self.save_partial(vcpu);
-        vcpu.dump_regs(&mut self.regs);
-        self.lstar = unsafe { IA32_LSTAR.read() };
-        self.star = unsafe { IA32_STAR.read() };
-        vcpu.flush();
-    }
-
-    pub fn restore_partial(&self, vcpu: &mut ActiveVmcs<'static>) {
-        log::trace!(
-            "Switching info cr3 : {:#x}, rip : {:#x}, rsp : {:#x}",
-            self.cr3,
-            self.rip as u64,
-            self.rsp as u64
-        );
-        vcpu.set_cr(ControlRegister::Cr3, self.cr3);
-        vcpu.set(Register::Rip, self.rip as u64);
-        vcpu.set(Register::Rsp, self.rsp as u64);
-    }
-
-    pub fn restore(&self, vcpu: &mut ActiveVmcs<'static>) {
-        let locked = RC_VMCS.lock();
-        let rc_frame = locked.get(self.vmcs).unwrap();
-        vcpu.load_regs(&self.regs);
-        unsafe { vmx::msr::Msr::new(IA32_LSTAR.address()).write(self.lstar) };
-        unsafe { vmx::msr::Msr::new(IA32_STAR.address()).write(self.star) };
-        vcpu.switch_frame(rc_frame.frame).unwrap();
-        // Restore partial must be called AFTER we set a valid frame.
-        self.restore_partial(vcpu);
-    }
 }
 
 #[repr(u64)]
@@ -124,16 +75,22 @@ const EMPTY_DOMAIN: Mutex<DomainData> = Mutex::new(DomainData {
     iopt: None,
 });
 const EMPTY_UPDATE_BUFFER: Mutex<Buffer<CoreUpdate>> = Mutex::new(Buffer::new());
-const EMPTY_CONTEXT: Mutex<ContextData> = Mutex::new(ContextData {
-    cr3: usize::max_value(),
-    rip: usize::max_value(),
-    rsp: usize::max_value(),
-    regs: [0; REGFILE_SIZE],
-    lstar: u64::max_value(),
-    star: u64::max_value(),
+const EMPTY_CONTEXT: Mutex<Contextx86> = Mutex::new(Contextx86 {
+    dirty: Cache::<{ DirtyRegGroups::size() }> { bitmap: 0 },
+    vmcs_16: [0; Context16x86::size()],
+    dirty_16: Cache::<{ Context16x86::size() }> { bitmap: 0 },
+    vmcs_32: [0; Context32x86::size()],
+    dirty_32: Cache::<{ Context32x86::size() }> { bitmap: 0 },
+    vmcs_64: [0; Context64x86::size()],
+    dirty_64: Cache::<{ Context64x86::size() }> { bitmap: 0 },
+    vmcs_nat: [0; ContextNatx86::size()],
+    dirty_nat: Cache::<{ ContextNatx86::size() }> { bitmap: 0 },
+    vmcs_gp: [0; ContextGpx86::size()],
+    dirty_gp: Cache::<{ ContextGpx86::size() }> { bitmap: 0 },
+    interrupted: false,
     vmcs: Handle::<RCFrame>::new_invalid(),
 });
-const EMPTY_CONTEXT_ARRAY: [Mutex<ContextData>; NB_CORES] = [EMPTY_CONTEXT; NB_CORES];
+const EMPTY_CONTEXT_ARRAY: [Mutex<Contextx86>; NB_CORES] = [EMPTY_CONTEXT; NB_CORES];
 static IOMMU: Mutex<Iommu> =
     Mutex::new(unsafe { Iommu::new(HostVirtAddr::new(usize::max_value())) });
 
@@ -199,7 +156,7 @@ fn get_domain(domain: Handle<Domain>) -> MutexGuard<'static, DomainData> {
     DOMAINS[domain.idx()].lock()
 }
 
-fn get_context(domain: Handle<Domain>, core: usize) -> MutexGuard<'static, ContextData> {
+pub fn get_context(domain: Handle<Domain>, core: usize) -> MutexGuard<'static, Contextx86> {
     CONTEXTS[domain.idx()][core].lock()
 }
 
@@ -310,9 +267,15 @@ pub fn do_set_entry(
         log::error!("Set the switch type first!");
         return Err(CapaError::InvalidOperation);
     }
-    context.cr3 = cr3;
-    context.rip = rip;
-    context.rsp = rsp;
+    context
+        .set(VmcsField::GuestCr3, cr3, None)
+        .expect("This will go away");
+    context
+        .set(VmcsField::GuestRip, rip, None)
+        .expect("This will go away");
+    context
+        .set(VmcsField::GuestRsp, rsp, None)
+        .expect("This will go away");
     Ok(())
 }
 
@@ -618,31 +581,33 @@ pub fn apply_core_updates(
             } => {
                 log::trace!("Domain Switch on core {}", core_id);
 
-                let current_ctx = get_context(*current_domain, core);
-                let next_ctx = get_context(domain, core);
+                let mut current_ctx = get_context(*current_domain, core);
+                let mut next_ctx = get_context(domain, core);
                 let next_domain = get_domain(domain);
-                switch_domain(vcpu, current_ctx, next_ctx, next_domain)
-                    .expect("Failed to perform the switch");
-
-                // Set switch return values
-                vcpu.set(Register::Rax, 0);
-                vcpu.set(Register::Rdi, return_capa.as_u64());
-
+                switch_domain(
+                    vcpu,
+                    &mut current_ctx,
+                    &mut next_ctx,
+                    next_domain,
+                    return_capa,
+                )
+                .expect("Failed to perform the switch");
                 // Update the current domain and context handle
                 *current_domain = domain;
             }
             CoreUpdate::Trap {
-                manager,
+                manager: _manager,
                 trap,
-                info,
+                info: _info,
             } => {
                 log::trace!("Trap {} on core {}", trap, core_id);
                 log::debug!(
                     "Exception Bitmap is {:b}",
                     vcpu.get_exception_bitmap().expect("Failed to read bitmpap")
                 );
+                todo!("Update this code path.");
 
-                let current_ctx = get_context(*current_domain, core);
+                /*let current_ctx = get_context(*current_domain, core);
                 let next_ctx = get_context(manager, core);
                 let next_domain = get_domain(manager);
                 switch_domain(vcpu, current_ctx, next_ctx, next_domain)
@@ -669,7 +634,7 @@ pub fn apply_core_updates(
                 //vcpu.set(Register::Rax, trap);
 
                 // Update the current domain
-                *current_domain = manager;
+                *current_domain = manager;*/
             }
             CoreUpdate::UpdateTrap { bitmap } => {
                 log::trace!("Updating trap bitmap on core {} to {:b}", core_id, bitmap);
@@ -687,9 +652,10 @@ pub fn apply_core_updates(
 
 fn switch_domain(
     vcpu: &mut ActiveVmcs<'static>,
-    mut current_ctx: MutexGuard<ContextData>,
-    next_ctx: MutexGuard<ContextData>,
+    current_ctx: &mut MutexGuard<Contextx86>,
+    next_ctx: &mut MutexGuard<Contextx86>,
     next_domain: MutexGuard<DomainData>,
+    return_capa: LocalCapa,
 ) -> Result<(), CapaError> {
     // Safety check that both contexts have a valid vmcs.
     if current_ctx.vmcs.is_invalid() || next_ctx.vmcs.is_invalid() {
@@ -700,12 +666,39 @@ fn switch_domain(
         );
         return Err(CapaError::InvalidSwitch);
     }
-    if current_ctx.vmcs != next_ctx.vmcs {
-        current_ctx.save(vcpu);
-        next_ctx.restore(vcpu);
+
+    // We have different cases:
+    // 1. current(interrupted) -- interrupt --> next.
+    // 2. current -- resume interrupted --> next(interrupted)
+    // 3. current -- synchronous --> next
+    if current_ctx.interrupted && next_ctx.interrupted {
+        panic!("Two domains should never be both interrupted in a switch.");
+    }
+    // Case 1: copy the interrupted state.
+    if current_ctx.interrupted {
+        next_ctx
+            .copy_interrupt_frame(current_ctx, return_capa.as_usize(), vcpu)
+            .unwrap();
+    } else if next_ctx.interrupted {
+        // Case 2: do not put the return capa.
+        next_ctx.interrupted = false;
     } else {
-        current_ctx.save_partial(vcpu);
-        next_ctx.restore_partial(vcpu);
+        // Case 3: synchronous call.
+        next_ctx.set(VmcsField::GuestRax, 0, None).unwrap();
+        next_ctx
+            .set(VmcsField::GuestRdi, return_capa.as_usize(), None)
+            .unwrap();
+    }
+
+    // Now the logic for shared vs. private vmcs.
+    if current_ctx.vmcs != next_ctx.vmcs {
+        current_ctx.load(vcpu);
+        next_ctx.switch_flush(&RC_VMCS, vcpu);
+    } else {
+        // TODO: This case is annoying.
+        current_ctx.save_shared(vcpu).unwrap();
+        // The previous values should have been marked as dirty.
+        next_ctx.flush(vcpu);
     }
 
     vcpu.set_ept_ptr(HostPhysAddr::new(

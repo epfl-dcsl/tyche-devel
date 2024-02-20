@@ -7,8 +7,8 @@ use core::mem;
 
 use super::bitmaps::{EntryControls, ExitControls, PinbasedControls};
 use super::errors::{VmxError, VmxFieldError};
-use super::fields::traits::*;
-use super::{fields, msr};
+use super::msr;
+use crate::fields::VmcsField;
 
 // ———————————————————————— Main Checking Functions ————————————————————————— //
 
@@ -27,9 +27,9 @@ pub fn check() -> Result<(), VmxError> {
 /// Performs some of the checks on execution control fields (section 26.2.1).
 fn check_exec_ctrl_fields() -> Result<(), VmxError> {
     // TODO: check ctrls against VMX capabilities
-    let pin_ctrls = unsafe { fields::Ctrl32::PinBasedExecCtrls.vmread()? };
-    let exit_ctrls = unsafe { fields::Ctrl32::VmExitCtrls.vmread()? };
-    let entry_ctrls = unsafe { fields::Ctrl32::VmEntryCtrls.vmread()? };
+    let pin_ctrls = unsafe { VmcsField::PinBasedVmExecControl.vmread()? } as u32;
+    let exit_ctrls = unsafe { VmcsField::VmExitControls.vmread()? } as u32;
+    let entry_ctrls = unsafe { VmcsField::VmEntryControls.vmread()? } as u32;
 
     let pin_ctrls = PinbasedControls::from_bits_truncate(pin_ctrls);
     let exit_ctrls = ExitControls::from_bits_truncate(exit_ctrls);
@@ -43,9 +43,9 @@ fn check_exec_ctrl_fields() -> Result<(), VmxError> {
             return Err(VmxError::Disallowed1(VmxFieldError::ExitControls, 22));
         }
     }
-    let msr_store_count = unsafe { fields::Ctrl32::VmExitMsrStoreCount.vmread()? };
+    let msr_store_count = unsafe { VmcsField::VmExitMsrStoreCount.vmread()? } as u32;
     if msr_store_count != 0 {
-        let msr_store_addr = unsafe { fields::Ctrl64::VmExitMsrStoreAddr.vmread()? };
+        let msr_store_addr = unsafe { VmcsField::VmExitMsrStoreAddr.vmread()? } as u64;
         if msr_store_addr & 0b1111 != 0 {
             return Err(VmxError::Disallowed1(
                 VmxFieldError::VmExitMsrStoreAddr,
@@ -53,9 +53,9 @@ fn check_exec_ctrl_fields() -> Result<(), VmxError> {
             ));
         }
     }
-    let msr_load_count = unsafe { fields::Ctrl32::VmExitMsrLoadCount.vmread()? };
+    let msr_load_count = unsafe { VmcsField::VmExitMsrLoadCount.vmread()? } as u32;
     if msr_load_count != 0 {
-        let msr_load_addr = unsafe { fields::Ctrl64::VmExitMsrLoadAddr.vmread()? };
+        let msr_load_addr = unsafe { VmcsField::VmExitMsrLoadAddr.vmread()? } as u64;
         if msr_load_addr & 0b1111 != 0 {
             return Err(VmxError::Disallowed1(
                 VmxFieldError::VmExitMsrLoadAddr,
@@ -65,7 +65,7 @@ fn check_exec_ctrl_fields() -> Result<(), VmxError> {
     }
 
     // VM-Entry Control Fields, section 26.2.1.3
-    let entry_int_info = unsafe { fields::Ctrl32::VmEntryIntInfoField.vmread()? };
+    let entry_int_info = unsafe { VmcsField::VmEntryIntrInfoField.vmread()? } as u32;
     if entry_int_info & (1 << 31) != 0 {
         // We only check reserved bits for now
         let reserved_bits = ((1 << 19) - 1) << 12;
@@ -82,9 +82,9 @@ fn check_exec_ctrl_fields() -> Result<(), VmxError> {
             ));
         }
     }
-    let msr_load_count = unsafe { fields::Ctrl32::VmEntryMsrLoadCount.vmread()? };
+    let msr_load_count = unsafe { VmcsField::VmEntryMsrLoadCount.vmread()? } as u32;
     if msr_load_count != 0 {
-        let msr_load_addr = unsafe { fields::Ctrl64::VmEntryMsrLoadAddr.vmread()? };
+        let msr_load_addr = unsafe { VmcsField::VmEntryMsrLoadAddr.vmread()? } as u32;
         if msr_load_addr & 0b1111 != 0 {
             return Err(VmxError::Disallowed1(
                 VmxFieldError::VmEntryMsrLoadAddr,
@@ -104,8 +104,8 @@ fn check_exec_ctrl_fields() -> Result<(), VmxError> {
 /// Performs some of the checks on host state fields (section 26.2.2).
 fn check_host_state() -> Result<(), VmxError> {
     // Check on Host Control Registers and MSRs (section 26.2.2)
-    let host_cr0 = unsafe { fields::HostStateNat::Cr0.vmread()? } as usize;
-    let host_cr4 = unsafe { fields::HostStateNat::Cr4.vmread()? } as usize;
+    let host_cr0 = unsafe { VmcsField::HostCr0.vmread()? };
+    let host_cr4 = unsafe { VmcsField::HostCr4.vmread()? };
     validate_cr0(host_cr0).map_err(|err| err.set_field(VmxFieldError::HostCr0))?;
     validate_cr4(host_cr4).map_err(|err| err.set_field(VmxFieldError::HostCr4))?;
 
@@ -117,7 +117,7 @@ fn check_host_state() -> Result<(), VmxError> {
         }
     }
 
-    let exit_ctrls = unsafe { fields::Ctrl32::VmExitCtrls.vmread()? };
+    let exit_ctrls = unsafe { VmcsField::VmExitControls.vmread()? } as u32;
     let exit_ctrls = ExitControls::from_bits_truncate(exit_ctrls);
     if exit_ctrls.contains(ExitControls::LOAD_IA32_PERF_GLOBAL_CTRL) {
         // See section 18.2.2 (Performance Monitoring)
@@ -151,13 +151,13 @@ fn check_host_state() -> Result<(), VmxError> {
     }
 
     // Checks on Host Segment and Descriptor-Table Registers
-    let cs = unsafe { fields::HostState16::CsSelector.vmread()? };
-    let ds = unsafe { fields::HostState16::DsSelector.vmread()? };
-    let es = unsafe { fields::HostState16::EsSelector.vmread()? };
-    let fs = unsafe { fields::HostState16::FsSelector.vmread()? };
-    let gs = unsafe { fields::HostState16::GsSelector.vmread()? };
-    let ss = unsafe { fields::HostState16::SsSelector.vmread()? };
-    let tr = unsafe { fields::HostState16::TrSelector.vmread()? };
+    let cs = unsafe { VmcsField::HostCsSelector.vmread()? } as u16;
+    let ds = unsafe { VmcsField::HostDsSelector.vmread()? } as u16;
+    let es = unsafe { VmcsField::HostEsSelector.vmread()? } as u16;
+    let fs = unsafe { VmcsField::HostFsSelector.vmread()? } as u16;
+    let gs = unsafe { VmcsField::HostGsSelector.vmread()? } as u16;
+    let ss = unsafe { VmcsField::HostSsSelector.vmread()? } as u16;
+    let tr = unsafe { VmcsField::HostTrSelector.vmread()? } as u16;
     validate_host_selector(cs).map_err(|err| err.set_field(VmxFieldError::HostCsSelector))?;
     validate_host_selector(ds).map_err(|err| err.set_field(VmxFieldError::HostDsSelector))?;
     validate_host_selector(es).map_err(|err| err.set_field(VmxFieldError::HostEsSelector))?;
@@ -178,9 +178,9 @@ fn check_host_state() -> Result<(), VmxError> {
 
 /// Performs some of the checks on guest state fields (section 26.2.3).
 fn check_guest_state() -> Result<(), VmxError> {
-    let guest_cr0 = unsafe { fields::GuestStateNat::Cr0.vmread()? } as usize;
+    let guest_cr0 = unsafe { VmcsField::GuestCr0.vmread()? } as usize;
     validate_cr0(guest_cr0).map_err(|err| err.set_field(VmxFieldError::GuestCr0))?;
-    let guest_cr4 = unsafe { fields::GuestStateNat::Cr4.vmread()? } as usize;
+    let guest_cr4 = unsafe { VmcsField::GuestCr4.vmread()? } as usize;
     validate_cr4(guest_cr4).map_err(|err| err.set_field(VmxFieldError::GuestCr4))?;
 
     // If CR0.PG == 1, then CR0.PE must be 1
@@ -190,7 +190,7 @@ fn check_guest_state() -> Result<(), VmxError> {
         }
     }
 
-    let ctrls = unsafe { fields::Ctrl32::VmEntryCtrls.vmread()? };
+    let ctrls = unsafe { VmcsField::VmEntryControls.vmread()? } as u32;
     let entry_cntrls = EntryControls::from_bits_truncate(ctrls);
     if entry_cntrls.contains(EntryControls::IA32E_MODE_GUEST) {
         if guest_cr0 & (1 << 31) == 0 {
@@ -205,9 +205,9 @@ fn check_guest_state() -> Result<(), VmxError> {
         }
     }
 
-    let tr = unsafe { fields::GuestState16::TrSelector.vmread()? };
-    let ss = unsafe { fields::GuestState16::SsSelector.vmread()? };
-    let cs = unsafe { fields::GuestState16::CsSelector.vmread()? };
+    let tr = unsafe { VmcsField::GuestTrSelector.vmread()? } as u16;
+    let ss = unsafe { VmcsField::GuestSsSelector.vmread()? } as u16;
+    let cs = unsafe { VmcsField::GuestCsSelector.vmread()? } as u16;
     if tr & (1 << 2) != 0 {
         return Err(VmxError::Disallowed1(VmxFieldError::GuestTrSelector, 2));
     }
@@ -224,18 +224,18 @@ fn check_guest_state() -> Result<(), VmxError> {
         ));
     }
 
-    let cs_ar = unsafe { fields::GuestState32::CsAccessRights.vmread()? };
-    let ss_ar = unsafe { fields::GuestState32::SsAccessRights.vmread()? };
-    let ds_ar = unsafe { fields::GuestState32::DsAccessRights.vmread()? };
-    let es_ar = unsafe { fields::GuestState32::EsAccessRights.vmread()? };
-    let fs_ar = unsafe { fields::GuestState32::FsAccessRights.vmread()? };
-    let gs_ar = unsafe { fields::GuestState32::GsAccessRights.vmread()? };
-    let tr_ar = unsafe { fields::GuestState32::TrAccessRights.vmread()? };
-    let ldtr_ar = unsafe { fields::GuestState32::LdtrAccessRights.vmread()? };
-    let tr_limit = unsafe { fields::GuestState32::TrLimit.vmread()? };
-    let gdtr_limit = unsafe { fields::GuestState32::GdtrLimit.vmread()? };
-    let idtr_limit = unsafe { fields::GuestState32::IdtrLimit.vmread()? };
-    let rflags = unsafe { fields::GuestStateNat::Rflags.vmread()? };
+    let cs_ar = unsafe { VmcsField::GuestCsArBytes.vmread()? } as u32;
+    let ss_ar = unsafe { VmcsField::GuestSsArBytes.vmread()? } as u32;
+    let ds_ar = unsafe { VmcsField::GuestDsArBytes.vmread()? } as u32;
+    let es_ar = unsafe { VmcsField::GuestEsArBytes.vmread()? } as u32;
+    let fs_ar = unsafe { VmcsField::GuestFsArBytes.vmread()? } as u32;
+    let gs_ar = unsafe { VmcsField::GuestGsArBytes.vmread()? } as u32;
+    let tr_ar = unsafe { VmcsField::GuestTrArBytes.vmread()? } as u32;
+    let ldtr_ar = unsafe { VmcsField::GuestLdtrArBytes.vmread()? } as u32;
+    let tr_limit = unsafe { VmcsField::GuestTrLimit.vmread()? } as u32;
+    let gdtr_limit = unsafe { VmcsField::GuestGdtrLimit.vmread()? } as u32;
+    let idtr_limit = unsafe { VmcsField::GuestIdtrLimit.vmread()? } as u32;
+    let rflags = unsafe { VmcsField::GuestRflags.vmread()? };
 
     let cs_type = cs_ar & 0b1111;
     let ss_type = ss_ar & 0b1111;

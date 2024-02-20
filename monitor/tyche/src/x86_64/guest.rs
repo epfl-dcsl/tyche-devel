@@ -5,10 +5,10 @@ use core::arch::asm;
 use capa_engine::{Bitmaps, Domain, Handle, LocalCapa, NextCapaToken};
 use vmx::bitmaps::exit_qualification;
 use vmx::errors::Trapnr;
-use vmx::{
-    ActiveVmcs, ControlRegister, InterruptionType, Register, VmExitInterrupt, VmxExitReason, Vmxon,
-};
+use vmx::fields::VmcsField;
+use vmx::{ActiveVmcs, InterruptionType, VmExitInterrupt, VmxExitReason, Vmxon};
 
+use super::cpuid_filter::{filter_mpk, filter_tpause};
 use super::{cpuid, monitor};
 use crate::calls;
 use crate::error::TycheError;
@@ -30,7 +30,10 @@ pub struct VmxState {
 
 pub fn main_loop(mut vmx_state: VmxState, mut domain: Handle<Domain>) {
     let core_id = cpuid();
-    let mut result = unsafe { vmx_state.vcpu.run() };
+    let mut result = unsafe {
+        let mut context = monitor::get_context(domain, core_id);
+        vmx_state.vcpu.run(&mut context.vmcs_gp)
+    };
     loop {
         let exit_reason = match result {
             Ok(exit_reason) => {
@@ -51,7 +54,10 @@ pub fn main_loop(mut vmx_state: VmxState, mut domain: Handle<Domain>) {
 
         match exit_reason {
             HandlerResult::Resume => {
-                result = unsafe { vmx_state.vcpu.run() };
+                result = unsafe {
+                    let mut context = monitor::get_context(domain, core_id);
+                    vmx_state.vcpu.run(&mut context.vmcs_gp)
+                };
             }
             _ => {
                 log::info!("Exiting guest: {:?}", exit_reason);
@@ -66,69 +72,49 @@ fn handle_exit(
     reason: vmx::VmxExitReason,
     domain: &mut Handle<Domain>,
 ) -> Result<HandlerResult, TycheError> {
-    //let vcpu = &mut vmx_state.vcpu;
-    let dump = |vcpu: &mut ActiveVmcs| {
-        let rip = vcpu.get(Register::Rip);
-        let rax = vcpu.get(Register::Rax);
-        let rcx = vcpu.get(Register::Rcx);
-        let rbp = vcpu.get(Register::Rbp);
-        log::info!(
-            "VM Exit: {:?} - rip: 0x{:x} - rbp: 0x{:x} - rax: 0x{:x} - rcx: 0x{:x}",
-            reason,
-            rip,
-            rbp,
-            rax,
-            rcx
-        );
-    };
-
     match reason {
         VmxExitReason::Vmcall => {
-            let vmcall = vs.vcpu.get(Register::Rax) as usize;
-            let arg_1 = vs.vcpu.get(Register::Rdi) as usize;
-            let arg_2 = vs.vcpu.get(Register::Rsi) as usize;
-            let arg_3 = vs.vcpu.get(Register::Rdx) as usize;
-            let arg_4 = vs.vcpu.get(Register::Rcx) as usize;
-            let arg_5 = vs.vcpu.get(Register::R8) as usize;
-            let arg_6 = vs.vcpu.get(Register::R9) as usize;
+            let (vmcall, arg_1, arg_2, arg_3, arg_4, arg_5, arg_6) = {
+                let mut context = monitor::get_context(*domain, cpuid());
+                let vmcall = context.get(VmcsField::GuestRax, None)?;
+                let arg_1 = context.get(VmcsField::GuestRdi, None)?;
+                let arg_2 = context.get(VmcsField::GuestRsi, None)?;
+                let arg_3 = context.get(VmcsField::GuestRdx, None)?;
+                let arg_4 = context.get(VmcsField::GuestRcx, None)?;
+                let arg_5 = context.get(VmcsField::GuestR8, None)?;
+                let arg_6 = context.get(VmcsField::GuestR9, None)?;
+                (vmcall, arg_1, arg_2, arg_3, arg_4, arg_5, arg_6)
+            };
             match vmcall {
                 calls::CREATE_DOMAIN => {
                     log::trace!("Create Domain");
                     let capa = monitor::do_create_domain(*domain).expect("TODO");
-                    vs.vcpu.set(Register::Rdi, capa.as_u64());
-                    vs.vcpu.set(Register::Rax, 0);
+                    let mut context = monitor::get_context(*domain, cpuid());
+                    context.set(VmcsField::GuestRdi, capa.as_usize(), None)?;
+                    context.set(VmcsField::GuestRax, 0, None)?;
                     vs.vcpu.next_instruction()?;
                     Ok(HandlerResult::Resume)
                 }
                 calls::CONFIGURE => {
                     log::trace!("Configure");
-                    if let Ok(bitmap) = Bitmaps::from_usize(arg_1) {
+                    let res = if let Ok(bitmap) = Bitmaps::from_usize(arg_1) {
                         match monitor::do_set_config(
                             *domain,
                             LocalCapa::new(arg_2),
                             bitmap,
                             arg_3 as u64,
                         ) {
-                            Ok(_) => {
-                                // Check if we need to initialize context.
-                                if bitmap == Bitmaps::SWITCH {
-                                    monitor::do_init_child_contexts(
-                                        *domain,
-                                        LocalCapa::new(arg_2),
-                                        &mut vs.vcpu,
-                                    )
-                                }
-                                vs.vcpu.set(Register::Rax, 0);
-                            }
+                            Ok(_) => 0,
                             Err(e) => {
                                 log::error!("Configuration error: {:?}", e);
-                                vs.vcpu.set(Register::Rax, 1);
+                                1
                             }
                         }
                     } else {
                         log::error!("Invalid configuration target");
-                        vs.vcpu.set(Register::Rax, 1);
-                    }
+                        1
+                    };
+                    monitor::get_context(*domain, cpuid()).set(VmcsField::GuestRax, res, None)?;
                     vs.vcpu.next_instruction()?;
                     Ok(HandlerResult::Resume)
                 }
@@ -140,6 +126,7 @@ fn handle_exit(
                         arg_4,
                         arg_5
                     );
+                    let mut context = monitor::get_context(*domain, cpuid());
                     match monitor::do_set_entry(
                         *domain,
                         LocalCapa::new(arg_1),
@@ -148,10 +135,10 @@ fn handle_exit(
                         arg_4, // rip
                         arg_5, // rsp
                     ) {
-                        Ok(()) => vs.vcpu.set(Register::Rax, 0),
+                        Ok(()) => context.set(VmcsField::GuestRax, 0, None)?,
                         Err(e) => {
                             log::error!("Unable to set entry: {:?}", e);
-                            vs.vcpu.set(Register::Rax, 1);
+                            context.set(VmcsField::GuestRax, 1, None)?;
                         }
                     }
                     vs.vcpu.next_instruction()?;
@@ -160,8 +147,9 @@ fn handle_exit(
                 calls::SEAL_DOMAIN => {
                     log::trace!("Seal Domain");
                     let capa = monitor::do_seal(*domain, LocalCapa::new(arg_1)).expect("TODO");
-                    vs.vcpu.set(Register::Rdi, capa.as_u64());
-                    vs.vcpu.set(Register::Rax, 0);
+                    let mut context = monitor::get_context(*domain, cpuid());
+                    context.set(VmcsField::GuestRdi, capa.as_usize(), None)?;
+                    context.set(VmcsField::GuestRax, 0, None)?;
                     vs.vcpu.next_instruction()?;
                     Ok(HandlerResult::Resume)
                 }
@@ -175,7 +163,8 @@ fn handle_exit(
                     log::trace!("Send");
                     monitor::do_send(*domain, LocalCapa::new(arg_1), LocalCapa::new(arg_2))
                         .expect("TODO");
-                    vs.vcpu.set(Register::Rax, 0);
+                    let mut context = monitor::get_context(*domain, cpuid());
+                    context.set(VmcsField::GuestRax, 0, None)?;
                     vs.vcpu.next_instruction()?;
                     Ok(HandlerResult::Resume)
                 }
@@ -192,24 +181,27 @@ fn handle_exit(
                         (arg_6 << 32) >> 32, // prot2
                     )
                     .expect("TODO");
-                    vs.vcpu.set(Register::Rdi, left.as_u64());
-                    vs.vcpu.set(Register::Rsi, right.as_u64());
-                    vs.vcpu.set(Register::Rax, 0);
+                    let mut context = monitor::get_context(*domain, cpuid());
+                    context.set(VmcsField::GuestRdi, left.as_usize(), None)?;
+                    context.set(VmcsField::GuestRsi, right.as_usize(), None)?;
+                    context.set(VmcsField::GuestRax, 0, None)?;
                     vs.vcpu.next_instruction()?;
                     Ok(HandlerResult::Resume)
                 }
                 calls::REVOKE => {
                     log::trace!("Revoke");
                     monitor::do_revoke(*domain, LocalCapa::new(arg_1)).expect("TODO");
-                    vs.vcpu.set(Register::Rax, 0);
+                    let mut context = monitor::get_context(*domain, cpuid());
+                    context.set(VmcsField::GuestRax, 0, None)?;
                     vs.vcpu.next_instruction()?;
                     Ok(HandlerResult::Resume)
                 }
                 calls::DUPLICATE => {
                     log::trace!("Duplicate");
                     let capa = monitor::do_duplicate(*domain, LocalCapa::new(arg_1)).expect("TODO");
-                    vs.vcpu.set(Register::Rdi, capa.as_u64());
-                    vs.vcpu.set(Register::Rax, 0);
+                    let mut context = monitor::get_context(*domain, cpuid());
+                    context.set(VmcsField::GuestRdi, capa.as_usize(), None)?;
+                    context.set(VmcsField::GuestRax, 0, None)?;
                     vs.vcpu.next_instruction()?;
                     Ok(HandlerResult::Resume)
                 }
@@ -219,136 +211,161 @@ fn handle_exit(
                         monitor::do_enumerate(*domain, NextCapaToken::from_usize(arg_1))
                     {
                         let (v1, v2, v3) = info.serialize();
-                        vs.vcpu.set(Register::Rdi, v1 as u64);
-                        vs.vcpu.set(Register::Rsi, v2 as u64);
-                        vs.vcpu.set(Register::Rdx, v3 as u64);
-                        vs.vcpu.set(Register::Rcx, next.as_u64());
+                        let mut context = monitor::get_context(*domain, cpuid());
+                        context.set(VmcsField::GuestRdi, v1, None)?;
+                        context.set(VmcsField::GuestRsi, v2, None)?;
+                        context.set(VmcsField::GuestRdx, v3 as usize, None)?;
+                        context.set(VmcsField::GuestRcx, next.as_usize(), None)?;
+                        context.set(VmcsField::GuestRax, 0, None)?;
                     } else {
                         // For now, this marks the end
-                        vs.vcpu.set(Register::Rcx, 0);
+                        let mut context = monitor::get_context(*domain, cpuid());
+                        context.set(VmcsField::GuestRcx, 0, None)?;
+                        context.set(VmcsField::GuestRax, 0, None)?;
                     }
-                    vs.vcpu.set(Register::Rax, 0);
                     vs.vcpu.next_instruction()?;
                     Ok(HandlerResult::Resume)
                 }
                 calls::SWITCH => {
                     log::trace!("Switch");
+                    {
+                        //TODO: figure out a way to fix this.
+                        let mut msr = vmx::msr::Msr::new(0xC000_0080);
+                        unsafe {
+                            msr.write(0xd01);
+                        }
+                    }
                     vs.vcpu.next_instruction()?;
                     monitor::do_switch(*domain, LocalCapa::new(arg_1), cpuid()).expect("TODO");
                     Ok(HandlerResult::Resume)
                 }
                 calls::DEBUG => {
                     log::trace!("Debug");
+                    log::info!("Debug called on {} vcpu: {:x?}", domain.idx(), vs.vcpu);
                     monitor::do_debug();
-                    vs.vcpu.set(Register::Rax, 0);
+                    let mut context = monitor::get_context(*domain, cpuid());
+                    context.set(VmcsField::GuestRax, 0, None)?;
                     vs.vcpu.next_instruction()?;
                     Ok(HandlerResult::Resume)
                 }
                 calls::EXIT => {
                     log::info!("MonCall: exit");
-                    dump(&mut vs.vcpu);
+                    log::info!("Vcpu: {:x?}", vs.vcpu);
                     Ok(HandlerResult::Exit)
                 }
                 calls::ENCLAVE_ATTESTATION => {
                     log::trace!("Get attestation!");
                     log::trace!("arg1 {:#x}", arg_1);
                     log::trace!("arg2 {:#x}", arg_2);
+                    let mut context = monitor::get_context(*domain, cpuid());
                     if let Some(report) = monitor::do_domain_attestation(*domain, arg_1, arg_2) {
-                        vs.vcpu.set(Register::Rax, 0 as u64);
+                        context.set(VmcsField::GuestRax, 0, None)?;
                         if arg_2 == 0 {
-                            vs.vcpu.set(
-                                Register::Rdi,
-                                u64::from_le_bytes(
+                            context.set(
+                                VmcsField::GuestRdi,
+                                usize::from_le_bytes(
                                     report.public_key.as_slice()[0..8].try_into().unwrap(),
                                 ),
-                            );
-                            vs.vcpu.set(
-                                Register::Rsi,
-                                u64::from_le_bytes(
+                                None,
+                            )?;
+                            context.set(
+                                VmcsField::GuestRsi,
+                                usize::from_le_bytes(
                                     report.public_key.as_slice()[8..16].try_into().unwrap(),
                                 ),
-                            );
-                            vs.vcpu.set(
-                                Register::Rdx,
-                                u64::from_le_bytes(
+                                None,
+                            )?;
+                            context.set(
+                                VmcsField::GuestRdx,
+                                usize::from_le_bytes(
                                     report.public_key.as_slice()[16..24].try_into().unwrap(),
                                 ),
-                            );
-                            vs.vcpu.set(
-                                Register::Rcx,
-                                u64::from_le_bytes(
+                                None,
+                            )?;
+                            context.set(
+                                VmcsField::GuestRcx,
+                                usize::from_le_bytes(
                                     report.public_key.as_slice()[24..32].try_into().unwrap(),
                                 ),
-                            );
-                            vs.vcpu.set(
-                                Register::R8,
-                                u64::from_le_bytes(
+                                None,
+                            )?;
+                            context.set(
+                                VmcsField::GuestR8,
+                                usize::from_le_bytes(
                                     report.signed_enclave_data.as_slice()[0..8]
                                         .try_into()
                                         .unwrap(),
                                 ),
-                            );
-                            vs.vcpu.set(
-                                Register::R9,
-                                u64::from_le_bytes(
+                                None,
+                            )?;
+                            context.set(
+                                VmcsField::GuestR9,
+                                usize::from_le_bytes(
                                     report.signed_enclave_data.as_slice()[8..16]
                                         .try_into()
                                         .unwrap(),
                                 ),
-                            );
+                                None,
+                            )?;
                         } else if arg_2 == 1 {
-                            vs.vcpu.set(
-                                Register::Rdi,
-                                u64::from_le_bytes(
+                            context.set(
+                                VmcsField::GuestRdi,
+                                usize::from_le_bytes(
                                     report.signed_enclave_data.as_slice()[16..24]
                                         .try_into()
                                         .unwrap(),
                                 ),
-                            );
-                            vs.vcpu.set(
-                                Register::Rsi,
-                                u64::from_le_bytes(
+                                None,
+                            )?;
+                            context.set(
+                                VmcsField::GuestRsi,
+                                usize::from_le_bytes(
                                     report.signed_enclave_data.as_slice()[24..32]
                                         .try_into()
                                         .unwrap(),
                                 ),
-                            );
-                            vs.vcpu.set(
-                                Register::Rdx,
-                                u64::from_le_bytes(
+                                None,
+                            )?;
+                            context.set(
+                                VmcsField::GuestRdx,
+                                usize::from_le_bytes(
                                     report.signed_enclave_data.as_slice()[32..40]
                                         .try_into()
                                         .unwrap(),
                                 ),
-                            );
-                            vs.vcpu.set(
-                                Register::Rcx,
-                                u64::from_le_bytes(
+                                None,
+                            )?;
+                            context.set(
+                                VmcsField::GuestRcx,
+                                usize::from_le_bytes(
                                     report.signed_enclave_data.as_slice()[40..48]
                                         .try_into()
                                         .unwrap(),
                                 ),
-                            );
-                            vs.vcpu.set(
-                                Register::R8,
-                                u64::from_le_bytes(
+                                None,
+                            )?;
+                            context.set(
+                                VmcsField::GuestR8,
+                                usize::from_le_bytes(
                                     report.signed_enclave_data.as_slice()[48..56]
                                         .try_into()
                                         .unwrap(),
                                 ),
-                            );
-                            vs.vcpu.set(
-                                Register::R9,
-                                u64::from_le_bytes(
+                                None,
+                            )?;
+                            context.set(
+                                VmcsField::GuestR9,
+                                usize::from_le_bytes(
                                     report.signed_enclave_data.as_slice()[56..64]
                                         .try_into()
                                         .unwrap(),
                                 ),
-                            );
+                                None,
+                            )?;
                         }
                     } else {
                         log::trace!("Attestation error");
-                        vs.vcpu.set(Register::Rax, 1 as u64);
+                        context.set(VmcsField::GuestRax, 1, None)?;
                     }
                     vs.vcpu.next_instruction()?;
                     Ok(HandlerResult::Resume)
@@ -364,12 +381,13 @@ fn handle_exit(
             Ok(HandlerResult::Resume)
         }
         VmxExitReason::Cpuid => {
-            let input_eax = vs.vcpu.get(Register::Rax);
-            let input_ecx = vs.vcpu.get(Register::Rcx);
-            let eax: u64;
-            let ebx: u64;
-            let ecx: u64;
-            let edx: u64;
+            let mut context = monitor::get_context(*domain, cpuid());
+            let input_eax = context.get(VmcsField::GuestRax, None)?;
+            let input_ecx = context.get(VmcsField::GuestRcx, None)?;
+            let mut eax: usize;
+            let mut ebx: usize;
+            let mut ecx: usize;
+            let mut edx: usize;
 
             unsafe {
                 // Note: LLVM reserves %rbx for its internal use, so we need to use a scratch
@@ -387,24 +405,37 @@ fn handle_exit(
                 )
             }
 
-            vs.vcpu.set(Register::Rax, eax);
-            vs.vcpu.set(Register::Rbx, ebx);
-            vs.vcpu.set(Register::Rcx, ecx);
-            vs.vcpu.set(Register::Rdx, edx);
+            //Apply cpuid filters.
+            filter_tpause(input_eax, input_ecx, &mut eax, &mut ebx, &mut ecx, &mut edx);
+            filter_mpk(input_eax, input_ecx, &mut eax, &mut ebx, &mut ecx, &mut edx);
+
+            context.set(VmcsField::GuestRax, eax as usize, None)?;
+            context.set(VmcsField::GuestRbx, ebx as usize, None)?;
+            context.set(VmcsField::GuestRcx, ecx as usize, None)?;
+            context.set(VmcsField::GuestRdx, edx as usize, None)?;
             vs.vcpu.next_instruction()?;
             Ok(HandlerResult::Resume)
         }
         VmxExitReason::ControlRegisterAccesses => {
+            // Handle some of these only for dom0, the other domain's problems
+            // are for now forwarded to the manager domain.
+            let mut context = monitor::get_context(*domain, cpuid());
             let qualification = vs.vcpu.exit_qualification()?.control_register_accesses();
             match qualification {
                 exit_qualification::ControlRegisterAccesses::MovToCr(cr, reg) => {
-                    if cr != ControlRegister::Cr4 {
-                        todo!("Handle {:?}", cr);
+                    log::info!("MovToCr {:?} into {:?} on domain {:?}", reg, cr, *domain);
+                    if !cr.is_guest_cr() {
+                        log::error!("Invalid register: {:x?}", cr);
+                        panic!("VmExit reason for access to control register is not a control register.");
                     }
-                    let value = vs.vcpu.get(reg) as usize;
-                    vs.vcpu.set_cr4_shadow(value)?;
-                    let real_value = value | (1 << 13); // VMXE
-                    vs.vcpu.set_cr(cr, real_value);
+                    if cr == VmcsField::GuestCr4 {
+                        let value = context.get(reg, Some(&mut vs.vcpu))? as usize;
+                        context.set(VmcsField::Cr4ReadShadow, value, Some(&mut vs.vcpu))?;
+                        let real_value = value | (1 << 13); // VMXE
+                        context.set(cr, real_value, Some(&mut vs.vcpu))?;
+                    } else {
+                        todo!("Handle cr: {:?}", cr);
+                    }
 
                     vs.vcpu.next_instruction()?;
                 }
@@ -445,9 +476,10 @@ fn handle_exit(
             Ok(HandlerResult::Crash)
         }
         VmxExitReason::Xsetbv => {
-            let ecx = vs.vcpu.get(Register::Rcx);
-            let eax = vs.vcpu.get(Register::Rax);
-            let edx = vs.vcpu.get(Register::Rdx);
+            let mut context = monitor::get_context(*domain, cpuid());
+            let ecx = context.get(VmcsField::GuestRcx, None)?;
+            let eax = context.get(VmcsField::GuestRax, None)?;
+            let edx = context.get(VmcsField::GuestRdx, None)?;
 
             let xrc_id = ecx & 0xFFFFFFFF; // Ignore 32 high-order bits
             if xrc_id != 0 {
@@ -468,7 +500,8 @@ fn handle_exit(
             Ok(HandlerResult::Resume)
         }
         VmxExitReason::Wrmsr => {
-            let ecx = vs.vcpu.get(Register::Rcx);
+            let mut context = monitor::get_context(*domain, cpuid());
+            let ecx = context.get(VmcsField::GuestRcx, None)?;
             if ecx >= 0x4B564D00 && ecx <= 0x4B564DFF {
                 // Custom MSR range, used by KVM
                 // See https://docs.kernel.org/virt/kvm/x86/msr.html
@@ -481,14 +514,23 @@ fn handle_exit(
             }
         }
         VmxExitReason::Rdmsr => {
-            let ecx = vs.vcpu.get(Register::Rcx);
-            if ecx == 0xc0011029 {
-                // Reading an AMD specifig register, just ignore it
+            let mut context = monitor::get_context(*domain, cpuid());
+            let ecx = context.get(VmcsField::GuestRcx, None)?;
+            log::trace!("rdmsr");
+            if ecx == 0xc0011029 || (ecx >= 0xc0010200 && ecx <= 0xc001020b) {
+                // Reading an AMD specific register, just ignore it
+                // The other interval seems to be related to pmu...
+                // TODO: figure this out and why it only works on certain hardware.
                 vs.vcpu.next_instruction()?;
                 Ok(HandlerResult::Resume)
             } else {
-                log::error!("Unexpected rdmsr number: {:#x}", ecx);
-                Ok(HandlerResult::Crash)
+                let msr_reg = vmx::msr::Msr::new(ecx as u32);
+                let (low, high) = unsafe { msr_reg.read_raw() };
+                log::trace!("Emulated read of msr {:x} = h:{:x};l:{:x}", ecx, high, low);
+                context.set(VmcsField::GuestRax, low as usize, None)?;
+                context.set(VmcsField::GuestRdx, high as usize, None)?;
+                vs.vcpu.next_instruction()?;
+                Ok(HandlerResult::Resume)
             }
         }
         VmxExitReason::Exception => {

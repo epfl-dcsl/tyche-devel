@@ -3,8 +3,8 @@
 use core::arch::asm;
 
 use stage_two_abi::GuestInfo;
-use vmx::fields::traits::*;
-use vmx::{fields, msr, ActiveVmcs, VmxError};
+use vmx::fields::VmcsField;
+use vmx::{msr, ActiveVmcs, VmxError};
 use x86_64::instructions::tables::{sgdt, sidt};
 use x86_64::registers::model_specific::Efer;
 use x86_64::registers::segmentation;
@@ -45,21 +45,21 @@ pub fn save_host_state<'vmx>(_vmcs: &mut ActiveVmcs<'vmx>) -> Result<(), VmxErro
     }
 
     unsafe {
-        fields::HostState16::CsSelector.vmwrite(cs.0)?;
-        fields::HostState16::DsSelector.vmwrite(ds.0)?;
-        fields::HostState16::EsSelector.vmwrite(es.0)?;
-        fields::HostState16::FsSelector.vmwrite(fs.0)?;
-        fields::HostState16::GsSelector.vmwrite(gs.0)?;
-        fields::HostState16::SsSelector.vmwrite(ss.0)?;
-        fields::HostState16::TrSelector.vmwrite(tr)?;
+        VmcsField::HostCsSelector.vmwrite(cs.0 as usize)?;
+        VmcsField::HostDsSelector.vmwrite(ds.0 as usize)?;
+        VmcsField::HostEsSelector.vmwrite(es.0 as usize)?;
+        VmcsField::HostFsSelector.vmwrite(fs.0 as usize)?;
+        VmcsField::HostGsSelector.vmwrite(gs.0 as usize)?;
+        VmcsField::HostSsSelector.vmwrite(ss.0 as usize)?;
+        VmcsField::HostTrSelector.vmwrite(tr as usize)?;
 
         // NOTE: those might throw an exception depending on the CPU features, let's just
         // ignore them for now.
         // VmcsHostStateNat::FsBase.vmwrite(FS::read_base().as_u64() as usize)?;
         // VmcsHostStateNat::GsBase.vmwrite(GS::read_base().as_u64() as usize)?;
 
-        fields::HostStateNat::IdtrBase.vmwrite(idt.base.as_u64() as usize)?;
-        fields::HostStateNat::GdtrBase.vmwrite(gdt.base.as_u64() as usize)?;
+        VmcsField::HostIdtrBase.vmwrite(idt.base.as_u64() as usize)?;
+        VmcsField::HostGdtrBase.vmwrite(gdt.base.as_u64() as usize)?;
 
         // Save TR base
         let tr_offset = (tr >> 3) as usize;
@@ -67,15 +67,15 @@ pub fn save_host_state<'vmx>(_vmcs: &mut ActiveVmcs<'vmx>) -> Result<(), VmxErro
         let low = gdt[tr_offset];
         let high = gdt[tr_offset + 1];
         let tr_base = get_tr_base(high, low);
-        fields::HostStateNat::TrBase.vmwrite(tr_base as usize)?;
+        VmcsField::HostTrBase.vmwrite(tr_base as usize)?;
     }
 
     // MSRs
     unsafe {
-        fields::HostStateNat::Ia32SysenterEsp.vmwrite(msr::SYSENTER_ESP.read() as usize)?;
-        fields::HostStateNat::Ia32SysenterEip.vmwrite(msr::SYSENTER_EIP.read() as usize)?;
-        fields::HostState32::Ia32SysenterCs.vmwrite(msr::SYSENTER_CS.read() as u32)?;
-        fields::HostState64::Ia32Efer.vmwrite(Efer::read().bits())?;
+        VmcsField::HostIa32SysenterEsp.vmwrite(msr::SYSENTER_ESP.read() as usize)?;
+        VmcsField::HostIa32SysenterEip.vmwrite(msr::SYSENTER_EIP.read() as usize)?;
+        VmcsField::HostIa32SysenterCs.vmwrite(msr::SYSENTER_CS.read() as usize)?;
+        VmcsField::HostIa32Efer.vmwrite(Efer::read().bits() as usize)?;
     }
 
     // Control registers
@@ -86,9 +86,9 @@ pub fn save_host_state<'vmx>(_vmcs: &mut ActiveVmcs<'vmx>) -> Result<(), VmxErro
         asm!("mov {}, cr0", out(reg) cr0, options(nomem, nostack, preserves_flags));
         asm!("mov {}, cr3", out(reg) cr3, options(nomem, nostack, preserves_flags));
         asm!("mov {}, cr4", out(reg) cr4, options(nomem, nostack, preserves_flags));
-        fields::HostStateNat::Cr0.vmwrite(cr0)?;
-        fields::HostStateNat::Cr3.vmwrite(cr3)?;
-        fields::HostStateNat::Cr4.vmwrite(cr4)
+        VmcsField::HostCr0.vmwrite(cr0)?;
+        VmcsField::HostCr3.vmwrite(cr3)?;
+        VmcsField::HostCr4.vmwrite(cr4)
     }
 }
 
