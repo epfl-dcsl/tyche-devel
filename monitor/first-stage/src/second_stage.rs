@@ -12,6 +12,7 @@ use crate::cpu::MAX_CPU_NUM;
 use crate::elf::{Elf64PhdrType, ElfProgram};
 use crate::guests::ManifestInfo;
 use crate::mmu::frames::{MemoryMap, RangeFrameAllocator};
+use crate::mmu::PAGE_SIZE;
 use crate::{cpu, HostPhysAddr, HostVirtAddr};
 
 #[cfg(feature = "second-stage")]
@@ -165,6 +166,18 @@ pub fn load(
             PtFlag::PRESENT,
         );
     }
+
+    // map the default APIC page to 2nd stage
+    // TODO aghosn: do we need to hide this?
+
+    let lapic_phys_address: usize = 0xfee00000;
+    loaded_elf.pt_mapper.map_range(
+        stage2_allocator,
+        HostVirtAddr::new(lapic_phys_address),
+        HostPhysAddr::new(lapic_phys_address),
+        PAGE_SIZE,
+        PtFlag::PRESENT | PtFlag::WRITE | PtFlag::PAGE_WRITE_THROUGH | PtFlag::PAGE_CACHE_DISABLE,
+    );
 
     // If we setup VGA support
     if info.vga_info.is_valid {

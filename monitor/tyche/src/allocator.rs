@@ -57,7 +57,7 @@ impl<const N: usize> FreeListAllocator<N> {
         }
     }
 
-    /// Initializes the allocqtor.
+    /// Initializes the allocator.
     ///
     /// This function must be called before performing any allocation.
     pub fn initialize(&mut self, virt_offset: usize) {

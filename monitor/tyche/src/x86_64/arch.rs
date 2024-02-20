@@ -6,6 +6,8 @@ use core::sync::atomic::{AtomicBool, Ordering};
 
 use capa_engine::config::NB_CORES;
 
+use super::vmx_helper::MSR_IA32_CR_PAT_DEFAULT;
+
 // ———————————————————— Interrupt-related Initialization ———————————————————— //
 
 // BSP calls init to initialize IDT and GDT
@@ -32,6 +34,9 @@ pub fn setup(cpu_id: usize) {
             options(readonly, nostack, preserves_flags),
         };
     }
+    // Setup the PAT default value.
+    let mut ia32_pat = vmx::msr::Msr::new(0x277);
+    unsafe { ia32_pat.write(MSR_IA32_CR_PAT_DEFAULT as u64) }
 }
 
 #[repr(C, packed(2))]
