@@ -26,6 +26,7 @@ qemu = { path = "../../crates/qemu/" }
 [target.'cfg(target_arch = "x86_64")'.dependencies]
 vtd = { path = "../../crates/vtd" }
 vmx = { version = "0.1.0", path = "../../crates/vmx" }
+x2apic= { path = "../../crates/x2apic/" }
 
 [target.'cfg(target_arch = "riscv64")'.dependencies]
 riscv_utils = { path = "../../crates/riscv_utils/" }

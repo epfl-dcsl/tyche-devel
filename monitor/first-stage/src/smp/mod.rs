@@ -3,15 +3,13 @@ use core::arch::global_asm;
 use core::arch::x86_64::_rdtsc;
 use core::sync::atomic::*;
 
-use acpi::platform::interrupt::InterruptModel;
 use acpi::platform::{PlatformInfo, Processor, ProcessorState};
 use mmu::{PtFlag, PtMapper, RangeAllocator};
-use x86::apic::{ApicControl, ApicId};
 use x86_64::instructions::tlb;
 
 use crate::mmu::PAGE_SIZE;
 use crate::vmx::{HostPhysAddr, HostVirtAddr};
-use crate::{apic, cpu, idt, second_stage};
+use crate::{cpu, idt, second_stage};
 
 global_asm!(include_str!("trampoline.S"));
 
@@ -140,22 +138,9 @@ pub unsafe fn boot(
     stage1_allocator: &impl RangeAllocator,
     pt_mapper: &mut PtMapper<HostPhysAddr, HostVirtAddr>,
 ) {
-    let virtoffset = stage1_allocator.get_physical_offset();
-
-    let apic_info = match platform_info.interrupt_model {
-        InterruptModel::Apic(apic) => apic,
-        _ => panic!("unable to retrieve apic informaiton"),
-    };
     let processor_info = platform_info.processor_info.as_ref().unwrap();
     let bsp: Processor = processor_info.boot_processor;
     let ap: &Vec<Processor> = processor_info.application_processors.as_ref();
-
-    // Map the LAPIC's 4k MMIO region to virtual memory
-    apic::allocate(
-        apic_info.local_apic_address as usize + virtoffset.as_usize(),
-        stage1_allocator,
-        pt_mapper,
-    );
 
     // TODO: disable PIC (mask all interrupts)
 
@@ -175,22 +160,19 @@ pub unsafe fn boot(
         } else {
             log::info!("Waking up AP: {:x?}", cpu);
             assert!(CPU_STATUS[cpu.local_apic_id as usize].load(Ordering::SeqCst) == false);
-
             allocate_stack_section(stage1_allocator, pt_mapper);
-            let apic_id = ApicId::XApic(cpu.local_apic_id as u8);
-
             // BSP sends AP an INIT IPI (Level Interrupt)
-            lapic.ipi_init(apic_id);
+            lapic.send_init_assert(cpu.local_apic_id);
             spin(200);
-            lapic.ipi_init_deassert();
+            lapic.send_init_deassert();
             // BSP delays (10ms)
             spin(10_000);
             // BSP sends AP a STARTUP IPI (1st try), AP should start executing at 000VV000h
-            lapic.ipi_startup(apic_id, START_PAGE);
+            lapic.send_startup_ipi(cpu.local_apic_id, START_PAGE);
             // BSP delays (200us)
             spin(200);
             // BSP sends AP a STARTUP IPI (2nd try)
-            // lapic.ipi_startup(apic_id, START_PAGE);
+            lapic.send_startup_ipi(cpu.local_apic_id, START_PAGE);
             // BSP delays (200us)
             spin(200);
             // Wait for AP to startup

@@ -490,7 +490,7 @@ dependencies = [
  "spin 0.5.2",
  "uart_16550",
  "volatile 0.2.7",
- "x2apic",
+ "x2apic 0.4.1",
  "x86",
  "x86_64",
 ]
@@ -883,7 +883,7 @@ dependencies = [
  "vmx",
  "volatile 0.2.7",
  "vtd",
- "x2apic",
+ "x2apic 0.1.0",
  "x86",
  "x86_64",
 ]
@@ -1115,6 +1115,7 @@ dependencies = [
  "vga",
  "vmx",
  "vtd",
+ "x2apic 0.1.0",
 ]
 
 [[package]]
@@ -1331,6 +1332,15 @@ name = "windows_x86_64_msvc"
 version = "0.42.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9aec5da331524158c6d1a4ac0ab1541149c0b9505fde06423b02f5ef0106b9f0"
+
+[[package]]
+name = "x2apic"
+version = "0.1.0"
+dependencies = [
+ "bit_field",
+ "log",
+ "utils",
+]
 
 [[package]]
 name = "x2apic"

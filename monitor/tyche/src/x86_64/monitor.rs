@@ -27,7 +27,6 @@ use super::init::NB_BOOTED_CORES;
 use crate::allocator::allocator;
 use crate::attestation_domain::{attest_domain, calculate_attestation_hash};
 use crate::rcframe::{drop_rc, RCFrame, RCFramePool, EMPTY_RCFRAME};
-use crate::x86_64::apic;
 // ————————————————————————— Statics & Backend Data ————————————————————————— //
 
 static CAPA_ENGINE: Mutex<CapaEngine> = Mutex::new(CapaEngine::new());
@@ -804,10 +803,7 @@ fn notify_cores(core_id: usize, domain_core_bitmap: u64) {
             continue;
         }
         // send ipi
-        let apic_id = apic::ApicId::XApic(core as u8);
-        unsafe {
-            apic::ipi_init(apic_id);
-        }
+        x2apic::send_init_assert(core as u32)
     }
 }
 

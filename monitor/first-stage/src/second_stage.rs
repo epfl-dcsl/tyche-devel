@@ -8,12 +8,10 @@ use mmu::frame_allocator::PhysRange;
 use mmu::{PtFlag, PtMapper, RangeAllocator};
 use stage_two_abi::{EntryPoint, Manifest, Smp};
 
-use crate::apic::LAPIC_PHYS_ADDRESS;
 use crate::cpu::MAX_CPU_NUM;
 use crate::elf::{Elf64PhdrType, ElfProgram};
 use crate::guests::ManifestInfo;
 use crate::mmu::frames::{MemoryMap, RangeFrameAllocator};
-use crate::mmu::PAGE_SIZE;
 use crate::{cpu, HostPhysAddr, HostVirtAddr};
 
 #[cfg(feature = "second-stage")]
@@ -167,15 +165,6 @@ pub fn load(
             PtFlag::PRESENT,
         );
     }
-
-    // map the default APIC page to 2nd stage
-    loaded_elf.pt_mapper.map_range(
-        stage2_allocator,
-        HostVirtAddr::new(LAPIC_PHYS_ADDRESS),
-        HostPhysAddr::new(LAPIC_PHYS_ADDRESS),
-        PAGE_SIZE,
-        PtFlag::PRESENT | PtFlag::WRITE | PtFlag::PAGE_WRITE_THROUGH | PtFlag::PAGE_CACHE_DISABLE,
-    );
 
     // If we setup VGA support
     if info.vga_info.is_valid {

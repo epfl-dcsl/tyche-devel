@@ -1,9 +1,7 @@
 use core::sync::atomic::*;
 
-use x86::apic::xapic;
 use x86_64::registers::control::{Cr0, Cr0Flags, Cr4, Cr4Flags};
 
-use crate::apic;
 use crate::gdt::Gdt;
 
 pub const MAX_CPU_NUM: usize = 256;
@@ -16,7 +14,7 @@ static NB_CORES: AtomicUsize = AtomicUsize::new(0);
 pub struct Cpu {
     pub id: usize,
     pub gdt: Gdt,
-    pub lapic: xapic::XAPIC,
+    pub lapic: x2apic::X2Apic,
 }
 
 impl Cpu {
@@ -24,15 +22,13 @@ impl Cpu {
         Self {
             id: id(),
             gdt: Gdt::new(),
-            // FIXME: it's amazing that this doesn't crash before the memory allocator is
-            //        initialized on CPU0...
-            lapic: apic::lapic_new(apic::get_lapic_virt_address()),
+            lapic: x2apic::X2Apic::new(),
         }
     }
 
     pub fn setup(&'static mut self) {
         self.gdt.setup();
-        apic::lapic_setup(&mut self.lapic);
+        self.lapic.init();
 
         initialize_cpu();
 
