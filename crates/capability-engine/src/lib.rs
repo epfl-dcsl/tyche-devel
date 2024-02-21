@@ -553,11 +553,6 @@ impl CapaEngine {
             return_capa,
             core,
         });
-        self.updates.push(Update::UpdateTraps {
-            trap: self.domains[next_dom].traps(),
-            core,
-        });
-
         Ok(())
     }
 
@@ -572,6 +567,7 @@ impl CapaEngine {
             log::error!("The domain is able to handle its own trap, why did we exit?");
             return Err(CapaError::ValidTrapCausedExit);
         }
+        //TODO: fix transition capa. This entire path is unstable and should be removed.
         let manager = domain::find_trap_handler(domain, trap, &self.domains)
             .ok_or(CapaError::CouldNotHandleTrap)?;
         self.updates.push(Update::Trap {
@@ -580,13 +576,30 @@ impl CapaEngine {
             info,
             core,
         });
-        // Also update the bitmap.
-        self.updates.push(Update::UpdateTraps {
-            trap: self.domains[manager].traps(),
-            core,
-        });
-
         Ok(())
+    }
+
+    pub fn handle_violation(
+        &mut self,
+        domain: Handle<Domain>,
+        core_id: usize,
+    ) -> Result<(), CapaError> {
+        // Find the capability to simulate a switch.
+        let dom = &self.domains[domain];
+        let manager = dom.get_manager().ok_or(CapaError::CouldNotHandleTrap)?;
+        let capa = dom
+            .find_capa(|x| match x {
+                Capa::Switch { to, core } => {
+                    if *to == manager && *core == core_id {
+                        return true;
+                    }
+                    return false;
+                }
+                _ => return false,
+            })
+            .ok_or(CapaError::InvalidCore)?;
+
+        self.switch(domain, core_id, capa)
     }
 
     pub fn enumerate(

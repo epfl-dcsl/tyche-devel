@@ -216,15 +216,19 @@ impl Domain {
     }
 
     pub fn set_config(&mut self, bitmap: Bitmaps, value: u64) -> Result<(), CapaError> {
-        if self.is_sealed() {
+        /*if self.is_sealed() {
             return Err(CapaError::AlreadySealed);
-        }
+        }*/
         if value & !self.config.valid_masks[bitmap as usize] != 0 {
             return Err(CapaError::InvalidOperation);
         }
         self.config.values[bitmap as usize] = value;
         self.config.initialized[bitmap as usize] = true;
         Ok(())
+    }
+
+    pub(crate) fn get_manager(&self) -> Option<Handle<Domain>> {
+        self.manager
     }
 
     pub(crate) fn set_manager(&mut self, manager: Handle<Domain>) {
@@ -255,6 +259,19 @@ impl Domain {
             return Err(CapaError::CapabilityDoesNotExist);
         }
         Ok(&mut self.capas[index.idx])
+    }
+
+    /// Find a capability inside the domain.
+    pub(crate) fn find_capa<F: Fn(&Capa) -> bool>(&self, f: F) -> Option<LocalCapa> {
+        for (i, e) in self.capas.iter().enumerate() {
+            if self.free_list.is_free(i) {
+                continue;
+            }
+            if f(e) {
+                return Some(LocalCapa { idx: i });
+            }
+        }
+        return None;
     }
 
     /// Mark the domain as executing on the given core.

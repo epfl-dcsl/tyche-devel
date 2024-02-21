@@ -4,14 +4,14 @@ use core::arch::asm;
 
 use capa_engine::{Bitmaps, Domain, Handle, LocalCapa, NextCapaToken};
 use vmx::bitmaps::exit_qualification;
-use vmx::errors::Trapnr;
 use vmx::fields::VmcsField;
-use vmx::{ActiveVmcs, InterruptionType, VmExitInterrupt, VmxExitReason, Vmxon};
+use vmx::{ActiveVmcs, VmxExitReason, Vmxon};
 
 use super::cpuid_filter::{filter_mpk, filter_tpause};
 use super::{cpuid, monitor};
 use crate::calls;
 use crate::error::TycheError;
+use crate::x86_64::filtered_fields::FilteredFields;
 
 #[derive(PartialEq, Debug)]
 pub enum HandlerResult {
@@ -88,7 +88,9 @@ fn handle_exit(
             match vmcall {
                 calls::CREATE_DOMAIN => {
                     log::trace!("Create Domain");
-                    let capa = monitor::do_create_domain(*domain).expect("TODO");
+                    let capa =
+                        monitor::do_create_domain(*domain)
+                            .expect("TODO");
                     let mut context = monitor::get_context(*domain, cpuid());
                     context.set(VmcsField::GuestRdi, capa.as_usize(), None)?;
                     context.set(VmcsField::GuestRax, 0, None)?;
@@ -118,29 +120,135 @@ fn handle_exit(
                     vs.vcpu.next_instruction()?;
                     Ok(HandlerResult::Resume)
                 }
-                calls::SET_ENTRY_ON_CORE => {
-                    log::trace!(
-                        "Set entry on core {}, cr3 {:x}, rip {:x}, rsp {:x}",
+                calls::SELF_CONFIG => {
+                    log::trace!("Self config");
+                    let mut context = monitor::get_context(*domain, cpuid());
+                    let field = VmcsField::from_u32(arg_1 as u32).unwrap();
+                    if FilteredFields::is_valid_self(field) {
+                        context.set(field, arg_2, Some(&mut vs.vcpu)).unwrap();
+                        context.set(VmcsField::GuestRax, 0, None).unwrap();
+                    } else {
+                        context.set(VmcsField::GuestRax, 1, None).unwrap();
+                    }
+                    vs.vcpu.next_instruction()?;
+                    Ok(HandlerResult::Resume)
+                }
+                calls::ALLOC_CORE_CONTEXT => {
+                    log::trace!("Alloc core context");
+                    let res = match monitor::do_init_child_context(
+                        *domain,
+                        LocalCapa::new(arg_1),
+                        arg_2,
+                        &mut vs.vcpu,
+                        &vs.vmxon,
+                    ) {
+                        Ok(_) => 0,
+                        Err(e) => {
+                            log::error!("Allocating core context error: {:?}", e);
+                            1
+                        }
+                    };
+                    monitor::get_context(*domain, cpuid()).set(VmcsField::GuestRax, res, None)?;
+                    vs.vcpu.next_instruction()?;
+                    Ok(HandlerResult::Resume)
+                }
+                calls::READ_ALL_GP => {
+                    log::trace!("Read all gp register values.");
+                    monitor::do_get_all_gp(*domain, LocalCapa::new(arg_1), arg_2)
+                        .expect("Problem during copy");
+                    vs.vcpu.next_instruction()?;
+                    Ok(HandlerResult::Resume)
+                }
+                calls::WRITE_ALL_GP => {
+                    log::trace!("Write all gp register values.");
+                    monitor::do_set_all_gp(*domain, LocalCapa::new(arg_1))
+                        .expect("Problem during copy");
+                    vs.vcpu.next_instruction()?;
+                    Ok(HandlerResult::Resume)
+                }
+                calls::WRITE_FIELDS => {
+                    log::trace!("Write several registers.");
+                    // Collect the arguments.
+                    let values: [(usize, usize); 6] = {
+                        let mut context = monitor::get_context(*domain, cpuid());
+                        [
+                            (
+                                context.get(VmcsField::GuestRbp, None).unwrap(),
+                                context.get(VmcsField::GuestRbx, None).unwrap(),
+                            ),
+                            (
+                                context.get(VmcsField::GuestRcx, None).unwrap(),
+                                context.get(VmcsField::GuestRdx, None).unwrap(),
+                            ),
+                            (
+                                context.get(VmcsField::GuestR8, None).unwrap(),
+                                context.get(VmcsField::GuestR9, None).unwrap(),
+                            ),
+                            (
+                                context.get(VmcsField::GuestR10, None).unwrap(),
+                                context.get(VmcsField::GuestR11, None).unwrap(),
+                            ),
+                            (
+                                context.get(VmcsField::GuestR12, None).unwrap(),
+                                context.get(VmcsField::GuestR13, None).unwrap(),
+                            ),
+                            (
+                                context.get(VmcsField::GuestR14, None).unwrap(),
+                                context.get(VmcsField::GuestR15, None).unwrap(),
+                            ),
+                        ]
+                    };
+                    let res = match monitor::do_set_fields(
+                        *domain,
+                        LocalCapa::new(arg_1),
+                        arg_2,
+                        &values,
+                    ) {
+                        Ok(()) => 0,
+                        Err(e) => {
+                            log::error!("Set fields error {:?}", e);
+                            1
+                        }
+                    };
+                    monitor::get_context(*domain, cpuid()).set(VmcsField::GuestRax, res, None)?;
+                    vs.vcpu.next_instruction()?;
+                    Ok(HandlerResult::Resume)
+                }
+                calls::CONFIGURE_CORE => {
+                    log::trace!("Configure Core");
+                    let res = match monitor::do_configure_core(
+                        *domain,
+                        LocalCapa::new(arg_1),
                         arg_2,
                         arg_3,
                         arg_4,
-                        arg_5
-                    );
-                    let mut context = monitor::get_context(*domain, cpuid());
-                    match monitor::do_set_entry(
+                    ) {
+                        Ok(()) => 0,
+                        Err(e) => {
+                            log::error!("Configure core error: {:?}", e);
+                            1
+                        }
+                    };
+                    monitor::get_context(*domain, cpuid()).set(VmcsField::GuestRax, res, None)?;
+                    vs.vcpu.next_instruction()?;
+                    Ok(HandlerResult::Resume)
+                }
+                calls::GET_CONFIG_CORE => {
+                    let (rdi, rax) = match monitor::do_get_config_core(
                         *domain,
                         LocalCapa::new(arg_1),
-                        arg_2, // core
-                        arg_3, // cr3
-                        arg_4, // rip
-                        arg_5, // rsp
+                        arg_2,
+                        arg_3,
                     ) {
-                        Ok(()) => context.set(VmcsField::GuestRax, 0, None)?,
+                        Ok(v) => (v, 0),
                         Err(e) => {
-                            log::error!("Unable to set entry: {:?}", e);
-                            context.set(VmcsField::GuestRax, 1, None)?;
+                            log::error!("Get config core error: {:?}", e);
+                            (0, 1)
                         }
-                    }
+                    };
+                    let mut context = monitor::get_context(*domain, cpuid());
+                    context.set(VmcsField::GuestRax, rax, None)?;
+                    context.set(VmcsField::GuestRdi, rdi, None)?;
                     vs.vcpu.next_instruction()?;
                     Ok(HandlerResult::Resume)
                 }
@@ -153,12 +261,6 @@ fn handle_exit(
                     vs.vcpu.next_instruction()?;
                     Ok(HandlerResult::Resume)
                 }
-                calls::SHARE => {
-                    log::trace!("Share");
-                    log::warn!("Share is NOT IMPLEMENTED in v3");
-                    vs.vcpu.next_instruction()?;
-                    Ok(HandlerResult::Resume)
-                }
                 calls::SEND => {
                     log::trace!("Send");
                     monitor::do_send(*domain, LocalCapa::new(arg_1), LocalCapa::new(arg_2))
@@ -167,6 +269,25 @@ fn handle_exit(
                     context.set(VmcsField::GuestRax, 0, None)?;
                     vs.vcpu.next_instruction()?;
                     Ok(HandlerResult::Resume)
+                }
+                calls::SEND_ALIASED => {
+                    log::trace!("Send aliased");
+                    todo!("Implement! need to check the remapper");
+                    /* //TODO(aghosn) we need to implement this
+                    // Send a region capa and adds an alias to it.
+                    monitor::do_send_aliased(
+                        *domain,
+                        LocalCapa::new(arg_1),
+                        LocalCapa::new(arg_2),
+                        arg_3,
+                        arg_4 != 0,
+                        arg_5,
+                    )
+                    .expect("TODO");
+                    let mut context = monitor::get_context(*domain, cpuid());
+                    context.set(VmcsField::GuestRax, 0, None)?;
+                    vs.vcpu.next_instruction()?;
+                    Ok(HandlerResult::Resume)*/
                 }
                 calls::SEGMENT_REGION => {
                     log::trace!("Segment region");
@@ -376,11 +497,11 @@ fn handle_exit(
                 }
             }
         }
-        VmxExitReason::InitSignal => {
+        VmxExitReason::InitSignal /*if domain.idx() == 0*/ => {
             log::info!("cpu {} received init signal", cpuid());
             Ok(HandlerResult::Resume)
         }
-        VmxExitReason::Cpuid => {
+        VmxExitReason::Cpuid if domain.idx() == 0 => {
             let mut context = monitor::get_context(*domain, cpuid());
             let input_eax = context.get(VmcsField::GuestRax, None)?;
             let input_ecx = context.get(VmcsField::GuestRcx, None)?;
@@ -416,7 +537,7 @@ fn handle_exit(
             vs.vcpu.next_instruction()?;
             Ok(HandlerResult::Resume)
         }
-        VmxExitReason::ControlRegisterAccesses => {
+        VmxExitReason::ControlRegisterAccesses if domain.idx() == 0 => {
             // Handle some of these only for dom0, the other domain's problems
             // are for now forwarded to the manager domain.
             let mut context = monitor::get_context(*domain, cpuid());
@@ -443,7 +564,7 @@ fn handle_exit(
             };
             Ok(HandlerResult::Resume)
         }
-        VmxExitReason::EptViolation => {
+        VmxExitReason::EptViolation if domain.idx() == 0 => {
             let addr = vs.vcpu.guest_phys_addr()?;
             log::error!(
                 "EPT Violation! virt: 0x{:x}, phys: 0x{:x}",
@@ -453,29 +574,12 @@ fn handle_exit(
                     .as_u64(),
                 addr.as_u64(),
             );
-            log::info!("The vcpu {:x?}", vs.vcpu);
-
-            //TODO: replace this with proper handler for interrupts.
-            if domain.idx() == 0 {
-                let interrupt = VmExitInterrupt::create(
-                    Trapnr::Breakpoint,
-                    InterruptionType::SoftwareException,
-                    None,
-                    &vs.vcpu,
-                );
-                // Inject the interrupt.
-                log::debug!(
-                    "Replace EPT violation with exception: {:b}",
-                    interrupt.as_u32()
-                );
-                vs.vcpu
-                    .inject_interrupt(interrupt)
-                    .expect("Unable to inject an exception");
-                return Ok(HandlerResult::Resume);
-            }
-            Ok(HandlerResult::Crash)
+            panic!("The vcpu {:x?}", vs.vcpu);
         }
-        VmxExitReason::Xsetbv => {
+        VmxExitReason::Exception if domain.idx() == 0 => {
+            panic!("Received an exception on dom0?");
+        }
+        VmxExitReason::Xsetbv if domain.idx() == 0 => {
             let mut context = monitor::get_context(*domain, cpuid());
             let ecx = context.get(VmcsField::GuestRcx, None)?;
             let eax = context.get(VmcsField::GuestRax, None)?;
@@ -499,7 +603,7 @@ fn handle_exit(
             vs.vcpu.next_instruction()?;
             Ok(HandlerResult::Resume)
         }
-        VmxExitReason::Wrmsr => {
+        VmxExitReason::Wrmsr if domain.idx() == 0 => {
             let mut context = monitor::get_context(*domain, cpuid());
             let ecx = context.get(VmcsField::GuestRcx, None)?;
             if ecx >= 0x4B564D00 && ecx <= 0x4B564DFF {
@@ -513,7 +617,7 @@ fn handle_exit(
                 Ok(HandlerResult::Crash)
             }
         }
-        VmxExitReason::Rdmsr => {
+        VmxExitReason::Rdmsr if domain.idx() == 0 => {
             let mut context = monitor::get_context(*domain, cpuid());
             let ecx = context.get(VmcsField::GuestRcx, None)?;
             log::trace!("rdmsr");
@@ -533,37 +637,52 @@ fn handle_exit(
                 Ok(HandlerResult::Resume)
             }
         }
-        VmxExitReason::Exception => {
-            log::info!("The vcpu {:x?}", vs.vcpu);
-            match vs.vcpu.interrupt_info() {
-                Ok(Some(exit)) => {
-                    // The domain exited, so it shouldn't be able to handle it.
-                    log::debug!(
-                        "EXCEPTION RECEIVED {:b}, vector: {:?}, type: {:?}",
-                        exit.as_u32(),
-                        exit.vector(),
-                        exit.interrupt_type()
-                    );
-                    match monitor::handle_trap(*domain, cpuid(), exit) {
-                        Ok(()) => {
-                            log::debug!("Received exception {}, re-routing it", exit.vector());
-                            Ok(HandlerResult::Resume)
-                        }
-                        Err(e) => {
-                            log::error!(
-                                "Unable to handle the exception {}, capa error:{:?}",
-                                exit.vector(),
-                                e
-                            );
-                            log::error!("{:?}", vs.vcpu);
-                            Ok(HandlerResult::Crash)
-                        }
-                    }
+        // Routing exits to the manager domains.
+        VmxExitReason::EptViolation
+        | VmxExitReason::ExternalInterrupt
+        | VmxExitReason::IoInstruction
+        | VmxExitReason::ControlRegisterAccesses
+        | VmxExitReason::TripleFault
+        | VmxExitReason::Cpuid
+        | VmxExitReason::Exception
+        | VmxExitReason::Wrmsr
+        | VmxExitReason::Rdmsr
+        | VmxExitReason::ApicWrite
+        | VmxExitReason::InterruptWindow
+        | VmxExitReason::Wbinvd
+        | VmxExitReason::MovDR
+        | VmxExitReason::VirtualizedEoi
+        | VmxExitReason::ApicAccess
+        | VmxExitReason::VmxPreemptionTimerExpired
+        | VmxExitReason::Hlt => {
+            log::trace!("Handling {:?} for dom {}", reason, domain.idx());
+            if reason == VmxExitReason::ExternalInterrupt {
+                let address_eoi = 0xfee000b0 as *mut u32;
+                unsafe {
+                    // Clear the eoi
+                    *address_eoi = 0;
                 }
-                _ => {
-                    log::error!("VM received an exception");
-                    log::info!("{:?}", vs.vcpu);
-                    Ok(HandlerResult::Crash)
+            }
+            match monitor::do_handle_violation(*domain) {
+                Ok(_) => {
+                    return Ok(HandlerResult::Resume);
+                }
+                Err(e) => {
+                    log::error!("Unable to handle {:?}: {:?}", reason, e);
+                    if reason == VmxExitReason::EptViolation {
+                        let addr = vs.vcpu.guest_phys_addr()?;
+                        log::error!(
+                            "Ept Violation! virt: 0x{:x}, phys: 0x{:x} on dom{}",
+                            vs.vcpu
+                                .guest_linear_addr()
+                                .expect("Unable to get virt addr")
+                                .as_u64(),
+                            addr.as_u64(),
+                            *domain
+                        );
+                    }
+                    log::info!("The vcpu: {:x?}", vs.vcpu);
+                    return Ok(HandlerResult::Crash);
                 }
             }
         }

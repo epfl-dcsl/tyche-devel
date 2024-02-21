@@ -15,9 +15,9 @@ use spin::barrier::Barrier;
 use spin::{Mutex, MutexGuard};
 use stage_two_abi::Manifest;
 use utils::{GuestPhysAddr, HostPhysAddr, HostVirtAddr};
-use vmx::bitmaps::{EptEntryFlags, ExceptionBitmap};
-use vmx::fields::VmcsField;
-use vmx::{ActiveVmcs, VmExitInterrupt};
+use vmx::bitmaps::EptEntryFlags;
+use vmx::fields::{GeneralPurposeField, VmcsField, REGFILE_SIZE};
+use vmx::{ActiveVmcs, VmExitInterrupt, Vmxon};
 use vtd::Iommu;
 
 use super::context::{
@@ -25,9 +25,11 @@ use super::context::{
     DirtyRegGroups,
 };
 use super::cpuid;
+use super::filtered_fields::FilteredFields;
 use super::guest::VmxState;
 use super::init::NB_BOOTED_CORES;
-use crate::allocator::allocator;
+use super::vmx_helper::{dump_host_state, load_host_state};
+use crate::allocator::{allocator, PAGE_SIZE};
 use crate::attestation_domain::{attest_domain, calculate_attestation_hash};
 use crate::rcframe::{drop_rc, RCFrame, RCFramePool, EMPTY_RCFRAME};
 // ————————————————————————— Statics & Backend Data ————————————————————————— //
@@ -51,6 +53,7 @@ pub struct DomainData {
     iopt: Option<HostPhysAddr>,
 }
 
+#[derive(PartialEq)]
 #[repr(u64)]
 pub enum InitVMCS {
     Shared = 1,
@@ -181,101 +184,317 @@ pub fn do_set_config(
     Ok(())
 }
 
-pub fn do_init_child_contexts(
+pub fn do_configure_core(
     current: Handle<Domain>,
     domain: LocalCapa,
+    core: usize,
+    idx: usize,
+    value: usize,
+) -> Result<(), CapaError> {
+    let mut engine = CAPA_ENGINE.lock();
+    let local_capa = domain;
+    let domain = engine.get_domain_capa(current, domain)?;
+
+    //TODO(aghosn): check how we could differentiate between registers
+    //that can be changed and others. For the moment allow modifications
+    //post sealing too.
+    // Check the domain is not seal.
+    /*if engine.is_sealed(domain) {
+        return Err(CapaError::AlreadySealed);
+    }*/
+
+    // Check this is a valid core for the operation.
+    let core_map = engine.get_domain_config(domain, Bitmaps::CORE);
+    if (1 << core) & core_map == 0 {
+        log::error!(
+            "Invalid core {} for coremap {:b} in configure core",
+            1 << core,
+            core_map
+        );
+        return Err(CapaError::InvalidCore);
+    }
+
+    // Check this is a valid idx for a field.
+    if !FilteredFields::is_valid(idx, true) {
+        log::error!("Attempt to set an invalid register: {:x}", idx);
+        return Err(CapaError::InvalidOperation);
+    }
+    let field = VmcsField::from_u32(idx as u32).unwrap();
+    if field == VmcsField::ExceptionBitmap {
+        engine
+            .set_child_config(current, local_capa, Bitmaps::TRAP, !(value as u64))
+            .expect("Unable to set the bitmap");
+    }
+
+    // Check the domain has the correct vcpu type
+    let switch_type = engine.get_domain_config(domain, Bitmaps::SWITCH);
+    let switch_type = InitVMCS::from_u64(switch_type)?;
+
+    if switch_type == InitVMCS::Shared && !field.is_gp_register() && !field.is_context_register() {
+        log::error!("Trying to set non-GP/non-Context register on a shared vcpu.");
+        return Err(CapaError::InvalidOperation);
+    }
+
+    let mut target_ctxt = get_context(domain, core);
+    if target_ctxt.vmcs.is_invalid() {
+        log::error!("Target VMCS is none.");
+        return Err(CapaError::InvalidOperation);
+    }
+    target_ctxt
+        .set(field, value, None)
+        .map_err(|_| CapaError::InvalidOperation)?;
+    Ok(())
+}
+
+pub fn do_get_config_core(
+    current: Handle<Domain>,
+    domain: LocalCapa,
+    core: usize,
+    idx: usize,
+) -> Result<usize, CapaError> {
+    let mut engine = CAPA_ENGINE.lock();
+    let domain = engine.get_domain_capa(current, domain)?;
+
+    // Check the domain is not seal.
+    //TODO(aghosn) we will need a way to differentiate between what's readable
+    //and what's not readable once the domain is sealed.
+    /*if engine.is_sealed(domain) {
+        return Err(CapaError::AlreadySealed);
+    }*/
+
+    // Check this is a valid core for the operation.
+    let core_map = engine.get_domain_config(domain, Bitmaps::CORE);
+    if (1 << core) & core_map == 0 {
+        return Err(CapaError::InvalidCore);
+    }
+
+    // Check this is a valid idx for a field.
+    if !FilteredFields::is_valid(idx, false) {
+        log::error!("Attempt to get an invalid register: {:x}", idx);
+        return Err(CapaError::InvalidOperation);
+    }
+    let field = VmcsField::from_u32(idx as u32).unwrap();
+
+    // Check the domain has the correct vcpu type
+    let switch_type = engine.get_domain_config(domain, Bitmaps::SWITCH);
+    let switch_type = InitVMCS::from_u64(switch_type)?;
+
+    if switch_type == InitVMCS::Shared && !field.is_gp_register() {
+        log::error!("Trying to set non GP register on a shared vcpu.");
+        return Err(CapaError::InvalidOperation);
+    }
+
+    let mut target_ctx = get_context(domain, core);
+    if target_ctx.vmcs.is_invalid() {
+        log::error!("Target VMCS is invalid.");
+        return Err(CapaError::InvalidOperation);
+    }
+    target_ctx
+        .get(field, None)
+        .map_err(|_| CapaError::InvalidOperation)
+}
+
+pub fn do_get_all_gp(
+    current: Handle<Domain>,
+    domain: LocalCapa,
+    core: usize,
+) -> Result<(), CapaError> {
+    let mut engine = CAPA_ENGINE.lock();
+    let domain = engine.get_domain_capa(current, domain)?;
+    let core_map = engine.get_domain_config(domain, Bitmaps::CORE);
+    if (1 << core) & core_map == 0 {
+        return Err(CapaError::InvalidCore);
+    }
+
+    //TODO: we need to unify things...
+    //This breaks enclaves.
+    /*
+    // Check the domain has the correct vcpu type
+    let switch_type = engine.get_domain_config(domain, Bitmaps::SWITCH);
+    let switch_type = InitVMCS::from_u64(switch_type)?;
+    if switch_type == InitVMCS::Shared {
+        log::error!("Trying to get all registers from a shared vcpu.");
+        return Err(CapaError::InvalidOperation);
+    }*/
+    let mut curr_ctx = get_context(current, core);
+    let tgt_ctx = get_context(domain, core);
+    if curr_ctx.vmcs.is_invalid() || tgt_ctx.vmcs.is_invalid() {
+        log::error!(
+            "VMCs are none during a configure core {}: curr:{:?}, tgt:{:?}",
+            core,
+            curr_ctx.vmcs.is_invalid(),
+            tgt_ctx.vmcs.is_invalid()
+        );
+        return Err(CapaError::InvalidOperation);
+    }
+    // Copy the general purpose registers.
+    curr_ctx.vmcs_gp[0..REGFILE_SIZE - 1].copy_from_slice(&tgt_ctx.vmcs_gp[0..REGFILE_SIZE - 1]);
+    Ok(())
+}
+
+pub fn do_set_all_gp(current: Handle<Domain>, domain: LocalCapa) -> Result<(), CapaError> {
+    let mut engine = CAPA_ENGINE.lock();
+    let domain = engine.get_domain_capa(current, domain)?;
+    let core = cpuid();
+
+    let core_map = engine.get_domain_config(domain, Bitmaps::CORE);
+    if (1 << core) & core_map == 0 {
+        return Err(CapaError::InvalidCore);
+    }
+
+    // Check the domain has the correct vcpu type
+    let switch_type = engine.get_domain_config(domain, Bitmaps::SWITCH);
+    let switch_type = InitVMCS::from_u64(switch_type)?;
+    if switch_type == InitVMCS::Shared {
+        log::error!("Trying to get all registers from a shared vcpu.");
+        return Err(CapaError::InvalidOperation);
+    }
+    let curr_ctx = get_context(current, core);
+    let mut tgt_ctx = get_context(domain, core);
+    if curr_ctx.vmcs.is_invalid() || tgt_ctx.vmcs.is_invalid() {
+        log::error!(
+            "VMCs are none during a configure core {}: curr:{:?}, tgt:{:?}",
+            core,
+            curr_ctx.vmcs.is_invalid(),
+            tgt_ctx.vmcs.is_invalid()
+        );
+        return Err(CapaError::InvalidOperation);
+    }
+    // Copy the general purpose registers.
+    let rax = tgt_ctx.vmcs_gp[GeneralPurposeField::Rax as usize];
+    let rdi = tgt_ctx.vmcs_gp[GeneralPurposeField::Rdi as usize];
+    tgt_ctx.vmcs_gp[0..REGFILE_SIZE - 1].copy_from_slice(&curr_ctx.vmcs_gp[0..REGFILE_SIZE - 1]);
+    tgt_ctx.vmcs_gp[GeneralPurposeField::Rax as usize] = rax;
+    tgt_ctx.vmcs_gp[GeneralPurposeField::Rdi as usize] = rdi;
+    Ok(())
+}
+
+pub fn do_set_fields(
+    current: Handle<Domain>,
+    domain: LocalCapa,
+    core: usize,
+    values: &[(usize, usize); 6],
+) -> Result<(), CapaError> {
+    let mut engine = CAPA_ENGINE.lock();
+    // Check the core.
+    let domain = engine.get_domain_capa(current, domain)?;
+    let core_map = engine.get_domain_config(domain, Bitmaps::CORE);
+    if (1 << core) & core_map == 0 {
+        log::error!("Trying to set registers on the wrong core.");
+        return Err(CapaError::InvalidCore);
+    }
+    // Check switch type.
+    let switch_type = engine.get_domain_config(domain, Bitmaps::SWITCH);
+    let switch_type = InitVMCS::from_u64(switch_type)?;
+    if switch_type == InitVMCS::Shared {
+        log::error!("Setting registers on a shared vcpu");
+        return Err(CapaError::InvalidSwitch);
+    }
+    // Get and set the context.
+    let mut tgt_ctx = get_context(domain, core);
+    if tgt_ctx.vmcs.is_invalid() {
+        log::error!("The VMCS is none on core {}", core);
+        return Err(CapaError::InvalidOperation);
+    }
+    for p in values {
+        let field = p.0;
+        let value = p.1;
+        if field == !(0 as usize) {
+            // We are done.
+            break;
+        }
+        if !FilteredFields::is_valid(field, true) {
+            log::error!("Invalid set field value: {:x}", field);
+            return Err(CapaError::InvalidOperation);
+        }
+        let field = VmcsField::from_u32(field as u32).unwrap();
+        tgt_ctx.set(field, value, None).unwrap();
+        if field == VmcsField::ExceptionBitmap {
+            engine
+                .set_domain_config(domain, Bitmaps::TRAP, !(value as u64))
+                .expect("Bitmap failure");
+        }
+    }
+    Ok(())
+}
+
+pub fn do_init_child_context(
+    current: Handle<Domain>,
+    domain: LocalCapa,
+    core: usize,
     vcpu: &mut ActiveVmcs<'static>,
-) {
+    vmxon: &Vmxon,
+) -> Result<(), CapaError> {
     let mut engine = CAPA_ENGINE.lock();
     let domain = engine
         .get_domain_capa(current, domain)
         .expect("Unable to access child");
     let value = engine.get_domain_config(domain, Bitmaps::SWITCH);
-    let value = InitVMCS::from_u64(value).unwrap();
+    let value = InitVMCS::from_u64(value)?;
     let allocator = allocator();
-    // Init on all the cores.
-    let cpus = 0..(NB_BOOTED_CORES.load(core::sync::atomic::Ordering::SeqCst) + 1);
+    let max_cpus = NB_BOOTED_CORES.load(core::sync::atomic::Ordering::SeqCst) + 1;
     let mut rcvmcs = RC_VMCS.lock();
     let cores = engine.get_domain_config(domain, Bitmaps::CORE);
+    // Check whether the domain is allowed on that core.
+    if core > max_cpus || (1 << core) & cores == 0 {
+        log::error!("Attempt to set context on unallowed core.");
+        return Err(CapaError::InvalidCore);
+    }
     match value {
         InitVMCS::Shared => {
             // Easy case, increase ref on all cores shared by the two domains.
-            for c in cpus {
-                if (1 << c) & cores == 0 {
-                    continue;
-                }
-                let orig = get_context(current, c);
-                let dest = &mut get_context(domain, c);
-                rcvmcs
-                    .get_mut(orig.vmcs)
-                    .expect("No vmcs on original")
-                    .acquire();
-                if !dest.vmcs.is_invalid() {
-                    drop_rc(&mut rcvmcs, dest.vmcs);
-                }
-                dest.vmcs = orig.vmcs;
+            let orig = get_context(current, core);
+            let dest = &mut get_context(domain, core);
+            rcvmcs
+                .get_mut(orig.vmcs)
+                .expect("No vmcs on original")
+                .acquire();
+            if !dest.vmcs.is_invalid() {
+                drop_rc(&mut rcvmcs, dest.vmcs);
             }
+            dest.vmcs = orig.vmcs;
         }
         InitVMCS::Copy => {
             // Flush the current vcpu.
-            for c in cpus {
-                if (1 << c) & cores == 0 {
-                    continue;
-                }
-                let dest = &mut get_context(domain, c);
-                let frame = allocator
-                    .allocate_frame()
-                    .expect("Unable to allocate frame");
-                let rc = RCFrame::new(frame);
-                dest.vmcs = rcvmcs.allocate(rc).expect("Unable to allocate rc frame");
-                vcpu.copy_into(frame);
-            }
+            let dest = &mut get_context(domain, core);
+            let frame = allocator
+                .allocate_frame()
+                .expect("Unable to allocate frame");
+            let rc = RCFrame::new(frame);
+            dest.vmcs = rcvmcs.allocate(rc).expect("Unable to allocate rc frame");
+            vcpu.copy_into(frame);
         }
         InitVMCS::Fresh => {
-            for c in cpus {
-                if (1 << c) & cores == 0 {
-                    continue;
-                }
-                let dest = &mut get_context(domain, c);
-                let frame = allocator
-                    .allocate_frame()
-                    .expect("Unable to allocate frame");
-                let rc = RCFrame::new(frame);
-                //TODO do an init;
-                dest.vmcs = rcvmcs.allocate(rc).expect("Unable to allocate rc frame");
+            let dest = &mut get_context(domain, core);
+            let frame = allocator
+                .allocate_frame()
+                .expect("Unable to allocate frame");
+            let rc = RCFrame::new(frame);
+            dest.vmcs = rcvmcs.allocate(rc).expect("Unable to allocate rc frame");
+            //Init the frame, it needs the identifier.
+            vmxon.init_frame(frame);
+            // Init the host state:
+            {
+                let current_ctxt = get_context(current, cpuid());
+                let mut values: [usize; 13] = [0; 13];
+                dump_host_state(vcpu, &mut values).or(Err(CapaError::InvalidSwitch))?;
+
+                //TODO(aghosn): we could just set it in the context if we were able to distinguish
+                //writable by tyche from writable by parent.
+
+                // Switch to the target frame.
+                vcpu.switch_frame(rcvmcs.get(dest.vmcs).unwrap().frame)
+                    .unwrap();
+
+                // Load the default values.
+                load_host_state(vcpu, &mut values).or(Err(CapaError::InvalidSwitch))?;
+
+                // Switch back the frame.
+                vcpu.switch_frame(rcvmcs.get(current_ctxt.vmcs).unwrap().frame)
+                    .unwrap();
             }
         }
     }
-}
-
-pub fn do_set_entry(
-    current: Handle<Domain>,
-    domain: LocalCapa,
-    core: usize,
-    cr3: usize,
-    rip: usize,
-    rsp: usize,
-) -> Result<(), CapaError> {
-    let mut engine = CAPA_ENGINE.lock();
-    let domain = engine.get_domain_capa(current, domain)?;
-    let cores = engine.get_domain_config(domain, Bitmaps::CORE);
-    if (1 << core) & cores == 0 {
-        return Err(CapaError::InvalidCore);
-    }
-    let context = &mut get_context(domain, core);
-    if context.vmcs.is_invalid() {
-        log::error!("Set the switch type first!");
-        return Err(CapaError::InvalidOperation);
-    }
-    context
-        .set(VmcsField::GuestCr3, cr3, None)
-        .expect("This will go away");
-    context
-        .set(VmcsField::GuestRip, rip, None)
-        .expect("This will go away");
-    context
-        .set(VmcsField::GuestRsp, rsp, None)
-        .expect("This will go away");
     Ok(())
 }
 
@@ -328,6 +547,22 @@ pub fn do_send(current: Handle<Domain>, capa: LocalCapa, to: LocalCapa) -> Resul
     apply_updates(&mut engine);
     Ok(())
 }
+
+//TODO (aghosn) figure that out
+/*pub fn do_send_aliased(
+    current: Handle<Domain>,
+    capa: LocalCapa,
+    to: LocalCapa,
+    alias: usize,
+    is_repeat: bool,
+    size: usize,
+) -> Result<(), CapaError> {
+    let mut engine = CAPA_ENGINE.lock();
+    let size = if is_repeat { Some(size) } else { None };
+    engine.send_aliased(current, capa, to, alias, size)?;
+    apply_updates(&mut engine);
+    Ok(())
+}*/
 
 pub fn do_enumerate(
     current: Handle<Domain>,
@@ -388,6 +623,7 @@ pub fn do_domain_attestation(
 
 // —————————————————————— Interrupt Handling functions —————————————————————— //
 
+#[allow(dead_code)]
 pub fn handle_trap(
     current: Handle<Domain>,
     core: usize,
@@ -395,6 +631,18 @@ pub fn handle_trap(
 ) -> Result<(), CapaError> {
     let mut engine = CAPA_ENGINE.lock();
     engine.handle_trap(current, core, trap.get_trap_number(), trap.as_info())?;
+    apply_updates(&mut engine);
+    Ok(())
+}
+
+pub fn do_handle_violation(current: Handle<Domain>) -> Result<(), CapaError> {
+    let mut engine = CAPA_ENGINE.lock();
+    let core = cpuid();
+    {
+        let mut current_ctx = get_context(current, core);
+        current_ctx.interrupted = true;
+    }
+    engine.handle_violation(current, core)?;
     apply_updates(&mut engine);
     Ok(())
 }
@@ -413,9 +661,6 @@ enum CoreUpdate {
         manager: Handle<Domain>,
         trap: u64,
         info: u64,
-    },
-    UpdateTrap {
-        bitmap: u64,
     },
 }
 
@@ -517,10 +762,6 @@ fn apply_updates(engine: &mut MutexGuard<CapaEngine>) {
                     trap,
                     info,
                 });
-            }
-            capa_engine::Update::UpdateTraps { trap, core } => {
-                let mut core_updates = CORE_UPDATES[core as usize].lock();
-                core_updates.push(CoreUpdate::UpdateTrap { bitmap: !trap });
             }
         }
     }
@@ -635,16 +876,6 @@ pub fn apply_core_updates(
 
                 // Update the current domain
                 *current_domain = manager;*/
-            }
-            CoreUpdate::UpdateTrap { bitmap } => {
-                log::trace!("Updating trap bitmap on core {} to {:b}", core_id, bitmap);
-                let value = bitmap as u32;
-                //TODO: for the moment we only offer interposition on the hardware cpu exception
-                //interrupts (first 32 values).
-                //By instrumenting APIC and virtualizing it, we might manage to do better in the
-                //future.
-                vcpu.set_exception_bitmap(ExceptionBitmap::from_bits_truncate(value))
-                    .expect("Error setting the exception bitmap");
             }
         }
     }
@@ -887,9 +1118,6 @@ impl core::fmt::Display for CoreUpdate {
                 info: inf,
             } => {
                 write!(f, "Trap({}, {} | {:b})", manager, interrupt, inf)
-            }
-            CoreUpdate::UpdateTrap { bitmap } => {
-                write!(f, "UpdateTrap({:b})", bitmap)
             }
         }
     }

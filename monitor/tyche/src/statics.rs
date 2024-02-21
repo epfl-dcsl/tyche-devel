@@ -7,7 +7,7 @@ use stage_two_abi::make_manifest;
 
 // ————————————————————— Static Resources Configuration ————————————————————— //
 
-pub const NB_PAGES: usize = 200;
+pub const NB_PAGES: usize = 400;
 
 // ————————————————————————— Second Stage Manifest —————————————————————————— //
 
