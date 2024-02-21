@@ -44,6 +44,7 @@ pub mod config {
     pub const NB_TRACKER: usize = 1024;
     pub const NB_UPDATES: usize = 128;
     pub const NB_CORES: usize = 32; // NOTE: Can't be greater than 64 as we use 64 bits bitmaps.
+    pub const NB_REMAP_REGIONS: usize = 128;
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

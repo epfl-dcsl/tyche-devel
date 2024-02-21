@@ -6,7 +6,7 @@
 
 pub const CREATE_DOMAIN: usize = 1;
 pub const SEAL_DOMAIN: usize = 2;
-pub const SHARE: usize = 3;
+pub const _SHARE: usize = 3;
 pub const SEND: usize = 4;
 pub const SEGMENT_REGION: usize = 5;
 pub const REVOKE: usize = 6;

@@ -3,11 +3,11 @@
 use core::sync::atomic::{AtomicBool, Ordering};
 
 use attestation::signature::EnclaveReport;
-use capa_engine::config::{NB_CORES, NB_DOMAINS};
+use capa_engine::config::{NB_CORES, NB_DOMAINS, NB_REMAP_REGIONS};
 use capa_engine::utils::BitmapIterator;
 use capa_engine::{
     permission, AccessRights, Bitmaps, Buffer, CapaEngine, CapaError, CapaInfo, Domain, GenArena,
-    Handle, LocalCapa, MemOps, NextCapaToken, MEMOPS_ALL,
+    Handle, LocalCapa, MemOps, NextCapaToken, Remapper, MEMOPS_ALL,
 };
 use mmu::eptmapper::EPT_ROOT_FLAGS;
 use mmu::{EptMapper, FrameAllocator, IoPtFlag, IoPtMapper};
@@ -51,6 +51,7 @@ pub struct DomainData {
     ept: Option<HostPhysAddr>,
     ept_old: Option<HostPhysAddr>,
     iopt: Option<HostPhysAddr>,
+    remapper: Remapper<NB_REMAP_REGIONS>,
 }
 
 #[derive(PartialEq)]
@@ -76,6 +77,7 @@ const EMPTY_DOMAIN: Mutex<DomainData> = Mutex::new(DomainData {
     ept: None,
     ept_old: None,
     iopt: None,
+    remapper: Remapper::new(),
 });
 const EMPTY_UPDATE_BUFFER: Mutex<Buffer<CoreUpdate>> = Mutex::new(Buffer::new());
 const EMPTY_CONTEXT: Mutex<Contextx86> = Mutex::new(Contextx86 {
