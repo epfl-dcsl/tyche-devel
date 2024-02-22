@@ -139,6 +139,10 @@ build-riscv:
 
 ## ——————————————————————————— Linux Kernel Build ——————————————————————————— ##
 
+# Build linux image.
+build-linux:
+       make -C linux-image/
+
 build-linux-x86:
 	@just _build-linux-common x86
 
@@ -148,8 +152,15 @@ build-linux-riscv:
 
 _build-linux-common ARCH CROSS_COMPILE=extra_arg:
 	@just _setup-linux-config {{ARCH}}
-	make -C ./linux ARCH={{ARCH}} O=../builds/linux-{{ARCH}} {{CROSS_COMPILE}} -j `nproc`
+	bear --output ./linux/compile_commands.json -- make -C ./linux ARCH={{ARCH}} O=../builds/linux-{{ARCH}} {{CROSS_COMPILE}} -j `nproc`
 	@just _clean-linux-config {{ARCH}}
+
+build-linux-x86-nested:
+  cp ./configs/linux-x86-nested.config ./linux/arch/x86/configs/linux-x86-nested_defconfig
+  mkdir -p ./builds/linux-x86-nested
+  make -C ./linux ARCH=x86 O=../builds/linux-x86-nested defconfig KBUILD_DEFCONFIG=linux-x86-nested_defconfig
+  make -C ./linux ARCH=x86 O=../builds/linux-x86-nested -j `nproc`
+  rm ./linux/arch/x86/configs/linux-x86-nested_defconfig
 
 _build-linux-header-common ARCH CROSS_COMPILE=extra_arg:
 	@just _setup-linux-config {{ARCH}}
@@ -261,6 +272,55 @@ riscv_monitor_gdb:
 
 riscv_linux_gdb:
 	riscv64-unknown-linux-gnu-gdb -q -ex "add-auto-load-safe-path {{riscv-linux-dir}}" -ex "file {{riscv-vmlinux}}" -ex "set riscv use-compressed-breakpoints no" -ex "target remote localhost:1234" 
+## ———————————————————————— Run Linux without tyche ————————————————————————— ##
+
+only-linux SMP=default_smp:
+  #touch _empty.fake_disk
+  qemu-system-x86_64 \
+  -kernel builds/linux-x86/arch/x86_64/boot/bzImage \
+  -smp {{SMP}} \
+  --no-reboot \
+  -chardev file,path="/tmp/charseabios",logfile="/tmp/seabios",id=seabios -device isa-debugcon,iobase=0x402,chardev=seabios \
+  -device isa-debug-exit,iobase=0xf4,iosize=0x04 \
+  -device intel-iommu,intremap=on,aw-bits=48 \
+  -cpu host,+kvm -machine q35 -accel kvm,kernel-irqchip=split -m 6G \
+  -drive format=raw,file=target/x86_64-unknown-kernel/debug/boot-uefi-s1.img \
+  -bios OVMF-pure-efi.fd \
+  -drive file=ubuntu.qcow2,format=qcow2,media=disk \
+  -nographic \
+  -append "root=/dev/sda1 apic=debug earlyprintk=serial,ttyS0 console=ttyS0" \
+  -chardev socket,path={{default_dbg}},server=on,wait=off,id=gdb0 -gdb chardev:gdb0
+  #rm _empty.fake_disk
+  #  -drive format=raw,file=target/x86_64-unknown-kernel/debug/boot-uefi-s1.img \
+  #    -bios OVMF-pure-efi.fd \
+  #-drive file=_empty.fake_disk,format=raw,media=disk \
+ 
+simple-linux SMP=default_smp:
+  qemu-system-x86_64 \
+  -kernel builds/linux-x86/arch/x86_64/boot/bzImage \
+  -smp {{SMP}} \
+  --no-reboot \
+  -chardev file,path="/tmp/charseabios",logfile="/tmp/seabios",id=seabios -device isa-debugcon,iobase=0x402,chardev=seabios \
+  -device isa-debug-exit,iobase=0xf4,iosize=0x04 \
+  -cpu host,+kvm -machine q35 -accel kvm -m 6G \
+  -drive format=raw,file=target/x86_64-unknown-kernel/debug/boot-uefi-s1.img \
+  -bios OVMF-pure-efi.fd \
+  -drive file=ubuntu.qcow2,format=qcow2,media=disk \
+  -nographic \
+  -append "root=/dev/sda1 apic=debug earlyprintk=serial,ttyS0 console=ttyS0 tsc=none" \
+  -chardev socket,path={{default_dbg}},server=on,wait=off,id=gdb0 -gdb chardev:gdb0
+
+dbg-only-linux:
+  gdb -ex "target remote {{default_dbg}}" \
+  -ex "source builds/linux-x86/vmlinux-gdb.py" \
+  -ex "lx-symbols" \
+  builds/linux-x86/vmlinux
+
+install-drivers:
+  ARCH=x86 make -C C/ ubuntu_mount
+  ARCH=x86 make -C builds/linux-x86/ modules
+  ARCH=x86 sudo INSTALL_MOD_PATH=/tmp/mount/ make -C builds/linux-x86/ modules_install
+  ARCH=x86 make -C C/ ubuntu_umount
 
 # The following line gives highlighting on vim
 # vim: set ft=make :

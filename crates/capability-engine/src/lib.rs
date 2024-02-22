@@ -26,7 +26,7 @@ pub use gen_arena::{GenArena, Handle};
 pub use region::{
     AccessRights, MemOps, MemoryPermission, Region, RegionIterator, RegionTracker, MEMOPS_ALL,
 };
-use region::{TrackerPool, EMPTY_REGION};
+use region::{PermissionIterator, TrackerPool, EMPTY_REGION};
 use region_capa::{RegionCapa, RegionPool};
 pub use remapper::Remapper;
 use segment::NewRegionPool;
@@ -640,6 +640,16 @@ impl CapaEngine {
         self.domains[domain].get(capa)?.as_domain()
     }
 
+    pub fn get_region_capa(
+        &self,
+        domain: Handle<Domain>,
+        capa: LocalCapa,
+    ) -> Result<Option<&RegionCapa>, CapaError> {
+        Ok(self
+            .regions
+            .get(self.domains[domain].get(capa)?.as_region()?))
+    }
+
     pub fn get_domain_regions<'a>(
         &'a self,
         domain: Handle<Domain>,
@@ -653,7 +663,7 @@ impl CapaEngine {
     pub fn get_domain_permissions<'a>(
         &'a self,
         domain: Handle<Domain>,
-    ) -> Result<impl Iterator<Item = MemoryPermission> + 'a, CapaError> {
+    ) -> Result<PermissionIterator<'a>, CapaError> {
         let Some(domain) = self.domains.get(domain) else {
             return Err(CapaError::InvalidValue);
         };

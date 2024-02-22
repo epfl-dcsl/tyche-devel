@@ -115,6 +115,19 @@ pub fn init(manifest: &'static Manifest) {
             },
         )
         .unwrap();
+    // Call the remapper information.
+    {
+        let mut dom_dat = get_domain(domain);
+        let _ = dom_dat
+            .remapper
+            .map_range(0, 0, manifest.iommu as usize, 1)
+            .unwrap();
+        let s = (manifest.iommu + PAGE_SIZE) as usize;
+        let _ = dom_dat
+            .remapper
+            .map_range(s, s, (manifest.poffset as usize) - s, 1)
+            .unwrap();
+    }
     apply_updates(&mut engine);
 
     // Save the initial domain
@@ -543,15 +556,31 @@ pub fn do_segment_region(
     Ok((left, right))
 }
 
+//TODO: aghosn make it so we have only one call to send a region.
+// And that it's special compared to others
 pub fn do_send(current: Handle<Domain>, capa: LocalCapa, to: LocalCapa) -> Result<(), CapaError> {
     let mut engine = CAPA_ENGINE.lock();
+    // Get the capa first cause we need it for the remapper.
+    let region_info = {
+        match engine.get_region_capa(current, capa)? {
+            Some(rc) => Some(rc.get_access_rights()),
+            _ => None,
+        }
+    };
     engine.send(current, capa, to)?;
+    if let Some(info) = region_info {
+        // Call the remapper.
+        let target = engine.get_domain_capa(current, to)?;
+        let mut dom_dat = get_domain(target);
+        let _ = dom_dat
+            .remapper
+            .map_range(info.start, info.start, info.end - info.start, 1);
+    }
     apply_updates(&mut engine);
     Ok(())
 }
 
-//TODO (aghosn) figure that out
-/*pub fn do_send_aliased(
+pub fn do_send_aliased(
     current: Handle<Domain>,
     capa: LocalCapa,
     to: LocalCapa,
@@ -560,11 +589,38 @@ pub fn do_send(current: Handle<Domain>, capa: LocalCapa, to: LocalCapa) -> Resul
     size: usize,
 ) -> Result<(), CapaError> {
     let mut engine = CAPA_ENGINE.lock();
-    let size = if is_repeat { Some(size) } else { None };
-    engine.send_aliased(current, capa, to, alias, size)?;
+    // Get the capa first.
+    let region_info = engine
+        .get_region_capa(current, capa)?
+        .ok_or(CapaError::InvalidCapa)?
+        .get_access_rights();
+    let repeat = {
+        if is_repeat {
+            let region_size = region_info.end - region_info.start;
+            if size == 0 || (region_size % size) != 0 {
+                return Err(CapaError::InvalidValue);
+            }
+            region_size / size
+        } else {
+            // Not a repeat, spans the entire thing.
+            1
+        }
+    };
+    engine.send(current, capa, to)?;
+    let target = engine.get_domain_capa(current, to)?;
+    // We cannot hold the reference while apply_updates is called.
+    {
+        let mut dom_dat = get_domain(target);
+        let _ = dom_dat.remapper.map_range(
+            region_info.start,
+            alias,
+            region_info.end - region_info.start,
+            repeat,
+        );
+    };
     apply_updates(&mut engine);
     Ok(())
-}*/
+}
 
 pub fn do_enumerate(
     current: Handle<Domain>,
@@ -966,6 +1022,9 @@ fn update_domain_ept(
 ) -> bool {
     let mut domain = get_domain(domain_handle);
     let allocator = allocator();
+    if let Some(ept) = domain.ept {
+        unsafe { free_ept(ept, allocator) };
+    }
     let ept_root = allocator
         .allocate_frame()
         .expect("Failled to allocate EPT root")
@@ -974,8 +1033,33 @@ fn update_domain_ept(
         allocator.get_physical_offset().as_usize(),
         ept_root.phys_addr,
     );
+    let permission_iter = engine.get_domain_permissions(domain_handle).unwrap();
+    for range in domain.remapper.remap(permission_iter) {
+        if !range.ops.contains(MemOps::READ) {
+            log::error!("there is a region without read permission: {}", range);
+            continue;
+        }
+        let mut flags = EptEntryFlags::READ;
+        if range.ops.contains(MemOps::WRITE) {
+            flags |= EptEntryFlags::WRITE;
+        }
+        if range.ops.contains(MemOps::EXEC) {
+            if range.ops.contains(MemOps::SUPER) {
+                flags |= EptEntryFlags::SUPERVISOR_EXECUTE;
+            } else {
+                flags |= EptEntryFlags::USER_EXECUTE;
+            }
+        }
+        mapper.map_range(
+            allocator,
+            GuestPhysAddr::new(range.gpa),
+            HostPhysAddr::new(range.hpa),
+            range.size,
+            flags,
+        )
+    }
 
-    for range in engine.get_domain_permissions(domain_handle).unwrap() {
+    /*for range in engine.get_domain_permissions(domain_handle).unwrap() {
         if !range.ops.contains(MemOps::READ) {
             log::error!("there is a region without read permission: {}", range);
             continue;
@@ -998,7 +1082,7 @@ fn update_domain_ept(
             range.size(),
             flags,
         )
-    }
+    }*/
 
     if !init {
         loop {

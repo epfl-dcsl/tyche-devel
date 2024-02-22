@@ -272,8 +272,7 @@ fn handle_exit(
                 }
                 calls::SEND_ALIASED => {
                     log::trace!("Send aliased");
-                    todo!("Implement! need to check the remapper");
-                    /* //TODO(aghosn) we need to implement this
+
                     // Send a region capa and adds an alias to it.
                     monitor::do_send_aliased(
                         *domain,
@@ -287,7 +286,7 @@ fn handle_exit(
                     let mut context = monitor::get_context(*domain, cpuid());
                     context.set(VmcsField::GuestRax, 0, None)?;
                     vs.vcpu.next_instruction()?;
-                    Ok(HandlerResult::Resume)*/
+                    Ok(HandlerResult::Resume)
                 }
                 calls::SEGMENT_REGION => {
                     log::trace!("Segment region");

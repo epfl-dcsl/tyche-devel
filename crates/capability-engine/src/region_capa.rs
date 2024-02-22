@@ -55,6 +55,10 @@ impl RegionCapa {
         self.is_confidential = confidential;
         self
     }
+
+    pub fn get_access_rights(&self) -> AccessRights {
+        self.access
+    }
 }
 
 pub type RegionHandle = Handle<RegionCapa>;
