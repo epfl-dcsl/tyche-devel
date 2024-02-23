@@ -322,5 +322,20 @@ install-drivers:
   ARCH=x86 sudo INSTALL_MOD_PATH=/tmp/mount/ make -C builds/linux-x86/ modules_install
   ARCH=x86 make -C C/ ubuntu_umount
 
+setup_for_vms_x86:
+  @just build-linux-x86 && just install-drivers
+  @just build-linux-x86-nested
+  git clone https://git.seabios.org/seabios.git /tmp/seabios
+  make -C /tmp/seabios/
+  ARCH=x86 make -C C/ ubuntu_mount
+  # Copy all the necessary files
+  mkdir -p /tmp/mount/tyche/vms
+  sudo cp builds/linux-x86-nested/arch/x86_64/boot/bzImage /tmp/mount/tyche/vms/bzImage
+  sudo cp configs/Makefile_nested /tmp/mount/tyche/vms/Makefile
+  sudo cp scripts/mod_switch.sh /tmp/mount/tyche/vms/mod_switch.sh
+  sudo chmod +x /tmp/mount/tyche/vms/mod_switch.sh
+  sudo cp /tmp/seabios/out/bios.bin /tmp/mount/tyche/vms/bios.bin
+  ARCH=x86 make -C C/ ubuntu_umount
+
 # The following line gives highlighting on vim
 # vim: set ft=make :

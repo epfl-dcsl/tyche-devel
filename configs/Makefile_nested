@@ -1,0 +1,66 @@
+all: run_bz
+
+ISO=ubuntu-22.04.2-live-server-amd64.iso
+DISK=ubuntu-server.qcow2
+
+create:
+	qemu-img create -f qcow2 $(DISK) 1T
+	qemu-system-x86_64 \
+        -cdrom $(ISO) \
+        -drive "file=$(DISK),format=qcow2" \
+        -m 2G \
+        -smp 1 \
+        ;
+
+run:
+	qemu-system-x86_64 \
+  	-drive "file=$(DISK),format=qcow2" \
+    	-enable-kvm \
+    	-m 2G \
+    	-nographic \
+    	-smp 1 
+
+
+run_strace:
+	strace -o out.txt \
+	qemu-system-x86_64 \
+  	-drive "file=$(DISK),format=qcow2" \
+    	-enable-kvm \
+    	-m 2G \
+    	-nographic \
+    	-smp 1
+ 
+ run_graphic:
+	qemu-system-x86_64 \
+  	-drive "file=$(DISK),format=qcow2" \
+    	-enable-kvm \
+    	-m 2G \
+    	-smp 1
+
+run_bz:
+	qemu-system-x86_64 \
+	-kernel bzImage \
+	-nographic \
+	-enable-kvm -m 100 \
+	-bios bios.bin \
+	-chardev file,path="/tyche/seabios",id=seabios -device isa-debugcon,iobase=0x402,chardev=seabios \
+	-append "noapic lpj=24000000 earlyprintk=serial,tty0 console=ttyS0" 
+
+run_no_kvm:
+	qemu-system-x86_64 \
+	-kernel bzImage \
+	-nographic \
+	-m 100 \
+	-bios bios.bin \
+	-chardev file,path="/tyche/seabios",id=seabios -device isa-debugcon,iobase=0x402,chardev=seabios \
+	-append "noapic lpj=24000000 earlyprintk=serial,tty0 console=ttyS0" 
+
+run_micro:
+	qemu-system-x86_64 -M microvm \
+		-enable-kvm -smp 1 -m 100 \
+		-kernel bzImage -append "earlyprintk=ttyS0 console=ttyS0 root=/dev/vda notsc noapic noacpi lpj=24000000" \
+		-nodefaults -no-user-config -nographic \
+   		-serial stdio 
+
+run_lkvm:
+	sudo lkvm run --kernel bzImage
