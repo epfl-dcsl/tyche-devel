@@ -1,9 +1,9 @@
-[submodule "opensbi-stage1"]
-	path = opensbi-stage1
-	url = git@github.com:neeluk7/opensbi-stage1.git
-[submodule "linux"]
+[submodule "linux-kvm-tyche"]
 	path = linux
-	url = git@github.com:torvalds/linux.git
+	url = git@github.com:YuChen-Qian/linux-kvm-tyche.git
 [submodule "busybox"]
 	path = busybox
 	url = git://busybox.net/busybox.git
+[submodule "opensbi-stage1"]
+	path = opensbi-stage1
+	url = git@github.com:neeluk7/opensbi-stage1.git
