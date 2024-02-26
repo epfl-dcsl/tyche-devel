@@ -801,6 +801,20 @@ mod tests {
 
 // ———————————————————————————————— Display ————————————————————————————————— //
 
+impl fmt::Display for Mapping {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "[0x{:x}, 0x{:x} at 0x{:x}, rep {} | {}]",
+            self.hpa,
+            self.hpa + self.size,
+            self.gpa,
+            self.repeat,
+            self.ops,
+        )
+    }
+}
+
 impl<'a, const N: usize> fmt::Display for RemapIterator<'a, N> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut first = true;
@@ -811,15 +825,7 @@ impl<'a, const N: usize> fmt::Display for RemapIterator<'a, N> {
             } else {
                 write!(f, " -> ")?;
             }
-            write!(
-                f,
-                "[0x{:x}, 0x{:x} at 0x{:x}, rep {} | {}]",
-                mapping.hpa,
-                mapping.hpa + mapping.size,
-                mapping.gpa,
-                mapping.repeat,
-                mapping.ops,
-            )?;
+            write!(f, "{}", mapping,)?;
         }
         write!(f, "}}")
     }

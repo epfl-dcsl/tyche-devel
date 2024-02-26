@@ -56,6 +56,7 @@ pub fn main_loop(mut vmx_state: VmxState, mut domain: Handle<Domain>) {
             HandlerResult::Resume => {
                 result = unsafe {
                     let mut context = monitor::get_context(domain, core_id);
+                    context.flush(&mut vmx_state.vcpu);
                     vmx_state.vcpu.run(&mut context.vmcs_gp)
                 };
             }
@@ -272,7 +273,7 @@ fn handle_exit(
                 }
                 calls::SEND_ALIASED => {
                     log::trace!("Send aliased");
-
+                    log::info!("Send alias the alias is {:x}", arg_5);
                     // Send a region capa and adds an alias to it.
                     monitor::do_send_aliased(
                         *domain,
@@ -290,7 +291,7 @@ fn handle_exit(
                 }
                 calls::SEGMENT_REGION => {
                     log::trace!("Segment region");
-                    let (left, right) = monitor::do_segment_region(
+                    let (left, right) = match monitor::do_segment_region(
                         *domain,
                         LocalCapa::new(arg_1),
                         arg_2,               // start
@@ -299,8 +300,13 @@ fn handle_exit(
                         arg_4,               // start
                         arg_5,               // end
                         (arg_6 << 32) >> 32, // prot2
-                    )
-                    .expect("TODO");
+                    ) {
+                        Ok((l, r)) => (l,r),
+                        Err(e) => {
+                            monitor::do_debug();
+                            panic!("Error {:?}", e);
+                        }
+                    };
                     let mut context = monitor::get_context(*domain, cpuid());
                     context.set(VmcsField::GuestRdi, left.as_usize(), None)?;
                     context.set(VmcsField::GuestRsi, right.as_usize(), None)?;

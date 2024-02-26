@@ -606,10 +606,11 @@ pub fn do_send_aliased(
             1
         }
     };
+    log::info!("send alias: {:x?} at {:x}", region_info, alias);
     engine.send(current, capa, to)?;
-    let target = engine.get_domain_capa(current, to)?;
     // We cannot hold the reference while apply_updates is called.
     {
+        let target = engine.get_domain_capa(current, to)?;
         let mut dom_dat = get_domain(target);
         let _ = dom_dat.remapper.map_range(
             region_info.start,
@@ -657,17 +658,34 @@ pub fn do_debug() {
     while let Some((domain, next_next)) = engine.enumerate_domains(next) {
         next = next_next;
 
-        log::trace!("Domain");
+        log::info!("Domain {}", domain.idx());
         let mut next_capa = NextCapaToken::new();
         while let Some((info, next_next_capa)) = engine.enumerate(domain, next_capa) {
             next_capa = next_next_capa;
-            log::trace!(" - {}", info);
+            log::info!(" - {}", info);
         }
-        log::trace!(
-            "{}",
+        log::info!(
+            "tracker: {}",
             engine.get_domain_regions(domain).expect("Invalid domain")
         );
+        let dom_dat = get_domain(domain);
+        let remap = dom_dat
+            .remapper
+            .remap(engine.get_domain_permissions(domain).unwrap());
+        log::info!("remap: {}", remap);
     }
+}
+
+#[allow(dead_code)]
+pub fn do_debug_addr(dom: Handle<Domain>, addr: usize) {
+    log::info!("do_debug_addr:");
+    let domain = get_domain(dom);
+    let allocator = allocator();
+    let mut mapper = EptMapper::new(
+        allocator.get_physical_offset().as_usize(),
+        domain.ept.unwrap(),
+    );
+    mapper.debug_range(GuestPhysAddr::new(addr), 0x1000);
 }
 
 pub fn do_domain_attestation(
@@ -746,6 +764,16 @@ fn post_ept_update(core_id: usize, cores: u64, domain: &Handle<Domain>) {
     // root.
     log::trace!("core {} freeing the original domain EPT", core_id);
     free_original_ept_root(domain);
+    let new_epts = {
+        let domain = get_domain(*domain);
+        domain.ept.unwrap().as_usize()
+    };
+    for core in BitmapIterator::new(cores) {
+        let mut context = get_context(*domain, core);
+        context
+            .set(VmcsField::EptPointer, new_epts | EPT_ROOT_FLAGS, None)
+            .unwrap();
+    }
     // We're done with the current TLB flush update
     log::trace!("core {} allows more TLB flushes", core_id);
     TLB_FLUSH[domain.idx()].store(false, Ordering::SeqCst);
@@ -776,7 +804,6 @@ fn apply_updates(engine: &mut MutexGuard<CapaEngine>) {
                     core_map
                 );
                 let ept_update = update_permission(domain, engine, init);
-
                 if !init && ept_update {
                     log::trace!(
                         "cpu {} pushes core update with core_map={:b}",
@@ -1022,9 +1049,6 @@ fn update_domain_ept(
 ) -> bool {
     let mut domain = get_domain(domain_handle);
     let allocator = allocator();
-    if let Some(ept) = domain.ept {
-        unsafe { free_ept(ept, allocator) };
-    }
     let ept_root = allocator
         .allocate_frame()
         .expect("Failled to allocate EPT root")
@@ -1056,7 +1080,7 @@ fn update_domain_ept(
             HostPhysAddr::new(range.hpa),
             range.size,
             flags,
-        )
+        );
     }
 
     /*for range in engine.get_domain_permissions(domain_handle).unwrap() {
@@ -1100,6 +1124,7 @@ fn update_domain_ept(
 
     // The core needs exclusive access before updating the domain's EPT. Otherwise, we might have
     // miss freeing some EPT roots.
+    // The contexts per core will be updated in the permission change update.
     domain.ept_old = domain.ept;
     domain.ept = Some(ept_root.phys_addr);
 
