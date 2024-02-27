@@ -4,9 +4,11 @@ use capa_engine::{Bitmaps, Domain, Handle, LocalCapa, NextCapaToken};
 use riscv_csrs::*;
 use riscv_pmp::clear_pmp;
 use riscv_sbi::ecall::ecall_handler;
-use riscv_sbi::sbi::EXT_IPI;
-use riscv_utils::{RegisterState, clear_mie_mtie, aclint_mtimer_set_mtimecmp, TIMER_EVENT_TICK, clear_mip_seip}; 
 use riscv_sbi::ipi::process_ipi;
+use riscv_sbi::sbi::EXT_IPI;
+use riscv_utils::{
+    aclint_mtimer_set_mtimecmp, clear_mie_mtie, clear_mip_seip, RegisterState, TIMER_EVENT_TICK,
+};
 
 use super::monitor;
 use crate::arch::cpuid;
@@ -108,7 +110,10 @@ pub extern "C" fn machine_trap_handler() {
 pub extern "C" fn exit_handler_failed(mcause: usize) {
     // TODO: Currently, interrupts must be getting redirected here too. Confirm this and then fix
     // it.
-    panic!("*******WARNING: Cannot handle this trap with mcause: {:x} !*******", mcause);
+    panic!(
+        "*******WARNING: Cannot handle this trap with mcause: {:x} !*******",
+        mcause
+    );
 }
 
 // Exit handler - equivalent to x86 handle_exit for its guest.
@@ -163,7 +168,6 @@ pub fn handle_exit(reg_state: &mut RegisterState) {
         satp
     ); */
 
-
     // Check which trap it is
     // mcause register holds the cause of the machine mode trap
     match mcause {
@@ -172,7 +176,12 @@ pub fn handle_exit(reg_state: &mut RegisterState) {
         }
         mcause::MTI => {
             clear_mie_mtie();
-            log::info!("\nHART {} MTIMER: MEPC: {:x} RA: {:x}\n", hartid, mepc, reg_state.ra);
+            log::info!(
+                "\nHART {} MTIMER: MEPC: {:x} RA: {:x}\n",
+                hartid,
+                mepc,
+                reg_state.ra
+            );
             aclint_mtimer_set_mtimecmp(hartid, TIMER_EVENT_TICK);
         }
         mcause::MEI => {
@@ -190,11 +199,9 @@ pub fn handle_exit(reg_state: &mut RegisterState) {
                 } else {
                     misaligned_load_handler(reg_state);
                 }
-            
             } else {
-
                 //if(reg_state.a7 == EXT_IPI) {
-                    //log::debug!("[HART {}] EXT_IPI_ECALL MEPC: {:x} RA {:x}",hartid, mepc, reg_state.ra);
+                //log::debug!("[HART {}] EXT_IPI_ECALL MEPC: {:x} RA {:x}",hartid, mepc, reg_state.ra);
                 //}
 
                 ecall_handler(&mut ret, &mut err, &mut out_val, *reg_state);
@@ -226,7 +233,7 @@ pub fn handle_exit(reg_state: &mut RegisterState) {
     // Return to the next instruction after the trap.
     // i.e. mepc += 4
     // TODO: This shouldn't happen in case of switch.
-    if (mcause & (1 << 63)) != (1 << 63) { 
+    if (mcause & (1 << 63)) != (1 << 63) {
         unsafe {
             asm!("csrr t0, mepc");
             asm!("addi t0, t0, 0x4");
@@ -236,7 +243,13 @@ pub fn handle_exit(reg_state: &mut RegisterState) {
     }
 }
 
-pub fn illegal_instruction_handler(mepc: usize, mtval: usize, mstatus: usize, mip: usize, mie: usize) {
+pub fn illegal_instruction_handler(
+    mepc: usize,
+    mtval: usize,
+    mstatus: usize,
+    mip: usize,
+    mie: usize,
+) {
     /* let mut mepc_instr_opcode: usize = 0;
 
     // Read the instruction which caused the trap. (mepc points to the VA of this instruction).
@@ -261,7 +274,10 @@ pub fn illegal_instruction_handler(mepc: usize, mtval: usize, mstatus: usize, mi
         mepc_instr_opcode
     ); */
 
-    panic!("Illegal Instruction Trap! mepc: {:x} mtval: {:x} mstatus: {:x} mip: {:x} mie: {:x}", mepc, mtval, mstatus, mip, mie);
+    panic!(
+        "Illegal Instruction Trap! mepc: {:x} mtval: {:x} mstatus: {:x} mip: {:x} mie: {:x}",
+        mepc, mtval, mstatus, mip, mie
+    );
 }
 
 pub fn misaligned_load_handler(reg_state: &mut RegisterState) {

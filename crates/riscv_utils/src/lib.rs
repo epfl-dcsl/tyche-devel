@@ -1,7 +1,6 @@
 #![no_std]
 
 use core::arch::asm;
-
 use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 pub const NUM_HARTS: usize = 2;
@@ -25,7 +24,7 @@ pub const PCI_SIZE: usize = 0x10000000;
 pub const PAGING_MODE_SV48: usize = 0x9000000000000000;
 
 pub const ACLINT_MSWI_BASE_ADDR: usize = 0x2000000;
-pub const ACLINT_MSWI_WORD_SIZE: usize = 4; 
+pub const ACLINT_MSWI_WORD_SIZE: usize = 4;
 
 pub const ACLINT_MTIMECMP_BASE_ADDR: usize = 0x2004000;
 pub const ACLINT_MTIMECMP_SIZE: usize = 8;
@@ -39,7 +38,7 @@ pub static HART_START: [AtomicBool; NUM_HARTS] = [FALSE; NUM_HARTS];
 const ZERO: AtomicUsize = AtomicUsize::new(0);
 
 pub static HART_START_ADDR: [AtomicUsize; NUM_HARTS] = [ZERO; NUM_HARTS];
-pub static HART_START_ARG1: [AtomicUsize; NUM_HARTS] = [ZERO; NUM_HARTS]; 
+pub static HART_START_ARG1: [AtomicUsize; NUM_HARTS] = [ZERO; NUM_HARTS];
 
 pub static HART_IPI_SYNC: [AtomicUsize; NUM_HARTS] = [ZERO; NUM_HARTS];
 
@@ -294,7 +293,7 @@ pub fn set_mip_ssip() {
         asm!("csrr {}, mip", out(reg) mip);
     }
 
-    mip = mip | 0x2;    //Note: Assuming MIE.SEIE is set. Not sure if a check is needed. 
+    mip = mip | 0x2; //Note: Assuming MIE.SEIE is set. Not sure if a check is needed.
 
     unsafe {
         asm!("csrw mip, {}", in(reg) mip);
@@ -304,9 +303,14 @@ pub fn set_mip_ssip() {
 pub fn aclint_mtimer_set_mtimecmp(target_hartid: usize, value: usize) {
     let target_addr: usize = ACLINT_MTIMECMP_BASE_ADDR + target_hartid * ACLINT_MTIMECMP_SIZE;
     let val = value + last_timer_tick[target_hartid].load(Ordering::SeqCst);
-    last_timer_tick[target_hartid].store(val, Ordering::SeqCst);  
-    
-    log::info!("[Hart {}] Setting mtimecmp at addr {:x} with value: {:x}", target_hartid, target_addr, val);
+    last_timer_tick[target_hartid].store(val, Ordering::SeqCst);
+
+    log::info!(
+        "[Hart {}] Setting mtimecmp at addr {:x} with value: {:x}",
+        target_hartid,
+        target_addr,
+        val
+    );
     unsafe {
         asm!("sw {}, 0({})", in(reg) val, in(reg) target_addr);
     }
@@ -320,12 +324,11 @@ pub fn set_mie_mtie() {
         asm!("csrr {}, mie", out(reg) mie);
     }
 
-    mie = mie | 0x80;     
+    mie = mie | 0x80;
 
     unsafe {
         asm!("csrw mie, {}", in(reg) mie);
     }
- 
 }
 
 pub fn clear_mie_mtie() {
@@ -335,7 +338,7 @@ pub fn clear_mie_mtie() {
         asm!("csrr {}, mie", out(reg) mie);
     }
 
-    mie = mie & !(0x80);     
+    mie = mie & !(0x80);
 
     unsafe {
         asm!("csrw mie, {}", in(reg) mie);
@@ -349,7 +352,7 @@ pub fn clear_mip_seip() {
         asm!("csrr {}, mip", out(reg) mip);
     }
 
-    mip = mip & !(0x200);     
+    mip = mip & !(0x200);
 
     unsafe {
         asm!("csrw mip, {}", in(reg) mip);
@@ -357,14 +360,14 @@ pub fn clear_mip_seip() {
 }
 
 /* pub fn aclint_mswi_send_ipi(target_hartid: usize) {
-    let target_addr: usize = ACLINT_MSWI_BASE_ADDR + target_hartid * ACLINT_MSWI_WORD_SIZE;  
+    let target_addr: usize = ACLINT_MSWI_BASE_ADDR + target_hartid * ACLINT_MSWI_WORD_SIZE;
     unsafe {
         asm!("sw {}, 0({})", in(reg) 1, in(reg) target_addr);
     }
 }
 
 pub fn aclint_mswi_clear_ipi(target_hartid: usize) {
-    let target_addr: usize = ACLINT_MSWI_BASE_ADDR + target_hartid * ACLINT_MSWI_WORD_SIZE;  
+    let target_addr: usize = ACLINT_MSWI_BASE_ADDR + target_hartid * ACLINT_MSWI_WORD_SIZE;
     unsafe {
         asm!("sw {}, 0({})", in(reg) 0, in(reg) target_addr);
     }
@@ -375,8 +378,8 @@ pub fn process_ipi() {
     //sbi_ipi_send_raw, the ipi_type is determined/updated. I can just create my own metadata in Tyche to
     //convey this information across harts - I just need to understand when to trigger which types
     //of ipis. Until then, it's all processed as follows and chances are that it may lead to
-    //unexpected behaviour at times - I will debug that on a need basis. 
-    let target_hartid: usize; 
+    //unexpected behaviour at times - I will debug that on a need basis.
+    let target_hartid: usize;
     unsafe {
         asm!("csrr {}, mhartid", out(reg) target_hartid);
     }

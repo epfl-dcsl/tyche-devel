@@ -46,7 +46,7 @@ pub fn launch_guest(hartid: usize, arg1: usize, next_addr: usize, next_mode: usi
         asm!("csrw mstatus, {}", in(reg) mstatus);
     }
 
-    // 2. Update MEPC to next_addr 
+    // 2. Update MEPC to next_addr
     //mepc::write(next_addr);
     unsafe {
         asm!("csrw mepc, {}",
@@ -109,9 +109,9 @@ pub fn init() {
 }
 
 pub fn cpuid() -> usize {
-    let hartid: usize; 
+    let hartid: usize;
 
-    unsafe { 
+    unsafe {
         asm!("csrr {}, mhartid", out(reg) hartid);
     }
 

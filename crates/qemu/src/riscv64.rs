@@ -5,8 +5,8 @@ use core::fmt;
 use core::fmt::Write;
 
 use riscv_utils::SERIAL_PORT_BASE_ADDRESS;
-use uart_16550::MmioSerialPort;
 use spin::Mutex;
+use uart_16550::MmioSerialPort;
 
 use crate::ExitCode;
 
@@ -14,11 +14,9 @@ use crate::ExitCode;
 
 /// Internal function used to print to stdout when running in Qemu.
 pub fn _print(_args: fmt::Arguments) {
-    
-    static mut SERIAL_PORT: Option<Mutex<MmioSerialPort>> = None; 
+    static mut SERIAL_PORT: Option<Mutex<MmioSerialPort>> = None;
 
     unsafe {
-                
         let mut serial_port = Mutex::new(MmioSerialPort::new(SERIAL_PORT_BASE_ADDRESS));
         let mut serial = serial_port.lock();
         serial.init();
@@ -46,7 +44,7 @@ pub fn _print(_args: fmt::Arguments) {
                 .write_fmt(_args)
                 .expect("Printing to serial failed");
         }
-    } */ 
+    } */
 }
 
 // —————————————————————————————— Exiting QEMU —————————————————————————————— //

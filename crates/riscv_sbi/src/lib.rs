@@ -47,15 +47,15 @@ pub mod sbi_ext_ipi {
 
 pub mod sbi_ext_rfence {
     pub const REMOTE_SFENCE_VMA: usize = 1;
-    pub const REMOTE_SFENCE_VMA_ASID: usize = 2; 
+    pub const REMOTE_SFENCE_VMA_ASID: usize = 2;
 }
 
 #[derive(Debug, Clone, Copy)]
 pub enum IPIRequest {
-    SMode, 
+    SMode,
     RfenceSfenceVMAASID {
         src_hartid: usize,
-        start: usize, 
+        start: usize,
         size: usize,
         asid: usize,
     },
@@ -65,32 +65,33 @@ impl core::fmt::Display for IPIRequest {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             IPIRequest::SMode => write!(f, "SMode IPI"),
-            IPIRequest::RfenceSfenceVMAASID { src_hartid, .. } => write!(f, "Sfence VMA ASID from hart {}", src_hartid),
+            IPIRequest::RfenceSfenceVMAASID { src_hartid, .. } => {
+                write!(f, "Sfence VMA ASID from hart {}", src_hartid)
+            }
         }
-    } 
+    }
 }
 
-/* 
+/*
 #[derive(Clone, Copy, Debug)]
-pub struct sbi_scratch { 
-    pub fw_start: u64, 
+pub struct sbi_scratch {
+    pub fw_start: u64,
     pub fw_size: u64,
-    pub next_arg1: u64, 
-    pub next_addr: u64, 
-    pub next_mode: u64, 
-    pub warmboot_addr: u64, 
-    pub platform_addr: u64, 
-    pub hartid_to_scratch: u64, 
-    pub trap_exit: u64, 
-    pub tmp0: u64, 
-    pub options: u64, 
-    pub tyche_sm_addr: u64, 
+    pub next_arg1: u64,
+    pub next_addr: u64,
+    pub next_mode: u64,
+    pub warmboot_addr: u64,
+    pub platform_addr: u64,
+    pub hartid_to_scratch: u64,
+    pub trap_exit: u64,
+    pub tmp0: u64,
+    pub options: u64,
+    pub tyche_sm_addr: u64,
     pub tyche_sm_mode: u64,
     pub tyche_stack_ptr: u64,
 }
 
 #[derive(Clone, Copy, Debug)]
-pub struct sbi_hsm_data { 
-    pub 
+pub struct sbi_hsm_data {
+    pub
 } */
-

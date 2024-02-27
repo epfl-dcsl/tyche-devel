@@ -37,7 +37,13 @@ pub type EntryPoint = extern "C" fn(usize, usize, usize, usize, bool) -> !;
 macro_rules! entry_point {
     ($path:path) => {
         #[no_mangle]
-        pub extern "C" fn _start(hartid: usize, arg1: usize, next_addr: usize, next_mode: usize, coldboot: bool) -> ! {
+        pub extern "C" fn _start(
+            hartid: usize,
+            arg1: usize,
+            next_addr: usize,
+            next_mode: usize,
+            coldboot: bool,
+        ) -> ! {
             // Validate the signature of the entry point.
             let f: fn(usize, usize, usize, usize, bool) -> ! = $path;
             f(hartid, arg1, next_addr, next_mode, coldboot);

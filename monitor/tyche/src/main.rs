@@ -19,7 +19,13 @@ fn tyche_entry_point() -> ! {
 }
 
 #[cfg(target_arch = "riscv64")]
-fn tyche_entry_point(hartid: usize, arg1: usize, next_addr: usize, next_mode: usize, coldboot: bool) -> ! {
+fn tyche_entry_point(
+    hartid: usize,
+    arg1: usize,
+    next_addr: usize,
+    next_mode: usize,
+    coldboot: bool,
+) -> ! {
     //logger::init(LOG_LEVEL);
     arch::arch_entry_point(hartid, arg1, next_addr, next_mode, coldboot, LOG_LEVEL);
 }
