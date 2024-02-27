@@ -5,7 +5,7 @@ use riscv_csrs::*;
 use riscv_pmp::clear_pmp;
 use riscv_sbi::ecall::ecall_handler;
 use riscv_sbi::sbi::EXT_IPI;
-use riscv_utils::{RegisterState, clear_mie_mtie, aclint_mtimer_set_mtimecmp, TIMER_EVENT_TICK}; 
+use riscv_utils::{RegisterState, clear_mie_mtie, aclint_mtimer_set_mtimecmp, TIMER_EVENT_TICK, clear_mip_seip}; 
 use riscv_sbi::ipi::process_ipi;
 
 use super::monitor;
@@ -55,10 +55,18 @@ pub extern "C" fn machine_trap_handler() {
         sd s9, 28*8(sp)
         sd s10, 29*8(sp)
         sd s11, 30*8(sp)
+        csrr t1, mepc 
+        sd t1, 31*8(sp)
+        csrr t1, mstatus
+        sd t1, 32*8(sp)
         mv a0, sp      //arg to trap_handler
         auipc x1, 0x0
         addi x1, x1, 10
         j {trap_handler}
+        ld t1, 31*8(sp)
+        csrw mepc, t1
+        ld t1, 32*8(sp)
+        csrw mstatus, t1
         ld ra, 0*8(sp)
         ld a0, 1*8(sp)
         ld a1, 2*8(sp)
@@ -178,7 +186,13 @@ pub fn handle_exit(reg_state: &mut RegisterState) {
         mcause::ECALL_FROM_SMODE => {
             if reg_state.a7 == 0x5479636865 {
                 //Tyche call
-                misaligned_load_handler(reg_state);
+                if reg_state.a0 == 0x5479636865 {
+                    log::info!("Tyche is clearing SIP.SEIE");
+                    clear_mip_seip();
+                } else {
+                    misaligned_load_handler(reg_state);
+                }
+            
             } else {
 
                 //if(reg_state.a7 == EXT_IPI) {
@@ -191,7 +205,8 @@ pub fn handle_exit(reg_state: &mut RegisterState) {
             }
         }
         mcause::LOAD_ADDRESS_MISALIGNED => {
-            misaligned_load_handler(reg_state);
+            //misaligned_load_handler(reg_state);
+            panic!("Load address misaligned.");
         }
         mcause::STORE_ACCESS_FAULT
         | mcause::LOAD_ACCESS_FAULT
@@ -214,11 +229,12 @@ pub fn handle_exit(reg_state: &mut RegisterState) {
     // i.e. mepc += 4
     // TODO: This shouldn't happen in case of switch.
     if (mcause & (1 << 63)) != (1 << 63) { 
-        unsafe {
+        /*unsafe {
             asm!("csrr t0, mepc");
             asm!("addi t0, t0, 0x4");
             asm!("csrw mepc, t0");
-        }
+        }*/
+        reg_state.mepc = reg_state.mepc + 0x4;
     }
 }
 

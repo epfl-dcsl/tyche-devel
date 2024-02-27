@@ -22,7 +22,7 @@ pub fn init(hartid: usize) {
     log::info!("mtvec_ptr to be set by Tyche {:p}", mtvec_ptr);
     set_mtvec(mtvec_ptr);
 
-    aclint_mtimer_set_mtimecmp(hartid, TIMER_EVENT_TICK);
+    //aclint_mtimer_set_mtimecmp(hartid, TIMER_EVENT_TICK);
 }
 
 // ------------------------------ Trap Handler Setup -------------------------- //

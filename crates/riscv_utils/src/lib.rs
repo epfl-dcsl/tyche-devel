@@ -81,8 +81,8 @@ pub struct RegisterState {
     pub s9: usize,
     pub s10: usize,
     pub s11: usize,
-    //pub mepc: usize,
-    //pub mstatus: usize,
+    pub mepc: usize,
+    pub mstatus: usize,
 }
 
 impl RegisterState {
@@ -119,6 +119,8 @@ impl RegisterState {
             s9: 0,
             s10: 0,
             s11: 0,
+            mepc: 0,
+            mstatus: 0,
         }
     }
 }
@@ -337,6 +339,20 @@ pub fn clear_mie_mtie() {
 
     unsafe {
         asm!("csrw mie, {}", in(reg) mie);
+    }
+}
+
+pub fn clear_mip_seip() {
+    let mut mip: usize;
+
+    unsafe {
+        asm!("csrr {}, mip", out(reg) mip);
+    }
+
+    mip = mip & !(0x200);     
+
+    unsafe {
+        asm!("csrw mip, {}", in(reg) mip);
     }
 }
 
