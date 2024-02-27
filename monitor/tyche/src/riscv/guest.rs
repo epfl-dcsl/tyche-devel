@@ -55,18 +55,16 @@ pub extern "C" fn machine_trap_handler() {
         sd s9, 28*8(sp)
         sd s10, 29*8(sp)
         sd s11, 30*8(sp)
-        csrr t1, mepc 
-        sd t1, 31*8(sp)
-        csrr t1, mstatus
-        sd t1, 32*8(sp)
+        //csrr t1, mepc 
+        //sd t1, 31*8(sp)
+        //csrr t1, mstatus
+        //sd t1, 32*8(sp)
         mv a0, sp      //arg to trap_handler
         auipc x1, 0x0
         addi x1, x1, 10
         j {trap_handler}
-        ld t1, 31*8(sp)
-        csrw mepc, t1
-        ld t1, 32*8(sp)
-        csrw mstatus, t1
+        //ld t1, 31*8(sp)
+        //csrw mepc, t1
         ld ra, 0*8(sp)
         ld a0, 1*8(sp)
         ld a1, 2*8(sp)
@@ -229,12 +227,12 @@ pub fn handle_exit(reg_state: &mut RegisterState) {
     // i.e. mepc += 4
     // TODO: This shouldn't happen in case of switch.
     if (mcause & (1 << 63)) != (1 << 63) { 
-        /*unsafe {
+        unsafe {
             asm!("csrr t0, mepc");
             asm!("addi t0, t0, 0x4");
             asm!("csrw mepc, t0");
-        }*/
-        reg_state.mepc = reg_state.mepc + 0x4;
+        }
+        //reg_state.mepc = reg_state.mepc + 0x4;
     }
 }
 
