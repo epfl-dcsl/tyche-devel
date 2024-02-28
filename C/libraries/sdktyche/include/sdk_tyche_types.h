@@ -2,7 +2,11 @@
 
 #include "elf64.h"
 #include "tyche_capabilities_types.h"
+#ifdef RUN_WITH_KVM
+#include <linux/kvm.h>
+#else
 #include "tyche_driver.h"
+#endif
 
 #include <elf.h>
 #include <stdint.h>
@@ -15,8 +19,6 @@
 #define ALL_TRAPS (~(usize)(0))
 #define NO_TRAPS ((usize)(0))
 #define DEFAULT_PERM ((usize)0)
-
-#define DOMAIN_DRIVER ("/dev/tyche")
 
 // ————————————————————————————— Tychools Phdrs ————————————————————————————— //
 /// OS-specific Phdr (Segments) types.
@@ -44,6 +46,13 @@ typedef enum {
   KERNEL_CONFIDENTIAL = 0x6000000a,
 } tyche_phdr_t;
 // ————————————————————————————————— Types —————————————————————————————————— //
+
+/// Opaque information held by the backend.
+typedef struct backend_info_t backend_info_t;
+
+/// Opaque vcpu info held by the backend.
+typedef struct backend_vcpu_info_t backend_vcpu_info_t;
+
 /// The fd that represents an domain.
 typedef int handle_t;
 
@@ -98,10 +107,6 @@ typedef struct {
 
   /// User stack configuration.
   usize user_stack;
-
-  /// List of shared regions.
-  dll_list(domain_shared_memory_t, shared_regions);
-
 } domain_config_t;
 
 /// The representation of a domain.
@@ -129,7 +134,15 @@ typedef struct {
 
   /// The domain's switch type.
   switch_save_t switch_type;
-} tyche_domain_t;
 
+  /// List of shared regions.
+  dll_list(domain_shared_memory_t, shared_regions);
+
+  /// List of vcpus (contexts) for this domain.
+  dll_list(backend_vcpu_info_t, vcpus);
+
+  /// Backend specific fields.
+  backend_info_t backend;
+} tyche_domain_t;
 
 typedef unsigned long long nonce_t;

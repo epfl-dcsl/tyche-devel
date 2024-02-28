@@ -27,7 +27,7 @@ static void* find_default_shared(tyche_domain_t* sb)
     goto failure;
   }
   // Find the shared region.
-  dll_foreach(&(sb->config.shared_regions), shared_sec, list) {
+  dll_foreach(&(sb->shared_regions), shared_sec, list) {
     if (shared_sec->segment->p_type == KERNEL_SHARED
         && shared_sec->segment->p_vaddr == SHARED_BUFFER) {
       return (void*) (shared_sec->untrusted_vaddr);

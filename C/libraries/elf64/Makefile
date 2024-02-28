@@ -1,6 +1,6 @@
 all: libelf64.so test_elf64
 
-COMMON=../common/
+COMMON=../../../linux/drivers/tyche/libraries/common
 FILES=src/lib.c include/elf64.h $(COMMON)/include/common.h
 INCLUDES= -I$(COMMON)/include -Iinclude/
 

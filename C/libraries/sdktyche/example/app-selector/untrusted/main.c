@@ -30,7 +30,7 @@ static void* find_default_shared(tyche_domain_t* enclave)
     goto failure;
   }
   // Find the shared region.
-  dll_foreach(&(enclave->config.shared_regions), shared_sec, list) {
+  dll_foreach(&(enclave->shared_regions), shared_sec, list) {
       if (shared_sec->segment->p_type == KERNEL_SHARED) {
         return (void*)(shared_sec->untrusted_vaddr);
       }

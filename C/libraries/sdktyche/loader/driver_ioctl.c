@@ -3,6 +3,7 @@
 #include <sys/mman.h>
 #include <sys/errno.h>
 #include "driver_ioctl.h"
+#include "tyche_api.h"
 #include "common.h"
 
 
@@ -19,7 +20,6 @@ int ioctl_getphysoffset(
     ERROR("Failed to read the physoffset for domain %d", handle);
     goto failure;
   }
-  LOG("Physical offset of the enclave is %lx", info.physoffset);
   *physoffset = info.physoffset;
   return SUCCESS;
 failure:
@@ -38,8 +38,8 @@ failure:
 }
 
 int ioctl_set_traps(handle_t handle, usize traps) {
-  msg_set_perm_t perm = {traps}; 
-  if (ioctl(handle, TYCHE_SET_TRAPS, &perm) != SUCCESS) {
+  msg_set_perm_t perm = {TYCHE_CONFIG_TRAPS, traps}; 
+  if (ioctl(handle, TYCHE_SET_DOMAIN_CONFIGURATION, &perm) != SUCCESS) {
       ERROR("Failed to set traps for the domain %d", handle);
       goto failure;
     }
@@ -49,8 +49,8 @@ failure:
 }
 
 int ioctl_set_cores(handle_t handle, usize cores) {
-  msg_set_perm_t perm = {cores}; 
-  if (ioctl(handle, TYCHE_SET_CORES, &perm) != SUCCESS) {
+  msg_set_perm_t perm = {TYCHE_CONFIG_CORES, cores}; 
+  if (ioctl(handle, TYCHE_SET_DOMAIN_CONFIGURATION, &perm) != SUCCESS) {
       ERROR("Failed to set cores for the domain %d", handle);
       goto failure;
     }
@@ -59,9 +59,17 @@ failure:
   return FAILURE;
 }
 
+int ioctl_alloc_core_context(handle_t handle, usize core) {
+  if (ioctl(handle, TYCHE_ALLOC_CONTEXT, core) != SUCCESS) {
+    ERROR("Failed to allocate core context for domain %d.", handle);
+    return FAILURE;
+  }
+  return SUCCESS;
+}
+
 int ioctl_set_perms(handle_t handle, usize perms) {
-  msg_set_perm_t perm = {perms}; 
-  if (ioctl(handle, TYCHE_SET_PERM, &perm) != SUCCESS) {
+  msg_set_perm_t perm = {TYCHE_CONFIG_PERMISSIONS, perms}; 
+  if (ioctl(handle, TYCHE_SET_DOMAIN_CONFIGURATION, &perm) != SUCCESS) {
       ERROR("Failed to set perms for the domain %d", handle);
       goto failure;
     }
@@ -71,8 +79,8 @@ failure:
 }
 
 int ioctl_set_switch(handle_t handle, usize sw) {
-  msg_set_perm_t perm = {sw}; 
-  if (ioctl(handle, TYCHE_SET_SWITCH, &perm) != SUCCESS) {
+  msg_set_perm_t perm = {TYCHE_CONFIG_SWITCH, sw}; 
+  if (ioctl(handle, TYCHE_SET_DOMAIN_CONFIGURATION, &perm) != SUCCESS) {
       ERROR("Failed to set switch for the domain %d", handle);
       goto failure;
     }
@@ -84,11 +92,11 @@ failure:
 int ioctl_set_entry_on_core(
     handle_t handle,
     usize core,
-    usize page_table_root,
-    usize entry_instr_ptr,
-    usize stack_ptr)
+    usize cr3,
+    usize rip,
+    usize rsp)
 {
-  msg_entry_on_core_t entry = {.core = core, .stack = stack_ptr, .entry = entry_instr_ptr, .page_tables = page_table_root};
+  msg_entry_on_core_t entry = {.core = core, .stack = rsp, .entry = rip, .page_tables = cr3};
   if (ioctl(handle, TYCHE_SET_ENTRY_POINT, &entry) != SUCCESS) {
       ERROR("Failed to set entry for the domain %d", handle);
       goto failure;
@@ -147,7 +155,7 @@ int ioctl_switch(handle_t handle, void* args)
 {
   msg_switch_t transition = {args};
   if (ioctl(handle, TYCHE_TRANSITION, &transition) != SUCCESS) {
-    ERROR("ioctl failed to switch to %lld", handle);
+    ERROR("ioctl failed to switch to %d", handle);
     goto failure;
   }
   return SUCCESS;

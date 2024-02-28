@@ -17,6 +17,7 @@
 #include "common.h"
 #include "sdk_tyche_rt.h"
 #include "sdk_tyche.h"
+#include "backend.h"
 
 // ———————————————————————————— Local Functions ————————————————————————————— //
 static uint32_t PF_H = 1 << 3;
@@ -183,7 +184,7 @@ int init_domain_with_cores_traps(
     switch_save_t switch_type)
 {
   if (domain == NULL || domain->parser.elf.memory.start == NULL) {
-    ERROR("Null argument provided: domain(%s)", domain);
+    ERROR("Null argument provided: domain(%p)", domain);
     goto failure;
   }
   domain->traps = traps;
@@ -217,7 +218,7 @@ int parse_domain(tyche_domain_t* domain)
     ERROR("The domain's memory content is null.");
     goto failure;
   }
-  dll_init_list(&(domain->config.shared_regions));
+  dll_init_list(&(domain->shared_regions));
   
   // Parse the ELF.
   read_elf64_header(&domain->parser.elf, &(domain->parser.header));
@@ -249,7 +250,7 @@ int parse_domain(tyche_domain_t* domain)
       memset(shared, 0, sizeof(domain_shared_memory_t));
       shared->segment = segment;
       dll_init_elem(shared, list);
-      dll_add(&(domain->config.shared_regions), shared, list);
+      dll_add(&(domain->shared_regions), shared, list);
     }
     // Found the page tables.
     if (segment->p_type == PAGE_TABLES_SB || segment->p_type == PAGE_TABLES_CONF) {
@@ -284,6 +285,8 @@ failure:
   return FAILURE;
 }
 
+
+
 int load_domain(tyche_domain_t* domain)
 {
   usize size = 0;
@@ -297,26 +300,16 @@ int load_domain(tyche_domain_t* domain)
     ERROR("The domain is not parsed. Call parse_domain first!");
     goto failure;
   }
-
-  // Open the driver.
-  domain->handle = open(DOMAIN_DRIVER, O_RDWR);
-  if (domain->handle < 0) {
-    ERROR("Unable to create an domain with open %s", DOMAIN_DRIVER);
-    goto failure;
-  }
-
-  // Mmap the size of memory we need.
-  if (ioctl_mmap(
-        domain->handle,
-        domain->map.size,
-        &(domain->map.virtoffset)) != SUCCESS) {
-    goto failure;
-  }
   
-  // Get the physoffset.
-  if (ioctl_getphysoffset(
-        domain->handle,
-        &(domain->map.physoffset)) != SUCCESS) {
+  // Call the backend to create the domain.
+  if (backend_td_create(domain) != SUCCESS) {
+    ERROR("Backend error creating the backend.");
+    goto failure;
+  }
+
+  // Call the backend to allocate the domain's memory.
+  if (backend_td_alloc_mem(domain) != SUCCESS) {
+    ERROR("Backend error allocating domain's memory.");
     goto failure;
   }
 
@@ -340,7 +333,7 @@ int load_domain(tyche_domain_t* domain)
     // If segment is shared, fix it in the shared_segments.
     // For now, do it in a non-efficient way.
     domain_shared_memory_t* shared =  NULL;
-    dll_foreach(&(domain->config.shared_regions), shared, list) {
+    dll_foreach(&(domain->shared_regions), shared, list) {
       if (shared->segment->p_vaddr == seg.p_vaddr) {
           shared->untrusted_vaddr = dest;
       }
@@ -367,8 +360,8 @@ int load_domain(tyche_domain_t* domain)
     if (conf_or_shared == CONFIDENTIAL) {
       flags |= MEM_CONFIDENTIAL;
     }
-    if (ioctl_mprotect(
-          domain->handle,
+    if (backend_td_register_region(
+          domain,
           dest,
           size,
           flags,
@@ -494,14 +487,14 @@ int sdk_delete_domain(tyche_domain_t* domain)
   }
   // First call the driver.
   if (close(domain->handle) != SUCCESS) {
-    ERROR("Unable to delete the domain %lld", domain->handle);
+    ERROR("Unable to delete the domain %d", domain->handle);
     goto failure;
   }
   // Now collect everything else.
   // The config.
-  while (!dll_is_empty(&(domain->config.shared_regions))) {
-    domain_shared_memory_t* sec = domain->config.shared_regions.head;
-    dll_remove(&(domain->config.shared_regions), sec, list);
+  while (!dll_is_empty(&(domain->shared_regions))) {
+    domain_shared_memory_t* sec = domain->shared_regions.head;
+    dll_remove(&(domain->shared_regions), sec, list);
     free(sec);
   }
   free(domain->parser.segments);

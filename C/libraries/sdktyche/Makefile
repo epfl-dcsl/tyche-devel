@@ -1,4 +1,4 @@
-all: sdk_tyche_loader.so sdk_tyche_runtime.so
+all: sdk_tyche_loader.so sdk_tyche_runtime.so sdk_tyche_loader_kvm.so
 
 $(info ARCH="$(ARCH)")
 
@@ -11,12 +11,14 @@ endif
 $(info GCC="$(GCC)")
 
 # Dependencies for the build.
+TYCHE_DRIVER=../../../linux/drivers/tyche
+CONTALLOC_DRIVER=../../../linux/drivers/contalloc
+LIB_PATH=$(TYCHE_DRIVER)/libraries/
 LIB_PT=../pts
-DLL_LIB= ../dll
-ELF_LIB=../elf64
-CAPA_LIB=../capabilities
-COMMON_LIB=../common
-TYCHE_DRIVER=../../drivers/tyche
+ELF_LIB= ../elf64
+DLL_LIB=$(LIB_PATH)/dll
+CAPA_LIB=$(LIB_PATH)/capabilities
+COMMON_LIB=$(LIB_PATH)/common
 
 # Configuration for loader.
 CODE_LOADER = $(wildcard loader/*.c)
@@ -38,15 +40,21 @@ endif
 
 # Configure the includes.
 COMMON_INCLUDES = -Iinclude -I$(CAPA_LIB)/include -I$(COMMON_LIB)/include -I$(DLL_LIB)/include 
-LOADER_INCLUDES = -Iinclude -I$(ELF_LIB)/include -I$(TYCHE_DRIVER)/include $(COMMON_INCLUDES)
+LOADER_INCLUDES = -Iinclude -I$(ELF_LIB)/include $(COMMON_INCLUDES)
 WITH_PTS_INCLUDES = $(LOADER_INCLUDES) -I$(LIB_PT)/include
+TYCHE_LOADER_INCLUDES = $(WITH_PTS_INCLUDES) -I$(TYCHE_DRIVER)/include
+KVM_LOADER_INCLUDES = $(WITH_PTS_INCLUDES) -I$(CONTALLOC_DRIVER)/include
 
 # Configs for dynamic library.
 ELF_CONFIG= -Wl,-R $(ELF_LIB) -L$(ELF_LIB)
 
 sdk_tyche_loader.so: $(CODE_LOADER) $(HDRS_LOADER) $(CODE_ELF64) $(HDRS_ELF64)
 	make -B -C $(ELF_LIB)
-	$(GCC) -DTYCHE_USER_SPACE=1 -g $(WITH_PTS_INCLUDES) -shared -o $@ -fPIC $(CODE_LOADER) $(CODE_ELF64)
+	$(GCC) -DTYCHE_USER_SPACE=1 -g $(TYCHE_LOADER_INCLUDES) -shared -o $@ -fPIC $(CODE_LOADER) $(CODE_ELF64)
+
+sdk_tyche_loader_kvm.so: $(CODE_LOADER) $(HDRS_LOADER) $(CODE_ELF64) $(HDRS_ELF64)
+	make -B -C $(ELF_LIB)
+	$(GCC) -DTYCHE_USER_SPACE=1 -DRUN_WITH_KVM=1 -g $(KVM_LOADER_INCLUDES) -shared -o $@ -fPIC $(CODE_LOADER) $(CODE_ELF64)
 
 # This is mostly to make sure the code compiles.
 # When used by a domain, include the code directly as shown below.
@@ -56,4 +64,4 @@ sdk_tyche_runtime.so: $(CODE_RUNTIME) $(HDRS_RUNTIME)
 .PHONY: clean
 
 clean:
-	rm -rf sdk_tyche_loader.so sdk_tyche_runtime.so
+	rm -rf sdk_tyche_loader.so sdk_tyche_runtime.so sdk_tyche_loader_kvm.so

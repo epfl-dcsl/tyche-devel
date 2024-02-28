@@ -55,7 +55,7 @@ size_t read_elf64_sections(elf_parser_t* parser, Elf64_Ehdr eh, Elf64_Shdr** sec
   for (int i = 0; i < eh.e_shnum; i++) {
     size_t val = elf_read(parser, (void*)(&((*sections)[i])), sizeof(Elf64_Shdr));
     if (val != sizeof(Elf64_Shdr)) {
-      LOG("%d  instead of %d [%s]", val, sizeof(Elf64_Shdr), strerror(errno));
+      LOG("%ld  instead of %ld [%s]", val, sizeof(Elf64_Shdr), strerror(errno));
     }
   TEST(val == sizeof(Elf64_Shdr));
   }
@@ -76,7 +76,7 @@ size_t read_elf64_segments(
   for (int i = 0; i < eh.e_phnum; i++) {
     int val = elf_read(parser, (void*)(&((*segments)[i])), sizeof(Elf64_Phdr)); 
     if (val != sizeof(Elf64_Phdr)) {
-      LOG("%d  instead of %d [%s]", val, sizeof(Elf64_Shdr), strerror(errno));
+      LOG("%d  instead of %ld [%s]", val, sizeof(Elf64_Shdr), strerror(errno));
     }
     TEST(val == sizeof(Elf64_Phdr)); 
   }

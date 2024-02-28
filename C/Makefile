@@ -24,7 +24,6 @@ TYCHOOLS_LOCAL_BIN_PATH ?= ../target/release
 # Make sure you mount the disk first
 update_disk:
 	sudo chown --recursive $(shell whoami) /tmp/mount/tyche
-	make ARCH=x86 -B -C drivers/tyche install_disk
 	make ARCH=x86 -B -C libraries/sdktyche/example/app-selector install_disk
 	make ARCH=x86 -B -C libraries/sdktyche/example/simple-enclave install_disk
 	make ARCH=x86 -B -C libraries/sdktyche/example/simple-sandbox install_disk
@@ -41,7 +40,6 @@ TYCHOOLS_PATH ?= ../crates/tychools
 
 update_disk: 
 	sudo chown --recursive $(shell whoami) /tmp/ubuntu_riscv_mount/tyche
-	make ARCH=riscv -B -C drivers/tyche install_disk 
 	make ARCH=riscv -B -C libraries/sdktyche/example/app-selector install_disk
 	echo "Building tychools"
 	cargo build --manifest-path $(TYCHOOLS_PATH)/Cargo.toml --release --target=riscv64gc-unknown-linux-gnu --config target.riscv64gc-unknown-linux-gnu.linker=\"riscv64-unknown-linux-gnu-gcc\" 
