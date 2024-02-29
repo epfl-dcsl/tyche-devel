@@ -39,7 +39,7 @@ pub fn arch_entry_point(
             guest::set_active_dom(domain);
         }
 
-        monitor::do_debug();
+        //monitor::do_debug();
 
         let mip: usize;
         let mie: usize;

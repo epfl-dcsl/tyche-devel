@@ -254,8 +254,8 @@ pub fn do_switch(
     Ok(())
 }
 
-pub fn do_debug() {
-    let mut engine = CAPA_ENGINE.lock();
+pub fn do_debug(engine: &mut MutexGuard<CapaEngine>) {
+    //let mut engine = CAPA_ENGINE.lock();
     let mut next = NextCapaToken::new();
     log::debug!("Logging domains.");
     while let Some((domain, next_next)) = engine.enumerate_domains(next) {
@@ -310,10 +310,17 @@ enum CoreUpdate {
 }
 
 fn apply_updates(engine: &mut MutexGuard<CapaEngine>) {
+    do_debug(engine);
     while let Some(update) = engine.pop_update() {
+        log::debug!("Applying update: {}",update);
         match update {
-            capa_engine::Update::PermissionUpdate { domain, .. } => (),
-            capa_engine::Update::RevokeDomain { domain } => revoke_domain(domain),
+            capa_engine::Update::PermissionUpdate { domain, init, core_map } => {
+        
+                if (core_map != 0) {
+                    update_permission(domain, engine);
+                }
+            }
+            capa_engine::Update::RevokeDomain { domain } => revoke_domain(domain, engine),
             capa_engine::Update::CreateDomain { domain } => create_domain(domain),
 
             // Updates that needs to be routed to some specific cores
@@ -361,7 +368,7 @@ pub fn apply_core_updates(
         log::debug!("Core Update: {}", update);
         match update {
             CoreUpdate::TlbShootdown => {
-                log::trace!("TLB Shootdown on core {}", core_id);
+                log::debug!("TLB Shootdown on core {}", core_id);
 
                 // Rewrite the PMPs
                 let mut engine = CAPA_ENGINE.lock();
@@ -459,8 +466,9 @@ fn create_domain(domain: Handle<Domain>) {
     //creation fails? How is this reflected in the capa engine?
 }
 
-fn revoke_domain(_domain: Handle<Domain>) {
+fn revoke_domain(_domain: Handle<Domain>, engine: &mut MutexGuard<CapaEngine>) {
     //Todo
+    do_debug(engine);
 }
 
 //Neelu: TODO: Make this function create more of a cache/snapshot of PMP entries - and later apply

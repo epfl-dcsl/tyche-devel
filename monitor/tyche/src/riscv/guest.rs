@@ -482,7 +482,7 @@ pub fn misaligned_load_handler(reg_state: &mut RegisterState) {
             }
             calls::DEBUG => {
                 log::debug!("Debug");
-                monitor::do_debug();
+                //monitor::do_debug();
                 reg_state.a0 = 0x0;
             }
             calls::EXIT => {
