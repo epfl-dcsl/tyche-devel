@@ -725,6 +725,29 @@ impl CapaEngine {
         self.id_counter += 1;
         self.id_counter
     }
+
+    /// Adds a permission update for the domain only if there isn't another one.
+    pub fn conditional_permission_update(&mut self, target: Handle<Domain>) {
+        let filter = |up: Update| match up {
+            Update::PermissionUpdate {
+                domain,
+                init: _,
+                core_map: _,
+            } if domain == target => {
+                return true;
+            }
+            _ => false,
+        };
+        if self.updates.contains(filter) {
+            return;
+        }
+        let cores = self.domains[target].cores();
+        self.updates.push(Update::PermissionUpdate {
+            domain: target,
+            init: true,
+            core_map: cores,
+        });
+    }
 }
 
 impl Default for CapaEngine {

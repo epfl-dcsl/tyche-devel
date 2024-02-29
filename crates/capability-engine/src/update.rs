@@ -87,6 +87,18 @@ where
             Some(update) => Some(update),
         }
     }
+
+    pub fn contains<F>(&self, filter: F) -> bool
+    where
+        F: Fn(U) -> bool,
+    {
+        for i in 0..self.head {
+            if self.buff[i].is_some() && filter(self.buff[i].unwrap()) {
+                return true;
+            }
+        }
+        return false;
+    }
 }
 
 // ———————————————————————————————— Display ————————————————————————————————— //

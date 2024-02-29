@@ -575,6 +575,7 @@ pub fn do_send(current: Handle<Domain>, capa: LocalCapa, to: LocalCapa) -> Resul
         let _ = dom_dat
             .remapper
             .map_range(info.start, info.start, info.end - info.start, 1);
+        engine.conditional_permission_update(target);
     }
     apply_updates(&mut engine);
     Ok(())
@@ -606,7 +607,6 @@ pub fn do_send_aliased(
             1
         }
     };
-    log::info!("send alias: {:x?} at {:x}", region_info, alias);
     engine.send(current, capa, to)?;
     // We cannot hold the reference while apply_updates is called.
     {
@@ -618,6 +618,7 @@ pub fn do_send_aliased(
             region_info.end - region_info.start,
             repeat,
         );
+        engine.conditional_permission_update(target);
     };
     apply_updates(&mut engine);
     Ok(())
@@ -685,7 +686,7 @@ pub fn do_debug_addr(dom: Handle<Domain>, addr: usize) {
         allocator.get_physical_offset().as_usize(),
         domain.ept.unwrap(),
     );
-    mapper.debug_range(GuestPhysAddr::new(addr), 0x1000);
+    mapper.debug_range(GuestPhysAddr::new(addr), 0x10000);
 }
 
 pub fn do_domain_attestation(

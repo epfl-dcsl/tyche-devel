@@ -273,7 +273,6 @@ fn handle_exit(
                 }
                 calls::SEND_ALIASED => {
                     log::trace!("Send aliased");
-                    log::info!("Send alias the alias is {:x}", arg_5);
                     // Send a region capa and adds an alias to it.
                     monitor::do_send_aliased(
                         *domain,
