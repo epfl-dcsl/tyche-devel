@@ -282,7 +282,7 @@ fn handle_exit(
                         arg_4 != 0,
                         arg_5,
                     )
-                    .expect("TODO");
+                    .expect("Failed send aliased");
                     let mut context = monitor::get_context(*domain, cpuid());
                     context.set(VmcsField::GuestRax, 0, None)?;
                     vs.vcpu.next_instruction()?;

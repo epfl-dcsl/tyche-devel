@@ -598,10 +598,10 @@ pub fn do_send_aliased(
     let repeat = {
         if is_repeat {
             let region_size = region_info.end - region_info.start;
-            if size == 0 || (region_size % size) != 0 {
+            if size == 0 || (size % region_size) != 0 {
                 return Err(CapaError::InvalidValue);
             }
-            region_size / size
+            size / region_size
         } else {
             // Not a repeat, spans the entire thing.
             1
