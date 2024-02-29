@@ -217,8 +217,8 @@ pub fn handle_exit(reg_state: &mut RegisterState) {
         | mcause::LOAD_ACCESS_FAULT
         | mcause::INSTRUCTION_ACCESS_FAULT => {
             panic!(
-                "PMP Access Fault! mcause: {:x} mepc: {:x} mtval: {:x}",
-                mcause, mepc, mtval
+                "PMP Access Fault! mcause: {:x} mepc: {:x} mtval: {:x} satp: {:x} mstatus: {:x}",
+                mcause, mepc, mtval, satp, mstatus
             );
         }
         mcause::INSTRUCTION_PAGE_FAULT | mcause::LOAD_PAGE_FAULT | mcause::STORE_PAGE_FAULT => {

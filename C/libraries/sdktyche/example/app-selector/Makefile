@@ -96,7 +96,7 @@ enclave: $(CODE_DOMAIN) $(HDRS_DOMAIN)
 
 app_selector: app enclave
 	echo "Building app_selector for RISCV"
-	cargo -C $(TYCHOOLS_PATH) install --path . --locked 
+	cargo -C $(TYCHOOLS_PATH) install --path . --locked -Z unstable-options
 	tychools instrument -s manifests/default.json --riscv-enabled
 	chmod +x app_selector
 	rm app enclave
