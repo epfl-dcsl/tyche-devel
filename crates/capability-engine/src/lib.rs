@@ -731,7 +731,6 @@ impl CapaEngine {
         let filter = |up: Update| match up {
             Update::PermissionUpdate {
                 domain,
-                init: _,
                 core_map: _,
             } if domain == target => {
                 return true;
@@ -744,7 +743,6 @@ impl CapaEngine {
         let cores = self.domains[target].cores();
         self.updates.push(Update::PermissionUpdate {
             domain: target,
-            init: true,
             core_map: cores,
         });
     }

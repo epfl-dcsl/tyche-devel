@@ -602,7 +602,6 @@ pub(crate) fn activate_region(
     if let PermissionChange::Some = change {
         updates.push(Update::PermissionUpdate {
             domain,
-            init: true,
             core_map: dom.cores(),
         });
     };
@@ -630,7 +629,6 @@ pub(crate) fn deactivate_region(
     if let PermissionChange::Some = change {
         updates.push(Update::PermissionUpdate {
             domain,
-            init: false,
             core_map: dom.cores(),
         });
     };

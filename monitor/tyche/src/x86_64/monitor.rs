@@ -793,19 +793,15 @@ fn apply_updates(engine: &mut MutexGuard<CapaEngine>) {
         log::trace!("Update: {}", update);
         match update {
             // Updates that can be handled locally
-            capa_engine::Update::PermissionUpdate {
-                domain,
-                init,
-                core_map,
-            } => {
+            capa_engine::Update::PermissionUpdate { domain, core_map } => {
                 let core_id = cpuid();
                 log::trace!(
                     "cpu {} processes PermissionUpdate with core_map={:b}",
                     core_id,
                     core_map
                 );
-                let ept_update = update_permission(domain, engine, init);
-                if !init && ept_update {
+                let ept_update = update_permission(domain, engine);
+                if ept_update {
                     log::trace!(
                         "cpu {} pushes core update with core_map={:b}",
                         cpuid(),
@@ -1031,7 +1027,6 @@ fn create_domain(domain: Handle<Domain>) {
     if let Some(ept) = domain.ept {
         unsafe { free_ept(ept, allocator) };
     }
-
     let ept_root = allocator
         .allocate_frame()
         .expect("Failled to allocate EPT root")
@@ -1043,13 +1038,12 @@ fn revoke_domain(_domain: Handle<Domain>) {
     // Noop for now, might need to send IPIs once we land multi-core
 }
 
-fn update_domain_ept(
-    domain_handle: Handle<Domain>,
-    engine: &mut MutexGuard<CapaEngine>,
-    init: bool,
-) -> bool {
+fn update_domain_ept(domain_handle: Handle<Domain>, engine: &mut MutexGuard<CapaEngine>) -> bool {
     let mut domain = get_domain(domain_handle);
     let allocator = allocator();
+    if domain.ept_old.is_some() {
+        panic!("We will replace an ept old that's not empty");
+    }
     let ept_root = allocator
         .allocate_frame()
         .expect("Failled to allocate EPT root")
@@ -1084,42 +1078,15 @@ fn update_domain_ept(
         );
     }
 
-    /*for range in engine.get_domain_permissions(domain_handle).unwrap() {
-        if !range.ops.contains(MemOps::READ) {
-            log::error!("there is a region without read permission: {}", range);
-            continue;
-        }
-        let mut flags = EptEntryFlags::READ;
-        if range.ops.contains(MemOps::WRITE) {
-            flags |= EptEntryFlags::WRITE;
-        }
-        if range.ops.contains(MemOps::EXEC) {
-            if range.ops.contains(MemOps::SUPER) {
-                flags |= EptEntryFlags::SUPERVISOR_EXECUTE;
-            } else {
-                flags |= EptEntryFlags::USER_EXECUTE;
-            }
-        }
-        mapper.map_range(
-            allocator,
-            GuestPhysAddr::new(range.start),
-            HostPhysAddr::new(range.start),
-            range.size(),
-            flags,
-        )
-    }*/
-
-    if !init {
-        loop {
-            match TLB_FLUSH[domain_handle.idx()].compare_exchange(
-                false,
-                true,
-                Ordering::SeqCst,
-                Ordering::SeqCst,
-            ) {
-                Ok(false) => break,
-                _ => continue,
-            }
+    loop {
+        match TLB_FLUSH[domain_handle.idx()].compare_exchange(
+            false,
+            true,
+            Ordering::SeqCst,
+            Ordering::SeqCst,
+        ) {
+            Ok(false) => break,
+            _ => continue,
         }
     }
 
@@ -1195,15 +1162,11 @@ fn update_domain_iopt(domain_handle: Handle<Domain>, engine: &mut MutexGuard<Cap
     false
 }
 
-fn update_permission(
-    domain_handle: Handle<Domain>,
-    engine: &mut MutexGuard<CapaEngine>,
-    init: bool,
-) -> bool {
+fn update_permission(domain_handle: Handle<Domain>, engine: &mut MutexGuard<CapaEngine>) -> bool {
     if engine[domain_handle].is_io() {
         update_domain_iopt(domain_handle, engine)
     } else {
-        update_domain_ept(domain_handle, engine, init)
+        update_domain_ept(domain_handle, engine)
     }
 }
 

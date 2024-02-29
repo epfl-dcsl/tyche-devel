@@ -11,7 +11,6 @@ pub type UpdateBuffer = Buffer<Update>;
 pub enum Update {
     PermissionUpdate {
         domain: Handle<Domain>,
-        init: bool,
         core_map: u64,
     },
     RevokeDomain {
