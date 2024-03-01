@@ -7,29 +7,7 @@
 
 // —————————————————————— Backend specific attributes ——————————————————————— //
 
-#ifdef RUN_WITH_KVM
-
-typedef struct backend_region_t {
-  /// The kvm memory region.
-  struct kvm_userspace_memory_region kvm_mem;
-
-  /// backend_region_t are stored in a list.
-  dll_elem(struct backend_region_t, list);
-} backend_region_t;
-
-struct backend_info_t {
-  /// File descriptor for memory allocation.
-  int memfd;
-
-  /// kvm memory regions.
-  dll_list(backend_region_t, kvm_regions);
-};
-
-#else
-struct backend_info_t {
-  // TODO figure out what to do
-};
-#endif /*RUN_WITH_KVM*/
+typedef struct backend_info_t backend_info_t;
 
 // —————————————————————————————————— API ——————————————————————————————————— //
 
@@ -44,5 +22,10 @@ int backend_td_register_region(
     usize size,
     memory_access_right_t flags,
     segment_type_t tpe);
-int backend_td_configure(tyche_domain_t* domain);
-int backend_td_create_vcpu(tyche_domain_t* domain);
+int backend_td_commit(tyche_domain_t* domain);
+int backend_td_delete(tyche_domain_t* domain);
+int backend_td_config(tyche_domain_t* domain, usize config, usize value);
+int backend_td_create_vcpu(tyche_domain_t* domain, usize core_idx);
+int backend_td_init_vcpu(tyche_domain_t* domain, usize core_idx);
+// int backend_td_config_vcpu(tyche_domain_t* domain, usize field, usize value);
+int backend_td_vcpu_run(tyche_domain_t* domain, usize core);

@@ -8,6 +8,12 @@
 #include "tyche_driver.h"
 #endif
 
+#ifdef RUN_WITH_KVM
+#include "../loader/backends/back_kvm.h"
+#else
+#include "../loader/backends/back_tyche.h"
+#endif
+
 #include <elf.h>
 #include <stdint.h>
 

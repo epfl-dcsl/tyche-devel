@@ -8,6 +8,10 @@
 /// Provide a path where a binary should be extracted
 #define DUMP_BIN ("DUMP_BIN")
 
+// ——————————————————————————————— Constants ———————————————————————————————— //
+
+#define MAX_CORES (32)
+
 // ——————————————— Helper functions to configure the loading ———————————————— //
 
 /// Creates a domain by parsing the current program and extracting the nested
@@ -23,7 +27,7 @@ int sdk_create_domain(
     switch_save_t switch_type);
 
 /// Transitions into the domain.
-int sdk_call_domain(tyche_domain_t* domain, void* args);
+int sdk_call_domain(tyche_domain_t* domain, usize core);
 
 /// Delete the domain.
 int sdk_delete_domain(tyche_domain_t* domain);

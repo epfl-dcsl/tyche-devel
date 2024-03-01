@@ -2,6 +2,7 @@
 
 #include "common.h"
 #include "dll.h"
+#include "tyche_capabilities_types.h"
 
 #include <linux/kvm.h>
 
@@ -23,13 +24,12 @@ typedef struct backend_region_t {
 /// Backend-specific implementation of an execution context (vcpu)
 struct backend_vcpu_info_t {
   /// File descriptor for the vcpu.
-  int vcpu_fd;
+  int fd;
   /// Vcpu core id.
-  int vcpu_core_id;
+  int core_id;
   /// kvm-specific memory mapped structure.
   struct kvm_run* kvm_run;
-  /// size of the structure above.
-  int kvm_run_mmap_size;
+
   /// user registers for the vcpu.
   struct kvm_regs regs;
   /// supervisor registers for the vcpu.
@@ -45,6 +45,9 @@ struct backend_info_t {
 
   /// Counters for the slot.
   int counter_slots;
+
+  /// size of the structure above.
+  int kvm_run_mmap_size;
 
   /// kvm memory regions.
   dll_list(backend_region_t, kvm_regions);

@@ -7,7 +7,6 @@
 #include <unistd.h>
 
 #include "elf64.h"
-#include "driver_ioctl.h"
 #include "tyche_capabilities_types.h"
 #if defined(CONFIG_X86) || defined(__x86_64__)
 #include "x86_64_pt.h"
@@ -18,6 +17,7 @@
 #include "sdk_tyche_rt.h"
 #include "sdk_tyche.h"
 #include "backend.h"
+#include "tyche_api.h"
 
 // ———————————————————————————— Local Functions ————————————————————————————— //
 static uint32_t PF_H = 1 << 3;
@@ -375,44 +375,48 @@ int load_domain(tyche_domain_t* domain)
   } 
   DEBUG("Done mprotecting domain %d's sections", domain->handle);
 
-  // Set the cores and traps.
-  if (ioctl_set_traps(domain->handle, domain->traps) != SUCCESS) {
+  // Set the traps.
+  if (backend_td_config(
+        domain, TYCHE_CONFIG_TRAPS, domain->traps) != SUCCESS) {
     ERROR("Unable to set the traps for the domain %d", domain->handle);
     goto failure;
   }
- 
-  if (ioctl_set_cores(domain->handle, domain->core_map) != SUCCESS) {
+  // Set the cores. 
+  if (backend_td_config(
+        domain, TYCHE_CONFIG_CORES, domain->core_map) != SUCCESS) {
     ERROR("Unable to set the cores for the domain %d", domain->handle);
     goto failure;
   }
-
-  // TODO(aghosn) expose this through the SDK.
-  // I don't do it now because I'll need some time to refactor libraries to avoid
-  // having so many layers of forwarding. It's becoming really annoying.
-  if (ioctl_set_perms(domain->handle, domain->perms) != SUCCESS) {
+  // Set the domain permissions.
+  if (backend_td_config(
+        domain, TYCHE_CONFIG_PERMISSIONS, domain->perms) != SUCCESS) {
     ERROR("Unable to set the permission on domain %d", domain->handle);
     goto failure;
   }
-
-  // TODO(aghosn) same as above.
-  if (ioctl_set_switch(domain->handle, domain->switch_type) != SUCCESS) {
+  // Set the switch type.
+  if (backend_td_config(
+        domain, TYCHE_CONFIG_SWITCH, domain->switch_type) != SUCCESS) {
       ERROR("Unable to set the switch type.");
       goto failure;
   } 
 
-  // TODO(aghosn) same as above as well.
-  if (ioctl_set_entry_on_core(
-        domain->handle,
-        0,
-        domain->config.page_table_root,
-        domain->config.entry,
-        domain->config.stack) != SUCCESS) {
-      ERROR("Unable to set the entry on core 0");
+  // For the moment support maximum 32 cores, 
+  for (usize i = 0; i < MAX_CORES; i++) {
+    // Create the core context.
+    if (domain->core_map & (1ULL << i) == 0) {
+      continue;
+    }
+    if (backend_td_create_vcpu(domain, i) != SUCCESS) {
+      ERROR("Unable to create vcpu on core %lld", i); 
       goto failure;
+    }
+    if (backend_td_init_vcpu(domain, i) != SUCCESS) {
+      ERROR("Unable to init the vcpu on core %lld", i);
+    }
   }
 
   // Commit the domain.
-  if (ioctl_commit(domain->handle)!= SUCCESS) {
+  if (backend_td_commit(domain)!= SUCCESS) {
     ERROR("Unable to commit the domain %d", domain->handle);
     goto failure;
   } 
@@ -462,16 +466,14 @@ failure:
   return FAILURE;
 }
 
-int sdk_call_domain(tyche_domain_t* domain, void* args)
+int sdk_call_domain(tyche_domain_t* domain, usize core)
 {
   if (domain == NULL) {
     ERROR("The provided domain is null.");
     goto failure;
   } 
-  if (ioctl_switch(
-        domain->handle,
-        args) != SUCCESS) {
-    ERROR("Unable to switch to the domain %d", domain->handle);
+  if (backend_td_vcpu_run(domain, core) != SUCCESS) {
+    ERROR("Unable to switch to the domain %d on core %lld", domain->handle, core);
     goto failure;
   }
   return SUCCESS;
@@ -486,7 +488,7 @@ int sdk_delete_domain(tyche_domain_t* domain)
     goto failure;
   }
   // First call the driver.
-  if (close(domain->handle) != SUCCESS) {
+  if (backend_td_delete(domain) != SUCCESS) {
     ERROR("Unable to delete the domain %d", domain->handle);
     goto failure;
   }
@@ -501,10 +503,6 @@ int sdk_delete_domain(tyche_domain_t* domain)
   free(domain->parser.sections);
   free(domain->parser.strings);
   free(domain->parser.elf.memory.start);
-
-  // Unmap the domain.
-  munmap((void*) domain->map.virtoffset, domain->map.size); 
-
   return SUCCESS;
 failure:
   return FAILURE;

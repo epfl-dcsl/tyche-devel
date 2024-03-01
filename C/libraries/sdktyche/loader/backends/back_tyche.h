@@ -1,12 +1,20 @@
 #pragma once
 
+#include "common.h"
+
 /// Backend-specific implementation of an execution context (vcpu)
 struct backend_vcpu_info_t {
   /// Vcpu core id.
-  int vcpu_core_id;
+  int core_id;
 
-  /// TODO figure out what to put there.
+  // Stack pointer.
+  usize stack;
 
+  // Program pointer.
+  usize rip;
+
+  // Page table root.
+  usize cr3;
   /// Allow the vcpus to be in a list.
   dll_elem(struct backend_vcpu_info_t, list);
 };
