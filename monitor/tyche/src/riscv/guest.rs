@@ -145,7 +145,7 @@ pub fn handle_exit(reg_state: &mut RegisterState) {
         asm!("csrr {}, satp", out(reg)satp);
     }
 
-    /* log::debug!("###### TRAP FROM HART {} ######", hartid);
+    log::debug!("###### TRAP FROM HART {} ######", hartid);
 
     log::debug!(
         "mcause {:x}, mepc {:x} mstatus {:x} mtval {:x} mie {:x} mip {:x} mideleg {:x} ra {:x} a0 {:x} a1 {:x} a2 {:x} a3 {:x} a4 {:x} a5 {:x} a6 {:x} a7 {:x} satp: {:x}",
@@ -166,7 +166,7 @@ pub fn handle_exit(reg_state: &mut RegisterState) {
         reg_state.a6,
         reg_state.a7,
         satp
-    ); */
+    );
 
     // Check which trap it is
     // mcause register holds the cause of the machine mode trap
@@ -194,23 +194,18 @@ pub fn handle_exit(reg_state: &mut RegisterState) {
             if reg_state.a7 == 0x5479636865 {
                 //Tyche call
                 if reg_state.a0 == 0x5479636865 {
-                    //log::info!("Tyche is clearing SIP.SEIE");
+                    log::trace!("Tyche is clearing SIP.SEIE");
                     clear_mip_seip();
                 } else {
                     misaligned_load_handler(reg_state);
                 }
             } else {
-                //if(reg_state.a7 == EXT_IPI) {
-                //log::debug!("[HART {}] EXT_IPI_ECALL MEPC: {:x} RA {:x}",hartid, mepc, reg_state.ra);
-                //}
-
                 ecall_handler(&mut ret, &mut err, &mut out_val, *reg_state);
                 reg_state.a0 = ret;
                 reg_state.a1 = out_val as isize;
             }
         }
         mcause::LOAD_ADDRESS_MISALIGNED => {
-            //misaligned_load_handler(reg_state);
             panic!("Load address misaligned.");
         }
         mcause::STORE_ACCESS_FAULT
@@ -222,14 +217,13 @@ pub fn handle_exit(reg_state: &mut RegisterState) {
             );
         }
         mcause::INSTRUCTION_PAGE_FAULT | mcause::LOAD_PAGE_FAULT | mcause::STORE_PAGE_FAULT => {
-            //log::debug!("Page Fault Caught.");
             panic!("Page Fault!");
         }
         _ => exit_handler_failed(mcause),
         //Default - just print whatever information you can about the trap.
     }
 
-    //log::debug!("Returning from Trap on Hart {}", hartid);
+    log::debug!("Returning from Trap on Hart {}", hartid);
     // Return to the next instruction after the trap.
     // i.e. mepc += 4
     // TODO: This shouldn't happen in case of switch.
@@ -239,7 +233,6 @@ pub fn handle_exit(reg_state: &mut RegisterState) {
             asm!("addi t0, t0, 0x4");
             asm!("csrw mepc, t0");
         }
-        //reg_state.mepc = reg_state.mepc + 0x4;
     }
 }
 
@@ -250,30 +243,6 @@ pub fn illegal_instruction_handler(
     mip: usize,
     mie: usize,
 ) {
-    /* let mut mepc_instr_opcode: usize = 0;
-
-    // Read the instruction which caused the trap. (mepc points to the VA of this instruction).
-    // Need to set mprv before reading the instruction pointed to by mepc (to enable VA to PA
-    // translation in M-mode. Reset mprv once done.
-
-    let mut mprv_index: usize = 1 << mstatus::MPRV;
-
-    //clear_pmp();
-
-    unsafe {
-        asm!("csrs mstatus, {}", in(reg) mprv_index);
-        asm!("csrr a0, mepc");
-        asm!("lw a1, (a0)");
-        asm!("csrc mstatus, {}", in(reg) mprv_index);
-        asm!("mv {}, a1", out(reg) mepc_instr_opcode);
-    }
-
-    println!(
-        "Illegal instruction trap from {} mode, caused by instruction with opcode {:x}",
-        ((mstatus >> mstatus::MPP_LOW) & mstatus::MPP_MASK),
-        mepc_instr_opcode
-    ); */
-
     panic!(
         "Illegal Instruction Trap! mepc: {:x} mtval: {:x} mstatus: {:x} mip: {:x} mie: {:x}",
         mepc, mtval, mstatus, mip, mie
@@ -403,11 +372,9 @@ pub fn misaligned_load_handler(reg_state: &mut RegisterState) {
                     reg_state.a2 = v2 as usize;
                     reg_state.a3 = v3 as usize;
                     reg_state.a4 = next.as_usize();
-                    //log::debug!("do_enumerate response: {:x} {:x} {:x} {:x}", reg_state.a1, reg_state.a2, reg_state.a3, reg_state.a4);
                 } else {
                     // For now, this marks the end
                     reg_state.a4 = 0;
-                    //log::debug!("do_enumerate response: {:x}", reg_state.a4);
                 }
                 reg_state.a0 = 0x0;
             }

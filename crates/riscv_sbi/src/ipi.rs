@@ -36,28 +36,6 @@ pub fn process_ipi(current_hartid: usize) {
         IPI_TYPE_TLB[current_hartid].store(false, Ordering::SeqCst);
         process_tlb_ipis(current_hartid);
     }
-
-    /* let mut ipi_requests = HART_IPI_BUFFER[current_hartid].lock();
-
-    //This means I will process a TLB request once -----
-
-    if let Some(ipi_req) = ipi_requests.pop() {
-        match ipi_req {
-            IPIRequest::SMode => {
-                //log::info!("Processed Smode IPI in hart {}", current_hartid);
-                set_mip_ssip();
-            }
-            IPIRequest::RfenceSfenceVMAASID {
-                src_hartid, start, size, asid,
-            } => {
-                //log::info!("Processed Rfence IPI in hart {} from hart {}", current_hartid, src_hartid);
-                local_sfence_vma_asid(start, size, asid);
-                HART_IPI_SYNC[src_hartid].fetch_sub(1, Ordering::SeqCst);
-            },
-            _ => ipi_handling_failed(),
-        }
-    } */
-    //drop(ipi_requests);
 }
 
 pub fn process_tlb_ipis(current_hartid: usize) {
@@ -72,9 +50,6 @@ pub fn process_tlb_ipis(current_hartid: usize) {
                 asid,
             } => {
                 process_tlb_ipi(src_hartid, start, size, asid);
-                //log::info!("Processed Rfence IPI in hart {} from hart {}", current_hartid, src_hartid);
-                //local_sfence_vma_asid(start, size, asid);
-                //HART_IPI_SYNC[src_hartid].fetch_sub(1, Ordering::SeqCst);
             }
             _ => ipi_handling_failed(),
         }

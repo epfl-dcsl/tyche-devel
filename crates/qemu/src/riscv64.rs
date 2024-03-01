@@ -10,8 +10,6 @@ use uart_16550::MmioSerialPort;
 
 use crate::ExitCode;
 
-//static mut SERIAL_PORT: Option<MmioSerialPort> = None;
-
 /// Internal function used to print to stdout when running in Qemu.
 pub fn _print(_args: fmt::Arguments) {
     static mut SERIAL_PORT: Option<Mutex<MmioSerialPort>> = None;
@@ -31,20 +29,6 @@ pub fn _print(_args: fmt::Arguments) {
                 .expect("Printing to serial failed")
         }
     }
-
-    /* static mut SERIAL_PORT: Option<MmioSerialPort> = None;
-
-    unsafe {
-        let mut serial_port = MmioSerialPort::new(SERIAL_PORT_BASE_ADDRESS);
-        serial_port.init();
-        SERIAL_PORT = Some(serial_port);
-
-        if let Some(ref mut serial_port) = SERIAL_PORT {
-            serial_port
-                .write_fmt(_args)
-                .expect("Printing to serial failed");
-        }
-    } */
 }
 
 // —————————————————————————————— Exiting QEMU —————————————————————————————— //

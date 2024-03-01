@@ -101,13 +101,6 @@ pub fn exit_qemu(exit_code: ExitCode) {
     }
 }
 
-/// Architecture specific initialization.
-pub fn init() {
-    //Todo: This is a dead function - clean it up!
-    // log::info!("*\n*\n*\n*\n*\n*\n*\n******* Called this init ********\n*\n*\n*\n*\n*\n*\n*");
-    //    arch::init();
-}
-
 pub fn cpuid() -> usize {
     let hartid: usize;
 

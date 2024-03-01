@@ -25,8 +25,3 @@ pub mod arch {
 pub mod arch {
     pub use crate::riscv::*;
 }
-
-#[cfg(target_arch = "riscv64")]
-pub fn init() {
-    arch::init();
-}

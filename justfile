@@ -251,21 +251,7 @@ _tpm:
 	fi
 
 run_riscv:
-	{{qemu-riscv}} -nographic -drive "file={{drive-riscv}},format=raw,if=virtio" -cpu rv64,h=true -M virt -m 4G -bios {{bios-riscv}} -kernel {{kernel-riscv}} -append "root=/dev/vda1 rw console=ttyS0 earlycon=sbi quiet" -smp 1 {{dev-riscv}} 
-
-run_riscv_ramfs:
-        {{qemu-riscv}} -nographic -cpu rv64,h=true -M virt -m 4G -bios {{bios-riscv}} -kernel {{kernel-riscv}} -append "root=/dev/ram rw console=ttyS0 earlycon=sbi quiet" -smp 2
-
-run_riscv_2harts:
-	{{qemu-riscv}} -nographic -drive "file={{drive-riscv}},format=raw,if=virtio" -cpu rv64,h=true -M virt -m 4G -bios {{bios-riscv}} -kernel {{kernel-riscv}} -append "root=/dev/vda1 rw console=ttyS0 earlycon=sbi loglevel=6" -smp 2 {{dev-riscv}} 
-
-#-gdb tcp::1234 -S
-
-run_riscv_debian:
-        {{qemu-riscv}} -nographic -device virtio-blk-device,drive=hd -drive "file={{debian-riscv}},id=hd,if=none" -cpu rv64,h=true -M virt -m 4G -bios {{bios-riscv}} -kernel {{kernel-riscv}} -append "root=LABEL=rootfs console=ttyS0 earlycon=sbi quiet" -smp 1 {{deb-dev-riscv}}
-
-run_riscv_2harts_debian:
-        {{qemu-riscv}} -nographic -device virtio-blk-device,drive=hd -drive "file={{debian-riscv}},id=hd,if=none" -cpu rv64,h=true -M virt -m 4G -bios {{bios-riscv}} -kernel {{kernel-riscv}} -append "root=LABEL=rootfs console=ttyS0 earlycon=sbi quiet" -smp 2 {{deb-dev-riscv}}
+	{{qemu-riscv}} -nographic -drive "file={{drive-riscv}},format=raw,if=virtio" -cpu rv64,h=true -M virt -m 4G -bios {{bios-riscv}} -kernel {{kernel-riscv}} -append "root=/dev/vda1 rw console=ttyS0 earlycon=sbi quiet" -smp 2 {{dev-riscv}} 
 
 run_riscv_gdb: 
 	{{qemu-riscv}} -nographic -drive "file={{drive-riscv}},format=raw,if=virtio" -cpu rv64,h=true -M virt -m 4G -bios {{bios-riscv}} -kernel {{kernel-riscv}} -append "root=/dev/vda1 rw console=ttyS0 earlycon=sbi quiet" -smp 1 {{dev-riscv}} -gdb tcp::1234 -S 
@@ -275,9 +261,6 @@ riscv_monitor_gdb:
 
 riscv_linux_gdb:
 	riscv64-unknown-linux-gnu-gdb -q -ex "add-auto-load-safe-path {{riscv-linux-dir}}" -ex "file {{riscv-vmlinux}}" -ex "set riscv use-compressed-breakpoints no" -ex "target remote localhost:1234" 
-
-#-ex "b *0xffffffff808b46b6" -ex "b handle_exception" -ex "c" 
-
 
 # The following line gives highlighting on vim
 # vim: set ft=make :

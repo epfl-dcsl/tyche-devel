@@ -6,11 +6,6 @@ pub fn local_sfence_vma() {
     }
 }
 
-//Corresponding to func_id 1 for EXT_RFENCE
-//pub fn local_sfence_vma_range() {
-//
-//}
-
 //Corresponding to func_id 2 for EXT_RFENCE
 pub fn local_sfence_vma_asid(start: usize, size: usize, asid: usize) {
     if start == 0 && size == 0 {
