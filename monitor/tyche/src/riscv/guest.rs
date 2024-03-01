@@ -194,7 +194,7 @@ pub fn handle_exit(reg_state: &mut RegisterState) {
             if reg_state.a7 == 0x5479636865 {
                 //Tyche call
                 if reg_state.a0 == 0x5479636865 {
-                    log::info!("Tyche is clearing SIP.SEIE");
+                    //log::info!("Tyche is clearing SIP.SEIE");
                     clear_mip_seip();
                 } else {
                     misaligned_load_handler(reg_state);

@@ -45,7 +45,7 @@ pub static HART_IPI_SYNC: [AtomicUsize; NUM_HARTS] = [ZERO; NUM_HARTS];
 pub static IPI_TYPE_SMODE: [AtomicBool; NUM_HARTS] = [FALSE; NUM_HARTS];
 pub static IPI_TYPE_TLB: [AtomicBool; NUM_HARTS] = [FALSE; NUM_HARTS];
 
-static last_timer_tick: [AtomicUsize; NUM_HARTS] = [ZERO; NUM_HARTS];
+static LAST_TIMER_TICK: [AtomicUsize; NUM_HARTS] = [ZERO; NUM_HARTS];
 
 #[derive(Copy, Clone, Debug)]
 pub struct RegisterState {
@@ -302,8 +302,8 @@ pub fn set_mip_ssip() {
 
 pub fn aclint_mtimer_set_mtimecmp(target_hartid: usize, value: usize) {
     let target_addr: usize = ACLINT_MTIMECMP_BASE_ADDR + target_hartid * ACLINT_MTIMECMP_SIZE;
-    let val = value + last_timer_tick[target_hartid].load(Ordering::SeqCst);
-    last_timer_tick[target_hartid].store(val, Ordering::SeqCst);
+    let val = value + LAST_TIMER_TICK[target_hartid].load(Ordering::SeqCst);
+    LAST_TIMER_TICK[target_hartid].store(val, Ordering::SeqCst);
 
     log::info!(
         "[Hart {}] Setting mtimecmp at addr {:x} with value: {:x}",

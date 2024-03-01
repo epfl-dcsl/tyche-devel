@@ -310,12 +310,15 @@ enum CoreUpdate {
 }
 
 fn apply_updates(engine: &mut MutexGuard<CapaEngine>) {
-    do_debug(engine);
+    //do_debug(engine);
     while let Some(update) = engine.pop_update() {
-        log::debug!("Applying update: {}",update);
+        //    log::debug!("Applying update: {}",update);
         match update {
-            capa_engine::Update::PermissionUpdate { domain, init, core_map } => {
-        
+            capa_engine::Update::PermissionUpdate {
+                domain,
+                init,
+                core_map,
+            } => {
                 if (core_map != 0) {
                     update_permission(domain, engine);
                 }
@@ -468,7 +471,6 @@ fn create_domain(domain: Handle<Domain>) {
 
 fn revoke_domain(_domain: Handle<Domain>, engine: &mut MutexGuard<CapaEngine>) {
     //Todo
-    do_debug(engine);
 }
 
 //Neelu: TODO: Make this function create more of a cache/snapshot of PMP entries - and later apply

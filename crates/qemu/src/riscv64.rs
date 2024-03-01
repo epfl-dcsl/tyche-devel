@@ -17,7 +17,7 @@ pub fn _print(_args: fmt::Arguments) {
     static mut SERIAL_PORT: Option<Mutex<MmioSerialPort>> = None;
 
     unsafe {
-        let mut serial_port = Mutex::new(MmioSerialPort::new(SERIAL_PORT_BASE_ADDRESS));
+        let serial_port = Mutex::new(MmioSerialPort::new(SERIAL_PORT_BASE_ADDRESS));
         let mut serial = serial_port.lock();
         serial.init();
         drop(serial);

@@ -55,7 +55,7 @@ pub fn arch_entry_point(
             asm!("csrr {}, mideleg", out(reg) mideleg);
         }
 
-        log::info!(
+        log::debug!(
             "MIP: {:x} MIE: {:x} MSTATUS: {:x} MEDELEG: {:x} MIDELEG: {:x}",
             mip,
             mie,
@@ -113,7 +113,7 @@ pub fn arch_entry_point(
             //asm!("csrsi mip, 2");
         }
 
-        log::info!(
+        log::debug!(
             "MIP: {:x} MIE: {:x} MSTATUS: {:x} MEDELEG: {:x} MIDELEG: {:x}",
             mip,
             mie,

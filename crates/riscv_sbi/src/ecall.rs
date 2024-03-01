@@ -1,15 +1,14 @@
 use core::arch::asm;
-use core::panic::RefUnwindSafe;
 use core::sync::atomic::Ordering;
 
 use capa_engine::Buffer;
 use riscv_utils::{
-    read_mscratch, RegisterState, AVAILABLE_HART_MASK, HART_IPI_SYNC, HART_START, HART_START_ADDR,
+    RegisterState, AVAILABLE_HART_MASK, HART_IPI_SYNC, HART_START, HART_START_ADDR,
     HART_START_ARG1, IPI_TYPE_SMODE, IPI_TYPE_TLB, NUM_HARTS,
 };
 use spin::Mutex;
 
-use crate::ipi::{aclint_mswi_send_ipi, ipi_handling_failed, process_ipi, process_tlb_ipi};
+use crate::ipi::{aclint_mswi_send_ipi, ipi_handling_failed, process_tlb_ipi};
 use crate::rfence::local_sfence_vma_asid;
 use crate::{
     sbi, sbi_ext_base, sbi_ext_hsm, sbi_ext_ipi, sbi_ext_rfence, IPIRequest, ECALL_IMPID,
@@ -93,9 +92,9 @@ pub fn sbi_ext_base_handler(
 }
 
 pub fn sbi_ext_hsm_handler(
-    ret: &mut isize,
+    _ret: &mut isize,
     _err: &mut usize,
-    out_val: &mut usize,
+    _out_val: &mut usize,
     a0: usize,
     a1: usize,
     a2: usize,
@@ -122,9 +121,9 @@ pub fn sbi_ext_hsm_handler(
 }
 
 pub fn sbi_ext_ipi_handler(
-    ret: &mut isize,
+    _ret: &mut isize,
     _err: &mut usize,
-    out_val: &mut usize,
+    _out_val: &mut usize,
     a0: usize,
     a1: isize,
     a6: usize,
@@ -186,9 +185,9 @@ pub fn sbi_ext_ipi_handler(
 }
 
 pub fn sbi_ext_rfence_handler(
-    ret: &mut isize,
+    _ret: &mut isize,
     _err: &mut usize,
-    out_val: &mut usize,
+    _out_val: &mut usize,
     a0: usize,
     a1: isize,
     start: usize,
@@ -394,5 +393,5 @@ pub fn sbi_ext_srst_probe(_a0: usize) -> usize {
 }
 
 pub fn ecall_handler_failed(a7: usize, a6: usize) {
-    //log::info!("SBI ecall not supported: a7 {:x} a6 {:x}.",a7, a6);
+    log::debug!("SBI ecall not supported: a7 {:x} a6 {:x}.", a7, a6);
 }

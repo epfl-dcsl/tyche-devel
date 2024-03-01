@@ -235,7 +235,9 @@ unsafe impl Walker for Dumper<'_> {
         let addr = phys_addr.as_u64() - self.offset as u64 + top;
         HostVirtAddr::new(addr as usize)
     }
-    fn get_phys_addr(_: u64) -> <Self as Walker>::PhysAddr { todo!() }
+    fn get_phys_addr(_: u64) -> <Self as Walker>::PhysAddr {
+        todo!()
+    }
 }
 
 pub fn print_page_tables(file: &PathBuf, riscv_enabled: bool) {
