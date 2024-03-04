@@ -6,3 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+
+
+[target.'cfg(target_arch = "riscv64")'.dependencies]
+riscv_tyche = { path = "../riscv_tyche/" }

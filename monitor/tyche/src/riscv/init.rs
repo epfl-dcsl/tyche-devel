@@ -2,7 +2,11 @@ use core::arch::asm;
 use core::sync::atomic::Ordering;
 
 use capa_engine::{Domain, Handle};
-use riscv_utils::{set_mip_ssip, HART_START, HART_START_ADDR, HART_START_ARG1};
+use riscv_tyche::RVManifest;
+use riscv_utils::{
+    set_mip_ssip, AVAILABLE_HART_MASK, HART_START, HART_START_ADDR, HART_START_ARG1,
+    NUM_HARTS_AVAILABLE,
+};
 
 use super::{arch, guest, launch_guest, monitor};
 use crate::debug::qemu;
@@ -10,21 +14,41 @@ use crate::riscv::cpuid;
 
 pub fn arch_entry_point(
     hartid: usize,
-    arg1: usize,
-    next_addr: usize,
-    next_mode: usize,
-    coldboot: bool,
+    manifest: RVManifest,
+    //arg1: usize,
+    //next_addr: usize,
+    //next_mode: usize,
+    //coldboot: bool,
     log_level: log::LevelFilter,
 ) -> ! {
-    if coldboot {
+    if hartid == manifest.coldboot_hartid {
         logger::init(log_level);
 
         log::info!(
             "============= Hello from Second Stage on Hart ID: {} =============",
             hartid
         );
+        log::info!(
+            "Manifest Content: {:x} {:x} {:x} {:x} {:x}",
+            manifest.coldboot_hartid,
+            manifest.next_arg1,
+            manifest.next_addr,
+            manifest.next_mode,
+            manifest.num_harts
+        );
         let mhartid = cpuid();
         log::debug!("==========Coldboot MHARTID: {} ===========", mhartid);
+
+        let mut t_num_harts = manifest.num_harts - 1;
+        let mut available_harts_mask = 1;
+        while t_num_harts > 0 {
+            available_harts_mask = (available_harts_mask << 1) | 1;
+            t_num_harts = t_num_harts - 1;
+        }
+        unsafe {
+            AVAILABLE_HART_MASK = available_harts_mask;
+            NUM_HARTS_AVAILABLE = manifest.num_harts;
+        }
 
         monitor::init();
 
@@ -65,7 +89,12 @@ pub fn arch_entry_point(
         );
 
         //TODO: Change function name to be arch independent. Not launching guest in RV.
-        launch_guest(hartid, arg1, next_addr, next_mode);
+        launch_guest(
+            hartid,
+            manifest.next_arg1,
+            manifest.next_addr,
+            manifest.next_mode,
+        );
         qemu::exit(qemu::ExitCode::Success);
     } else {
         log::info!(
@@ -122,7 +151,7 @@ pub fn arch_entry_point(
             mideleg
         );
 
-        launch_guest(hartid, jump_arg, jump_addr, next_mode);
+        launch_guest(hartid, jump_arg, jump_addr, manifest.next_mode);
 
         qemu::exit(qemu::ExitCode::Success);
     }

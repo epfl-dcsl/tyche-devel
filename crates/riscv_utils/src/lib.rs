@@ -3,8 +3,9 @@
 use core::arch::asm;
 use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
-pub const NUM_HARTS: usize = 2;
-pub const AVAILABLE_HART_MASK: usize = 0x3;
+pub const NUM_HARTS: usize = 4; //This is supposed to be maximum supported harts.
+pub static mut NUM_HARTS_AVAILABLE: usize = 0;
+pub static mut AVAILABLE_HART_MASK: usize = 0;
 
 //uart base address
 pub const SERIAL_PORT_BASE_ADDRESS: usize = 0x1000_0000;

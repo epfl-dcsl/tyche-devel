@@ -160,7 +160,10 @@ pub fn sbi_ext_ipi_handler(
             }
         } else {
             //Check hmask starting from hbase hartid.
-            let mut available_hart_mask: usize = AVAILABLE_HART_MASK >> a1;
+            let mut available_hart_mask: usize;
+            unsafe {
+                available_hart_mask = AVAILABLE_HART_MASK >> a1;
+            }
             let mut target_hart_mask: usize = a0;
             for i in a1.try_into().unwrap()..NUM_HARTS {
                 if (((available_hart_mask & 0x1) & (target_hart_mask & 1)) == 1)
@@ -230,7 +233,10 @@ pub fn sbi_ext_rfence_handler(
                 }
             } else {
                 //Check hmask starting from hbase hartid.
-                let mut available_hart_mask: usize = AVAILABLE_HART_MASK >> a1;
+                let mut available_hart_mask: usize;
+                unsafe {
+                    available_hart_mask = AVAILABLE_HART_MASK >> a1;
+                }
                 //Currently assuming all harts are available to send IPIs.
                 let mut target_hart_mask: usize = a0;
                 for i in a1.try_into().unwrap()..NUM_HARTS {

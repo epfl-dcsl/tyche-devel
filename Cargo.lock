@@ -995,6 +995,9 @@ dependencies = [
 [[package]]
 name = "stage_two_abi"
 version = "0.1.0"
+dependencies = [
+ "riscv_tyche",
+]
 
 [[package]]
 name = "static_assertions"
