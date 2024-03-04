@@ -7,6 +7,7 @@
 #include <ucontext.h>
 #include <sys/ucontext.h>
 #include "common.h"
+#include "common_log.h"
 #include "sdk_tyche_rt.h"
 #include "sdk_tyche.h"
 #include "enclave_app.h"
@@ -48,7 +49,7 @@ failure:
 void call_tychools(nonce_t nonce, unsigned long long offset) {
   char cmd[256];
   // TODO: detect architecture to run the proper command (e.g. remove --riscv-enabled on non-riscv platforms)
-  sprintf(cmd, "sudo chmod ugo+rx tychools;./tychools attestation --att-src=file_tychools.txt --src-bin=enclave_iso --offset=0x%llx --nonce=0x%x --riscv-enabled", offset, nonce);
+  sprintf(cmd, "sudo chmod ugo+rx tychools;./tychools attestation --att-src=file_tychools.txt --src-bin=enclave_iso --offset=0x%llx --nonce=0x%llx --riscv-enabled", offset, nonce);
   LOG("cmd %s", cmd);
   LOG("WARNING: for now this assume we run on RISC-V! Update code for x86");
   system(cmd);
@@ -81,7 +82,7 @@ void read_tychools_response() {
   else {
     LOG("Answer from tychools\n");
     char* line = NULL;
-    int len = 0;
+    size_t len = 0;
     while ((getline(&line, &len, tychools_response)) != -1) {
         LOG("%s", line);
     }
@@ -98,7 +99,7 @@ int hello_world()
   hello_world_t* msg = (hello_world_t*)(&(shared->args));
 
   // Call the enclave.
-  if (sdk_call_domain(enclave, NULL) != SUCCESS) {
+  if (sdk_call_domain(enclave, 0) != SUCCESS) {
     ERROR("Unable to call the enclave %d!", enclave->handle);
     goto failure;
   }
@@ -111,8 +112,8 @@ int hello_world()
   msg->nonce = nonce;
   // Call to enclave, which will do attestation
   LOG("Calling enclave to execute attestation");
-  if (sdk_call_domain(enclave, NULL) != SUCCESS) {
-    ERROR("Unable to call the enclave a second time %lld!", enclave->handle);
+  if (sdk_call_domain(enclave, 0) != SUCCESS) {
+    ERROR("Unable to call the enclave a second time %d!", enclave->handle);
     goto failure;
   }
   
@@ -123,7 +124,7 @@ int hello_world()
 
   // Clean up.
   if (sdk_delete_domain(enclave) != SUCCESS) {
-    ERROR("Unable to delete the enclave %lld", enclave->handle);
+    ERROR("Unable to delete the enclave %d", enclave->handle);
     goto failure;
   }
   LOG("All done!");
@@ -144,7 +145,7 @@ int main(int argc, char *argv[]) {
   // Init the enclave.
     if (sdk_create_domain(
           enclave, argv[0],
-          DEFAULT_CORES, ALL_TRAPS, DEFAULT_PERM, CopyVCPU) != SUCCESS) {
+          DEFAULT_CORES, ALL_TRAPS, DEFAULT_PERM) != SUCCESS) {
       ERROR("Unable to parse the enclave");
       goto failure;
     }

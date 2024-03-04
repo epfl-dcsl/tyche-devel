@@ -271,10 +271,10 @@ fn handle_exit(
                     vs.vcpu.next_instruction()?;
                     Ok(HandlerResult::Resume)
                 }
-                calls::SEND_ALIASED => {
+                calls::SEND_REGION => {
                     log::trace!("Send aliased");
                     // Send a region capa and adds an alias to it.
-                    monitor::do_send_aliased(
+                    monitor::do_send_region(
                         *domain,
                         LocalCapa::new(arg_1),
                         LocalCapa::new(arg_2),
@@ -571,13 +571,14 @@ fn handle_exit(
         VmxExitReason::EptViolation if domain.idx() == 0 => {
             let addr = vs.vcpu.guest_phys_addr()?;
             log::error!(
-                "EPT Violation! virt: 0x{:x}, phys: 0x{:x}",
+                "EPT Violation on dom0! virt: 0x{:x}, phys: 0x{:x}",
                 vs.vcpu
                     .guest_linear_addr()
                     .expect("unable to get the virt addr")
                     .as_u64(),
                 addr.as_u64(),
             );
+            monitor::do_debug();
             panic!("The vcpu {:x?}", vs.vcpu);
         }
         VmxExitReason::Exception if domain.idx() == 0 => {

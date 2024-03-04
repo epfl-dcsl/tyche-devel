@@ -6,12 +6,12 @@ config_t* shared = NULL;
 
 // ————————————————————— TRANSITION_BENCHMARK Functions ————————————————————— //
 
-void transition_benchmark(frame_t* frame)
+void transition_benchmark(void)
 {
   transition_benchmark_t* count = (transition_benchmark_t*)(&(shared->args));
   while(1) {
     count->counter++;
-    gate_call(frame);
+    gate_call();
   }
 }
 
@@ -39,18 +39,18 @@ void print_message(void* input)
   my_memcpy(msg->reply, input, 15);
 }
 
-void hello_world(frame_t* frame)
+void hello_world(void)
 {
   print_message((void*) message);
   // Do a return.
-  gate_call(frame);
+  gate_call();
   // We're back, print the second message.
   print_message((void*) message2);
 }
 
 // —————————————————————————— BreakPoint Function ——————————————————————————— //
 
-void breakpoint(frame_t* frame)
+void breakpoint(void)
 {
   // Pray we hit that exception first.
   // If this doesn't work, we'll see something else than breakpoint.
@@ -65,7 +65,7 @@ void breakpoint(frame_t* frame)
 
 // ———————————————————————— Dispatcher configuration ———————————————————————— //
 
-typedef void (*encl_function)(frame_t*);
+typedef void (*encl_function)(void);
 
 encl_function dispatcher[] = {
   transition_benchmark,
@@ -77,12 +77,8 @@ encl_function dispatcher[] = {
 
 // ————————————————————————————— Entry Function ————————————————————————————— //
 
-void trusted_entry(frame_t* frame)
+void trusted_entry(void)
 {
-  // Error.
-  if (frame == NULL) {
-    return;
-  }
   shared = (config_t*) get_default_shared_buffer();
-  dispatcher[shared->app](frame);
+  dispatcher[shared->app]();
 }

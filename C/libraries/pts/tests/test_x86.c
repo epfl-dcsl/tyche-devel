@@ -5,6 +5,7 @@
 #include "pts_api.h"
 #include "x86_64_pt.h"
 #include "common.h"
+#include "common_log.h"
 
 
 // ————————————————————————— Page Table Simulation —————————————————————————— //

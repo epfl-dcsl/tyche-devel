@@ -1,5 +1,5 @@
-$(info ARCH="$(ARCH)")
-$(info CROSS_COMPILE="$(CROSS_COMPILE)")
+ARCH ?= x86
+
 ifeq ($(ARCH), x86)
 	DISK = "../ubuntu.qcow2"
 	MOUNT_DIR = "/tmp/mount"
@@ -7,6 +7,9 @@ else ifeq ($(ARCH), riscv)
 	DISK = "../ubuntu-22.04.3-preinstalled-server-riscv64+unmatched.img"
 	MOUNT_DIR = "/tmp/ubuntu_riscv_mount/"
 endif 
+
+$(info ARCH="$(ARCH)")
+$(info CROSS_COMPILE="$(CROSS_COMPILE)")
 
 all:
 
@@ -24,11 +27,14 @@ TYCHOOLS_LOCAL_BIN_PATH ?= ../target/release
 # Make sure you mount the disk first
 update_disk:
 	sudo chown --recursive $(shell whoami) /tmp/mount/tyche
-	make ARCH=x86 -B -C libraries/sdktyche/example/app-selector install_disk
-	make ARCH=x86 -B -C libraries/sdktyche/example/simple-enclave install_disk
-	make ARCH=x86 -B -C libraries/sdktyche/example/simple-sandbox install_disk
-	make ARCH=x86 -B -C libraries/tyche-trusted-runtime install_disk
-	cp scripts/install_drivers.sh /tmp/mount/tyche
+	make ARCH=x86 KVM=0 DISK_PATH=/tmp/mount/tyche/programs/sdk_tyche -B -C libraries/sdktyche/example/app-selector install_disk
+	make ARCH=x86 KVM=0 DISK_PATH=/tmp/mount/tyche/programs/sdk_tyche -B -C libraries/sdktyche/example/simple-enclave install_disk
+	make ARCH=x86 KVM=0 DISK_PATH=/tmp/mount/tyche/programs/sdk_tyche -B -C libraries/sdktyche/example/simple-sandbox install_disk
+	make ARCH=x86 KVM=1 DISK_PATH=/tmp/mount/tyche/programs/sdk_kvm -B -C libraries/sdktyche/example/app-selector install_disk
+	make ARCH=x86 KVM=1 DISK_PATH=/tmp/mount/tyche/programs/sdk_kvm -B -C libraries/sdktyche/example/simple-enclave install_disk
+	make ARCH=x86 KVM=1 DISK_PATH=/tmp/mount/tyche/programs/sdk_kvm -B -C libraries/sdktyche/example/simple-sandbox install_disk
+	#make ARCH=x86 -B -C libraries/tyche-trusted-runtime install_disk
+	cp scripts/x86_64_install_drivers.sh /tmp/mount/tyche
 	cp $(TYCHOOLS_LOCAL_BIN_PATH)/tychools $(PROGRAMGS_PATH)/tychools 
 	
 else ifeq ($(ARCH), riscv)

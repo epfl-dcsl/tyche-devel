@@ -1,5 +1,6 @@
 #include "back_kvm.h"
 #include "common.h"
+#include "common_log.h"
 #include "../backend.h"
 #include "contalloc_driver.h"
 #include "sdk_tyche.h"
@@ -10,6 +11,8 @@
 #include <sys/ioctl.h>
 #include <unistd.h>
 #include <string.h>
+#include <stdlib.h>
+#include <stdint.h>
 // ———————————————————————— Backend specific defines ———————————————————————— //
 
 #define KVM_DRIVER ("/dev/kvm")
@@ -18,14 +21,94 @@
 
 // ———————————————————————————— Helper functions ———————————————————————————— //
 
-static void default_sregs(struct kvm_sregs* sregs)
-{
-  //TODO!!!
+static void ar_to_kvm_segment(struct kvm_segment* var, uint32_t ar)
+{ 
+  var->type = (ar & 15);
+  var->s = (ar >> 4) & 1;
+  var->dpl = (ar >> 5) & 1;
+  var->present = (ar >> 7) & 1;
+  var->avl = (ar >> 12) & 1;
+  var->l = (ar >> 13) & 1;
+  var->db = (ar >> 14) & 1;
+  var->g = (ar >> 15) & 1;
+  // TODO not sure;
+  var->unusable = (ar >> 16);
+
+  /// Model to compute from ar to kvm_segment.
+	/*ar = var->type & 15;
+	ar |= (var->s & 1) << 4;
+	ar |= (var->dpl & 3) << 5;
+	ar |= (var->present & 1) << 7;
+	ar |= (var->avl & 1) << 12;
+	ar |= (var->l & 1) << 13;
+	ar |= (var->db & 1) << 14;
+	ar |= (var->g & 1) << 15;
+	ar |= (var->unusable || !var->present) << 16;*/
 }
 
-static void default_regs(struct kvm_regs *regs)
+static int default_sregs(struct kvm_sregs* sregs)
 {
-  //TODO
+  if (sregs == NULL)  {
+    ERROR("Sregs are null");
+    goto failure;
+  }
+  sregs->cs.selector = 0x0;
+  sregs->cs.base = 0x0;
+  sregs->cs.limit = 0xffff;
+  ar_to_kvm_segment(&(sregs->cs), 0xa09b);
+  sregs->ds.selector = 0x0;
+  sregs->ds.base = 0x0;
+  sregs->ds.limit = 0xffff;
+  ar_to_kvm_segment(&(sregs->ds), 0xc093);
+  sregs->es.selector = 0x0;
+  sregs->es.base = 0x0;
+  sregs->es.limit = 0xffff;
+  ar_to_kvm_segment(&(sregs->es), 0xc093);
+  sregs->fs.selector = 0x0;
+  sregs->fs.base = 0x0;
+  sregs->fs.limit = 0xffff;
+  ar_to_kvm_segment(&(sregs->fs), 0x10000);
+  sregs->gs.selector = 0x0;
+  sregs->gs.base = 0x0;
+  sregs->gs.limit = 0xffff;
+  ar_to_kvm_segment(&(sregs->gs), 0x10000);
+  sregs->ss.selector = 0x0;
+  sregs->ss.base = 0x0;
+  sregs->ss.limit = 0xffff;
+  ar_to_kvm_segment(&(sregs->ss), 0x14000);
+  sregs->ldt.selector = 0x0;
+  sregs->ldt.base = 0x0;
+  sregs->ldt.limit = 0xffff;
+  ar_to_kvm_segment(&(sregs->ldt), 0x10000);
+  sregs->tr.selector = 0x0;
+  sregs->tr.base = 0x0;
+  sregs->tr.limit = 0xff;
+  ar_to_kvm_segment(&(sregs->tr), 0x8b);
+  sregs->idt.base = 0x0;
+  sregs->idt.limit = 0xffff;
+  sregs->gdt.base = 0x0;
+  sregs->gdt.limit = 0xffff;
+
+  sregs->cr0 = 0x80050033;
+  // No PKE (bit 22) and no VMXE (bit 13);
+  sregs->cr4 = 0x350ef0;
+  sregs->efer = 0xd01;
+  return SUCCESS;
+failure:
+  return FAILURE;
+}
+
+static int default_regs(struct kvm_regs *regs)
+{
+  if (regs == NULL) {
+    ERROR("Regs are null");
+    goto failure;
+  }
+  regs->rflags = 0x92;
+  //regs->rflags = 0x286;
+  return SUCCESS;
+failure:
+  return FAILURE;
 }
 
 // —————————————————————————————— Backend API ——————————————————————————————— //
@@ -106,6 +189,7 @@ int backend_td_register_region(
     segment_type_t tpe) {
   
   backend_region_t* new_region = NULL;
+  uint32_t kvm_flags = KVM_FLAGS_ENCODING_PRESENT;
   if (domain == NULL) {
     ERROR("Nul argument.");
     goto failure;
@@ -126,10 +210,16 @@ int backend_td_register_region(
   }
   memset(new_region, 0, sizeof(backend_region_t));
   dll_init_elem(new_region, list);
+  
+  // KVM region initialization.
+  kvm_flags |= ((flags & MEM_WRITE) == 0)? KVM_MEM_READONLY : 0;
+  kvm_flags |= (flags << KVM_FLAGS_MEM_ACCESS_RIGHTS_IDX) & KVM_FLAGS_MEM_ACCESS_RIGHTS_MASK;
+  kvm_flags |= (tpe << KVM_FLAGS_SEGMENT_TYPE_IDX) & KVM_FLAGS_SEGMENT_TYPE_MASK;
   new_region->kvm_mem.slot = domain->backend.counter_slots++;
   new_region->kvm_mem.userspace_addr = vstart;
   new_region->kvm_mem.memory_size = size;
-  new_region->kvm_mem.guest_phys_addr = (vstart - domain->map.virtoffset);
+  new_region->kvm_mem.flags = kvm_flags;
+  new_region->kvm_mem.guest_phys_addr = (vstart - domain->map.virtoffset) + domain->map.physoffset;
   //TODO: handle the flags? for now just save them.
   new_region->flags = flags;
   new_region->tpe = tpe;
@@ -139,6 +229,10 @@ int backend_td_register_region(
     ERROR("Failed to register the kvm mem region");
     goto fail_free;
   }
+  /*ERROR("[KVM region %d] uaddr: %llx, gpa: %llx, size: %llx | physoffset: %llx",
+      new_region->kvm_mem.slot, new_region->kvm_mem.userspace_addr,
+      new_region->kvm_mem.guest_phys_addr, new_region->kvm_mem.memory_size,
+      domain->map.physoffset);*/
 
   /// Add the region to the list.
   dll_add(&(domain->backend.kvm_regions), new_region, list);
@@ -165,7 +259,7 @@ int backend_td_create_vcpu(tyche_domain_t* domain, usize core_idx)
     goto failure;
   }
   if (core_idx >= MAX_CORES || (domain->core_map & (1ULL << core_idx)) == 0) {
-    ERROR("Invalid core index");
+    ERROR("Invalid core index %lld for map 0x%llx", core_idx, domain->core_map);
     goto failure;
   }
   // Create a vcpu. 
@@ -186,7 +280,8 @@ int backend_td_create_vcpu(tyche_domain_t* domain, usize core_idx)
   }
 
   // Allocate its memory region.
-  vcpu->kvm_run = mmap(NULL, domain->backend.kvm_run_mmap_size, PROT_READ | PROT_WRITE, MAP_SHARED, vcpu->fd, 0);
+  vcpu->kvm_run = mmap(NULL, domain->backend.kvm_run_mmap_size,
+      PROT_READ | PROT_WRITE, MAP_SHARED, vcpu->fd, 0);
   if (vcpu->kvm_run == MAP_FAILED) {
     ERROR("Map failed for vcpu on core %lld", core_idx);
     goto close_failure;
@@ -223,14 +318,21 @@ int backend_td_init_vcpu(tyche_domain_t* domain, usize core_idx)
     goto failure;
   }
 
-  default_sregs(&(vcpu->sregs));
-  default_regs(&(vcpu->regs));
+  if (default_sregs(&(vcpu->sregs)) != SUCCESS) {
+    ERROR("Unable configure default sregs.");
+    goto failure;
+  }
+  if (default_regs(&(vcpu->regs)) != SUCCESS) {
+    ERROR("Unable to configure default regs");
+    goto failure;
+  }
 
   // TODO we need to figure out how to make this work for multiple core.
   // Store the info in the elf?
   vcpu->regs.rip = domain->config.entry;
   vcpu->regs.rsp = domain->config.stack;
   vcpu->sregs.cr3 = domain->config.page_table_root;
+  // When read that tells pending interrupts.
   //vcpu->sregs.interrupt_bitmap = ??? TODO ???;
 
   // Register it with kvm.

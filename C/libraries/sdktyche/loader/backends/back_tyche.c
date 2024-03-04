@@ -1,9 +1,11 @@
+#include "back_tyche.h"
 #include "common.h"
+#include "common_log.h"
 #include "../backend.h"
 #include "tyche_driver.h"
-#include "back_tyche.h"
 #include "tyche_api.h"
 #include "sdk_tyche.h"
+#include "tyche_register_map.h"
 
 #include <fcntl.h>
 #include <errno.h>
@@ -11,6 +13,8 @@
 #include <sys/mman.h>
 #include <sys/ioctl.h> 
 #include <unistd.h>
+#include <asm/vmx.h>
+#include <stdlib.h>
 // ——————————————————————————— Local definitions ———————————————————————————— //
 
 #define DOMAIN_DRIVER ("/dev/tyche")
@@ -36,7 +40,7 @@ static int ioctl_mmap(handle_t handle, usize size, usize* virtoffset)
     goto failure;
   }
   *virtoffset = (usize) result;
-  DEBUG("mmap success for %d, address %llx", handle, result);
+  //DEBUG("mmap success for %d, address %llx", handle, (usize) result);
   return SUCCESS;
 failure:
   return FAILURE;
@@ -67,9 +71,62 @@ static int ioctl_mprotect(handle_t handle, usize vstart, usize size,
     ERROR("Failed to mprotect region %llx -- %llx for domain %d", vstart, vstart + size, handle);
     goto failure;
   }
-  DEBUG("mprotect %llx -- %llx [%llx:%llx]",
+  /*DEBUG("mprotect %llx -- %llx [0x%x:0x%x]",
       mprotect.start, mprotect.start + mprotect.size,
-      mprotect.flags, mprotect.tpe);
+      mprotect.flags, mprotect.tpe);*/
+  return SUCCESS;
+failure:
+  return FAILURE;
+}
+
+static int default_vcpu(tyche_domain_t* domain, backend_vcpu_info_t* vcpu) {
+  msg_set_perm_t msg = {0};
+  if (domain == NULL) {
+    ERROR("The provided domain is null");
+    goto failure;
+  }
+  if (vcpu == NULL) {
+    ERROR("The provided vcpu is null");
+    goto failure;
+  }
+  // Set the bitmap for exceptions.
+  msg.core = vcpu->core_id;
+  msg.idx = EXCEPTION_BITMAP;
+  msg.value = ~(domain->traps);
+  if (ioctl(domain->handle, TYCHE_SET_DOMAIN_CORE_CONFIG, &msg) != SUCCESS) {
+    ERROR("Unable to set bitmap.");
+    goto failure;
+  } 
+  // Set the cr0.
+  msg.idx = GUEST_CR0;
+  //TODO: do a proper settings.
+  msg.value = 0x80050033;
+  if (ioctl(domain->handle, TYCHE_SET_DOMAIN_CORE_CONFIG, &msg) != SUCCESS) {
+    ERROR("Unable to set cr0 on core %d", vcpu->core_id);
+    goto failure;
+  }
+  msg.idx = GUEST_CR4;
+  // TODO same as above.
+  msg.value = 0x752ef0;
+  if (ioctl(domain->handle, TYCHE_SET_DOMAIN_CORE_CONFIG, &msg) != SUCCESS) {
+    ERROR("Unable to set cr4 on core %d", vcpu->core_id);
+    goto failure;
+  }
+  msg.idx = GUEST_IA32_EFER;
+  //TODO same;
+  msg.value = 0xd01;
+  if (ioctl(domain->handle, TYCHE_SET_DOMAIN_CORE_CONFIG, &msg) != SUCCESS) {
+    ERROR("Unable to set efer on core %d", vcpu->core_id);
+    goto failure;
+  }
+  msg.idx = GUEST_RFLAGS;
+  //TODO same; with tyche we cannot enable interrupts sadly.
+  msg.value = 0x092;
+  if (ioctl(domain->handle, TYCHE_SET_DOMAIN_CORE_CONFIG, &msg) != SUCCESS) {
+    ERROR("Unable to set rflags on core %d", vcpu->core_id);
+    goto failure;
+  }
+
   return SUCCESS;
 failure:
   return FAILURE;
@@ -128,15 +185,22 @@ int backend_td_register_region(
     segment_type_t tpe) {
   if (domain == NULL) {
     ERROR("Nul argument");
-    return FAILURE;
+    goto failure;
   }
-  return ioctl_mprotect(domain->handle, vstart, size, flags, tpe);
+  if (ioctl_mprotect(domain->handle, vstart, size, flags, tpe) != SUCCESS) {
+    ERROR("Unable to mprotect region at %llx", vstart);
+    goto failure;
+  }
+  //TODO: should we commit the regions now already?
+  return SUCCESS;
+failure:
+    return FAILURE;
 }
 
 
-int backend_td_config_vm(tyche_domain_t* domain, usize config, usize value)
+int backend_td_config(tyche_domain_t* domain, usize config, usize value)
 {
-  msg_set_perm_t msg = {config, value};
+  msg_set_perm_t msg = {0, config, value};
   if (domain == NULL) {
     ERROR("Nul argument");
     goto failure;
@@ -146,7 +210,6 @@ int backend_td_config_vm(tyche_domain_t* domain, usize config, usize value)
     ERROR("Invalid config number: %lld", config);
     goto failure;
   }
-  
   if (ioctl(domain->handle, TYCHE_SET_DOMAIN_CONFIGURATION, &msg) != SUCCESS) {
     ERROR("Failed to set domain configuration %lld to value %llx", msg.idx, msg.value);
     goto failure;
@@ -197,7 +260,7 @@ failure:
 
 int backend_td_init_vcpu(tyche_domain_t* domain, usize core_idx)
 {
-  msg_entry_on_core_t msg = {0};
+  msg_set_perm_t msg = {0};
   struct backend_vcpu_info_t* vcpu = NULL;
   if (domain == NULL) {
     ERROR("Nul argument.");
@@ -213,6 +276,11 @@ int backend_td_init_vcpu(tyche_domain_t* domain, usize core_idx)
     ERROR("Unable to find vcpu for core %lld. Call create_vcpu first!", core_idx);
     goto failure;
   }
+
+  if (default_vcpu(domain, vcpu) != SUCCESS) {
+    ERROR("Unable to configure the default vcpu on core %lld", core_idx);
+    goto failure;
+  }
   //TODO: we need to figure that out.
   //The elf binary so far was only configured to support one core.
   // We thus have a single entry point and stack...
@@ -221,11 +289,25 @@ int backend_td_init_vcpu(tyche_domain_t* domain, usize core_idx)
   vcpu->cr3 = domain->config.page_table_root;
   
   msg.core = vcpu->core_id;
-  msg.stack = vcpu->stack;
-  msg.entry = vcpu->rip;
-  msg.page_tables = vcpu->cr3;
-  if (ioctl(domain->handle, TYCHE_SET_ENTRY_POINT, &msg) != SUCCESS) {
-    ERROR("Unable to set entry point with driver for core %lld", core_idx);
+  // Set the stack.
+  msg.idx = REG_GP_RSP;
+  msg.value = vcpu->stack; 
+  if (ioctl(domain->handle, TYCHE_SET_DOMAIN_CORE_CONFIG, &msg) != SUCCESS) {
+    ERROR("Unable to set the stack for the vcpu.");
+    goto failure;
+  }
+  // Set the rip.
+  msg.idx = REG_GP_RIP;
+  msg.value = vcpu->rip; 
+  if (ioctl(domain->handle, TYCHE_SET_DOMAIN_CORE_CONFIG, &msg) != SUCCESS) {
+    ERROR("Unable to set the stack for the vcpu.");
+    goto failure;
+  }
+  // Set the rip.
+  msg.idx = REG_GP_CR3;
+  msg.value = vcpu->cr3; 
+  if (ioctl(domain->handle, TYCHE_SET_DOMAIN_CORE_CONFIG, &msg) != SUCCESS) {
+    ERROR("Unable to set the stack for the vcpu.");
     goto failure;
   }
   // All done!

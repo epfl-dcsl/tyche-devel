@@ -57,7 +57,7 @@ pub unsafe fn init_vcpu<'vmx>(
     vmx::check::check().expect("check error");
 }
 
-fn default_vmcs_config(vmcs: &mut ActiveVmcs, info: &GuestInfo, switching: bool) {
+pub fn default_vmcs_config(vmcs: &mut ActiveVmcs, info: &GuestInfo, switching: bool) {
     // Look for XSAVES capabilities
     let capabilities =
         secondary_controls_capabilities().expect("Secondary controls are not supported");
@@ -84,14 +84,12 @@ fn default_vmcs_config(vmcs: &mut ActiveVmcs, info: &GuestInfo, switching: bool)
         .and_then(|_| vmcs.set_exception_bitmap(ExceptionBitmap::empty()))
         .and_then(|_| save_host_state(vmcs, info))
         .and_then(|_| setup_guest(vmcs, info));
-    log::info!("Config: {:?}", err);
-    log::info!("MSRs:   {:?}", configure_msr());
-    log::info!(
-        "1'Ctrl: {:?}",
-        vmcs.set_primary_ctrls(
-            PrimaryControls::SECONDARY_CONTROLS | PrimaryControls::USE_MSR_BITMAPS
-        )
-    );
+    log::trace!("Config: {:?}", err);
+    let err = configure_msr();
+    log::trace!("MSRs:   {:?}", err);
+    let err = vmcs
+        .set_primary_ctrls(PrimaryControls::SECONDARY_CONTROLS | PrimaryControls::USE_MSR_BITMAPS);
+    log::trace!("1'Ctrl: {:?}", err);
 
     let mut secondary_ctrls = SecondaryControls::ENABLE_RDTSCP
         | SecondaryControls::ENABLE_EPT
@@ -103,11 +101,9 @@ fn default_vmcs_config(vmcs: &mut ActiveVmcs, info: &GuestInfo, switching: bool)
         secondary_ctrls |= SecondaryControls::ENABLE_XSAVES_XRSTORS;
     }
     secondary_ctrls |= cpuid_secondary_controls();
-    log::info!(
-        "2'Ctrl {:b}, {:b}",
-        secondary_ctrls,
-        vmx::secondary_controls_capabilities().expect("meh")
-    );
+    let err = vmx::secondary_controls_capabilities().expect("meh");
+
+    log::trace!("2'Ctrl {:b}, {:b}", secondary_ctrls, err);
     vmcs.set_secondary_ctrls(secondary_ctrls)
         .expect("Error setting secondary controls");
 

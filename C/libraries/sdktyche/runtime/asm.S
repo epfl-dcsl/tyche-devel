@@ -17,17 +17,17 @@ asm_call_gate:
     pushq %r15
     pushfq
     // Now do the call, arguments are in the right registers.
-    pushq %rdi
-    pushq %rsi
-    movq (%rdi), %rdi
-    movq (%rsi), %rsi
+    //pushq %rdi
+    //pushq %rsi
+    //movq (%rdi), %rdi
+    //movq (%rsi), %rsi
     movq $9, %rax   // TYCHE_SWITCH 
     vmcall
     // We returned, move the return values into the registers.
-    popq %r15 // &rsi, i.e., void**
-    movq %rsi, (%r15)
-    popq %r15 // &rdi, i.e., capa_index_t* 
-    movq %rdi, (%r15)
+    //popq %r15 // &rsi, i.e., void**
+    //movq %rsi, (%r15)
+    //popq %r15 // &rdi, i.e., capa_index_t* 
+    //movq %rdi, (%r15)
     // Restore all registers, don't change rax.
     popfq
     popq %r15
@@ -45,7 +45,7 @@ asm_call_gate:
 
 .globl _start
 _start:
-  movq %r11, %rsi
+  //movq %r11, %rsi
   callq trusted_main
   // Should never return here, call exit if we do.
   movq $1, %rax

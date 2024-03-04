@@ -27,19 +27,15 @@ void print_message(void* input)
   my_memcpy(msg->buffer, input, 15);
 }
 
-void write_ro(frame_t* frame)
+void write_ro()
 {
   print_message((void*) message);
 }
 
 // ————————————————————————————— Entry Function ————————————————————————————— //
 
-void trusted_entry(frame_t* frame)
+void trusted_entry(void)
 {
-  // Error.
-  if (frame == NULL) {
-    return;
-  }
   shared = (config_t*) get_default_shared_buffer();
-  write_ro(frame);
+  write_ro();
 }

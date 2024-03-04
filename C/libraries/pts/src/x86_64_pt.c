@@ -1,6 +1,7 @@
 #include "pts_api.h"
 #include "x86_64_pt.h"
 #include "common.h"
+#include "common_log.h"
 /// Default profile for x86_64.
 /// @warn It is incomplete.
 const pt_profile_t x86_64_profile = {

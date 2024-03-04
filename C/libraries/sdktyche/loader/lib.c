@@ -14,6 +14,7 @@
 #include "riscv48_pt.h"
 #endif
 #include "common.h"
+#include "common_log.h"
 #include "sdk_tyche_rt.h"
 #include "sdk_tyche.h"
 #include "backend.h"
@@ -162,8 +163,7 @@ int init_domain_with_cores_traps(
     tyche_domain_t* domain,
     usize cores,
     usize traps,
-    usize perms,
-    switch_save_t switch_type);
+    usize perms);
 
 /// Parses an ELF binary created by tychools.
 /// All the segments for the domain should have OS-specific types.
@@ -180,8 +180,7 @@ int init_domain_with_cores_traps(
     tyche_domain_t* domain,
     usize cores,
     usize traps,
-    usize perms,
-    switch_save_t switch_type)
+    usize perms)
 {
   if (domain == NULL || domain->parser.elf.memory.start == NULL) {
     ERROR("Null argument provided: domain(%p)", domain);
@@ -190,7 +189,6 @@ int init_domain_with_cores_traps(
   domain->traps = traps;
   domain->core_map = cores;
   domain->perms = perms;
-  domain->switch_type = switch_type;
   if (parse_domain(domain) != SUCCESS) {
     ERROR("Unable to parse the domain");
     goto failure;
@@ -272,7 +270,7 @@ int parse_domain(tyche_domain_t* domain)
     ERROR("The computed size for the segments is %zu", segments_size);
     goto close_failure;
   }
-  DEBUG("The overall size for the binary is %zx", segments_size);
+  //DEBUG("The overall size for the binary is %zx", segments_size);
   domain->map.size = segments_size;
   
   // We are done for now, next step is to load the domain.
@@ -393,25 +391,19 @@ int load_domain(tyche_domain_t* domain)
     ERROR("Unable to set the permission on domain %d", domain->handle);
     goto failure;
   }
-  // Set the switch type.
-  if (backend_td_config(
-        domain, TYCHE_CONFIG_SWITCH, domain->switch_type) != SUCCESS) {
-      ERROR("Unable to set the switch type.");
-      goto failure;
-  } 
-
   // For the moment support maximum 32 cores, 
   for (usize i = 0; i < MAX_CORES; i++) {
     // Create the core context.
-    if (domain->core_map & (1ULL << i) == 0) {
+    if ((domain->core_map & (1ULL << i)) == 0) {
       continue;
     }
     if (backend_td_create_vcpu(domain, i) != SUCCESS) {
-      ERROR("Unable to create vcpu on core %lld", i); 
+      ERROR("Unable to create vcpu on core %lld | core_map: 0x%llx", i, domain->core_map); 
       goto failure;
     }
     if (backend_td_init_vcpu(domain, i) != SUCCESS) {
       ERROR("Unable to init the vcpu on core %lld", i);
+      goto failure;
     }
   }
 
@@ -432,8 +424,7 @@ int sdk_create_domain(
     const char* self,
     usize cores,
     usize traps,
-    usize perms,
-    switch_save_t switch_type)
+    usize perms)
 {
   char* dump =  NULL;
   if (dom == NULL) {
@@ -456,8 +447,7 @@ int sdk_create_domain(
   } 
 
   // The binary is already instrumented, let's load it.
-  if (init_domain_with_cores_traps(
-        dom, cores, traps, perms, switch_type) != SUCCESS) {
+  if (init_domain_with_cores_traps(dom, cores, traps, perms) != SUCCESS) {
     ERROR("Unable to load tychools binary");
     goto failure;
   } 

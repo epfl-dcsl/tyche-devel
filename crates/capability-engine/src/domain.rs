@@ -47,17 +47,6 @@ pub mod core_bits {
     /// All cores.
     pub const ALL: u64 = !(NONE);
 }
-// —————————————————————————— Switch configuration —————————————————————————— //
-
-#[allow(dead_code)]
-pub mod switch_bits {
-    /// Default none value.
-    pub const NONE: u64 = 0;
-
-    /// Default all value.
-    pub const ALL: u64 = !(NONE);
-}
-
 // —————————————————————————— Domain Capabilities ——————————————————————————— //
 
 /// An index into the capability table of a domain.
@@ -113,8 +102,7 @@ pub enum Bitmaps {
     PERMISSION = 0,
     TRAP = 1,
     CORE = 2,
-    SWITCH = 3,
-    _SIZE = 4,
+    _SIZE = 3,
 }
 
 impl Bitmaps {
@@ -123,7 +111,6 @@ impl Bitmaps {
             0 => Ok(Self::PERMISSION),
             1 => Ok(Self::TRAP),
             2 => Ok(Self::CORE),
-            3 => Ok(Self::SWITCH),
             _ => Err(CapaError::InvalidValue),
         }
     }
@@ -188,18 +175,8 @@ impl Domain {
             regions: RegionTracker::new(),
             manager: None,
             config: Configuration {
-                values: [
-                    permission::NONE,
-                    trap_bits::NONE,
-                    core_bits::NONE,
-                    switch_bits::NONE,
-                ],
-                valid_masks: [
-                    permission::ALL,
-                    trap_bits::ALL,
-                    core_bits::ALL,
-                    switch_bits::ALL,
-                ],
+                values: [permission::NONE, trap_bits::NONE, core_bits::NONE],
+                valid_masks: [permission::ALL, trap_bits::ALL, core_bits::ALL],
                 initialized: [false; Bitmaps::_SIZE as usize],
             },
             cores: core_bits::NONE,
@@ -398,18 +375,8 @@ impl Cleanable for Domain {
         self.regions.clean();
         self.manager = None;
         self.config = Configuration {
-            values: [
-                permission::NONE,
-                trap_bits::NONE,
-                core_bits::NONE,
-                switch_bits::NONE,
-            ],
-            valid_masks: [
-                permission::ALL,
-                trap_bits::ALL,
-                core_bits::ALL,
-                switch_bits::ALL,
-            ],
+            values: [permission::NONE, trap_bits::NONE, core_bits::NONE],
+            valid_masks: [permission::ALL, trap_bits::ALL, core_bits::ALL],
             initialized: [false; Bitmaps::_SIZE as usize],
         };
         self.cores = core_bits::NONE;

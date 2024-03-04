@@ -33,7 +33,7 @@ use segment::NewRegionPool;
 use update::UpdateBuffer;
 pub use update::{Buffer, Update};
 
-use crate::domain::{core_bits, switch_bits, trap_bits};
+use crate::domain::{core_bits, trap_bits};
 use crate::segment::EMPTY_NEW_REGION_CAPA;
 
 /// Configuration for the static Capa Engine size.
@@ -122,12 +122,6 @@ impl CapaEngine {
                     &mut self.domains,
                     domain::Bitmaps::TRAP,
                     trap_bits::ALL,
-                )?;
-                domain::set_config(
-                    handle,
-                    &mut self.domains,
-                    domain::Bitmaps::SWITCH,
-                    switch_bits::ALL,
                 )?;
                 log::info!("About to seal");
                 self.domains[handle].set_id(id)?;

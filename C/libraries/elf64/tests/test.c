@@ -7,6 +7,7 @@
 #include <sys/mman.h>
 
 #include "common.h"
+#include "common_log.h"
 #include "elf64.h"
 
 /// Let the test read itself for the test.

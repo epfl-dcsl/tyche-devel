@@ -1,11 +1,13 @@
 #pragma once
 
 #include "common.h"
+#include "common_kvm.h"
 #include "dll.h"
 #include "tyche_capabilities_types.h"
 
 #include <linux/kvm.h>
 
+// ————————————————————————————————— Types —————————————————————————————————— //
 /// Regions for the domain.
 typedef struct backend_region_t {
   /// The kvm memory region.

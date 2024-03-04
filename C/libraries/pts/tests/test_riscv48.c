@@ -5,6 +5,7 @@
 #include "pts_api.h"
 #include "riscv48_pt.h"
 #include "common.h"
+#include "common_log.h"
 
 // ————————————————————————— Page Table Simulation —————————————————————————— //
 #define PTE_NB_ENTRIES 512

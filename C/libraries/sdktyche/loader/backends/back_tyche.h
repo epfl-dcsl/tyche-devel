@@ -1,6 +1,8 @@
 #pragma once
 
 #include "common.h"
+#include "dll.h"
+#include "tyche_capabilities_types.h"
 
 /// Backend-specific implementation of an execution context (vcpu)
 struct backend_vcpu_info_t {

@@ -1,5 +1,6 @@
 #include "riscv48_pt.h"
 #include "common.h"
+#include "common_log.h"
 
 /// Default profile for riscv48.
 /// @warn It is incomplete.

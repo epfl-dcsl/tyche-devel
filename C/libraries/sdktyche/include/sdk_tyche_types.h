@@ -138,9 +138,6 @@ typedef struct {
   /// The domain's permissions.
   usize perms;
 
-  /// The domain's switch type.
-  switch_save_t switch_type;
-
   /// List of shared regions.
   dll_list(domain_shared_memory_t, shared_regions);
 

@@ -44,6 +44,8 @@ CODE_RUNTIME = $(wildcard runtime/*.c) $(wildcard runtime/riscv_asm.S)
 HDRS_RUNTIME = $(wildcard include/*.h)
 endif
 
+# Capabilities implementation
+CODE_CAPAS = $(wildcard $(CAPA_LIB)/src/*.c)
 
 # Configure the includes.
 COMMON_INCLUDES = -Iinclude -I$(CAPA_LIB)/include -I$(COMMON_LIB)/include -I$(DLL_LIB)/include 
@@ -67,8 +69,8 @@ sdk_tyche_loader_kvm.so: $(CODE_LOADER) $(CODE_BACK_KVM) $(HDRS_LOADER) $(CODE_E
 
 # This is mostly to make sure the code compiles.
 # When used by a domain, include the code directly as shown below.
-sdk_tyche_runtime.so: $(CODE_RUNTIME) $(HDRS_RUNTIME)
-	$(GCC) -DTYCHE_USER_SPACE=1 -g $(COMMON_INCLUDES) -shared -o $@ -fPIC $(CODE_RUNTIME)
+sdk_tyche_runtime.so: $(CODE_RUNTIME) $(CODE_CAPAS) $(HDRS_RUNTIME)
+	$(GCC) -DTYCHE_USER_SPACE=1 -g $(COMMON_INCLUDES) -shared -o $@ -fPIC $(CODE_RUNTIME) $(CODE_CAPAS)
 
 .PHONY: clean
 

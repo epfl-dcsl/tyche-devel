@@ -23,8 +23,7 @@ int sdk_create_domain(
     const char* self,
     usize cores,
     usize traps,
-    usize perms,
-    switch_save_t switch_type);
+    usize perms);
 
 /// Transitions into the domain.
 int sdk_call_domain(tyche_domain_t* domain, usize core);

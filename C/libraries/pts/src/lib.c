@@ -1,6 +1,7 @@
 #include "pts_api.h"
 
 #include "common.h"
+#include "common_log.h"
 
 /// From a VA addr and a level, get the current index.
 index_t get_index(addr_t addr, level_t level, pt_profile_t* profile)
@@ -24,7 +25,7 @@ int pt_walk_page_range(entry_t root, level_t level, addr_t start, addr_t end, pt
   curr_va = start;
   s = get_index(start, level, profile);
   va_root = (entry_t*) profile->pa_to_va(root, profile);
-  DEBUG("va_root: %llx", va_root);
+  DEBUG("va_root: %llx", (usize) va_root);
   for (i = s; i < profile->nb_entries; i++) {
     // Compute the current virtual address.
     curr_va = (start & ~(profile->masks[level])) 

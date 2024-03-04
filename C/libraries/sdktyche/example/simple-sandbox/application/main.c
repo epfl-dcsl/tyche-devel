@@ -6,6 +6,7 @@
 #include <ucontext.h>
 #include <sys/ucontext.h>
 #include "common.h"
+#include "common_log.h"
 #include "sdk_tyche_rt.h"
 #include "sandbox_app.h"
 #include "sdk_tyche.h"
@@ -49,11 +50,13 @@ int write_ro()
   LOG("Executing WRITE_RO enclave\n");
   write_ro_t* msg = (write_ro_t*)(&(shared->args));
   memcpy(msg->buffer, "My saved message\0", 17);
+  LOG("Wrote the message");
   // Call the enclave.
-  if (sdk_call_domain(sandbox, NULL) != SUCCESS) {
+  if (sdk_call_domain(sandbox, 0) != SUCCESS) {
     ERROR("Unable to call the sandbox %d!", sandbox->handle);
     goto failure;
   }
+  LOG("The sandbox has return.");
   TEST(strcmp(msg->buffer, "My saved message") == 0);
   LOG("The message is still here:\n%s", msg->buffer);
   // Clean up.
@@ -77,7 +80,7 @@ int main(int argc, char *argv[]) {
   }
   // Init the domain.
   if (sdk_create_domain(
-        sandbox, argv[0], ALL_CORES, NO_TRAPS, DEFAULT_PERM, SharedVCPU) != SUCCESS) {
+        sandbox, argv[0], 1, NO_TRAPS, DEFAULT_PERM) != SUCCESS) {
       ERROR("Unable to parse the sandbox");
       goto failure;
   }

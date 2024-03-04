@@ -1,4 +1,5 @@
 #include "common.h"
+#include "common_log.h"
 #include "elf64.h"
 #include <elf.h>
 #include <sys/types.h>
