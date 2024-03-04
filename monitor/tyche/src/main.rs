@@ -22,9 +22,6 @@ fn tyche_entry_point() -> ! {
 
 #[cfg(target_arch = "riscv64")]
 fn tyche_entry_point(hartid: usize, manifest: RVManifest) -> ! {
-    //let coldboot: bool = hartid == manifest.coldboot_hartid;
-    //TODO: NUM_HARTS initialize.
-    //arch::arch_entry_point(hartid, manifest.next_arg1, manifest.next_addr, manifest.next_mode, coldboot, LOG_LEVEL);
     arch::arch_entry_point(hartid, manifest, LOG_LEVEL);
 }
 

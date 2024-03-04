@@ -4,8 +4,6 @@ use core::arch::asm;
 use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 pub const NUM_HARTS: usize = 4; //This is supposed to be maximum supported harts.
-pub static mut NUM_HARTS_AVAILABLE: usize = 0;
-pub static mut AVAILABLE_HART_MASK: usize = 0;
 
 //uart base address
 pub const SERIAL_PORT_BASE_ADDRESS: usize = 0x1000_0000;
@@ -47,6 +45,9 @@ pub static IPI_TYPE_SMODE: [AtomicBool; NUM_HARTS] = [FALSE; NUM_HARTS];
 pub static IPI_TYPE_TLB: [AtomicBool; NUM_HARTS] = [FALSE; NUM_HARTS];
 
 static LAST_TIMER_TICK: [AtomicUsize; NUM_HARTS] = [ZERO; NUM_HARTS];
+
+pub static NUM_HARTS_AVAILABLE: AtomicUsize = ZERO;
+pub static AVAILABLE_HART_MASK: AtomicUsize = ZERO;
 
 #[derive(Copy, Clone, Debug)]
 pub struct RegisterState {

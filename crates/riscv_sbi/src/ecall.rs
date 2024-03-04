@@ -4,7 +4,7 @@ use core::sync::atomic::Ordering;
 use capa_engine::Buffer;
 use riscv_utils::{
     RegisterState, AVAILABLE_HART_MASK, HART_IPI_SYNC, HART_START, HART_START_ADDR,
-    HART_START_ARG1, IPI_TYPE_SMODE, IPI_TYPE_TLB, NUM_HARTS,
+    HART_START_ARG1, IPI_TYPE_SMODE, IPI_TYPE_TLB, NUM_HARTS, NUM_HARTS_AVAILABLE,
 };
 use spin::Mutex;
 
@@ -142,13 +142,14 @@ pub fn sbi_ext_ipi_handler(
     unsafe {
         asm!("csrr {}, mhartid", out(reg) src_hartid);
     }
+    let number_of_harts = NUM_HARTS_AVAILABLE.load(Ordering::SeqCst);
 
     if a6 == sbi_ext_ipi::SEND_IPI {
         //impl : sbi_ipi_send_many()
         //hart_mask_base = -1 => all available harts.
         if a1 == -1 {
             //Send IPI to all available harts.
-            for i in 0..NUM_HARTS {
+            for i in 0..number_of_harts {
                 if i != src_hartid {
                     //log::info!("All harts: Sending IPI to hart {}", i);
                     //let mut ipi_requests = HART_IPI_BUFFER[i as usize].lock();
@@ -161,11 +162,9 @@ pub fn sbi_ext_ipi_handler(
         } else {
             //Check hmask starting from hbase hartid.
             let mut available_hart_mask: usize;
-            unsafe {
-                available_hart_mask = AVAILABLE_HART_MASK >> a1;
-            }
+            available_hart_mask = AVAILABLE_HART_MASK.load(Ordering::SeqCst) >> a1;
             let mut target_hart_mask: usize = a0;
-            for i in a1.try_into().unwrap()..NUM_HARTS {
+            for i in a1.try_into().unwrap()..number_of_harts {
                 if (((available_hart_mask & 0x1) & (target_hart_mask & 1)) == 1)
                     && (i != src_hartid)
                 {
@@ -204,12 +203,13 @@ pub fn sbi_ext_rfence_handler(
     unsafe {
         asm!("csrr {}, mhartid", out(reg) src_hartid);
     }
+    let number_of_harts = NUM_HARTS_AVAILABLE.load(Ordering::SeqCst);
 
     match a6 {
         sbi_ext_rfence::REMOTE_SFENCE_VMA_ASID => {
             if a1 == -1 {
                 //Send IPI to all available harts.
-                for i in 0..NUM_HARTS {
+                for i in 0..number_of_harts {
                     if i == src_hartid {
                         local_sfence_vma_asid(start, size, asid);
                     } else {
@@ -234,12 +234,10 @@ pub fn sbi_ext_rfence_handler(
             } else {
                 //Check hmask starting from hbase hartid.
                 let mut available_hart_mask: usize;
-                unsafe {
-                    available_hart_mask = AVAILABLE_HART_MASK >> a1;
-                }
+                available_hart_mask = AVAILABLE_HART_MASK.load(Ordering::SeqCst) >> a1;
                 //Currently assuming all harts are available to send IPIs.
                 let mut target_hart_mask: usize = a0;
-                for i in a1.try_into().unwrap()..NUM_HARTS {
+                for i in a1.try_into().unwrap()..number_of_harts {
                     if ((available_hart_mask & 0x1) & (target_hart_mask & 1)) == 1 {
                         if i == src_hartid {
                             local_sfence_vma_asid(start, size, asid);

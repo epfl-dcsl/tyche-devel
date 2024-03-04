@@ -12,15 +12,7 @@ use super::{arch, guest, launch_guest, monitor};
 use crate::debug::qemu;
 use crate::riscv::cpuid;
 
-pub fn arch_entry_point(
-    hartid: usize,
-    manifest: RVManifest,
-    //arg1: usize,
-    //next_addr: usize,
-    //next_mode: usize,
-    //coldboot: bool,
-    log_level: log::LevelFilter,
-) -> ! {
+pub fn arch_entry_point(hartid: usize, manifest: RVManifest, log_level: log::LevelFilter) -> ! {
     if hartid == manifest.coldboot_hartid {
         logger::init(log_level);
 
@@ -45,10 +37,9 @@ pub fn arch_entry_point(
             available_harts_mask = (available_harts_mask << 1) | 1;
             t_num_harts = t_num_harts - 1;
         }
-        unsafe {
-            AVAILABLE_HART_MASK = available_harts_mask;
-            NUM_HARTS_AVAILABLE = manifest.num_harts;
-        }
+
+        AVAILABLE_HART_MASK.store(available_harts_mask, Ordering::SeqCst);
+        NUM_HARTS_AVAILABLE.store(manifest.num_harts, Ordering::SeqCst);
 
         monitor::init();
 
