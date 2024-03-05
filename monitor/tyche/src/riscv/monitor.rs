@@ -93,14 +93,14 @@ pub fn init() {
 }
 
 pub fn start_initial_domain_on_cpu() -> (Handle<Domain>) {
-    let cpuid = cpuid();
+    let hartid = cpuid();
     log::debug!("Creating initial domain.");
     let mut engine = CAPA_ENGINE.lock();
     let initial_domain = INITIAL_DOMAIN
         .lock()
         .expect("CapaEngine is not initialized yet");
     engine
-        .start_domain_on_core(initial_domain, cpuid)
+        .start_domain_on_core(initial_domain, hartid)
         .expect("Failed to allocate initial domain");
 
     //update PMP permissions.
@@ -149,12 +149,11 @@ pub fn do_set_entry(
     mepc: usize,
     sp: usize,
 ) -> Result<(), CapaError> {
-    log::debug!("satp: {:x} mepc: {:x} sp: {:x}", satp, mepc, sp);
+    log::debug!("satp: {:x} mepc: {:x} sp: {:x} core {:x}", satp, mepc, sp, core);
     let mut engine = CAPA_ENGINE.lock();
     let domain = engine.get_domain_capa(current, domain)?;
     let cores = engine.get_domain_config(domain, Bitmaps::CORE);
     if (1 << core) & cores == 0 {
-        //Neelu: TODO: Is it better to create a mask for this check?
         return Err(CapaError::InvalidCore);
     }
     let context = &mut get_context(domain, core);

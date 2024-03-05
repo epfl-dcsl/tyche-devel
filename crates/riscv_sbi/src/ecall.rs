@@ -397,5 +397,5 @@ pub fn sbi_ext_srst_probe(_a0: usize) -> usize {
 }
 
 pub fn ecall_handler_failed(a7: usize, a6: usize) {
-    log::debug!("SBI ecall not supported: a7 {:x} a6 {:x}.", a7, a6);
+    log::trace!("SBI ecall not supported: a7 {:x} a6 {:x}.", a7, a6);
 }

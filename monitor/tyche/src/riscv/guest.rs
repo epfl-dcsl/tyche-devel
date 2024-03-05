@@ -7,14 +7,16 @@ use riscv_sbi::ecall::ecall_handler;
 use riscv_sbi::ipi::process_ipi;
 use riscv_sbi::sbi::EXT_IPI;
 use riscv_utils::{
-    aclint_mtimer_set_mtimecmp, clear_mie_mtie, clear_mip_seip, RegisterState, TIMER_EVENT_TICK,
+    aclint_mtimer_set_mtimecmp, clear_mie_mtie, clear_mip_seip, RegisterState, TIMER_EVENT_TICK, NUM_HARTS,
 };
+use spin::Mutex;
 
 use super::monitor;
 use crate::arch::cpuid;
 use crate::calls;
 
-static mut ACTIVE_DOMAIN: Option<Handle<Domain>> = None;
+const EMPTY_ACTIVE_DOMAIN: Mutex<Option<Handle<Domain>>> = Mutex::new(None);
+static ACTIVE_DOMAIN: [Mutex<Option<Handle<Domain>>>; NUM_HARTS] = [EMPTY_ACTIVE_DOMAIN; NUM_HARTS];
 
 // M-mode trap handler
 // Saves register state - calls trap_handler - restores register state - mret to intended mode.
@@ -145,9 +147,9 @@ pub fn handle_exit(reg_state: &mut RegisterState) {
         asm!("csrr {}, satp", out(reg)satp);
     }
 
-    log::debug!("###### TRAP FROM HART {} ######", hartid);
+    log::trace!("###### TRAP FROM HART {} ######", hartid);
 
-    log::debug!(
+    log::trace!(
         "mcause {:x}, mepc {:x} mstatus {:x} mtval {:x} mie {:x} mip {:x} mideleg {:x} ra {:x} a0 {:x} a1 {:x} a2 {:x} a3 {:x} a4 {:x} a5 {:x} a6 {:x} a7 {:x} satp: {:x}",
         mcause,
         mepc,
@@ -223,7 +225,7 @@ pub fn handle_exit(reg_state: &mut RegisterState) {
         //Default - just print whatever information you can about the trap.
     }
 
-    log::debug!("Returning from Trap on Hart {}", hartid);
+    log::trace!("Returning from Trap on Hart {}", hartid);
     // Return to the next instruction after the trap.
     // i.e. mepc += 4
     // TODO: This shouldn't happen in case of switch.
@@ -261,9 +263,9 @@ pub fn misaligned_load_handler(reg_state: &mut RegisterState) {
         let arg_6: usize = reg_state.a6;
 
         let mut active_dom: Handle<Domain>;
-        let cpuid = cpuid();
+        let hartid = cpuid();
         unsafe {
-            active_dom = get_active_dom();
+            active_dom = get_active_dom(hartid);
         }
 
         match tyche_call {
@@ -286,7 +288,6 @@ pub fn misaligned_load_handler(reg_state: &mut RegisterState) {
                         arg_3 as u64,
                     ) {
                         Ok(_) => {
-                            //TODO: do_init_child_contexts is not yet implemented on RISC-V.
                             reg_state.a0 = 0x0;
                         }
                         Err(e) => {
@@ -300,7 +301,7 @@ pub fn misaligned_load_handler(reg_state: &mut RegisterState) {
                 }
             }
             calls::SET_ENTRY_ON_CORE => {
-                log::debug!("Set entry on core");
+                log::debug!("Set entry on core {}", arg_2);
                 match monitor::do_set_entry(
                     active_dom,
                     LocalCapa::new(arg_1),
@@ -380,7 +381,7 @@ pub fn misaligned_load_handler(reg_state: &mut RegisterState) {
             }
             calls::SWITCH => {
                 log::debug!("Switch");
-                monitor::do_switch(active_dom, LocalCapa::new(arg_1), cpuid, reg_state)
+                monitor::do_switch(active_dom, LocalCapa::new(arg_1), hartid, reg_state)
                     .expect("TODO");
             }
             calls::ENCLAVE_ATTESTATION => {
@@ -464,20 +465,21 @@ pub fn misaligned_load_handler(reg_state: &mut RegisterState) {
                 todo!("Unknown Tyche Call.");
             }
         }
-        monitor::apply_core_updates(&mut active_dom, cpuid, reg_state);
+        monitor::apply_core_updates(&mut active_dom, hartid, reg_state);
         //Updating the state
         unsafe {
-            set_active_dom(active_dom);
+            set_active_dom(hartid, active_dom);
         }
     }
     //TODO: ELSE NOT TYCHE CALL
     //Handle Illegal Instruction Trap
 }
 
-pub unsafe fn get_active_dom() -> (Handle<Domain>) {
-    return ACTIVE_DOMAIN.unwrap();
+pub unsafe fn get_active_dom(hartid: usize) -> (Handle<Domain>) {
+    return ACTIVE_DOMAIN[hartid].lock().unwrap();
 }
 
-pub unsafe fn set_active_dom(domain: Handle<Domain>) {
-    ACTIVE_DOMAIN = Some(domain);
+pub unsafe fn set_active_dom(hartid: usize, domain: Handle<Domain>) {
+    let mut active_domain = ACTIVE_DOMAIN[hartid].lock(); 
+    *active_domain = Some(domain);
 }
