@@ -1,20 +1,25 @@
 //! Architecture specific monitor state
 
+use core::arch::asm;
+use core::sync::atomic::{Ordering, AtomicUsize};
+
 use attestation::hashing::TycheHasher;
 use attestation::signature::EnclaveReport;
 use capa_engine::config::{NB_CORES, NB_DOMAINS};
+use capa_engine::utils::BitmapIterator;
 use capa_engine::{
     permission, AccessRights, Bitmaps, Buffer, CapaEngine, CapaError, CapaInfo, Domain, Handle,
     LocalCapa, MemOps, NextCapaToken, MEMOPS_ALL,
 };
 use riscv_csrs::pmpcfg;
+use riscv_pmp::csrs::{pmpaddr_csr_read, pmpcfg_csr_read, pmpaddr_csr_write, pmpcfg_csr_write};
 use riscv_pmp::{
-    clear_pmp, pmp_write, PMPAddressingMode, PMPErrorCode, FROZEN_PMP_ENTRIES, PMP_ENTRIES,
+    clear_pmp, pmp_write, PMPAddressingMode, PMPErrorCode, FROZEN_PMP_ENTRIES, PMP_ENTRIES, PMP_ADDR_ENTRIES, PMP_CFG_ENTRIES
 };
+use riscv_sbi::ipi::aclint_mswi_send_ipi;
 use riscv_utils::*;
 use spin::{Mutex, MutexGuard};
 
-//use crate::riscv::arch::write_medeleg;
 use crate::arch::cpuid;
 use crate::attestation_domain::{attest_domain, calculate_attestation_hash};
 
@@ -24,12 +29,15 @@ static DOMAINS: [Mutex<DomainData>; NB_DOMAINS] = [EMPTY_DOMAIN; NB_DOMAINS];
 static CONTEXTS: [[Mutex<ContextData>; NB_CORES]; NB_DOMAINS] = [EMPTY_CONTEXT_ARRAY; NB_DOMAINS];
 static CORE_UPDATES: [Mutex<Buffer<CoreUpdate>>; NB_CORES] = [EMPTY_UPDATE_BUFFER; NB_CORES];
 
+const ZERO: AtomicUsize = AtomicUsize::new(0);
+
+static MONITOR_IPI_SYNC: [AtomicUsize; NUM_HARTS] = [ZERO; NUM_HARTS];
+
 const XWR_PERM: usize = 7;
 
 pub struct DomainData {
-    //Todo
-    //Add a PMP snapshot here, so PMP entries can be written directly without going
-    //through the pmp_write function every time!
+    pmpaddr: [usize; PMP_ADDR_ENTRIES],
+    pmpcfg: [usize; PMP_CFG_ENTRIES],
 }
 
 pub struct ContextData {
@@ -40,7 +48,7 @@ pub struct ContextData {
     pub medeleg: usize,
 }
 
-const EMPTY_DOMAIN: Mutex<DomainData> = Mutex::new(DomainData {}); //Todo Init the domain data
+const EMPTY_DOMAIN: Mutex<DomainData> = Mutex::new(DomainData {pmpaddr: [0; PMP_ADDR_ENTRIES], pmpcfg: [0;PMP_CFG_ENTRIES]}); 
 const EMPTY_UPDATE_BUFFER: Mutex<Buffer<CoreUpdate>> = Mutex::new(Buffer::new()); //once done.
 const EMPTY_CONTEXT: Mutex<ContextData> = Mutex::new(ContextData {
     reg_state: RegisterState::const_default(),
@@ -292,7 +300,9 @@ pub fn do_domain_attestation(
 /// Per-core updates
 #[derive(Debug, Clone, Copy)]
 enum CoreUpdate {
-    TlbShootdown,
+    TlbShootdown {
+        src_hartid: usize,
+    },
     Switch {
         domain: Handle<Domain>,
         return_capa: LocalCapa,
@@ -318,9 +328,30 @@ fn apply_updates(engine: &mut MutexGuard<CapaEngine>) {
                 init,
                 core_map,
             } => {
-                if (core_map != 0) {
+
+                let src_hartid = cpuid();
+
+                if (1 << src_hartid) & core_map == 1 {
                     update_permission(domain, engine);
                 }
+
+                for hart in BitmapIterator::new(core_map) {
+                    if (hart != src_hartid) {
+                        let mut per_hart_update_buffer = CORE_UPDATES[hart].lock();
+                        per_hart_update_buffer.push(CoreUpdate::TlbShootdown{src_hartid});
+                        drop(per_hart_update_buffer);
+
+                        MONITOR_IPI_SYNC[src_hartid].fetch_add(1, Ordering::SeqCst);
+                        aclint_mswi_send_ipi(hart);
+                    }
+                }
+
+                while MONITOR_IPI_SYNC[src_hartid].load(Ordering::SeqCst) > 0 {
+                    //TODO: Should I process local-core-updates here?
+                    core::hint::spin_loop();
+                }
+
+                //When it's all done then just continue!
             }
             capa_engine::Update::RevokeDomain { domain } => revoke_domain(domain, engine),
             capa_engine::Update::CreateDomain { domain } => create_domain(domain),
@@ -369,12 +400,17 @@ pub fn apply_core_updates(
     while let Some(update) = update_queue.pop() {
         log::debug!("Core Update: {}", update);
         match update {
-            CoreUpdate::TlbShootdown => {
+            CoreUpdate::TlbShootdown {
+                src_hartid,
+            } => {
                 log::debug!("TLB Shootdown on core {}", core_id);
 
                 // Rewrite the PMPs
-                let mut engine = CAPA_ENGINE.lock();
-                update_permission(*current_domain, &mut engine);
+                //let mut engine = CAPA_ENGINE.lock();
+                //TODO --- here, should only useee the snapshot to update
+                //update_permission(*current_domain, &mut engine);
+                update_pmps(*current_domain);
+                MONITOR_IPI_SYNC[src_hartid].fetch_sub(1, Ordering::SeqCst); 
             }
             CoreUpdate::Switch {
                 domain,
@@ -456,8 +492,10 @@ fn switch_domain(
     //directly write the PMP - no need to reiterate through the domain's regions as happens in
     //update_permission.
 
-    let mut engine = CAPA_ENGINE.lock();
-    update_permission(domain, &mut engine);
+    //TODO ---- here, should only useee snapshot to update the pmps. 
+    //let mut engine = CAPA_ENGINE.lock();
+    //update_permission(domain, &mut engine);
+    update_pmps(domain);
 }
 
 fn create_domain(domain: Handle<Domain>) {
@@ -470,6 +508,34 @@ fn create_domain(domain: Handle<Domain>) {
 
 fn revoke_domain(_domain: Handle<Domain>, engine: &mut MutexGuard<CapaEngine>) {
     //Todo
+}
+
+fn update_pmps(domain_handle: Handle<Domain>) {
+    clear_pmp();
+    let domain = get_domain(domain_handle);
+    for i in FROZEN_PMP_ENTRIES..PMP_ENTRIES {
+        pmpaddr_csr_write(i, domain.pmpaddr[i-FROZEN_PMP_ENTRIES]);
+        log::debug!("updating pmpaddr index: {}, val: {:x}",i, domain.pmpaddr[i-FROZEN_PMP_ENTRIES]); 
+    }
+    for i in 0..PMP_CFG_ENTRIES {
+        pmpcfg_csr_write(i*8, domain.pmpcfg[i]);
+        log::debug!("updating pmpcfg index: {}, val: {:x}", i, domain.pmpcfg[i]);
+    }
+    unsafe {
+        asm!("sfence.vma");
+    }
+}
+
+fn snapshot_pmps(domain_handle: Handle<Domain>) {
+    let mut domain = get_domain(domain_handle);
+    for i in FROZEN_PMP_ENTRIES..PMP_ENTRIES {
+        domain.pmpaddr[i-FROZEN_PMP_ENTRIES] = pmpaddr_csr_read(i);
+        log::debug!("snapshot pmpaddr index: {}, val: {:x}",i, domain.pmpaddr[i-FROZEN_PMP_ENTRIES]);
+    }
+    for i in 0..PMP_CFG_ENTRIES { 
+        domain.pmpcfg[i] = pmpcfg_csr_read(i*8);
+        log::debug!("snapshot pmpcfg index: {}, val: {:x}",i, domain.pmpcfg[i]);
+    }
 }
 
 //Neelu: TODO: Make this function create more of a cache/snapshot of PMP entries - and later apply
@@ -534,6 +600,7 @@ fn update_permission(domain_handle: Handle<Domain>, engine: &mut MutexGuard<Capa
             //Todo: Check error codes and manage appropriately.
         }
     }
+    snapshot_pmps(domain_handle);
 }
 
 // ———————————————————————————————— Display ————————————————————————————————— //
@@ -541,7 +608,7 @@ fn update_permission(domain_handle: Handle<Domain>, engine: &mut MutexGuard<Capa
 impl core::fmt::Display for CoreUpdate {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
-            CoreUpdate::TlbShootdown => write!(f, "TLB Shootdown"),
+            CoreUpdate::TlbShootdown { src_hartid } => write!(f, "TLB Shootdown({})",src_hartid),
             CoreUpdate::Switch { domain, .. } => write!(f, "Switch({})", domain),
             CoreUpdate::Trap {
                 manager,

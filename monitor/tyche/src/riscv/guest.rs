@@ -7,13 +7,14 @@ use riscv_sbi::ecall::ecall_handler;
 use riscv_sbi::ipi::process_ipi;
 use riscv_sbi::sbi::EXT_IPI;
 use riscv_utils::{
-    aclint_mtimer_set_mtimecmp, clear_mie_mtie, clear_mip_seip, RegisterState, TIMER_EVENT_TICK, NUM_HARTS,
+    aclint_mtimer_set_mtimecmp, clear_mie_mtie, clear_mip_seip, RegisterState, TIMER_EVENT_TICK, NUM_HARTS, ACLINT_MTIMECMP_SIZE, ACLINT_MTIMECMP_BASE_ADDR,
 };
 use spin::Mutex;
 
 use super::monitor;
 use crate::arch::cpuid;
 use crate::calls;
+use crate::riscv::monitor::apply_core_updates;
 
 const EMPTY_ACTIVE_DOMAIN: Mutex<Option<Handle<Domain>>> = Mutex::new(None);
 static ACTIVE_DOMAIN: [Mutex<Option<Handle<Domain>>>; NUM_HARTS] = [EMPTY_ACTIVE_DOMAIN; NUM_HARTS];
@@ -170,11 +171,23 @@ pub fn handle_exit(reg_state: &mut RegisterState) {
         satp
     );
 
+    let mut active_dom; 
+    unsafe {
+        active_dom = get_active_dom(hartid);
+    }
+
     // Check which trap it is
     // mcause register holds the cause of the machine mode trap
     match mcause {
         mcause::MSWI => {
             process_ipi(hartid);
+            unsafe {
+                let active_dom = get_active_dom(hartid);
+                match active_dom { 
+                    Some(mut domain) => apply_core_updates(&mut domain, hartid, reg_state),
+                    None => {},
+                }
+            }
         }
         mcause::MTI => {
             clear_mie_mtie();
@@ -265,7 +278,7 @@ pub fn misaligned_load_handler(reg_state: &mut RegisterState) {
         let mut active_dom: Handle<Domain>;
         let hartid = cpuid();
         unsafe {
-            active_dom = get_active_dom(hartid);
+            active_dom = get_active_dom(hartid).unwrap();
         }
 
         match tyche_call {
@@ -475,8 +488,8 @@ pub fn misaligned_load_handler(reg_state: &mut RegisterState) {
     //Handle Illegal Instruction Trap
 }
 
-pub unsafe fn get_active_dom(hartid: usize) -> (Handle<Domain>) {
-    return ACTIVE_DOMAIN[hartid].lock().unwrap();
+pub unsafe fn get_active_dom(hartid: usize) -> (Option<Handle<Domain>>) {
+    return *ACTIVE_DOMAIN[hartid].lock();
 }
 
 pub unsafe fn set_active_dom(hartid: usize, domain: Handle<Domain>) {

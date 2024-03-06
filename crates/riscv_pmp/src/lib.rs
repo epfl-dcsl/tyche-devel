@@ -6,7 +6,10 @@ pub mod csrs;
 
 use csrs::{pmpaddr_csr_read, pmpaddr_csr_write, pmpcfg_csr_read, pmpcfg_csr_write};
 
+//The following three constants assume 16 PMP entries. 
 pub const PMP_ENTRIES: usize = 16;
+pub const PMP_ADDR_ENTRIES: usize = 15; //1 is frozen! 
+pub const PMP_CFG_ENTRIES: usize = 2;  
 
 //The number of PMP entries used to protect for instance memory mapped CSRs related to interrupts,
 //in this case, 1 entry for SiFive CLINT (the highest priority entry)
