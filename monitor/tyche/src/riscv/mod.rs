@@ -5,6 +5,7 @@
 #![allow(unused)]
 
 mod arch;
+mod filtered_fields;
 pub mod guest;
 mod init;
 mod monitor;

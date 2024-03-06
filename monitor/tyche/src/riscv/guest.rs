@@ -284,53 +284,14 @@ pub fn misaligned_load_handler(reg_state: &mut RegisterState) {
                 //here, do we need a wrapper to determine when we crash? For all cases except Exit,
                 //not yet. Must be handled after addition of more exception handling in Tyche.
             }
-            calls::CONFIGURE => {
-                log::debug!("Configure");
-                if let Ok(bitmap) = Bitmaps::from_usize(arg_1) {
-                    match monitor::do_set_config(
-                        active_dom,
-                        LocalCapa::new(arg_2),
-                        bitmap,
-                        arg_3 as u64,
-                    ) {
-                        Ok(_) => {
-                            reg_state.a0 = 0x0;
-                        }
-                        Err(e) => {
-                            log::error!("Configuration error: {:?}", e);
-                            reg_state.a0 = 0x1;
-                        }
-                    }
-                } else {
-                    log::error!("Invalid configuration target");
-                    reg_state.a0 = 0x1;
-                }
-            }
-            calls::SET_ENTRY_ON_CORE => {
-                log::debug!("Set entry on core {}", arg_2);
-                match monitor::do_set_entry(
-                    active_dom,
-                    LocalCapa::new(arg_1),
-                    arg_2,
-                    arg_3,
-                    arg_4,
-                    arg_5,
-                ) {
-                    Ok(()) => reg_state.a0 = 0x0,
-                    Err(e) => {
-                        log::error!("Unable to set entry: {:?}", e);
-                        reg_state.a0 = 0x1;
-                    }
-                }
-            }
             calls::SEAL_DOMAIN => {
                 log::debug!("Seal Domain");
                 let capa = monitor::do_seal(active_dom, LocalCapa::new(arg_1)).expect("TODO");
                 reg_state.a0 = 0x0;
                 reg_state.a1 = capa.as_usize() as isize;
             }
-            calls::SHARE => {
-                log::debug!("Share");
+            calls::_SHARE => {
+                todo!("Share was called...");
                 //let capa = monitor::.do_().expect("TODO");
                 reg_state.a0 = 0x0;
                 reg_state.a1 = 0x0;
@@ -389,6 +350,120 @@ pub fn misaligned_load_handler(reg_state: &mut RegisterState) {
                 log::debug!("Switch");
                 monitor::do_switch(active_dom, LocalCapa::new(arg_1), hartid, reg_state)
                     .expect("TODO");
+            }
+            calls::EXIT => {
+                log::debug!("Tyche Call: Exit");
+                //TODO
+                //let capa = monitor::.do_().expect("TODO");
+                reg_state.a0 = 0x0;
+            }
+            calls::DEBUG => {
+                log::debug!("Debug");
+                //monitor::do_debug();
+                reg_state.a0 = 0x0;
+            }
+            calls::CONFIGURE => {
+                log::debug!("Configure");
+                if let Ok(bitmap) = Bitmaps::from_usize(arg_1) {
+                    match monitor::do_set_config(
+                        active_dom,
+                        LocalCapa::new(arg_2),
+                        bitmap,
+                        arg_3 as u64,
+                    ) {
+                        Ok(_) => {
+                            //TODO: do_init_child_contexts is not yet implemented on RISC-V.
+                            reg_state.a0 = 0x0;
+                        }
+                        Err(e) => {
+                            log::error!("Configuration error: {:?}", e);
+                            reg_state.a0 = 0x1;
+                        }
+                    }
+                } else {
+                    log::error!("Invalid configuration target");
+                    reg_state.a0 = 0x1;
+                }
+            }
+            calls::SEND_REGION => {
+                log::debug!("Send");
+                monitor::do_send_region(active_dom, LocalCapa::new(arg_1), LocalCapa::new(arg_2))
+                    .expect("TODO");
+                reg_state.a0 = 0x0;
+            }
+            calls::CONFIGURE_CORE => {
+                log::debug!("Configure Core");
+                let res = match monitor::do_configure_core(
+                    active_dom,
+                    LocalCapa::new(arg_1),
+                    arg_2,
+                    arg_3,
+                    arg_4,
+                ) {
+                    Ok(()) => 0,
+                    Err(e) => {
+                        log::error!("Configure core error: {:?}", e);
+                        1
+                    }
+                };
+                reg_state.a0 = res;
+            }
+            calls::GET_CONFIG_CORE => {
+                let (value, success) = match monitor::do_get_config_core(
+                    active_dom,
+                    LocalCapa::new(arg_1),
+                    arg_2,
+                    arg_3,
+                ) {
+                    Ok(v) => (v, 0),
+                    Err(e) => {
+                        log::error!("Get config core error: {:?}", e);
+                        (0, 1)
+                    }
+                };
+                reg_state.a0 = success;
+                reg_state.a1 = value as isize;
+            }
+            calls::ALLOC_CORE_CONTEXT => {
+                log::debug!("Alloc core context");
+                let res = match monitor::do_init_child_context(
+                    active_dom,
+                    LocalCapa::new(arg_1),
+                    arg_2,
+                ) {
+                    Ok(_) => 0,
+                    Err(e) => {
+                        log::error!("Allocating core context error: {:?}", e);
+                        1
+                    }
+                };
+                reg_state.a0 = res;
+            }
+            calls::READ_ALL_GP => {
+                todo!("Implement read all gp");
+            }
+            calls::WRITE_ALL_GP => {
+                todo!("Implement write all gp");
+            }
+            calls::WRITE_FIELDS => {
+                log::debug!("Write fields");
+                let res = match monitor::do_set_field(
+                    active_dom,
+                    LocalCapa::new(arg_1),
+                    arg_2,
+                    arg_3,
+                    arg_4,
+                ) {
+                    Ok(_) => 0,
+                    Err(e) => {
+                        log::error!("Error writing field {:?}: {:x}", e, arg_3);
+                        1
+                    }
+                };
+                reg_state.a1 = res;
+            }
+            calls::SELF_CONFIG => {
+                todo!("Implement that one only if needed.");
             }
             calls::ENCLAVE_ATTESTATION => {
                 log::trace!("Get attestation!");
@@ -453,17 +528,6 @@ pub fn misaligned_load_handler(reg_state: &mut RegisterState) {
                     log::trace!("Attestation error");
                     reg_state.a0 = 1;
                 }
-            }
-            calls::DEBUG => {
-                log::debug!("Debug");
-                //monitor::do_debug();
-                reg_state.a0 = 0x0;
-            }
-            calls::EXIT => {
-                log::debug!("Tyche Call: Exit");
-                //TODO
-                //let capa = monitor::.do_().expect("TODO");
-                reg_state.a0 = 0x0;
             }
             _ => {
                 /*TODO: Invalid Tyche Call*/

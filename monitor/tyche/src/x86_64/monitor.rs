@@ -472,7 +472,7 @@ pub fn do_segment_region(
 pub fn do_send(current: Handle<Domain>, capa: LocalCapa, to: LocalCapa) -> Result<(), CapaError> {
     let mut engine = CAPA_ENGINE.lock();
     // Send is not allowed for region capa.
-    // Use do_send_aliased instead.
+    // Use do_send_region instead.
     match engine.get_region_capa(current, capa)? {
         Some(_) => return Err(CapaError::InvalidCapa),
         _ => {}

@@ -23,6 +23,7 @@ use spin::{Mutex, MutexGuard};
 
 use crate::arch::cpuid;
 use crate::attestation_domain::{attest_domain, calculate_attestation_hash};
+use crate::riscv::filtered_fields::RiscVField;
 
 static CAPA_ENGINE: Mutex<CapaEngine> = Mutex::new(CapaEngine::new());
 static INITIAL_DOMAIN: Mutex<Option<Handle<Domain>>> = Mutex::new(None);
@@ -159,6 +160,112 @@ pub fn do_set_config(
     Ok(())
 }
 
+pub fn do_configure_core(
+    current: Handle<Domain>,
+    domain: LocalCapa,
+    core: usize,
+    idx: usize,
+    value: usize,
+) -> Result<(), CapaError> {
+    let mut engine = CAPA_ENGINE.lock();
+    let local_capa = domain;
+    let domain = engine.get_domain_capa(current, domain)?;
+
+    //TODO(aghosn): check how we could differentiate between registers
+    //that can be changed and others. For the moment allow modifications
+    //post sealing too.
+    // Check the domain is not seal.
+    /*if engine.is_sealed(domain) {
+        return Err(CapaError::AlreadySealed);
+    }*/
+
+    // Check this is a valid core for the operation.
+    let core_map = engine.get_domain_config(domain, Bitmaps::CORE);
+    if (1 << core) & core_map == 0 {
+        log::error!(
+            "Invalid core {} for coremap {:b} in configure core",
+            1 << core,
+            core_map
+        );
+        return Err(CapaError::InvalidCore);
+    }
+
+    // Check this is a valid idx for a field.
+    if !RiscVField::is_valid(idx) {
+        log::error!("Attempt to set an invalid register: {:x}", idx);
+        return Err(CapaError::InvalidOperation);
+    }
+    let field = RiscVField::from_usize(idx).unwrap();
+    //TODO @Neelu check that.
+    /*if field == RiscVField::Medeleg {
+        engine
+            .set_child_config(current, local_capa, Bitmaps::TRAP, !(value as u64))
+            .expect("Unable to set the bitmap");
+    }*/
+
+    let mut target_ctxt = get_context(domain, core);
+
+    field.set(&mut target_ctxt, value);
+    Ok(())
+}
+
+pub fn do_get_config_core(
+    current: Handle<Domain>,
+    domain: LocalCapa,
+    core: usize,
+    idx: usize,
+) -> Result<usize, CapaError> {
+    let mut engine = CAPA_ENGINE.lock();
+    let domain = engine.get_domain_capa(current, domain)?;
+
+    // Check the domain is not seal.
+    //TODO(aghosn) we will need a way to differentiate between what's readable
+    //and what's not readable once the domain is sealed.
+    /*if engine.is_sealed(domain) {
+        return Err(CapaError::AlreadySealed);
+    }*/
+
+    // Check this is a valid core for the operation.
+    let core_map = engine.get_domain_config(domain, Bitmaps::CORE);
+    if (1 << core) & core_map == 0 {
+        return Err(CapaError::InvalidCore);
+    }
+
+    // Check this is a valid idx for a field.
+    if !RiscVField::is_valid(idx) {
+        log::error!("Attempt to get an invalid register: {:x}", idx);
+        return Err(CapaError::InvalidOperation);
+    }
+    let field = RiscVField::from_usize(idx).unwrap();
+    let target_ctx = get_context(domain, core);
+    Ok(field.get(&target_ctx))
+}
+
+pub fn do_set_field(
+    current: Handle<Domain>,
+    domain: LocalCapa,
+    core: usize,
+    field: usize,
+    value: usize,
+) -> Result<(), CapaError> {
+    let mut engine = CAPA_ENGINE.lock();
+    // Check the core.
+    let domain = engine.get_domain_capa(current, domain)?;
+    let core_map = engine.get_domain_config(domain, Bitmaps::CORE);
+    if (1 << core) & core_map == 0 {
+        log::error!("Trying to set registers on the wrong core.");
+        return Err(CapaError::InvalidCore);
+    }
+    if !RiscVField::is_valid(field) {
+        log::error!("Attempt to get an invalid field: {:x}", field);
+        return Err(CapaError::InvalidOperation);
+    }
+    let field = RiscVField::from_usize(field).unwrap();
+    let mut target_ctx = get_context(domain, core);
+    field.set(&mut target_ctx, value);
+    Ok(())
+}
+
 pub fn do_set_entry(
     current: Handle<Domain>,
     domain: LocalCapa,
@@ -237,8 +344,46 @@ pub fn do_segment_region(
 
 pub fn do_send(current: Handle<Domain>, capa: LocalCapa, to: LocalCapa) -> Result<(), CapaError> {
     let mut engine = CAPA_ENGINE.lock();
+    // Send is not allowed for region capa.
+    // Use do_send_aliased instead.
+    match engine.get_region_capa(current, capa)? {
+        Some(_) => return Err(CapaError::InvalidCapa),
+        _ => {}
+    }
     engine.send(current, capa, to)?;
     apply_updates(&mut engine);
+    Ok(())
+}
+
+pub fn do_send_region(
+    current: Handle<Domain>,
+    capa: LocalCapa,
+    to: LocalCapa,
+) -> Result<(), CapaError> {
+    let mut engine = CAPA_ENGINE.lock();
+    // send_region is only allowed for region capa.
+    match engine.get_region_capa(current, capa)? {
+        Some(_) => {}
+        _ => return Err(CapaError::InvalidCapa),
+    }
+    engine.send(current, capa, to)?;
+    apply_updates(&mut engine);
+    Ok(())
+}
+
+pub fn do_init_child_context(
+    current: Handle<Domain>,
+    domain: LocalCapa,
+    core: usize,
+) -> Result<(), CapaError> {
+    let mut engine = CAPA_ENGINE.lock();
+    let domain = engine.get_domain_capa(current, domain)?;
+
+    // Check this is a valid core for the operation.
+    let core_map = engine.get_domain_config(domain, Bitmaps::CORE);
+    if (1 << core) & core_map == 0 {
+        return Err(CapaError::InvalidCore);
+    }
     Ok(())
 }
 
@@ -399,11 +544,11 @@ fn apply_updates(engine: &mut MutexGuard<CapaEngine>) {
                     trap,
                     info,
                 });
-            }
-            capa_engine::Update::UpdateTraps { trap, core } => {
-                let mut core_updates = CORE_UPDATES[core as usize].lock();
-                core_updates.push(CoreUpdate::UpdateTrap { bitmap: !trap });
-            }
+            } //TODO: @Neelu might have bugs since we removed that.
+              /*capa_engine::Update::UpdateTraps { trap, core } => {
+                  let mut core_updates = CORE_UPDATES[core as usize].lock();
+                  core_updates.push(CoreUpdate::UpdateTrap { bitmap: !trap });
+              }*/
         }
     }
 }
@@ -439,13 +584,13 @@ pub fn apply_core_updates(
                 );
 
                 let current_ctx = get_context(*current_domain, core);
-                let next_ctx = get_context(domain, core);
+                let mut next_ctx = get_context(domain, core);
                 let next_domain = get_domain(domain);
                 switch_domain(
                     current_domain,
                     current_ctx,
                     current_reg_state,
-                    next_ctx,
+                    &mut next_ctx,
                     next_domain,
                     domain,
                 );
@@ -472,7 +617,7 @@ fn switch_domain(
     current_domain: &mut Handle<Domain>,
     mut current_ctx: MutexGuard<ContextData>,
     current_reg_state: &mut RegisterState,
-    next_ctx: MutexGuard<ContextData>,
+    next_ctx: &mut MutexGuard<ContextData>,
     next_domain: MutexGuard<DomainData>,
     domain: Handle<Domain>,
 ) {
@@ -494,6 +639,12 @@ fn switch_domain(
     write_mscratch(next_ctx.sp);
     write_mepc(next_ctx.mepc);
     write_medeleg(next_ctx.medeleg); //TODO: This needs to be part of Trap/UpdateTrap.
+
+    // Propagate the state from the child, see drivers/tyche/src/domain.c exit frame.
+    next_ctx.reg_state.a2 = current_ctx.mepc;
+    next_ctx.reg_state.a3 = current_ctx.sp;
+    next_ctx.reg_state.a4 = current_ctx.satp;
+    next_ctx.reg_state.a5 = current_ctx.medeleg;
     *current_reg_state = next_ctx.reg_state;
 
     //IMP TODO: Toggling interrupts based on the assumption that we are running initial domain and
