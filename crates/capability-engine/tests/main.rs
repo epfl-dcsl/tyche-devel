@@ -241,10 +241,6 @@ fn scenario_2() {
     engine
         .set_child_config(domain, dom2, capa_engine::Bitmaps::CORE, 1)
         .unwrap();
-    engine
-        .set_child_config(domain, dom2, capa_engine::Bitmaps::SWITCH, 0)
-        .unwrap();
-
     let switch = engine.seal(domain, core, dom2).unwrap();
     // Second seal should fail
     assert!(engine.seal(domain, core, dom2).is_err());
@@ -335,9 +331,6 @@ fn scenario_3() {
         .unwrap();
     engine
         .set_child_config(domain, encl, capa_engine::Bitmaps::CORE, 1)
-        .unwrap();
-    engine
-        .set_child_config(domain, encl, capa_engine::Bitmaps::SWITCH, 0)
         .unwrap();
     let _ = engine.seal(domain, core, encl).unwrap();
     snap!(

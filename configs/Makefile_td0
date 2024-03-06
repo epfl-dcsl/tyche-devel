@@ -1,0 +1,14 @@
+all:
+
+install_driver:
+	sudo ./scripts/mod_switch.sh
+
+run_td1:
+	sudo ./scripts/mod_switch.sh && \
+	qemu-system-x86_64 \
+	-kernel vms/bzImage \
+	-nographic \
+	-enable-kvm -m 100 \
+	-bios vms/bios.bin \
+	-chardev file,path="/tyche/chardev/seabios",id=seabios -device isa-debugcon,iobase=0x402,chardev=seabios \
+	-append "noapic lpj=24000000 earlyprintk=serial,tty0 console=ttyS0" 

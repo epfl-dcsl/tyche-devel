@@ -322,19 +322,26 @@ install-drivers:
   ARCH=x86 sudo INSTALL_MOD_PATH=/tmp/mount/ make -C builds/linux-x86/ modules_install
   ARCH=x86 make -C C/ ubuntu_umount
 
-setup_for_vms_x86:
+setup_lab_x86:
   @just build-linux-x86 && just install-drivers
   @just build-linux-x86-nested
-  git clone https://git.seabios.org/seabios.git /tmp/seabios
-  make -C /tmp/seabios/
+  rm -rf /tmp/seabios_tmp
+  git clone git@github.com:aghosn/seabios.git /tmp/seabios_tmp
+  make -C /tmp/seabios_tmp/
   ARCH=x86 make -C C/ ubuntu_mount
+  ARCH=x86 make -C C/ update_disk
   # Copy all the necessary files
   mkdir -p /tmp/mount/tyche/vms
   sudo cp builds/linux-x86-nested/arch/x86_64/boot/bzImage /tmp/mount/tyche/vms/bzImage
-  sudo cp configs/Makefile_nested /tmp/mount/tyche/vms/Makefile
-  sudo cp scripts/mod_switch.sh /tmp/mount/tyche/vms/mod_switch.sh
-  sudo chmod +x /tmp/mount/tyche/vms/mod_switch.sh
-  sudo cp /tmp/seabios/out/bios.bin /tmp/mount/tyche/vms/bios.bin
+  sudo cp configs/Makefile_td0 /tmp/mount/tyche/Makefile
+  mkdir -p /tmp/mount/tyche/scripts
+  mkdir -p /tmp/mount/tyche/chardev/
+  sudo chmod 777 /tmp/mount/tyche/chardev
+  sudo cp scripts/mod_switch.sh /tmp/mount/tyche/scripts/mod_switch.sh
+  sudo cp configs/README_td0.md /tmp/mount/tyche/README.md
+  sudo chmod +x /tmp/mount/tyche/scripts/mod_switch.sh
+  sudo cp /tmp/seabios_tmp/out/bios.bin /tmp/mount/tyche/vms/bios.bin
+  rm -rf /tmp/seabios_tmp/
   ARCH=x86 make -C C/ ubuntu_umount
 
 # The following line gives highlighting on vim
