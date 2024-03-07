@@ -99,29 +99,26 @@ static int default_vcpu(tyche_domain_t* domain, backend_vcpu_info_t* vcpu) {
   } 
   // Set the cr0.
   msg.idx = GUEST_CR0;
-  //TODO: do a proper settings.
-  msg.value = 0x80050033;
+  msg.value = DEFAULT_CR0;
   if (ioctl(domain->handle, TYCHE_SET_DOMAIN_CORE_CONFIG, &msg) != SUCCESS) {
     ERROR("Unable to set cr0 on core %d", vcpu->core_id);
     goto failure;
   }
   msg.idx = GUEST_CR4;
-  // TODO same as above.
-  msg.value = 0x752ef0;
+  msg.value = DEFAULT_CR4 | DEFAULT_CR4_EXTRAS;
   if (ioctl(domain->handle, TYCHE_SET_DOMAIN_CORE_CONFIG, &msg) != SUCCESS) {
     ERROR("Unable to set cr4 on core %d", vcpu->core_id);
     goto failure;
   }
   msg.idx = GUEST_IA32_EFER;
-  //TODO same;
-  msg.value = 0xd01;
+  msg.value = DEFAULT_EFER;
   if (ioctl(domain->handle, TYCHE_SET_DOMAIN_CORE_CONFIG, &msg) != SUCCESS) {
     ERROR("Unable to set efer on core %d", vcpu->core_id);
     goto failure;
   }
   msg.idx = GUEST_RFLAGS;
-  //TODO same; with tyche we cannot enable interrupts sadly.
-  msg.value = 0x092;
+  //With the tyche backend we cannot enable interrupts sadly.
+  msg.value = DEFAULT_RFLAGS_INTERRUPTS_OFF;
   if (ioctl(domain->handle, TYCHE_SET_DOMAIN_CORE_CONFIG, &msg) != SUCCESS) {
     ERROR("Unable to set rflags on core %d", vcpu->core_id);
     goto failure;

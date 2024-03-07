@@ -89,10 +89,9 @@ static int default_sregs(struct kvm_sregs* sregs)
   sregs->gdt.base = 0x0;
   sregs->gdt.limit = 0xffff;
 
-  sregs->cr0 = 0x80050033;
-  // No PKE (bit 22) and no VMXE (bit 13);
-  sregs->cr4 = 0x350ef0;
-  sregs->efer = 0xd01;
+  sregs->cr0 = DEFAULT_CR0;
+  sregs->cr4 = DEFAULT_CR4;
+  sregs->efer = DEFAULT_EFER;
   return SUCCESS;
 failure:
   return FAILURE;
@@ -104,8 +103,8 @@ static int default_regs(struct kvm_regs *regs)
     ERROR("Regs are null");
     goto failure;
   }
-  regs->rflags = 0x92;
-  //regs->rflags = 0x286;
+  regs->rflags = DEFAULT_RFLAGS_INTERRUPTS_OFF;
+  //regs->rflags = DEFAULT_RFLAGS_INTERRUPTS_ON;
   return SUCCESS;
 failure:
   return FAILURE;

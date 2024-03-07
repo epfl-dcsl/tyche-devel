@@ -905,15 +905,11 @@ fn switch_domain(
     }
 
     // Now the logic for shared vs. private vmcs.
-    if current_ctx.vmcs != next_ctx.vmcs {
-        current_ctx.load(vcpu);
-        next_ctx.switch_flush(&RC_VMCS, vcpu);
-    } else {
-        // TODO: This case is annoying.
-        current_ctx.save_shared(vcpu).unwrap();
-        // The previous values should have been marked as dirty.
-        next_ctx.flush(vcpu);
+    if current_ctx.vmcs == next_ctx.vmcs {
+        panic!("Why are the two vmcs the same?");
     }
+    current_ctx.load(vcpu);
+    next_ctx.switch_flush(&RC_VMCS, vcpu);
 
     vcpu.set_ept_ptr(HostPhysAddr::new(
         next_domain.ept.unwrap().as_usize() | EPT_ROOT_FLAGS,
