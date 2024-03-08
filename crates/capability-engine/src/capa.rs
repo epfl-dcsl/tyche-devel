@@ -13,6 +13,7 @@ pub enum Capa {
     None,
     Region(Handle<RegionCapa>),
     NewRegion(Handle<NewRegionCapa>),
+    RegionRevoke(Handle<NewRegionCapa>),
     Management(Handle<Domain>),
     #[allow(dead_code)] // TODO: remove once channels are implemented
     Channel(Handle<Domain>),
@@ -32,6 +33,12 @@ pub enum CapaInfo {
         ops: MemOps,
     },
     NewRegion {
+        start: usize,
+        end: usize,
+        confidential: bool,
+        ops: MemOps,
+    },
+    RegionRevoke {
         start: usize,
         end: usize,
         confidential: bool,
@@ -89,6 +96,20 @@ impl CapaInfo {
                 flags |= ops.bits() << 2;
                 capa_type = capa_type::NEW_REGION;
             }
+            CapaInfo::RegionRevoke {
+                start,
+                end,
+                confidential,
+                ops,
+            } => {
+                v1 = *start;
+                v2 = *end;
+                if *confidential {
+                    flags |= 1 << 1;
+                }
+                flags |= ops.bits() << 2;
+                capa_type = capa_type::REGION_REVOKE;
+            }
             CapaInfo::Management { domain_id, sealed } => {
                 v1 = *domain_id;
                 if *sealed {
@@ -145,11 +166,12 @@ impl CapaInfo {
 
 #[rustfmt::skip]
 pub mod capa_type {
-    pub const REGION:     u8 = 0;
-    pub const MANAGEMENT: u8 = 1;
-    pub const CHANNEL:    u8 = 2;
-    pub const SWITCH:     u8 = 3; 
-    pub const NEW_REGION: u8 = 4;
+    pub const REGION:        u8 = 0;
+    pub const MANAGEMENT:    u8 = 1;
+    pub const CHANNEL:       u8 = 2;
+    pub const SWITCH:        u8 = 3;
+    pub const NEW_REGION:    u8 = 4;
+    pub const REGION_REVOKE: u8 = 5;
 }
 
 impl Capa {
@@ -222,6 +244,15 @@ impl Capa {
             Capa::NewRegion(h) => {
                 let region = &regions[h];
                 Some(CapaInfo::NewRegion {
+                    start: region.access.start,
+                    end: region.access.end,
+                    confidential: region.is_confidential,
+                    ops: region.access.ops,
+                })
+            }
+            Capa::RegionRevoke(h) => {
+                let region = &regions[h];
+                Some(CapaInfo::RegionRevoke {
                     start: region.access.start,
                     end: region.access.end,
                     confidential: region.is_confidential,
@@ -302,6 +333,19 @@ impl fmt::Display for CapaInfo {
             } => {
                 let c = if *confidential { 'C' } else { '_' };
                 write!(f, "Region([0x{:x}, 0x{:x} | {}{}])", start, end, c, ops)
+            }
+            CapaInfo::RegionRevoke {
+                start,
+                end,
+                confidential,
+                ops,
+            } => {
+                let c = if *confidential { 'C' } else { '_' };
+                write!(
+                    f,
+                    "RegionRevoke([0x{:x}, 0x{:x} | {}{}])",
+                    start, end, c, ops
+                )
             }
             CapaInfo::Management { domain_id, sealed } => {
                 let s = if *sealed { 'S' } else { '_' };

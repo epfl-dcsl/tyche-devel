@@ -2,6 +2,7 @@ use crate::config::NB_REGIONS;
 use crate::domain::{insert_capa, Domain, DomainPool, LocalCapa};
 use crate::gen_arena::{GenArena, Handle};
 use crate::region::{AccessRights, MemOps, TrackerPool};
+use crate::segment::NewRegionPool;
 use crate::update::UpdateBuffer;
 use crate::{domain, CapaError};
 
@@ -120,6 +121,7 @@ pub(crate) fn revoke(
 pub(crate) fn duplicate(
     handle: Handle<RegionCapa>,
     regions: &mut RegionPool,
+    new_regions: &mut NewRegionPool,
     domains: &mut DomainPool,
     tracker: &mut TrackerPool,
     updates: &mut UpdateBuffer,
@@ -160,14 +162,14 @@ pub(crate) fn duplicate(
     };
 
     // Insert the capas in the domain
-    let Ok(capa_left) = insert_capa(domain_handle, left, regions, domains) else {
+    let Ok(capa_left) = insert_capa(domain_handle, left, regions, new_regions, domains) else {
         log::info!("Failed to insert left capa in domain");
         // Cleanup previous allocatons
         regions.free(left);
         regions.free(right);
         return Err(CapaError::OutOfMemory);
     };
-    let Ok(capa_right) = insert_capa(domain_handle, right, regions, domains) else {
+    let Ok(capa_right) = insert_capa(domain_handle, right, regions, new_regions, domains) else {
         log::info!("Failed to insert right capa in domain");
         // Cleanup previous allocatons
         regions.free(left);
@@ -214,6 +216,7 @@ pub(crate) fn install(
     handle: RegionHandle,
     domain: Handle<Domain>,
     regions: &mut RegionPool,
+    new_regions: &mut NewRegionPool,
     domains: &mut DomainPool,
     tracker: &mut TrackerPool,
     updates: &mut UpdateBuffer,
@@ -225,7 +228,7 @@ pub(crate) fn install(
         return Err(CapaError::InvalidInstall);
     }
 
-    let local_capa = insert_capa(domain, handle, regions, domains)?;
+    let local_capa = insert_capa(domain, handle, regions, new_regions, domains)?;
     apply_install(&mut regions[handle], domain, domains, updates, tracker)?;
 
     Ok(local_capa)

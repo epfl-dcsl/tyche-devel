@@ -561,10 +561,17 @@ fn new_capa() {
     );
     snap!("{[0x0, 0x10 | 1 (1 - 1 - 1 - 1)] -> [0x10, 0x20 | 2 (2 - 2 - 2 - 2)] -> [0x20, 0x40 | 1 (1 - 1 - 1 - 1)] -> [0x40, 0x50 | 2 (2 - 2 - 2 - 2)] -> [0x50, 0x100 | 1 (1 - 1 - 1 - 1)]}", regions(d0, engine));
 
+    // Create a revok capa
+    let revoke_r1_capa = engine.create_revoke_capa(d0, r1).unwrap();
+    snap!(
+        "{Management(2 | _), Management(3 | _), Region([0x0, 0x100 | CRWXS]), Region([0x10, 0x20 | _RWXS]), Region([0x30, 0x50 | CRWXS]), Region([0x40, 0x50 | _RWXS]), Region([0x60, 0x80 | CRWXS]), RegionRevoke([0x10, 0x20 | _RWXS])}",
+        capas(d0, engine)
+    );
+
     // Send some of the regions
     engine.send(d0, r1, d1).unwrap();
     snap!(
-        "{Management(2 | _), Management(3 | _), Region([0x0, 0x100 | CRWXS]), Region([0x30, 0x50 | CRWXS]), Region([0x40, 0x50 | _RWXS]), Region([0x60, 0x80 | CRWXS])}",
+        "{Management(2 | _), Management(3 | _), Region([0x0, 0x100 | CRWXS]), Region([0x30, 0x50 | CRWXS]), Region([0x40, 0x50 | _RWXS]), Region([0x60, 0x80 | CRWXS]), RegionRevoke([0x10, 0x20 | _RWXS])}",
         capas(d0, engine)
     );
     snap!("{[0x0, 0x40 | 1 (1 - 1 - 1 - 1)] -> [0x40, 0x50 | 2 (2 - 2 - 2 - 2)] -> [0x50, 0x100 | 1 (1 - 1 - 1 - 1)]}", regions(d0, engine));
@@ -575,7 +582,7 @@ fn new_capa() {
     );
     engine.send(d0, r2, d1).unwrap();
     snap!(
-        "{Management(2 | _), Management(3 | _), Region([0x0, 0x100 | CRWXS]), Region([0x40, 0x50 | _RWXS]), Region([0x60, 0x80 | CRWXS])}",
+        "{Management(2 | _), Management(3 | _), Region([0x0, 0x100 | CRWXS]), Region([0x40, 0x50 | _RWXS]), Region([0x60, 0x80 | CRWXS]), RegionRevoke([0x10, 0x20 | _RWXS])}",
         capas(d0, engine)
     );
     snap!(
@@ -592,7 +599,7 @@ fn new_capa() {
     );
     engine.send(d0, r3, d2).unwrap();
     snap!(
-        "{Management(2 | _), Management(3 | _), Region([0x0, 0x100 | CRWXS]), Region([0x60, 0x80 | CRWXS])}",
+        "{Management(2 | _), Management(3 | _), Region([0x0, 0x100 | CRWXS]), Region([0x60, 0x80 | CRWXS]), RegionRevoke([0x10, 0x20 | _RWXS])}",
         capas(d0, engine)
     );
     snap!(
@@ -606,7 +613,7 @@ fn new_capa() {
     );
     engine.send(d0, r4, d2).unwrap();
     snap!(
-        "{Management(2 | _), Management(3 | _), Region([0x0, 0x100 | CRWXS])}",
+        "{Management(2 | _), Management(3 | _), Region([0x0, 0x100 | CRWXS]), RegionRevoke([0x10, 0x20 | _RWXS])}",
         capas(d0, engine)
     );
     snap!(
@@ -623,7 +630,11 @@ fn new_capa() {
     );
 
     // Revoke some regions
-    engine.revoke(d1_capa, LocalCapa::new(0)).unwrap();
+    engine.revoke(d0, revoke_r1_capa).unwrap();
+    snap!(
+        "{Management(2 | _), Management(3 | _), Region([0x0, 0x100 | CRWXS])}",
+        capas(d0, engine)
+    );
     snap!("{Region([0x30, 0x50 | CRWXS])}", capas(d1_capa, engine));
     snap!(
         "{[0x30, 0x50 | 1 (1 - 1 - 1 - 1)]}",

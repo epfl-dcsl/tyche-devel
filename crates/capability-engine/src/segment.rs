@@ -97,7 +97,7 @@ pub(crate) fn create_root_region(
     let region = regions
         .allocate(NewRegionCapa::new(domain, RegionKind::Root, access).confidential(true))
         .unwrap();
-    let local_capa = insert_capa(domain, region, old_regions, domains)?;
+    let local_capa = insert_capa(domain, region, old_regions, regions, domains)?;
     activate_region(domain, access, domains, updates, tracker)?;
 
     Ok(local_capa)
@@ -142,7 +142,7 @@ pub(crate) fn alias(
 
     let new_handle = alias_region(handle, regions, access)?;
     debug_check!(validate_child_list(handle, regions));
-    let local_capa = insert_capa(domain, new_handle, old_regions, domains)?;
+    let local_capa = insert_capa(domain, new_handle, old_regions, regions, domains)?;
     activate_region(domain, access, domains, updates, tracker)?;
 
     Ok(local_capa)
@@ -184,7 +184,7 @@ pub(crate) fn carve(
 
     let new_handle = carve_region(handle, regions, access)?;
     debug_check!(validate_child_list(handle, regions));
-    let local_capa = insert_capa(domain, new_handle, old_regions, domains)?;
+    let local_capa = insert_capa(domain, new_handle, old_regions, regions, domains)?;
     // No need to update tracker here, the domain lost access to the new region one time ang
     // gained it back at the same time.
 

@@ -198,6 +198,7 @@ impl CapaEngine {
                     handle,
                     domain,
                     &mut self.regions,
+                    &mut self.new_regions,
                     &mut self.domains,
                     &mut self.tracker,
                     &mut self.updates,
@@ -297,6 +298,23 @@ impl CapaEngine {
         Ok(handle)
     }
 
+    pub fn create_revoke_capa(
+        &mut self,
+        domain: Handle<Domain>,
+        region: LocalCapa,
+    ) -> Result<LocalCapa, CapaError> {
+        let region = self.domains[domain].get(region)?.as_new_region()?;
+        self.domains[domain].has_capacity_for(1)?;
+        let revoke_capa = Capa::RegionRevoke(region);
+        insert_capa(
+            domain,
+            revoke_capa,
+            &mut self.regions,
+            &mut self.new_regions,
+            &mut self.domains,
+        )
+    }
+
     pub fn segment_region(
         &mut self,
         domain: Handle<Domain>,
@@ -316,6 +334,7 @@ impl CapaEngine {
         let handles = region_capa::duplicate(
             region,
             &mut self.regions,
+            &mut self.new_regions,
             &mut self.domains,
             &mut self.tracker,
             &mut self.updates,
@@ -337,7 +356,13 @@ impl CapaEngine {
             domain::Bitmaps::PERMISSION,
             permission::DUPLICATE,
         )?;
-        domain::duplicate_capa(domain, capa, &mut self.regions, &mut self.domains)
+        domain::duplicate_capa(
+            domain,
+            capa,
+            &mut self.regions,
+            &mut self.new_regions,
+            &mut self.domains,
+        )
     }
 
     pub fn send(
@@ -364,6 +389,7 @@ impl CapaEngine {
             Capa::None => (),
             Capa::Channel(_) => (),
             Capa::Switch { .. } => (),
+            Capa::RegionRevoke(_) => (),
 
             // Sending those capa causes side effects
             Capa::Region(region) => {
@@ -393,7 +419,14 @@ impl CapaEngine {
         }
 
         // Move the capa to the new domain, can't fail as we checked for capacity already.
-        insert_capa(to, capa, &mut self.regions, &mut self.domains).unwrap();
+        insert_capa(
+            to,
+            capa,
+            &mut self.regions,
+            &mut self.new_regions,
+            &mut self.domains,
+        )
+        .unwrap();
 
         Ok(())
     }
@@ -440,6 +473,7 @@ impl CapaEngine {
             domain,
             Capa::Switch { to: capa, core },
             &mut self.regions,
+            &mut self.new_regions,
             &mut self.domains,
         )?;
         Ok(capa)
@@ -478,7 +512,13 @@ impl CapaEngine {
         domain: Handle<Domain>,
         core: usize,
     ) -> Result<LocalCapa, CapaError> {
-        domain::create_switch(domain, core, &mut self.regions, &mut self.domains)
+        domain::create_switch(
+            domain,
+            core,
+            &mut self.regions,
+            &mut self.new_regions,
+            &mut self.domains,
+        )
     }
 
     /// Returns the new domain if the switch succeeds
@@ -500,6 +540,7 @@ impl CapaEngine {
             next_dom,
             Capa::Switch { to: domain, core },
             &mut self.regions,
+            &mut self.new_regions,
             &mut self.domains,
         )?;
         remove_capa(domain, capa, &mut self.domains).unwrap(); // We already checked the capa
@@ -642,6 +683,7 @@ impl CapaEngine {
                     manager,
                     Capa::management(handle),
                     &mut self.regions,
+                    &mut self.new_regions,
                     &mut self.domains,
                 )?;
                 self.updates.push(Update::CreateDomain { domain: handle });

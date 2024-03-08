@@ -330,6 +330,7 @@ impl Domain {
             Capa::None => false,
             Capa::Region(handle) => old_regions.get(handle).is_some(),
             Capa::NewRegion(handle) => regions.get(handle).is_some(),
+            Capa::RegionRevoke(handle) => regions.get(handle).is_some(),
             Capa::Management(handle) => domains.get(handle).is_some(),
             Capa::Channel(handle) => domains.get(handle).is_some(),
             Capa::Switch { to, .. } => domains.get(to).is_some(),
@@ -408,7 +409,8 @@ impl Cleanable for Domain {
 pub(crate) fn insert_capa(
     domain: Handle<Domain>,
     capa: impl IntoCapa,
-    regions: &mut RegionPool,
+    old_regions: &mut RegionPool,
+    regions: &mut NewRegionPool,
     domains: &mut DomainPool,
 ) -> Result<LocalCapa, CapaError> {
     // Find a free slot
@@ -416,7 +418,7 @@ pub(crate) fn insert_capa(
         Some(idx) => idx,
         None => {
             // Run the garbage collection and retry
-            free_invalid_capas(domain, regions, domains);
+            free_invalid_capas(domain, old_regions, regions, domains);
             let Some(idx) = domains[domain].free_list.allocate() else {
                 log::trace!("Could not insert capa in domain: out of memory");
                 return Err(CapaError::OutOfMemory);
@@ -445,7 +447,12 @@ pub(crate) fn remove_capa(
 /// Run garbage collection on the domain's capabilities.
 ///
 /// This is necessary as some capabilities are invalidated but not removed eagerly.
-fn free_invalid_capas(domain: Handle<Domain>, regions: &mut RegionPool, domains: &mut DomainPool) {
+fn free_invalid_capas(
+    domain: Handle<Domain>,
+    old_regions: &mut RegionPool,
+    regions: &mut NewRegionPool,
+    domains: &mut DomainPool,
+) {
     log::trace!("Runing garbage collection");
     for idx in 0..NB_CAPAS_PER_DOMAIN {
         if domains[domain].free_list.is_free(idx) {
@@ -457,8 +464,9 @@ fn free_invalid_capas(domain: Handle<Domain>, regions: &mut RegionPool, domains:
         let capa = domains[domain].capas[idx];
         let is_invalid = match capa {
             Capa::None => true,
-            Capa::Region(h) => regions.get(h).is_none(),
-            Capa::NewRegion(_) => todo!(),
+            Capa::Region(h) => old_regions.get(h).is_none(),
+            Capa::NewRegion(h) => regions.get(h).is_none(),
+            Capa::RegionRevoke(h) => regions.get(h).is_none(),
             Capa::Management(h) => domains.get(h).is_none(),
             Capa::Channel(h) => domains.get(h).is_none(),
             Capa::Switch { to, .. } => domains.get(to).is_none(),
@@ -521,7 +529,8 @@ pub(crate) fn send_management(
 pub(crate) fn duplicate_capa(
     domain: Handle<Domain>,
     capa: LocalCapa,
-    regions: &mut RegionPool,
+    old_regions: &mut RegionPool,
+    regions: &mut NewRegionPool,
     domains: &mut DomainPool,
 ) -> Result<LocalCapa, CapaError> {
     let capa = domains[domain].get(capa)?;
@@ -535,9 +544,9 @@ pub(crate) fn duplicate_capa(
         | Capa::Switch { .. } => {
             return Err(CapaError::CannotDuplicate);
         }
-        Capa::Channel(_) => {
+        Capa::Channel(_) | Capa::RegionRevoke(_) => {
             // NOTE: there is no side effects when duplicating these capas
-            insert_capa(domain, capa, regions, domains)
+            insert_capa(domain, capa, old_regions, regions, domains)
         }
     }
 }
@@ -547,11 +556,12 @@ pub(crate) fn duplicate_capa(
 pub(crate) fn create_switch(
     domain: Handle<Domain>,
     core: usize,
-    regions: &mut RegionPool,
+    old_regions: &mut RegionPool,
+    regions: &mut NewRegionPool,
     domains: &mut DomainPool,
 ) -> Result<LocalCapa, CapaError> {
     let capa = Capa::Switch { to: domain, core };
-    insert_capa(domain, capa, regions, domains)
+    insert_capa(domain, capa, old_regions, regions, domains)
 }
 
 // ———————————————————————————— Activate Region ————————————————————————————— //
@@ -734,6 +744,11 @@ pub(crate) fn revoke_capa(
         }
         Capa::NewRegion(region) => {
             segment::revoke(region, regions, domains, tracker, updates)?;
+        }
+        Capa::RegionRevoke(region) => {
+            if regions.get(region).is_some() {
+                segment::revoke(region, regions, domains, tracker, updates)?;
+            }
         }
         Capa::Management(domain) => {
             revoke(domain, regions, old_regions, domains, tracker, updates)?;
