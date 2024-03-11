@@ -1,15 +1,14 @@
 #![no_std]
 //RISC-V PMP Configuration.
 
-use core::arch::asm;
 pub mod csrs;
 
 use csrs::{pmpaddr_csr_read, pmpaddr_csr_write, pmpcfg_csr_read, pmpcfg_csr_write};
 
-//The following three constants assume 16 PMP entries. 
+//The following three constants assume 16 PMP entries.
 pub const PMP_ENTRIES: usize = 16;
-pub const PMP_ADDR_ENTRIES: usize = 15; //1 is frozen! 
-pub const PMP_CFG_ENTRIES: usize = 2;  
+pub const PMP_ADDR_ENTRIES: usize = 15; //1 is frozen!
+pub const PMP_CFG_ENTRIES: usize = 2;
 
 //The number of PMP entries used to protect for instance memory mapped CSRs related to interrupts,
 //in this case, 1 entry for SiFive CLINT (the highest priority entry)
@@ -27,22 +26,18 @@ pub struct PMPWriteResponse {
     pub addressing_mode: PMPAddressingMode,
     pub addr1: usize,
     pub addr2: usize,
-    pub cfg1: usize, 
+    pub cfg1: usize,
     pub cfg2: usize,
-    //index1: isize, 
-    //index2: isize,
 }
 
-const EMPTY_PMPWriteResponse: PMPWriteResponse = PMPWriteResponse {
+const EMPTY_PMP_WRITE_RESPONSE: PMPWriteResponse = PMPWriteResponse {
     write_failed: true,
-    failure_code: PMPErrorCode::Uninitialized, 
+    failure_code: PMPErrorCode::Uninitialized,
     addressing_mode: PMPAddressingMode::OFF,
     addr1: 0,
     addr2: 0,
-    cfg1: 0, 
+    cfg1: 0,
     cfg2: 0,
-    //index1: -1,
-    //index2: -1,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -109,7 +104,7 @@ pub fn pmp_write_compute(
         region_addr + region_size,
         region_perm
     );
-    let mut pmp_write_response: PMPWriteResponse = EMPTY_PMPWriteResponse;
+    let mut pmp_write_response: PMPWriteResponse = EMPTY_PMP_WRITE_RESPONSE;
     //This will ensure that the index is in expected range
     if csr_index >= PMP_ENTRIES {
         pmp_write_response.failure_code = PMPErrorCode::InvalidIndex;
@@ -152,10 +147,9 @@ pub fn pmp_write_compute(
         pmpaddr = pmpaddr | (addrmask >> 1); //To add the 0 before the 1s.
 
         pmpcfg = region_perm | ((pmp_write_response.addressing_mode as usize) << 3);
-        
 
         match pmpcfg_compute(csr_index, pmpcfg) {
-            Ok(val) => { 
+            Ok(val) => {
                 pmp_write_response.cfg1 = val;
             }
             Err(code) => {
@@ -164,8 +158,6 @@ pub fn pmp_write_compute(
             }
         }
         pmp_write_response.addr1 = pmpaddr;
-        //pmp_write_response.index1 = csr_index;
-        //pmpaddr_csr_write(csr_index, pmpaddr);
     } else {
         //TOR addressing mode    //TODO: NA4 addressing mode!
         log::trace!("TOR Addressing Mode csr_index: {}", csr_index);
@@ -189,18 +181,15 @@ pub fn pmp_write_compute(
             pmpcfg
         );
         match pmpcfg_compute(csr_index_2, pmpcfg) {
-            Ok(val) => { 
+            Ok(val) => {
                 pmp_write_response.cfg2 = val;
             }
             Err(code) => {
                 pmp_write_response.failure_code = code;
                 return pmp_write_response;
             }
- 
         }
         pmp_write_response.addr2 = pmpaddr >> 2;
-        //pmp_write_response.index2 = csr_index_2;
-        //pmpaddr_csr_write(csr_index_2, pmpaddr >> 2);
 
         //Second PMP entry (index i-1) contains the bottom address and pmpcfg = 0
         pmpcfg = 0;
@@ -212,7 +201,7 @@ pub fn pmp_write_compute(
             pmpcfg
         );
         match pmpcfg_compute(csr_index, pmpcfg) {
-            Ok(val) => { 
+            Ok(val) => {
                 pmp_write_response.cfg1 = val;
             }
             Err(code) => {
@@ -221,33 +210,11 @@ pub fn pmp_write_compute(
             }
         }
         pmp_write_response.addr1 = pmpaddr >> 2;
-        //pmp_write_response.index1 = csr_index;
-        //pmpaddr_csr_write(csr_index, pmpaddr >> 2);
     }
 
-    //Sfence after writing the PMP.
-    //unsafe {
-    //    asm!("sfence.vma");
-    //}
-
-    //Ok(addressing_mode)
-    pmp_write_response.write_failed = false; 
+    pmp_write_response.write_failed = false;
     return pmp_write_response;
 }
-
-/* pub fn pmpcfg_update_perm(csr_index: usize, region_perm: usize) -> PMPErrorCode {
-    let mut pmpcfg: usize = pmpcfg_read(csr_index);
-
-    pmpcfg = pmpcfg & (!XWR_MASK);
-
-    if region_perm & XWR_MASK != XWR_MASK {
-        return PMPErrorCode::InvalidPermissions;
-    }
-
-    pmpcfg = pmpcfg | region_perm;
-
-    return pmpcfg_write(csr_index, pmpcfg);
-} */
 
 //Returns read value
 fn pmpaddr_read(index: usize) -> usize {
@@ -274,15 +241,15 @@ fn pmpcfg_read(index: usize) -> usize {
 }
 
 fn pmpcfg_compute(index: usize, value: usize) -> Result<usize, PMPErrorCode> {
-    let mut pmpcfg: usize = 0;
+    let pmpcfg: usize;
     let index_pos: usize = index % 8;
 
     if (value & !(0xff)) != 0 {
         log::debug!("Invalid pmpcfg value!");
         return Err(PMPErrorCode::InvalidCfg);
     }
-    
-    pmpcfg = (value << (index_pos * 8));
+
+    pmpcfg = value << (index_pos * 8);
 
     log::trace!(
         "Computed for index: {:x} pmpcfg: {:x} value: {:x}",
@@ -294,7 +261,8 @@ fn pmpcfg_compute(index: usize, value: usize) -> Result<usize, PMPErrorCode> {
     return Ok(pmpcfg);
 }
 
-fn pmpcfg_write(index: usize, value: usize) -> Result<usize,PMPErrorCode> {
+#[allow(dead_code)]
+fn pmpcfg_write(index: usize, value: usize) -> Result<usize, PMPErrorCode> {
     let mut pmpcfg: usize;
     let index_pos: usize = index % 8;
     let pmpcfg_mask: usize = 0xff << (index_pos * 8);
@@ -331,6 +299,8 @@ fn pmpcfg_write(index: usize, value: usize) -> Result<usize,PMPErrorCode> {
 pub fn clear_pmp() {
     for n in FROZEN_PMP_ENTRIES..PMP_ENTRIES {
         pmpaddr_csr_write(n, 0);
-        pmpcfg_csr_write(n, 0);
+        pmpcfg_csr_write(n, 0); //Note: This only works because the frozen_pmp entry we have
+                                //has pmpcfg = 0. If that wasn't the case, clearing would
+                                //require fine-grained writes to pmpcfg.
     }
 }

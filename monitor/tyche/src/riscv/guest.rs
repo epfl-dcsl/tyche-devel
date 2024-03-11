@@ -8,7 +8,8 @@ use riscv_sbi::ecall::ecall_handler;
 use riscv_sbi::ipi::process_ipi;
 use riscv_sbi::sbi::EXT_IPI;
 use riscv_utils::{
-    aclint_mtimer_set_mtimecmp, clear_mie_mtie, clear_mip_seip, RegisterState, TIMER_EVENT_TICK, NUM_HARTS, ACLINT_MTIMECMP_SIZE, ACLINT_MTIMECMP_BASE_ADDR,
+    aclint_mtimer_set_mtimecmp, clear_mie_mtie, clear_mip_seip, RegisterState,
+    ACLINT_MTIMECMP_BASE_ADDR, ACLINT_MTIMECMP_SIZE, NUM_HARTS, TIMER_EVENT_TICK,
 };
 use spin::Mutex;
 
@@ -20,8 +21,6 @@ use crate::riscv::monitor::apply_core_updates;
 const EMPTY_ACTIVE_DOMAIN: Mutex<Option<Handle<Domain>>> = Mutex::new(None);
 static ACTIVE_DOMAIN: [Mutex<Option<Handle<Domain>>>; NUM_HARTS] = [EMPTY_ACTIVE_DOMAIN; NUM_HARTS];
 
-const ZERO: AtomicUsize = AtomicUsize::new(0);
-static IPIS_PROCESSED_COUNT: [AtomicUsize; NUM_HARTS] = [ZERO; NUM_HARTS];
 // M-mode trap handler
 // Saves register state - calls trap_handler - restores register state - mret to intended mode.
 
@@ -174,7 +173,7 @@ pub fn handle_exit(reg_state: &mut RegisterState) {
         satp
     );
 
-    let mut active_dom; 
+    let mut active_dom;
     unsafe {
         active_dom = get_active_dom(hartid);
     }
@@ -183,16 +182,12 @@ pub fn handle_exit(reg_state: &mut RegisterState) {
     // mcause register holds the cause of the machine mode trap
     match mcause {
         mcause::MSWI => {
-            //IPIS_PROCESSED_COUNT[hartid].fetch_add(1, core::sync::atomic::Ordering::SeqCst);
-            //if IPIS_PROCESSED_COUNT[hartid].load(core::sync::atomic::Ordering::SeqCst) > 20000 {
-            //    log::debug!("Received IPI on hart {}", hartid);
-            //}
             process_ipi(hartid);
             unsafe {
                 let active_dom = get_active_dom(hartid);
-                match active_dom { 
+                match active_dom {
                     Some(mut domain) => apply_core_updates(&mut domain, hartid, reg_state),
-                    None => {},
+                    None => {}
                 }
             }
         }
@@ -500,6 +495,6 @@ pub unsafe fn get_active_dom(hartid: usize) -> (Option<Handle<Domain>>) {
 }
 
 pub unsafe fn set_active_dom(hartid: usize, domain: Handle<Domain>) {
-    let mut active_domain = ACTIVE_DOMAIN[hartid].lock(); 
+    let mut active_domain = ACTIVE_DOMAIN[hartid].lock();
     *active_domain = Some(domain);
 }
