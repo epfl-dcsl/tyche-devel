@@ -14,7 +14,7 @@ use capa_engine::{
 use riscv_csrs::pmpcfg;
 use riscv_pmp::csrs::{pmpaddr_csr_read, pmpcfg_csr_read, pmpaddr_csr_write, pmpcfg_csr_write};
 use riscv_pmp::{
-    clear_pmp, pmp_write, PMPAddressingMode, PMPErrorCode, FROZEN_PMP_ENTRIES, PMP_ENTRIES, PMP_ADDR_ENTRIES, PMP_CFG_ENTRIES
+    clear_pmp, PMPAddressingMode, PMPErrorCode, FROZEN_PMP_ENTRIES, PMP_ENTRIES, PMP_ADDR_ENTRIES, PMP_CFG_ENTRIES, pmp_write_compute, PMPWriteResponse
 };
 use riscv_sbi::ipi::aclint_mswi_send_ipi;
 use riscv_utils::*;
@@ -36,7 +36,8 @@ static MONITOR_IPI_SYNC: [AtomicUsize; NUM_HARTS] = [ZERO; NUM_HARTS];
 const XWR_PERM: usize = 7;
 
 pub struct DomainData {
-    pmpaddr: [usize; PMP_ADDR_ENTRIES],
+    data_init_done: bool,
+    pmpaddr: [usize; PMP_ENTRIES],
     pmpcfg: [usize; PMP_CFG_ENTRIES],
 }
 
@@ -48,7 +49,7 @@ pub struct ContextData {
     pub medeleg: usize,
 }
 
-const EMPTY_DOMAIN: Mutex<DomainData> = Mutex::new(DomainData {pmpaddr: [0; PMP_ADDR_ENTRIES], pmpcfg: [0;PMP_CFG_ENTRIES]}); 
+const EMPTY_DOMAIN: Mutex<DomainData> = Mutex::new(DomainData {data_init_done: false, pmpaddr: [0; PMP_ENTRIES], pmpcfg: [0;PMP_CFG_ENTRIES]}); 
 const EMPTY_UPDATE_BUFFER: Mutex<Buffer<CoreUpdate>> = Mutex::new(Buffer::new()); //once done.
 const EMPTY_CONTEXT: Mutex<ContextData> = Mutex::new(ContextData {
     reg_state: RegisterState::const_default(),
@@ -111,9 +112,13 @@ pub fn start_initial_domain_on_cpu() -> (Handle<Domain>) {
         .start_domain_on_core(initial_domain, hartid)
         .expect("Failed to allocate initial domain");
 
-    //update PMP permissions.
-    log::debug!("Updating permissions for initial domain.");
-    update_permission(initial_domain, &mut engine);
+    let domain = get_domain(initial_domain);
+    if !domain.data_init_done {
+        //update PMP permissions.
+        log::debug!("Updating permissions for initial domain.");
+        update_permission(initial_domain, &mut engine); 
+    }
+    update_pmps(domain);
 
     (initial_domain)
 }
@@ -331,8 +336,11 @@ fn apply_updates(engine: &mut MutexGuard<CapaEngine>) {
 
                 let src_hartid = cpuid();
 
+                update_permission(domain, engine);
+
                 if (1 << src_hartid) & core_map == 1 {
-                    update_permission(domain, engine);
+                    let mut domain_data = get_domain(domain); 
+                    update_pmps(domain_data);
                 }
 
                 for hart in BitmapIterator::new(core_map) {
@@ -340,7 +348,7 @@ fn apply_updates(engine: &mut MutexGuard<CapaEngine>) {
                         let mut per_hart_update_buffer = CORE_UPDATES[hart].lock();
                         per_hart_update_buffer.push(CoreUpdate::TlbShootdown{src_hartid});
                         drop(per_hart_update_buffer);
-
+                        log::debug!("TLB Shootdown IPI from src_hartid: {} to dest_hartid: {}",src_hartid,hart);
                         MONITOR_IPI_SYNC[src_hartid].fetch_add(1, Ordering::SeqCst);
                         aclint_mswi_send_ipi(hart);
                     }
@@ -403,13 +411,14 @@ pub fn apply_core_updates(
             CoreUpdate::TlbShootdown {
                 src_hartid,
             } => {
-                log::debug!("TLB Shootdown on core {}", core_id);
+                log::debug!("TLB Shootdown on core {} from src {}", core_id, src_hartid);
 
                 // Rewrite the PMPs
                 //let mut engine = CAPA_ENGINE.lock();
                 //TODO --- here, should only useee the snapshot to update
                 //update_permission(*current_domain, &mut engine);
-                update_pmps(*current_domain);
+                let domain = get_domain(*current_domain);
+                update_pmps(domain);
                 MONITOR_IPI_SYNC[src_hartid].fetch_sub(1, Ordering::SeqCst); 
             }
             CoreUpdate::Switch {
@@ -495,7 +504,13 @@ fn switch_domain(
     //TODO ---- here, should only useee snapshot to update the pmps. 
     //let mut engine = CAPA_ENGINE.lock();
     //update_permission(domain, &mut engine);
-    update_pmps(domain);
+    if(next_domain.data_init_done) { 
+        update_pmps(next_domain);
+    } else {
+        panic!("THIS SHOULD NEVER HAPPEN!");
+        let mut engine = CAPA_ENGINE.lock();
+        update_permission(domain, &mut engine);
+    }
 }
 
 fn create_domain(domain: Handle<Domain>) {
@@ -510,24 +525,24 @@ fn revoke_domain(_domain: Handle<Domain>, engine: &mut MutexGuard<CapaEngine>) {
     //Todo
 }
 
-fn update_pmps(domain_handle: Handle<Domain>) {
+fn update_pmps(domain: MutexGuard<DomainData>) {
+    log::info!("Updating PMPs FOR REAL!");
     clear_pmp();
-    let domain = get_domain(domain_handle);
+    //let domain = get_domain(domain_handle);
     for i in FROZEN_PMP_ENTRIES..PMP_ENTRIES {
-        pmpaddr_csr_write(i, domain.pmpaddr[i-FROZEN_PMP_ENTRIES]);
-        log::debug!("updating pmpaddr index: {}, val: {:x}",i, domain.pmpaddr[i-FROZEN_PMP_ENTRIES]); 
+        pmpaddr_csr_write(i, domain.pmpaddr[i]);
+        log::trace!("updating pmpaddr index: {}, val: {:x}",i, domain.pmpaddr[i]); 
     }
     for i in 0..PMP_CFG_ENTRIES {
         pmpcfg_csr_write(i*8, domain.pmpcfg[i]);
-        log::debug!("updating pmpcfg index: {}, val: {:x}", i, domain.pmpcfg[i]);
+        log::trace!("updating pmpcfg index: {}, val: {:x}", i, domain.pmpcfg[i]);
     }
     unsafe {
         asm!("sfence.vma");
     }
 }
 
-fn snapshot_pmps(domain_handle: Handle<Domain>) {
-    let mut domain = get_domain(domain_handle);
+/* fn snapshot_pmps(domain: mut MutexGuard<DomainData>) {
     for i in FROZEN_PMP_ENTRIES..PMP_ENTRIES {
         domain.pmpaddr[i-FROZEN_PMP_ENTRIES] = pmpaddr_csr_read(i);
         log::debug!("snapshot pmpaddr index: {}, val: {:x}",i, domain.pmpaddr[i-FROZEN_PMP_ENTRIES]);
@@ -536,7 +551,8 @@ fn snapshot_pmps(domain_handle: Handle<Domain>) {
         domain.pmpcfg[i] = pmpcfg_csr_read(i*8);
         log::debug!("snapshot pmpcfg index: {}, val: {:x}",i, domain.pmpcfg[i]);
     }
-}
+    domain.data_init_done = true;
+} */
 
 //Neelu: TODO: Make this function create more of a cache/snapshot of PMP entries - and later apply
 //it on switching or TLBShootDown to actually reflect in the PMP.
@@ -545,9 +561,9 @@ fn update_permission(domain_handle: Handle<Domain>, engine: &mut MutexGuard<Capa
 
     //let mut domain = get_domain(domain_handle);
     //First clean current PMP settings - this should internally cause the appropriate flushes
-    log::debug!("Clearing PMP");
-    clear_pmp();
-    let mut pmp_write_result: Result<PMPAddressingMode, PMPErrorCode>;
+    //log::debug!("Clearing PMP");
+    //clear_pmp();
+    let mut pmp_write_response: PMPWriteResponse;
     let mut pmp_index = FROZEN_PMP_ENTRIES;
     for range in engine.get_domain_permissions(domain_handle).unwrap() {
         if !range.ops.contains(MemOps::READ) {
@@ -555,30 +571,39 @@ fn update_permission(domain_handle: Handle<Domain>, engine: &mut MutexGuard<Capa
             continue;
         }
 
-        //TODO: Write to PMP based on specific permissions.
-        /* let mut flags: usize = 1 << pmpcfg::READ;
-        if range.ops.contains(MemOps::WRITE) {
-            flags |= (1 << pmpcfg::WRITE);
-        }
-        if range.ops.contains(MemOps::EXEC) {
-            flags |= (1 << pmpcfg::EXECUTE);
+        //TODO: Update PMP based on specific permissions - just need to compute XWR using MemOps.
 
-            //TODO: The U bit needs to be set in the page tables once the runtime is implemented.
-            // if range.ops.contains(MemOps::SUPER) {
-            //    flags |= EptEntryFlags::SUPERVISOR_EXECUTE;
-            //} else {
-            //    flags |= EptEntryFlags::USER_EXECUTE;
-            //}
-        } */
-
-        log::debug!(
-            "Protecting Domain: index: {:x} start: {:x} end: {:x}",
+        log::trace!(
+            "PMP Compute for Region: index: {:x} start: {:x} end: {:x}",
             pmp_index,
             range.start,
             range.start + range.size()
         );
 
-        pmp_write_result = pmp_write(pmp_index, range.start, range.size(), XWR_PERM);
+        pmp_write_response = pmp_write_compute(pmp_index, range.start, range.size(), XWR_PERM);
+
+        if pmp_write_response.write_failed {
+            panic!("PMP Write Not Ok");
+        } else {
+            log::debug!("PMP Write Ok");
+            
+            if pmp_write_response.addressing_mode == PMPAddressingMode::NAPOT {
+                log::trace!("NAPOT addr: {:x} cfg: {:x}", pmp_write_response.addr1, pmp_write_response.cfg1);
+                update_domain_pmp(domain_handle, pmp_index, pmp_write_response.addr1, pmp_write_response.cfg1); 
+                pmp_index = pmp_index + 1;
+            } else if pmp_write_response.addressing_mode == PMPAddressingMode::TOR {
+                log::trace!("TOR addr: {:x} cfg: {:x} addr: {:x} cfg: {:x}", pmp_write_response.addr1, pmp_write_response.cfg1, pmp_write_response.addr2, pmp_write_response.cfg2);
+                update_domain_pmp(domain_handle, pmp_index, pmp_write_response.addr1, pmp_write_response.cfg1);
+                update_domain_pmp(domain_handle, pmp_index + 1, pmp_write_response.addr2, pmp_write_response.cfg2);
+                pmp_index = pmp_index + 2;
+            } 
+
+            if pmp_index > PMP_ENTRIES {
+                panic!("Cannot continue running this domain: PMPOverflow");
+            }
+        }
+
+        /* pmp_write_result = pmp_write_compute(pmp_index, range.start, range.size(), XWR_PERM);
         //Check the PMP addressing mode so the index can be advanced by 1
         //(NAPOT) or 2 (TOR).
         if pmp_write_result.is_ok() {
@@ -598,9 +623,23 @@ fn update_permission(domain_handle: Handle<Domain>, engine: &mut MutexGuard<Capa
         } else {
             log::debug!("PMP write NOT ok!");
             //Todo: Check error codes and manage appropriately.
-        }
+        } */
     }
-    snapshot_pmps(domain_handle);
+    //snapshot_pmps(domain);
+    let mut domain = get_domain(domain_handle); 
+    domain.data_init_done = true; 
+}
+
+fn update_domain_pmp(domain_handle: Handle<Domain>, pmp_index: usize, pmp_addr: usize, pmp_cfg: usize) {
+    let mut domain = get_domain(domain_handle); 
+    let index_pos: usize = pmp_index % 8;
+    domain.pmpcfg[pmp_index/8] = domain.pmpcfg[pmp_index/8] & !(0xff << (index_pos * 8));
+    domain.pmpcfg[pmp_index/8] = domain.pmpcfg[pmp_index/8] | pmp_cfg;
+
+    domain.pmpaddr[pmp_index] = pmp_addr;
+
+    log::trace!("Updated for DOMAIN: PMPCFG: {:x} PMPADDR: {:x} at index: {:x}",domain.pmpcfg[pmp_index/8], domain.pmpaddr[pmp_index], pmp_index);
+
 }
 
 // ———————————————————————————————— Display ————————————————————————————————— //

@@ -1,4 +1,5 @@
 use core::arch::asm;
+use core::sync::atomic::AtomicUsize;
 
 use capa_engine::{Bitmaps, Domain, Handle, LocalCapa, NextCapaToken};
 use riscv_csrs::*;
@@ -19,6 +20,8 @@ use crate::riscv::monitor::apply_core_updates;
 const EMPTY_ACTIVE_DOMAIN: Mutex<Option<Handle<Domain>>> = Mutex::new(None);
 static ACTIVE_DOMAIN: [Mutex<Option<Handle<Domain>>>; NUM_HARTS] = [EMPTY_ACTIVE_DOMAIN; NUM_HARTS];
 
+const ZERO: AtomicUsize = AtomicUsize::new(0);
+static IPIS_PROCESSED_COUNT: [AtomicUsize; NUM_HARTS] = [ZERO; NUM_HARTS];
 // M-mode trap handler
 // Saves register state - calls trap_handler - restores register state - mret to intended mode.
 
@@ -180,6 +183,10 @@ pub fn handle_exit(reg_state: &mut RegisterState) {
     // mcause register holds the cause of the machine mode trap
     match mcause {
         mcause::MSWI => {
+            //IPIS_PROCESSED_COUNT[hartid].fetch_add(1, core::sync::atomic::Ordering::SeqCst);
+            //if IPIS_PROCESSED_COUNT[hartid].load(core::sync::atomic::Ordering::SeqCst) > 20000 {
+            //    log::debug!("Received IPI on hart {}", hartid);
+            //}
             process_ipi(hartid);
             unsafe {
                 let active_dom = get_active_dom(hartid);
