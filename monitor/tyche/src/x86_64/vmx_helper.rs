@@ -56,7 +56,7 @@ fn default_vmcs_config(vmcs: &mut ActiveVmcs, info: &GuestInfo, switching: bool)
         .and_then(|_| {
             vmcs.set_vm_entry_ctrls(EntryControls::IA32E_MODE_GUEST | EntryControls::LOAD_IA32_EFER)
         })
-        .and_then(|_| vmcs.set_exception_bitmap(ExceptionBitmap::INVALID_OPCODE))
+        .and_then(|_| vmcs.set_exception_bitmap(ExceptionBitmap::empty()))
         .and_then(|_| save_host_state(vmcs, info))
         .and_then(|_| setup_guest(vmcs, info));
     log::info!("Config: {:?}", err);
