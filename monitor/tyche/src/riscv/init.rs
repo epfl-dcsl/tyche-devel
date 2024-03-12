@@ -49,10 +49,8 @@ pub fn arch_entry_point(hartid: usize, manifest: RVManifest, log_level: log::Lev
 
         arch::init(hartid);
 
-        unsafe {
-            //Set the active domain.
-            guest::set_active_dom(hartid, domain);
-        }
+        //Set the active domain.
+        guest::set_active_dom(hartid, domain);
 
         //monitor::do_debug();
 
@@ -108,9 +106,7 @@ pub fn arch_entry_point(hartid: usize, manifest: RVManifest, log_level: log::Lev
 
         let mut domain = monitor::start_initial_domain_on_cpu();
 
-        unsafe {
-            guest::set_active_dom(hartid, domain);
-        }
+        guest::set_active_dom(hartid, domain);
 
         let jump_addr = HART_START_ADDR[hartid].load(Ordering::SeqCst);
         let jump_arg = HART_START_ARG1[hartid].load(Ordering::SeqCst);

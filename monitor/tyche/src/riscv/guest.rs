@@ -173,22 +173,15 @@ pub fn handle_exit(reg_state: &mut RegisterState) {
         satp
     );
 
-    let mut active_dom;
-    unsafe {
-        active_dom = get_active_dom(hartid);
-    }
-
     // Check which trap it is
     // mcause register holds the cause of the machine mode trap
     match mcause {
         mcause::MSWI => {
             process_ipi(hartid);
-            unsafe {
-                let active_dom = get_active_dom(hartid);
-                match active_dom {
-                    Some(mut domain) => apply_core_updates(&mut domain, hartid, reg_state),
-                    None => {}
-                }
+            let active_dom = get_active_dom(hartid);
+            match active_dom {
+                Some(mut domain) => apply_core_updates(&mut domain, hartid, reg_state),
+                None => {}
             }
         }
         mcause::MTI => {
@@ -279,9 +272,7 @@ pub fn misaligned_load_handler(reg_state: &mut RegisterState) {
 
         let mut active_dom: Handle<Domain>;
         let hartid = cpuid();
-        unsafe {
-            active_dom = get_active_dom(hartid).unwrap();
-        }
+        active_dom = get_active_dom(hartid).unwrap();
 
         match tyche_call {
             calls::CREATE_DOMAIN => {
@@ -482,19 +473,17 @@ pub fn misaligned_load_handler(reg_state: &mut RegisterState) {
         }
         monitor::apply_core_updates(&mut active_dom, hartid, reg_state);
         //Updating the state
-        unsafe {
-            set_active_dom(hartid, active_dom);
-        }
+        set_active_dom(hartid, active_dom);
     }
     //TODO: ELSE NOT TYCHE CALL
     //Handle Illegal Instruction Trap
 }
 
-pub unsafe fn get_active_dom(hartid: usize) -> (Option<Handle<Domain>>) {
+pub fn get_active_dom(hartid: usize) -> (Option<Handle<Domain>>) {
     return *ACTIVE_DOMAIN[hartid].lock();
 }
 
-pub unsafe fn set_active_dom(hartid: usize, domain: Handle<Domain>) {
+pub fn set_active_dom(hartid: usize, domain: Handle<Domain>) {
     let mut active_domain = ACTIVE_DOMAIN[hartid].lock();
     *active_domain = Some(domain);
 }
