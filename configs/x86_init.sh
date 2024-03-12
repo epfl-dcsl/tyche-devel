@@ -35,18 +35,23 @@ error() {
     exec /bin/sh
 }
 
-error_part3() {
+error_nvme_part() {
   echo "Failed to mount"
   umount /newroot
+  mknod /dev/nvme0n1p6 b 259 6
+  mount /dev/nvme0n1p6 /newroot || error
 }
 ##
 ### Install disk
-mknod /dev/nvme0n1p6 b 259 6
+### We have a disk B with 2 partitions for now
+mknod /dev/sdb  b 8 16
+mknod /dev/sdb1 b 8 17
+mknod /dev/sdb2 b 8 18
 ###
 #### Create new root
 mkdir /newroot
-mount /dev/nvme0n1p6 /newroot || error_part3
-ls /newroot/sbin || error_part3
+mount /dev/sdb2 /newroot || error_nvme_part
+ls /newroot/sbin || error_nvme_part
 ###
 #### Switch root
 exec switch_root /newroot /sbin/init || error
