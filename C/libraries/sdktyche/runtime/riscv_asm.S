@@ -8,7 +8,8 @@ asm_call_gate:
     //ld a2, 0x0(a1)      //loading the args - TODO: Make sure this is correct!! Because the tyche call id is supposed to be in a0. 
     //ld a1, 0x0(a0)
     //mv a2, a1 
-    ld a1, 0x0(a1)          //Question: why is ret_handle in a1 and not a0? 
+    //ld a1, 0x0(a1)          //Question: why is ret_handle in a1 and not a0? 
+    mv a1, a0
     li a0, 0x9  
     li a7, 0x5479636865
     ecall 
