@@ -245,13 +245,12 @@ pub(crate) fn revoke(
     if region.is_carved() {
         // Also update parent's permissions
         let parent_region = &regions[parent];
-        activate_region(
-            parent_region.domain,
-            region.access,
-            domains,
-            updates,
-            tracker,
-        )?;
+        let access = AccessRights {
+            start: region.access.start,
+            end: region.access.end,
+            ops: parent_region.access.ops,
+        };
+        activate_region(parent_region.domain, access, domains, updates, tracker)?;
     }
 
     // Definitively free the handle
