@@ -481,11 +481,7 @@ enum CoreUpdate {
 fn apply_updates(engine: &mut MutexGuard<CapaEngine>) {
     while let Some(update) = engine.pop_update() {
         match update {
-            capa_engine::Update::PermissionUpdate {
-                domain,
-                init,
-                core_map,
-            } => {
+            capa_engine::Update::PermissionUpdate { domain, core_map } => {
                 let src_hartid = cpuid();
 
                 update_permission(domain, engine);
