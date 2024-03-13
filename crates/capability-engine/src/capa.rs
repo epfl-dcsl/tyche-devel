@@ -334,7 +334,7 @@ impl fmt::Display for CapaInfo {
                 ops,
             } => {
                 let c = if *confidential { 'C' } else { '_' };
-                write!(f, "NRegion([0x{:x}, 0x{:x} | {}{}])", start, end, c, ops)
+                write!(f, "Region([0x{:x}, 0x{:x} | {}{}])", start, end, c, ops)
             }
             CapaInfo::RegionRevoke {
                 start,

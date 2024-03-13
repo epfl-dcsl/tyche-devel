@@ -304,20 +304,18 @@ pub fn misaligned_load_handler(reg_state: &mut RegisterState) {
             }
             calls::SEGMENT_REGION => {
                 log::debug!("Segment Region");
-                let (left, right) = monitor::do_segment_region(
+                let (to_send, to_revoke) = monitor::do_segment_region(
                     active_dom,
                     LocalCapa::new(arg_1),
-                    arg_2,
-                    arg_3,
-                    arg_6 >> 32,
-                    arg_4,
-                    arg_5,
-                    (arg_6 << 32) >> 32,
+                    arg_2 != 0, // is_shared
+                    arg_3,      // start
+                    arg_4,      // end
+                    arg_5,      // prot
                 )
                 .expect("TODO");
                 reg_state.a0 = 0x0;
-                reg_state.a1 = left.as_usize() as isize;
-                reg_state.a2 = right.as_usize();
+                reg_state.a1 = to_send.as_usize() as isize;
+                reg_state.a2 = to_revoke.as_usize();
             }
             calls::REVOKE => {
                 log::debug!("Revoke");

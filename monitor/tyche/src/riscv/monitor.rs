@@ -73,7 +73,7 @@ pub fn init() {
     let domain = engine.create_manager_domain(permission::ALL).unwrap();
     apply_updates(&mut engine);
     engine
-        .create_root_region(
+        .create_new_root_region(
             domain,
             AccessRights {
                 start: 0x80400000, //Linux Root Region Start Address
@@ -89,7 +89,7 @@ pub fn init() {
         .unwrap();
 
     engine
-        .create_root_region(
+        .create_new_root_region(
             domain,
             AccessRights {
                 start: SIFIVE_TEST_SYSCON_BASE_ADDRESS,
@@ -317,35 +317,36 @@ pub fn do_seal(current: Handle<Domain>, domain: LocalCapa) -> Result<LocalCapa, 
 pub fn do_segment_region(
     current: Handle<Domain>,
     capa: LocalCapa,
-    start_1: usize,
-    end_1: usize,
-    prot_1: usize,
-    start_2: usize,
-    end_2: usize,
-    prot_2: usize,
+    is_shared: bool,
+    start: usize,
+    end: usize,
+    prot: usize,
 ) -> Result<(LocalCapa, LocalCapa), CapaError> {
-    let prot_1 = MemOps::from_usize(prot_1)?;
-    let prot_2 = MemOps::from_usize(prot_2)?;
+    let prot = MemOps::from_usize(prot)?;
     let mut engine = CAPA_ENGINE.lock();
-    let access_left = AccessRights {
-        start: start_1,
-        end: end_1,
-        ops: prot_1,
+    let access = AccessRights {
+        start,
+        end,
+        ops: prot,
     };
-    let access_right = AccessRights {
-        start: start_2,
-        end: end_2,
-        ops: prot_2,
+    let to_send = if is_shared {
+        engine.alias_region(current, capa, access)?
+    } else {
+        engine.carve_region(current, capa, access)?
     };
-    let (left, right) = engine.segment_region(current, capa, access_left, access_right)?;
+    let to_revoke = engine.create_revoke_capa(current, to_send)?;
     apply_updates(&mut engine);
-    Ok((left, right))
+    Ok((to_send, to_revoke))
 }
 
 pub fn do_send(current: Handle<Domain>, capa: LocalCapa, to: LocalCapa) -> Result<(), CapaError> {
     let mut engine = CAPA_ENGINE.lock();
     // Send is not allowed for region capa.
     // Use do_send_aliased instead.
+    match engine.get_new_region_capa(current, capa)? {
+        Some(_) => return Err(CapaError::InvalidCapa),
+        _ => {}
+    }
     match engine.get_region_capa(current, capa)? {
         Some(_) => return Err(CapaError::InvalidCapa),
         _ => {}
@@ -362,7 +363,7 @@ pub fn do_send_region(
 ) -> Result<(), CapaError> {
     let mut engine = CAPA_ENGINE.lock();
     // send_region is only allowed for region capa.
-    match engine.get_region_capa(current, capa)? {
+    match engine.get_new_region_capa(current, capa)? {
         Some(_) => {}
         _ => return Err(CapaError::InvalidCapa),
     }
