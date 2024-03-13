@@ -75,7 +75,7 @@ fn handle_exit(
 ) -> Result<HandlerResult, TycheError> {
     match reason {
         VmxExitReason::Vmcall => {
-            let (vmcall, arg_1, arg_2, arg_3, arg_4, arg_5, arg_6) = {
+            let (vmcall, arg_1, arg_2, arg_3, arg_4, arg_5, _arg_6) = {
                 let mut context = monitor::get_context(*domain, cpuid());
                 let vmcall = context.get(VmcsField::GuestRax, None)?;
                 let arg_1 = context.get(VmcsField::GuestRdi, None)?;
@@ -290,15 +290,13 @@ fn handle_exit(
                 }
                 calls::SEGMENT_REGION => {
                     log::trace!("Segment region");
-                    let (left, right) = match monitor::do_segment_region(
+                    let (to_send, to_revoke) = match monitor::do_segment_region(
                         *domain,
                         LocalCapa::new(arg_1),
-                        arg_2,               // start
-                        arg_3,               // end
-                        arg_6 >> 32,         // prot1
-                        arg_4,               // start
-                        arg_5,               // end
-                        (arg_6 << 32) >> 32, // prot2
+                        arg_2 != 0, // is_shared 
+                        arg_3,      // start
+                        arg_4,      // end
+                        arg_5,      // prot
                     ) {
                         Ok((l, r)) => (l,r),
                         Err(e) => {
@@ -307,8 +305,8 @@ fn handle_exit(
                         }
                     };
                     let mut context = monitor::get_context(*domain, cpuid());
-                    context.set(VmcsField::GuestRdi, left.as_usize(), None)?;
-                    context.set(VmcsField::GuestRsi, right.as_usize(), None)?;
+                    context.set(VmcsField::GuestRdi, to_send.as_usize(), None)?;
+                    context.set(VmcsField::GuestRsi, to_revoke.as_usize(), None)?;
                     context.set(VmcsField::GuestRax, 0, None)?;
                     vs.vcpu.next_instruction()?;
                     Ok(HandlerResult::Resume)

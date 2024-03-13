@@ -29,7 +29,7 @@ pub use region::{
 use region::{PermissionIterator, TrackerPool, EMPTY_REGION};
 use region_capa::{RegionCapa, RegionPool};
 pub use remapper::Remapper;
-use segment::NewRegionPool;
+use segment::{NewRegionCapa, NewRegionPool};
 use update::UpdateBuffer;
 pub use update::{Buffer, Update};
 
@@ -642,6 +642,16 @@ impl CapaEngine {
         Ok(self
             .regions
             .get(self.domains[domain].get(capa)?.as_region()?))
+    }
+
+    pub fn get_new_region_capa(
+        &self,
+        domain: Handle<Domain>,
+        capa: LocalCapa,
+    ) -> Result<Option<&NewRegionCapa>, CapaError> {
+        Ok(self
+            .new_regions
+            .get(self.domains[domain].get(capa)?.as_new_region()?))
     }
 
     pub fn get_domain_regions<'a>(

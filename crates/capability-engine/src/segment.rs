@@ -69,6 +69,10 @@ impl NewRegionCapa {
         self
     }
 
+    pub fn get_access_rights(&self) -> AccessRights {
+        self.access
+    }
+
     /// Returns true if the region starts before the other
     pub fn is_smaller(&self, access: &AccessRights) -> bool {
         self.access.start <= access.start

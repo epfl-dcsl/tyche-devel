@@ -90,6 +90,8 @@ impl CapaInfo {
             } => {
                 v1 = *start;
                 v2 = *end;
+                // New regions are always active
+                flags |= 1;
                 if *confidential {
                     flags |= 1 << 1;
                 }
@@ -332,7 +334,7 @@ impl fmt::Display for CapaInfo {
                 ops,
             } => {
                 let c = if *confidential { 'C' } else { '_' };
-                write!(f, "Region([0x{:x}, 0x{:x} | {}{}])", start, end, c, ops)
+                write!(f, "NRegion([0x{:x}, 0x{:x} | {}{}])", start, end, c, ops)
             }
             CapaInfo::RegionRevoke {
                 start,
