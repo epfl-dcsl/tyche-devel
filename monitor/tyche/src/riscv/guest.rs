@@ -458,7 +458,7 @@ pub fn misaligned_load_handler(reg_state: &mut RegisterState) {
                         1
                     }
                 };
-                reg_state.a1 = res;
+                reg_state.a0 = res;
             }
             calls::SELF_CONFIG => {
                 todo!("Implement that one only if needed.");

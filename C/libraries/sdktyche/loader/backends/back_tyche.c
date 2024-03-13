@@ -13,8 +13,11 @@
 #include <sys/mman.h>
 #include <sys/ioctl.h> 
 #include <unistd.h>
-#include <asm/vmx.h>
 #include <stdlib.h>
+
+#if defined(CONFIG_X86) || defined(__x86_64__)
+#include <asm/vmx.h>
+#endif
 // ——————————————————————————— Local definitions ———————————————————————————— //
 
 #define DOMAIN_DRIVER ("/dev/tyche")

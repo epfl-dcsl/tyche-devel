@@ -1,3 +1,5 @@
+use riscv_utils::PAGING_MODE_SV48;
+
 use crate::riscv::monitor::ContextData;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -35,15 +37,20 @@ impl RiscVField {
         match *self {
             Self::Medeleg => {
                 context.medeleg = value;
+                log::debug!("Setting medeleg to {:x}", context.medeleg);
             }
             Self::Satp => {
-                context.satp = value;
+                context.satp = (value >> 12) | PAGING_MODE_SV48;
+                log::debug!("Setting satp to {:x}", context.satp);
             }
             Self::Sp => {
                 context.sp = value;
+                log::debug!("Setting sp to {:x}", context.sp);
             }
             Self::Mepc => {
-                context.mepc = value;
+                context.mepc = value - 0x4;     //Todo: This is a temporary hack - because before returning
+                                                //there's an mepc+4. 
+                log::debug!("Setting mepc to {:x}", context.mepc); 
             }
         }
     }

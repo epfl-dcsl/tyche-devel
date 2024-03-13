@@ -54,10 +54,10 @@ update_disk:
 	cp scripts/run_eapp.sh /tmp/ubuntu_riscv_mount/tyche
 	cp $(TYCHOOLS_RISCV_PATH)/tychools $(PROGRAMGS_PATH)/tychools 
 
-# Use this when you see errors like the following during the boot: 
-# EXT4-fs error (device vda1): ext4_validate_block_bitmap:390: comm ext4lazyinit: bg 30: bad block bitmap checksum
-# The superblock may have been corrupted and due to failing the checksum matching, the file system will get mounted in "ro" mode, which means you cannot write any logs to files, cannot copy the latest program builds to the /root and so on. 
-# This is undesirable. Make sure when running the VM you perform a clean poweroff or clean exit for all programs modifying the disk.  
+# Use the following when you see errors like the following during boot: 
+### EXT4-fs error (device vda1): ext4_validate_block_bitmap:390: comm ext4lazyinit: bg 30: bad block bitmap checksum
+### The superblock may have been corrupted and due to failing the checksum matching, the file system will get mounted in "ro" mode, which means you cannot write any logs to files, cannot copy the latest program builds to the /root and so on. 
+# Neelu: This is undesirable. Make sure when running the VM you perform a clean poweroff or clean exit for all programs modifying the disk.  
 
 fix_disk_superblock: 
 	echo "fixing disk superblock"

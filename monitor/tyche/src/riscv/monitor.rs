@@ -192,8 +192,8 @@ pub fn do_configure_core(
 
     // Check this is a valid idx for a field.
     if !RiscVField::is_valid(idx) {
-        log::error!("Attempt to set an invalid register: {:x}", idx);
-        return Err(CapaError::InvalidOperation);
+        log::debug!("Attempt to set an invalid register: {:x}", idx);
+        return Ok(());
     }
     let field = RiscVField::from_usize(idx).unwrap();
     //TODO @Neelu check that.
@@ -233,8 +233,8 @@ pub fn do_get_config_core(
 
     // Check this is a valid idx for a field.
     if !RiscVField::is_valid(idx) {
-        log::error!("Attempt to get an invalid register: {:x}", idx);
-        return Err(CapaError::InvalidOperation);
+        log::debug!("Attempt to get an invalid register: {:x}", idx);
+        return Ok(0);
     }
     let field = RiscVField::from_usize(idx).unwrap();
     let target_ctx = get_context(domain, core);
@@ -257,8 +257,8 @@ pub fn do_set_field(
         return Err(CapaError::InvalidCore);
     }
     if !RiscVField::is_valid(field) {
-        log::error!("Attempt to get an invalid field: {:x}", field);
-        return Err(CapaError::InvalidOperation);
+        log::debug!("Attempt to get an invalid field: {:x}", field);
+        return Ok(());
     }
     let field = RiscVField::from_usize(field).unwrap();
     let mut target_ctx = get_context(domain, core);
