@@ -1,7 +1,8 @@
 use std::fmt::Write;
 
+use capa_engine::config::NB_UPDATES;
 use capa_engine::{
-    permission, AccessRights, CapaEngine, CapaError, Domain, Handle, LocalCapa, MemOps,
+    permission, AccessRights, Buffer, CapaEngine, CapaError, Domain, Handle, LocalCapa, MemOps,
     NextCapaToken, RegionIterator, MEMOPS_ALL,
 };
 
@@ -29,473 +30,1707 @@ macro_rules! static_engine {
     }};
 }
 
-// ——————————————————————————————— Scenarios ———————————————————————————————— //
+// ———————————————————————————— Test our Buffer ————————————————————————————— //
 
-/// This scenario exercise multiple part of the engine: creating domains and region, sending and
-/// revoking.
 #[test]
-fn scenario_1() {
+fn test_empty_buffer() {
+    let mut buffer: Buffer<i32> = Buffer::new();
+    assert_eq!(buffer.pop(), None);
+    assert_eq!(buffer.pop(), None);
+    assert_eq!(buffer.push(1), Ok(()));
+    assert_eq!(buffer.pop(), Some(1));
+    assert_eq!(buffer.pop(), None);
+    assert_eq!(buffer.pop(), None);
+}
+
+#[test]
+fn test_buffer_push_pop() {
+    let mut buffer: Buffer<i32> = Buffer::new();
+
+    // Pushing elements into the buffer
+    assert_eq!(buffer.push(1), Ok(()));
+    assert_eq!(buffer.push(2), Ok(()));
+    assert_eq!(buffer.push(3), Ok(()));
+
+    // Popping elements from the buffer
+    assert_eq!(buffer.pop(), Some(1));
+    assert_eq!(buffer.pop(), Some(2));
+    assert_eq!(buffer.pop(), Some(3));
+    assert_eq!(buffer.pop(), None); // Buffer should be empty now
+}
+
+#[test]
+fn test_buffer_full() {
+    let mut buffer: Buffer<i32> = Buffer::new();
+
+    // Fill up the buffer
+    for i in 0..NB_UPDATES {
+        assert_eq!(buffer.push(i as i32), Ok(()));
+    }
+
+    // Buffer should be full now
+    assert_eq!(buffer.push(100), Err(CapaError::OutOfMemory));
+}
+
+#[test]
+fn test_buffer_circular_behavior() {
+    let mut buffer: Buffer<i32> = Buffer::new();
+
+    // Pushing elements into the buffer until it is full.
+    for i in 0..NB_UPDATES {
+        assert_eq!(buffer.push(i as i32), Ok(()));
+    }
+
+    // Popping elements from the buffer at the front
+    assert_eq!(buffer.pop(), Some(0));
+    assert_eq!(buffer.pop(), Some(1));
+
+    // Pushing more elements to check circular behavior
+    assert_eq!(buffer.push(NB_UPDATES as i32), Ok(()));
+    assert_eq!(buffer.push(NB_UPDATES as i32 + 1), Ok(()));
+    assert_eq!(buffer.push(666), Err(CapaError::OutOfMemory)); // Buffer is full, should return an error
+    assert_eq!(buffer.push(777), Err(CapaError::OutOfMemory)); // Buffer is full, should return an error
+
+    // Popping elements from the buffer
+    let start: i32 = 2;
+    for i in 0..NB_UPDATES {
+        assert_eq!(buffer.pop(), Some(start + i as i32));
+    }
+    assert_eq!(buffer.pop(), None); // Buffer should be empty now
+}
+
+#[test]
+fn test_buffer_contains() {
+    let mut buffer: Buffer<i32> = Buffer::new();
+
+    assert_eq!(buffer.contains(|x| { x == (0 as i32) }), false);
+
+    // Pushing elements into the buffer until it is full.
+    for i in 0..NB_UPDATES {
+        assert_eq!(buffer.push(i as i32), Ok(()));
+    }
+    assert_eq!(buffer.contains(|x| { x == 10 }), true);
+
+    for i in 0..10 {
+        assert_eq!(buffer.pop(), Some(i as i32));
+    }
+
+    for i in 0..10 {
+        assert_eq!(buffer.contains(|x| { x == (i as i32) }), false);
+    }
+    for i in 10..NB_UPDATES {
+        assert_eq!(buffer.contains(|x| { x == (i as i32) }), true);
+    }
+}
+
+// ————————————————————— EffectiveRegionIterator tests —————————————————————— //
+
+#[test]
+fn no_children_eri_direct() {
     let engine = unsafe { static_engine!() };
+    let core = 0;
 
-    // Create an initial domain with range 0x0 to 0x1000
-    let domain = engine.create_manager_domain(permission::ALL).unwrap();
-    let region = engine
+    // Create initial domain
+    let d0 = engine.create_manager_domain(permission::ALL).unwrap();
+    let _ctx = engine.start_domain_on_core(d0, core).unwrap();
+    // Create initial region
+    let r0 = engine
         .create_root_region(
-            domain,
+            d0,
             AccessRights {
                 start: 0,
                 end: 0x1000,
-                ops: MemOps::NONE,
+                ops: MEMOPS_ALL,
             },
         )
         .unwrap();
-    snap!(
-        "{[0x0, 0x1000 | 1 (0 - 0 - 0 - 0)]}",
-        regions(domain, engine)
-    );
-    snap!("{Region([0x0, 0x1000 | AC____])}", capas(domain, engine));
-    snap!(
-        "{PermissionUpdate(H(0, gen 0)), CreateDomain(H(0, gen 0))}",
-        updates(engine)
-    );
+    let mut iter = engine.get_effective_regions(d0, r0).unwrap();
+    let region = iter.next();
+    assert!(region.is_some());
+    let region = region.unwrap();
+    assert!(region.start == 0 && region.end == 0x1000 && region.ops == MEMOPS_ALL);
+    assert!(iter.next().is_none());
+    assert!(iter.next().is_none());
+}
 
-    // Duplicate the initial range into two regions
-    let (reg2, _reg3) = engine
-        .segment_region(
-            domain,
-            region,
+#[test]
+fn start_carve_eri_direct() {
+    let engine = unsafe { static_engine!() };
+    let core = 0;
+
+    // Create initial domain
+    let d0 = engine.create_manager_domain(permission::ALL).unwrap();
+    let _ctx = engine.start_domain_on_core(d0, core).unwrap();
+    // Create initial region
+    let r0 = engine
+        .create_root_region(
+            d0,
             AccessRights {
                 start: 0,
-                end: 0x200,
-                ops: MemOps::NONE,
-            },
-            AccessRights {
-                start: 0x300,
                 end: 0x1000,
-                ops: MemOps::NONE,
+                ops: MEMOPS_ALL,
+            },
+        )
+        .unwrap();
+
+    let _ = engine
+        .carve_region(
+            d0,
+            r0,
+            AccessRights {
+                start: 0,
+                end: 0x500,
+                ops: MEMOPS_ALL,
             },
         )
         .unwrap();
     snap!(
-        "{[0x0, 0x200 | 1 (0 - 0 - 0 - 0)] -> [0x300, 0x1000 | 1 (0 - 0 - 0 - 0)]}",
-        regions(domain, engine),
+        "{Region([0x0, 0x1000 | PURWXS]), Region([0x0, 0x500 | _URWXS])}",
+        capas(d0, engine)
+    );
+    let mut iter = engine.get_effective_regions(d0, r0).unwrap();
+    let region = iter.next();
+    assert!(region.is_some());
+    let region = region.unwrap();
+    snap!("[0x500, 0x1000 | RWXS]", region.to_string());
+    assert!(region.start == 0x500 && region.end == 0x1000 && region.ops == MEMOPS_ALL);
+    assert!(iter.next().is_none());
+    assert!(iter.next().is_none());
+}
+
+#[test]
+fn middle_carve_eri_direct() {
+    let engine = unsafe { static_engine!() };
+    let core = 0;
+
+    // Create initial domain
+    let d0 = engine.create_manager_domain(permission::ALL).unwrap();
+    let _ctx = engine.start_domain_on_core(d0, core).unwrap();
+    // Create initial region
+    let r0 = engine
+        .create_root_region(
+            d0,
+            AccessRights {
+                start: 0,
+                end: 0x1000,
+                ops: MEMOPS_ALL,
+            },
+        )
+        .unwrap();
+
+    let _ = engine
+        .carve_region(
+            d0,
+            r0,
+            AccessRights {
+                start: 0x200,
+                end: 0x300,
+                ops: MEMOPS_ALL,
+            },
+        )
+        .unwrap();
+    snap!(
+        "{Region([0x0, 0x1000 | PURWXS]), Region([0x200, 0x300 | _URWXS])}",
+        capas(d0, engine)
+    );
+    let mut iter = engine.get_effective_regions(d0, r0).unwrap();
+    let region = iter.next();
+    assert!(region.is_some());
+    let region = region.unwrap();
+    snap!("[0x0, 0x200 | RWXS]", region.to_string());
+    let region = iter.next().unwrap();
+    snap!("[0x300, 0x1000 | RWXS]", region.to_string());
+    assert!(iter.next().is_none());
+    assert!(iter.next().is_none());
+}
+
+#[test]
+fn end_carve_eri_direct() {
+    let engine = unsafe { static_engine!() };
+    let core = 0;
+
+    // Create initial domain
+    let d0 = engine.create_manager_domain(permission::ALL).unwrap();
+    let _ctx = engine.start_domain_on_core(d0, core).unwrap();
+    // Create initial region
+    let r0 = engine
+        .create_root_region(
+            d0,
+            AccessRights {
+                start: 0,
+                end: 0x1000,
+                ops: MEMOPS_ALL,
+            },
+        )
+        .unwrap();
+
+    let _ = engine
+        .carve_region(
+            d0,
+            r0,
+            AccessRights {
+                start: 0x500,
+                end: 0x1000,
+                ops: MEMOPS_ALL,
+            },
+        )
+        .unwrap();
+    snap!(
+        "{Region([0x0, 0x1000 | PURWXS]), Region([0x500, 0x1000 | _URWXS])}",
+        capas(d0, engine)
+    );
+    let mut iter = engine.get_effective_regions(d0, r0).unwrap();
+    let region = iter.next();
+    assert!(region.is_some());
+    let region = region.unwrap();
+    snap!("[0x0, 0x500 | RWXS]", region.to_string());
+    assert!(iter.next().is_none());
+    assert!(iter.next().is_none());
+}
+
+#[test]
+fn chop_chop_eri_direct() {
+    let engine = unsafe { static_engine!() };
+    let core = 0;
+
+    // Create initial domain
+    let d0 = engine.create_manager_domain(permission::ALL).unwrap();
+    let _ctx = engine.start_domain_on_core(d0, core).unwrap();
+    // Create initial region
+    let r0 = engine
+        .create_root_region(
+            d0,
+            AccessRights {
+                start: 0,
+                end: 0x1000,
+                ops: MEMOPS_ALL,
+            },
+        )
+        .unwrap();
+
+    let _ = engine
+        .carve_region(
+            d0,
+            r0,
+            AccessRights {
+                start: 0x0,
+                end: 0x100,
+                ops: MEMOPS_ALL,
+            },
+        )
+        .unwrap();
+    let _ = engine
+        .carve_region(
+            d0,
+            r0,
+            AccessRights {
+                start: 0x200,
+                end: 0x300,
+                ops: MEMOPS_ALL,
+            },
+        )
+        .unwrap();
+    let _ = engine
+        .carve_region(
+            d0,
+            r0,
+            AccessRights {
+                start: 0x400,
+                end: 0x500,
+                ops: MEMOPS_ALL,
+            },
+        )
+        .unwrap();
+    let _ = engine
+        .carve_region(
+            d0,
+            r0,
+            AccessRights {
+                start: 0x900,
+                end: 0x1000,
+                ops: MEMOPS_ALL,
+            },
+        )
+        .unwrap();
+    let mut iter = engine.get_effective_regions(d0, r0).unwrap();
+    let region = iter.next().unwrap();
+    snap!("[0x100, 0x200 | RWXS]", region.to_string());
+    let region = iter.next().unwrap();
+    snap!("[0x300, 0x400 | RWXS]", region.to_string());
+    let region = iter.next().unwrap();
+    snap!("[0x500, 0x900 | RWXS]", region.to_string());
+    assert!(iter.next().is_none());
+    assert!(iter.next().is_none());
+}
+
+#[test]
+fn no_children_eri() {
+    let engine = unsafe { static_engine!() };
+    let core = 0;
+
+    // Create initial domain
+    let d0 = engine.create_manager_domain(permission::ALL).unwrap();
+    let _ctx = engine.start_domain_on_core(d0, core).unwrap();
+    // Create initial region
+    let r0 = engine
+        .create_root_region(
+            d0,
+            AccessRights {
+                start: 0,
+                end: 0x1000,
+                ops: MEMOPS_ALL,
+            },
+        )
+        .unwrap();
+
+    let d1_mgmt = engine.create_domain(d0).unwrap();
+    let d1 = engine.get_domain_capa(d0, d1_mgmt).unwrap();
+    engine.send(d0, r0, d1_mgmt).unwrap();
+
+    snap!("{}", regions(d0, engine));
+    snap!("{[0x0, 0x1000 | 1 (1 - 1 - 1 - 1)]}", regions(d1, engine));
+}
+
+#[test]
+fn one_carve_eri() {
+    let engine = unsafe { static_engine!() };
+    let core = 0;
+
+    // Create initial domain
+    let d0 = engine.create_manager_domain(permission::ALL).unwrap();
+    let _ctx = engine.start_domain_on_core(d0, core).unwrap();
+    // Create initial region
+    let r0 = engine
+        .create_root_region(
+            d0,
+            AccessRights {
+                start: 0,
+                end: 0x1000,
+                ops: MEMOPS_ALL,
+            },
+        )
+        .unwrap();
+
+    // Do a carve.
+    let _r1 = engine
+        .carve_region(
+            d0,
+            r0,
+            AccessRights {
+                start: 0,
+                end: 0x500,
+                ops: MEMOPS_ALL,
+            },
+        )
+        .unwrap();
+
+    let d1_mgmt = engine.create_domain(d0).unwrap();
+    let d1 = engine.get_domain_capa(d0, d1_mgmt).unwrap();
+    engine.send(d0, r0, d1_mgmt).unwrap();
+
+    snap!("{[0x500, 0x1000 | 1 (1 - 1 - 1 - 1)]}", regions(d1, engine));
+    snap!("{[0x0, 0x500 | 1 (1 - 1 - 1 - 1)]}", regions(d0, engine));
+}
+
+// ———————————————————————————— Buffer in capas ————————————————————————————— //
+
+#[test]
+fn updates_order() {
+    let engine = unsafe { static_engine!() };
+    let core = 0;
+
+    // Create initial domain
+    let d0 = engine.create_manager_domain(permission::ALL).unwrap();
+    let _ctx = engine.start_domain_on_core(d0, core).unwrap();
+    // Create initial region
+    let _r0 = engine
+        .create_root_region(
+            d0,
+            AccessRights {
+                start: 0,
+                end: 0x1000,
+                ops: MEMOPS_ALL,
+            },
+        )
+        .unwrap();
+    // Check that the first update we pop is the correct one.
+    snap!(
+        "CreateDomain(H(0, gen 0))",
+        engine.pop_update().unwrap().to_string()
     );
     snap!(
-        "{Region([0x0, 0x1000 | _C____]), Region([0x0, 0x200 | AC____]), Region([0x300, 0x1000 | AC____])}",
-        capas(domain, engine),
+        "PermissionUpdate(H(0, gen 0))",
+        engine.pop_update().unwrap().to_string()
     );
+    assert_eq!(engine.pop_update().is_none(), true);
+}
+
+// ————————————————————————————— Carve regions —————————————————————————————— //
+#[test]
+fn simple_carve() {
+    let engine = unsafe { static_engine!() };
+    let core = 0;
+
+    // Create initial domain
+    let d0 = engine.create_manager_domain(permission::ALL).unwrap();
+    let _ctx = engine.start_domain_on_core(d0, core).unwrap();
+    snap!("{CreateDomain(H(0, gen 0))}", updates(engine));
+
+    // Create initial region
+    let r0 = engine
+        .create_root_region(
+            d0,
+            AccessRights {
+                start: 0,
+                end: 0x1000,
+                ops: MEMOPS_ALL,
+            },
+        )
+        .unwrap();
+
     snap!("{PermissionUpdate(H(0, gen 0))}", updates(engine));
-
-    // Duplicate again
-    let (_reg4, _reg5) = engine
-        .segment_region(
-            domain,
-            reg2,
+    // Carve a region.
+    let r1 = engine
+        .carve_region(
+            d0,
+            r0,
             AccessRights {
                 start: 0,
-                end: 0x50,
-                ops: MemOps::NONE,
-            },
-            AccessRights {
-                start: 0x50,
-                end: 0x200,
-                ops: MemOps::NONE,
+                end: 0x500,
+                ops: MEMOPS_ALL,
             },
         )
         .unwrap();
+
+    snap!("{[0x0, 0x1000 | 1 (1 - 1 - 1 - 1)]}", regions(d0, engine));
     snap!(
-        "{[0x0, 0x200 | 1 (0 - 0 - 0 - 0)] -> [0x300, 0x1000 | 1 (0 - 0 - 0 - 0)]}",
-        regions(domain, engine),
+        "{Region([0x0, 0x1000 | PURWXS]), Region([0x0, 0x500 | _URWXS])}",
+        capas(d0, engine)
     );
-    snap!(
-        "{Region([0x0, 0x1000 | _C____]), Region([0x0, 0x200 | _C____]), Region([0x300, 0x1000 | AC____]), Region([0x0, 0x50 | AC____]), Region([0x50, 0x200 | AC____])}",
-        capas(domain, engine)
-    );
+    // The carve does not change the regions so it should work.
     snap!("{}", updates(engine));
 
-    // Create a new domain and send the inactive region there
-    let dom2 = engine.create_domain(domain).unwrap();
-    let domain2 = engine.get_domain_capa(domain, dom2).unwrap();
-    engine.send(domain, reg2, dom2).unwrap();
-    snap!(
-        "{[0x0, 0x200 | 1 (0 - 0 - 0 - 0)] -> [0x300, 0x1000 | 1 (0 - 0 - 0 - 0)]}",
-        regions(domain, engine),
-    );
-    snap!("{}", regions(domain2, engine));
-    snap!(
-        "{Region([0x0, 0x1000 | _C____]), Region([0x300, 0x1000 | AC____]), Region([0x0, 0x50 | AC____]), Region([0x50, 0x200 | AC____]), Management(2 | _)}",
-        capas(domain, engine)
-    );
-    snap!("{Region([0x0, 0x200 | _C____])}", capas(domain2, engine));
-    snap!("{CreateDomain(H(1, gen 0))}", updates(engine));
+    // Undo the carve and check the regions and capas.
+    engine.revoke(d0, r1).unwrap();
+    snap!("{[0x0, 0x1000 | 1 (1 - 1 - 1 - 1)]}", regions(d0, engine));
+    snap!("{Region([0x0, 0x1000 | _URWXS])}", capas(d0, engine));
+}
 
-    // Revoke the domain owning the active region. This invalidates regions from the first domain
-    engine.revoke_domain(domain2).unwrap();
-    snap!(
-        "{[0x300, 0x1000 | 1 (0 - 0 - 0 - 0)]}",
-        regions(domain, engine),
-    );
-    snap!(
-        "{Region([0x0, 0x1000 | _C____]), Region([0x300, 0x1000 | AC____])}",
-        capas(domain, engine)
-    );
-    snap!(
-        "{PermissionUpdate(H(0, gen 0)), PermissionUpdate(H(0, gen 0)), RevokeDomain(H(1, gen 0))}",
-        updates(engine)
-    );
+#[test]
+fn carve_lose_permissions() {
+    let engine = unsafe { static_engine!() };
+    let core = 0;
 
-    // Restore the initial region
-    engine.restore_region(domain, region).unwrap();
-    snap!(
-        "{[0x0, 0x1000 | 1 (0 - 0 - 0 - 0)]}",
-        regions(domain, engine),
-    );
-    snap!("{Region([0x0, 0x1000 | AC____])}", capas(domain, engine));
+    // Create initial domain
+    let d0 = engine.create_manager_domain(permission::ALL).unwrap();
+    let _ctx = engine.start_domain_on_core(d0, core).unwrap();
+    snap!("{CreateDomain(H(0, gen 0))}", updates(engine));
+
+    // Create initial region
+    let r0 = engine
+        .create_root_region(
+            d0,
+            AccessRights {
+                start: 0,
+                end: 0x1000,
+                ops: MEMOPS_ALL,
+            },
+        )
+        .unwrap();
+
     snap!("{PermissionUpdate(H(0, gen 0))}", updates(engine));
-}
-
-#[test]
-fn scenario_2() {
-    let engine = unsafe { static_engine!() };
-    let core = 0;
-
-    // Create an initial domain with range 0x0 to 0x1000
-    let domain = engine.create_manager_domain(permission::ALL).unwrap();
-    engine.start_domain_on_core(domain, core).unwrap();
-    let region = engine
-        .create_root_region(
-            domain,
+    // Carve a region.
+    let r1 = engine
+        .carve_region(
+            d0,
+            r0,
             AccessRights {
                 start: 0,
-                end: 0x1000,
-                ops: MemOps::NONE,
-            },
-        )
-        .unwrap();
-    snap!(
-        "{[0x0, 0x1000 | 1 (0 - 0 - 0 - 0)]}",
-        regions(domain, engine)
-    );
-    snap!("{Region([0x0, 0x1000 | AC____])}", capas(domain, engine));
-    snap!(
-        "{PermissionUpdate(H(0, gen 0)), CreateDomain(H(0, gen 0))}",
-        updates(engine)
-    );
-
-    // Duplicate the initial range into two regions
-    let (reg2, _reg3) = engine
-        .segment_region(
-            domain,
-            region,
-            AccessRights {
-                start: 0,
-                end: 0x200,
-                ops: MemOps::NONE,
-            },
-            AccessRights {
-                start: 0x300,
-                end: 0x1000,
-                ops: MemOps::NONE,
-            },
-        )
-        .unwrap();
-    snap!(
-        "{[0x0, 0x200 | 1 (0 - 0 - 0 - 0)] -> [0x300, 0x1000 | 1 (0 - 0 - 0 - 0)]}",
-        regions(domain, engine),
-    );
-    snap!(
-        "{Region([0x0, 0x1000 | _C____]), Region([0x0, 0x200 | AC____]), Region([0x300, 0x1000 | AC____])}",
-        capas(domain, engine),
-    );
-    snap!("{PermissionUpdate(H(0, gen 0))}", updates(engine));
-
-    // Create a new domain and send a region there
-    let dom2 = engine.create_domain(domain).unwrap();
-    let domain2 = engine.get_domain_capa(domain, dom2).unwrap();
-    engine.send(domain, reg2, dom2).unwrap();
-    snap!(
-        "{[0x300, 0x1000 | 1 (0 - 0 - 0 - 0)]}",
-        regions(domain, engine),
-    );
-    snap!(
-        "{[0x0, 0x200 | 1 (0 - 0 - 0 - 0)]}",
-        regions(domain2, engine)
-    );
-    snap!(
-        "{Region([0x0, 0x1000 | _C____]), Region([0x300, 0x1000 | AC____]), Management(2 | _)}",
-        capas(domain, engine)
-    );
-    snap!("{Region([0x0, 0x200 | AC____])}", capas(domain2, engine));
-    snap!(
-        "{PermissionUpdate(H(1, gen 0)), PermissionUpdate(H(0, gen 0)), CreateDomain(H(1, gen 0))}",
-        updates(engine)
-    );
-
-    // Seal domain
-    engine
-        .set_child_config(domain, dom2, capa_engine::Bitmaps::TRAP, 0)
-        .unwrap();
-    engine
-        .set_child_config(domain, dom2, capa_engine::Bitmaps::PERMISSION, 0)
-        .unwrap();
-    engine
-        .set_child_config(domain, dom2, capa_engine::Bitmaps::CORE, 1)
-        .unwrap();
-    let switch = engine.seal(domain, core, dom2).unwrap();
-    // Second seal should fail
-    assert!(engine.seal(domain, core, dom2).is_err());
-
-    // Switch
-    engine.switch(domain, core, switch).unwrap();
-}
-
-#[test]
-fn scenario_3() {
-    let engine = unsafe { static_engine!() };
-    let core = 0;
-
-    // Create initial domain and range memory 0x0 to 0x10000.
-    let domain = engine.create_manager_domain(permission::ALL).unwrap();
-    let _ctx = engine.start_domain_on_core(domain, 0).unwrap();
-    let region = engine
-        .create_root_region(
-            domain,
-            AccessRights {
-                start: 0x0,
-                end: 0x10000,
-                ops: MemOps::NONE,
-            },
-        )
-        .unwrap();
-    // Carve a hole into the region: 0x0 -- 0x1000 | 0x1000 -- 0x2000 | 0x2000 -- 0x10000
-    let (_reg0, reg_chg) = engine
-        .segment_region(
-            domain,
-            region,
-            AccessRights {
-                start: 0x0,
-                end: 0x1000,
-                ops: MemOps::NONE,
-            },
-            AccessRights {
-                start: 0x1000,
-                end: 0x10000,
-                ops: MemOps::NONE,
-            },
-        )
-        .unwrap();
-    let (reg1, _reg2) = engine
-        .segment_region(
-            domain,
-            reg_chg,
-            AccessRights {
-                start: 0x1000,
-                end: 0x2000,
-                ops: MemOps::NONE,
-            },
-            AccessRights {
-                start: 0x2000,
-                end: 0x10000,
-                ops: MemOps::NONE,
-            },
-        )
-        .unwrap();
-    // mimic the null segment trick.
-    let (_reg_empty, reg_to_give) = engine
-        .segment_region(
-            domain,
-            reg1,
-            AccessRights {
-                start: 0x1000,
-                end: 0x1000,
-                ops: MemOps::NONE,
-            },
-            AccessRights {
-                start: 0x1000,
-                end: 0x2000,
-                ops: MemOps::NONE,
-            },
-        )
-        .unwrap();
-    // Create a new domain and send the region.
-    let encl = engine.create_domain(domain).unwrap();
-    let enclave = engine.get_domain_capa(domain, encl).unwrap();
-    engine.send(domain, reg_to_give, encl).unwrap();
-
-    // Seal domain.
-    engine
-        .set_child_config(domain, encl, capa_engine::Bitmaps::TRAP, 0)
-        .unwrap();
-    engine
-        .set_child_config(domain, encl, capa_engine::Bitmaps::PERMISSION, 0)
-        .unwrap();
-    engine
-        .set_child_config(domain, encl, capa_engine::Bitmaps::CORE, 1)
-        .unwrap();
-    let _ = engine.seal(domain, core, encl).unwrap();
-    snap!(
-        "{[0x1000, 0x2000 | 1 (0 - 0 - 0 - 0)]}",
-        regions(enclave, engine)
-    );
-    // Now delete the enclaves' region.
-    engine.revoke(domain, reg1).unwrap();
-    snap!("{}", regions(enclave, engine));
-    engine.revoke(domain, encl).unwrap();
-    // Test cleanup
-    engine.revoke(domain, region).unwrap();
-    snap!(
-        "{[0x0, 0x10000 | 1 (0 - 0 - 0 - 0)]}",
-        regions(domain, engine)
-    );
-    snap!("{Region([0x0, 0x10000 | AC____])}", capas(domain, engine));
-}
-
-#[test]
-fn access_rights_test() {
-    let engine = unsafe { static_engine!() };
-    let core = 0;
-    // Create initial domain.
-    let domain = engine.create_manager_domain(permission::ALL).unwrap();
-    let _ctx = engine.start_domain_on_core(domain, core).unwrap();
-    let region = engine
-        .create_root_region(
-            domain,
-            AccessRights {
-                start: 0,
-                end: 0x100000,
-                ops: MEMOPS_ALL,
-            },
-        )
-        .unwrap();
-
-    snap!(
-        "{[0x0, 0x100000 | 1 (1 - 1 - 1 - 1)]}",
-        regions(domain, engine)
-    );
-    snap!("{Region([0x0, 0x100000 | ACRWXS])}", capas(domain, engine));
-    // Try the null segment trick.
-    let (_reg1, _reg2) = engine
-        .segment_region(
-            domain,
-            region,
-            AccessRights {
-                start: 0,
-                end: 0,
-                ops: MEMOPS_ALL,
-            },
-            AccessRights {
-                start: 0,
-                end: 0x100000,
-                ops: MEMOPS_ALL,
-            },
-        )
-        .unwrap();
-
-    snap!(
-        "{[0x0, 0x100000 | 1 (1 - 1 - 1 - 1)]}",
-        regions(domain, engine)
-    );
-    snap!("{Region([0x0, 0x100000 | _CRWXS]), Region([0x0, 0x0 | _CRWXS]), Region([0x0, 0x100000 | ACRWXS])}", capas(domain, engine));
-
-    // Now revoke the original capability.
-    engine.revoke(domain, region).unwrap();
-    snap!(
-        "{[0x0, 0x100000 | 1 (1 - 1 - 1 - 1)]}",
-        regions(domain, engine)
-    );
-    snap!("{Region([0x0, 0x100000 | ACRWXS])}", capas(domain, engine));
-
-    // Now try a duplicate.
-    let (_reg1, _reg2) = engine
-        .segment_region(
-            domain,
-            region,
-            AccessRights {
-                start: 0,
-                end: 0x100000,
-                ops: MEMOPS_ALL,
-            },
-            AccessRights {
-                start: 0,
-                end: 0x100000,
-                ops: MEMOPS_ALL,
-            },
-        )
-        .unwrap();
-    snap!(
-        "{[0x0, 0x100000 | 2 (2 - 2 - 2 - 2)]}",
-        regions(domain, engine)
-    );
-    snap!(
-        "{Region([0x0, 0x100000 | _CRWXS]), Region([0x0, 0x100000 | A_RWXS]), Region([0x0, 0x100000 | A_RWXS])}",
-        capas(domain, engine)
-    );
-    // revoke.
-    engine.revoke(domain, region).unwrap();
-    snap!(
-        "{[0x0, 0x100000 | 1 (1 - 1 - 1 - 1)]}",
-        regions(domain, engine)
-    );
-    snap!("{Region([0x0, 0x100000 | ACRWXS])}", capas(domain, engine));
-    // Now with different access rights.
-    let (reg1, _reg2) = engine
-        .segment_region(
-            domain,
-            region,
-            AccessRights {
-                start: 0,
-                end: 0x100000,
+                end: 0x500,
                 ops: MemOps::READ,
             },
+        )
+        .unwrap();
+
+    snap!(
+        "{[0x0, 0x500 | 1 (1 - 0 - 0 - 0)] -> [0x500, 0x1000 | 1 (1 - 1 - 1 - 1)]}",
+        regions(d0, engine)
+    );
+    snap!(
+        "{Region([0x0, 0x1000 | PURWXS]), Region([0x0, 0x500 | _UR___])}",
+        capas(d0, engine)
+    );
+    // The carve changes the permissions but there should be only one.
+    snap!("{PermissionUpdate(H(0, gen 0))}", updates(engine));
+
+    // Undo the carve and check the regions and capas.
+    engine.revoke(d0, r1).unwrap();
+    snap!("{[0x0, 0x1000 | 1 (1 - 1 - 1 - 1)]}", regions(d0, engine));
+    snap!("{Region([0x0, 0x1000 | _URWXS])}", capas(d0, engine));
+}
+
+#[test]
+fn double_carve() {
+    let engine = unsafe { static_engine!() };
+    let core = 0;
+
+    // Create initial domain
+    let d0 = engine.create_manager_domain(permission::ALL).unwrap();
+    let _ctx = engine.start_domain_on_core(d0, core).unwrap();
+    // Create initial region
+    let r0 = engine
+        .create_root_region(
+            d0,
             AccessRights {
                 start: 0,
-                end: 0x100000,
+                end: 0x1000,
                 ops: MEMOPS_ALL,
             },
         )
         .unwrap();
-    snap!(
-        "{[0x0, 0x100000 | 2 (2 - 1 - 1 - 1)]}",
-        regions(domain, engine)
-    );
-    snap!(
-        "{Region([0x0, 0x100000 | _CRWXS]), Region([0x0, 0x100000 | A_RWXS]), Region([0x0, 0x100000 | A_R___])}",
-        capas(domain, engine)
-    );
-    // Now pause the read one.
-    let (_, _) = engine
-        .segment_region(
-            domain,
-            reg1,
+
+    // First carve.
+    let _r1 = engine
+        .carve_region(
+            d0,
+            r0,
             AccessRights {
-                start: 0,
-                end: 0,
-                ops: MemOps::NONE,
+                start: 0x0,
+                end: 0x500,
+                ops: MEMOPS_ALL,
             },
+        )
+        .unwrap();
+
+    // Try to carve the same region again.
+    let invalid = engine.carve_region(
+        d0,
+        r0,
+        AccessRights {
+            start: 0x0,
+            end: 0x500,
+            ops: MEMOPS_ALL,
+        },
+    );
+    assert!(invalid.is_err());
+    assert_eq!(invalid.err().unwrap(), CapaError::InvalidOperation);
+}
+
+#[test]
+fn carve_send() {
+    let engine = unsafe { static_engine!() };
+    let core = 0;
+
+    // Create initial domain
+    let d0 = engine.create_manager_domain(permission::ALL).unwrap();
+    let _ctx = engine.start_domain_on_core(d0, core).unwrap();
+    // Create initial region
+    let r0 = engine
+        .create_root_region(
+            d0,
             AccessRights {
                 start: 0,
-                end: 0,
-                ops: MemOps::NONE,
+                end: 0x1000,
+                ops: MEMOPS_ALL,
+            },
+        )
+        .unwrap();
+
+    // Create a second domain.
+    let d1_mgmt = engine.create_domain(d0).unwrap();
+    let d1 = engine.get_domain_capa(d0, d1_mgmt).unwrap();
+
+    // Carve a region.
+    let r1 = engine
+        .carve_region(
+            d0,
+            r0,
+            AccessRights {
+                start: 0,
+                end: 0x500,
+                ops: MEMOPS_ALL,
+            },
+        )
+        .unwrap();
+
+    // Send it to dom2.
+    engine.send(d0, r1, d1_mgmt).unwrap();
+
+    snap!("{[0x500, 0x1000 | 1 (1 - 1 - 1 - 1)]}", regions(d0, engine));
+    //TODO(Charly): this is not gonna be useful for the attestation.
+    //It still says confidential.
+    snap!(
+        "{Region([0x0, 0x1000 | PURWXS]), Management(2 | _)}",
+        capas(d0, engine)
+    );
+    snap!("{[0x0, 0x500 | 1 (1 - 1 - 1 - 1)]}", regions(d1, engine));
+    snap!("{Region([0x0, 0x500 | _URWXS])}", capas(d1, engine));
+
+    engine.revoke_domain(d1).unwrap();
+    snap!("{Region([0x0, 0x1000 | _URWXS])}", capas(d0, engine));
+    snap!("{[0x0, 0x1000 | 1 (1 - 1 - 1 - 1)]}", regions(d0, engine));
+}
+
+#[test]
+fn carve_chop_chop() {
+    let engine = unsafe { static_engine!() };
+    let core = 0;
+
+    // Create initial domain
+    let d0 = engine.create_manager_domain(permission::ALL).unwrap();
+    let _ctx = engine.start_domain_on_core(d0, core).unwrap();
+    // Create initial region
+    let r0 = engine
+        .create_root_region(
+            d0,
+            AccessRights {
+                start: 0,
+                end: 5,
+                ops: MEMOPS_ALL,
+            },
+        )
+        .unwrap();
+
+    for i in 0..5 {
+        let _ = engine
+            .carve_region(
+                d0,
+                r0,
+                AccessRights {
+                    start: i,
+                    end: 1 + i,
+                    ops: MEMOPS_ALL,
+                },
+            )
+            .unwrap();
+    }
+    snap!("{[0x0, 0x5 | 1 (1 - 1 - 1 - 1)]}", regions(d0, engine));
+    snap!("{Region([0x0, 0x5 | PURWXS]), Region([0x0, 0x1 | _URWXS]), Region([0x1, 0x2 | _URWXS]), Region([0x2, 0x3 | _URWXS]), Region([0x3, 0x4 | _URWXS]), Region([0x4, 0x5 | _URWXS])}", capas(d0, engine));
+}
+
+#[test]
+fn carve_recursive_chop() {
+    let engine = unsafe { static_engine!() };
+    let core = 0;
+
+    // Create initial domain
+    let d0 = engine.create_manager_domain(permission::ALL).unwrap();
+    let _ctx = engine.start_domain_on_core(d0, core).unwrap();
+    // Create initial region
+    let mut carver = engine
+        .create_root_region(
+            d0,
+            AccessRights {
+                start: 0,
+                end: 5,
+                ops: MEMOPS_ALL,
+            },
+        )
+        .unwrap();
+
+    for i in 0..4 {
+        carver = engine
+            .carve_region(
+                d0,
+                carver,
+                AccessRights {
+                    start: 0,
+                    end: (4 - i),
+                    ops: MEMOPS_ALL,
+                },
+            )
+            .unwrap();
+    }
+    snap!("{[0x0, 0x5 | 1 (1 - 1 - 1 - 1)]}", regions(d0, engine));
+    // TODO(Charly): that's not a lot of useful information really.
+    snap!("{Region([0x0, 0x5 | PURWXS]), Region([0x0, 0x4 | PURWXS]), Region([0x0, 0x3 | PURWXS]), Region([0x0, 0x2 | PURWXS]), Region([0x0, 0x1 | _URWXS])}", capas(d0, engine));
+}
+
+#[test]
+fn carve_access_rights() {
+    let engine = unsafe { static_engine!() };
+    let core = 0;
+
+    // Create initial domain
+    let d0 = engine.create_manager_domain(permission::ALL).unwrap();
+    let _ctx = engine.start_domain_on_core(d0, core).unwrap();
+    // Create initial region
+    let r0 = engine
+        .create_root_region(
+            d0,
+            AccessRights {
+                start: 0,
+                end: 5,
+                ops: MEMOPS_ALL,
+            },
+        )
+        .unwrap();
+
+    // Carve with less access rights.
+    let r1 = engine
+        .carve_region(
+            d0,
+            r0,
+            AccessRights {
+                start: 0,
+                end: 1,
+                ops: MemOps::READ | MemOps::WRITE,
             },
         )
         .unwrap();
     snap!(
-        "{[0x0, 0x100000 | 1 (1 - 1 - 1 - 1)]}",
-        regions(domain, engine)
+        "{[0x0, 0x1 | 1 (1 - 1 - 0 - 0)] -> [0x1, 0x5 | 1 (1 - 1 - 1 - 1)]}",
+        regions(d0, engine)
     );
     snap!(
-        "{Region([0x0, 0x100000 | _CRWXS]), Region([0x0, 0x100000 | A_RWXS]), Region([0x0, 0x100000 | __R___]), Region([0x0, 0x0 | ______]), Region([0x0, 0x0 | ______])}",
-        capas(domain, engine)
+        "{Region([0x0, 0x5 | PURWXS]), Region([0x0, 0x1 | _URW__])}",
+        capas(d0, engine)
     );
-    // Cleanup everything from a higher capa.
-    engine.revoke(domain, region).unwrap();
-    snap!(
-        "{[0x0, 0x100000 | 1 (1 - 1 - 1 - 1)]}",
-        regions(domain, engine)
+    // Try to cheat and get access to bigger region.
+    let invalid = engine.carve_region(
+        d0,
+        r1,
+        AccessRights {
+            start: 0,
+            end: 2,
+            ops: MemOps::READ | MemOps::WRITE,
+        },
     );
-    snap!("{Region([0x0, 0x100000 | ACRWXS])}", capas(domain, engine));
+    assert!(invalid.is_err());
+    assert_eq!(invalid.err().unwrap(), CapaError::InvalidOperation);
+
+    // Now try to cheat and get more accesses from the carved region.
+    let invalid = engine.carve_region(
+        d0,
+        r1,
+        AccessRights {
+            start: 0,
+            end: 1,
+            ops: MEMOPS_ALL,
+        },
+    );
+    assert!(invalid.is_err());
+    assert_eq!(invalid.err().unwrap(), CapaError::InvalidOperation);
 }
 
+// —————————————————————————————— Alias Region —————————————————————————————— //
+
+#[test]
+fn simple_alias() {
+    let engine = unsafe { static_engine!() };
+    let core = 0;
+
+    // Create initial domain
+    let d0 = engine.create_manager_domain(permission::ALL).unwrap();
+    let _ctx = engine.start_domain_on_core(d0, core).unwrap();
+    snap!("{CreateDomain(H(0, gen 0))}", updates(engine));
+
+    // Create initial region
+    let r0 = engine
+        .create_root_region(
+            d0,
+            AccessRights {
+                start: 0,
+                end: 0x1000,
+                ops: MEMOPS_ALL,
+            },
+        )
+        .unwrap();
+
+    snap!("{PermissionUpdate(H(0, gen 0))}", updates(engine));
+    // Alias a region.
+    let r1 = engine
+        .alias_region(
+            d0,
+            r0,
+            AccessRights {
+                start: 0,
+                end: 0x500,
+                ops: MEMOPS_ALL,
+            },
+        )
+        .unwrap();
+
+    snap!(
+        "{[0x0, 0x500 | 2 (2 - 2 - 2 - 2)] -> [0x500, 0x1000 | 1 (1 - 1 - 1 - 1)]}",
+        regions(d0, engine)
+    );
+    //TODO(charly): is the first one not confusing?
+    snap!(
+        "{Region([0x0, 0x1000 | PURWXS]), Region([0x0, 0x500 | __RWXS])}",
+        capas(d0, engine)
+    );
+    // The alias does not change the regions so it should work.
+    snap!("{}", updates(engine));
+
+    // Undo the alias and check the regions and capas.
+    engine.revoke(d0, r1).unwrap();
+    snap!("{[0x0, 0x1000 | 1 (1 - 1 - 1 - 1)]}", regions(d0, engine));
+    snap!("{Region([0x0, 0x1000 | _URWXS])}", capas(d0, engine));
+}
+
+#[test]
+fn double_alias() {
+    let engine = unsafe { static_engine!() };
+    let core = 0;
+
+    // Create initial domain
+    let d0 = engine.create_manager_domain(permission::ALL).unwrap();
+    let _ctx = engine.start_domain_on_core(d0, core).unwrap();
+    // Create initial region
+    let r0 = engine
+        .create_root_region(
+            d0,
+            AccessRights {
+                start: 0,
+                end: 0x1000,
+                ops: MEMOPS_ALL,
+            },
+        )
+        .unwrap();
+
+    // First alias.
+    let _ = engine
+        .alias_region(
+            d0,
+            r0,
+            AccessRights {
+                start: 0x0,
+                end: 0x500,
+                ops: MEMOPS_ALL,
+            },
+        )
+        .unwrap();
+
+    // Try to alias the same region again.
+    let _ = engine
+        .alias_region(
+            d0,
+            r0,
+            AccessRights {
+                start: 0x0,
+                end: 0x500,
+                ops: MEMOPS_ALL,
+            },
+        )
+        .unwrap();
+    snap!("{Region([0x0, 0x1000 | PURWXS]), Region([0x0, 0x500 | __RWXS]), Region([0x0, 0x500 | __RWXS])}", capas(d0, engine));
+    snap!(
+        "{[0x0, 0x500 | 3 (3 - 3 - 3 - 3)] -> [0x500, 0x1000 | 1 (1 - 1 - 1 - 1)]}",
+        regions(d0, engine)
+    );
+}
+
+#[test]
+fn alias_send() {
+    let engine = unsafe { static_engine!() };
+    let core = 0;
+
+    // Create initial domain
+    let d0 = engine.create_manager_domain(permission::ALL).unwrap();
+    let _ctx = engine.start_domain_on_core(d0, core).unwrap();
+    // Create initial region
+    let r0 = engine
+        .create_root_region(
+            d0,
+            AccessRights {
+                start: 0,
+                end: 0x1000,
+                ops: MEMOPS_ALL,
+            },
+        )
+        .unwrap();
+
+    // Create a second domain.
+    let d1_mgmt = engine.create_domain(d0).unwrap();
+    let d1 = engine.get_domain_capa(d0, d1_mgmt).unwrap();
+
+    // Alias a region.
+    let r1 = engine
+        .alias_region(
+            d0,
+            r0,
+            AccessRights {
+                start: 0,
+                end: 0x500,
+                ops: MEMOPS_ALL,
+            },
+        )
+        .unwrap();
+
+    // Send it to dom2.
+    engine.send(d0, r1, d1_mgmt).unwrap();
+
+    snap!("{[0x0, 0x1000 | 1 (1 - 1 - 1 - 1)]}", regions(d0, engine));
+    //TODO(Charly): this is not gonna be useful for the attestation.
+    //It still says confidential.
+    snap!(
+        "{Region([0x0, 0x1000 | PURWXS]), Management(2 | _)}",
+        capas(d0, engine)
+    );
+    snap!("{[0x0, 0x500 | 1 (1 - 1 - 1 - 1)]}", regions(d1, engine));
+    snap!("{Region([0x0, 0x500 | __RWXS])}", capas(d1, engine));
+
+    engine.revoke_domain(d1).unwrap();
+    snap!("{Region([0x0, 0x1000 | _URWXS])}", capas(d0, engine));
+    snap!("{[0x0, 0x1000 | 1 (1 - 1 - 1 - 1)]}", regions(d0, engine));
+}
+
+#[test]
+fn alias_chop_chop() {
+    let engine = unsafe { static_engine!() };
+    let core = 0;
+
+    // Create initial domain
+    let d0 = engine.create_manager_domain(permission::ALL).unwrap();
+    let _ctx = engine.start_domain_on_core(d0, core).unwrap();
+    // Create initial region
+    let r0 = engine
+        .create_root_region(
+            d0,
+            AccessRights {
+                start: 0,
+                end: 5,
+                ops: MEMOPS_ALL,
+            },
+        )
+        .unwrap();
+
+    for i in 0..5 {
+        let _ = engine
+            .alias_region(
+                d0,
+                r0,
+                AccessRights {
+                    start: i,
+                    end: 1 + i,
+                    ops: MEMOPS_ALL,
+                },
+            )
+            .unwrap();
+    }
+    snap!("{[0x0, 0x5 | 2 (2 - 2 - 2 - 2)]}", regions(d0, engine));
+    snap!("{Region([0x0, 0x5 | PURWXS]), Region([0x0, 0x1 | __RWXS]), Region([0x1, 0x2 | __RWXS]), Region([0x2, 0x3 | __RWXS]), Region([0x3, 0x4 | __RWXS]), Region([0x4, 0x5 | __RWXS])}", capas(d0, engine));
+}
+
+#[test]
+fn alias_recursive_chop() {
+    let engine = unsafe { static_engine!() };
+    let core = 0;
+
+    // Create initial domain
+    let d0 = engine.create_manager_domain(permission::ALL).unwrap();
+    let _ctx = engine.start_domain_on_core(d0, core).unwrap();
+    // Create initial region
+    let mut carver = engine
+        .create_root_region(
+            d0,
+            AccessRights {
+                start: 0,
+                end: 5,
+                ops: MEMOPS_ALL,
+            },
+        )
+        .unwrap();
+
+    for i in 0..4 {
+        carver = engine
+            .alias_region(
+                d0,
+                carver,
+                AccessRights {
+                    start: 0,
+                    end: (4 - i),
+                    ops: MEMOPS_ALL,
+                },
+            )
+            .unwrap();
+    }
+    snap!("{[0x0, 0x1 | 5 (5 - 5 - 5 - 5)] -> [0x1, 0x2 | 4 (4 - 4 - 4 - 4)] -> [0x2, 0x3 | 3 (3 - 3 - 3 - 3)] -> [0x3, 0x4 | 2 (2 - 2 - 2 - 2)] -> [0x4, 0x5 | 1 (1 - 1 - 1 - 1)]}", regions(d0, engine));
+    // TODO(Charly): that's not a lot of useful information really.
+    snap!("{Region([0x0, 0x5 | PURWXS]), Region([0x0, 0x4 | P_RWXS]), Region([0x0, 0x3 | P_RWXS]), Region([0x0, 0x2 | P_RWXS]), Region([0x0, 0x1 | __RWXS])}", capas(d0, engine));
+}
+
+#[test]
+fn alias_access_rights() {
+    let engine = unsafe { static_engine!() };
+    let core = 0;
+
+    // Create initial domain
+    let d0 = engine.create_manager_domain(permission::ALL).unwrap();
+    let _ctx = engine.start_domain_on_core(d0, core).unwrap();
+    // Create initial region
+    let r0 = engine
+        .create_root_region(
+            d0,
+            AccessRights {
+                start: 0,
+                end: 5,
+                ops: MEMOPS_ALL,
+            },
+        )
+        .unwrap();
+
+    // Alias with less access rights.
+    let r1 = engine
+        .alias_region(
+            d0,
+            r0,
+            AccessRights {
+                start: 0,
+                end: 1,
+                ops: MemOps::READ | MemOps::WRITE,
+            },
+        )
+        .unwrap();
+    snap!(
+        "{[0x0, 0x1 | 2 (2 - 2 - 1 - 1)] -> [0x1, 0x5 | 1 (1 - 1 - 1 - 1)]}",
+        regions(d0, engine)
+    );
+    snap!(
+        "{Region([0x0, 0x5 | PURWXS]), Region([0x0, 0x1 | __RW__])}",
+        capas(d0, engine)
+    );
+    // Try to cheat and get access to bigger region.
+    let invalid = engine.alias_region(
+        d0,
+        r1,
+        AccessRights {
+            start: 0,
+            end: 2,
+            ops: MemOps::READ | MemOps::WRITE,
+        },
+    );
+    assert!(invalid.is_err());
+    assert_eq!(invalid.err().unwrap(), CapaError::InvalidOperation);
+
+    // Now try to cheat and get more accesses from the carved region.
+    let invalid = engine.alias_region(
+        d0,
+        r1,
+        AccessRights {
+            start: 0,
+            end: 1,
+            ops: MEMOPS_ALL,
+        },
+    );
+    assert!(invalid.is_err());
+    assert_eq!(invalid.err().unwrap(), CapaError::InvalidOperation);
+}
+
+// ————————————————————————————— Carve & Alias —————————————————————————————— //
+
+#[test]
+fn counter_alias_carve_bug() {
+    let engine = unsafe { static_engine!() };
+    let core = 0;
+
+    // Create initial domain
+    let d0 = engine.create_manager_domain(permission::ALL).unwrap();
+    let _ctx = engine.start_domain_on_core(d0, core).unwrap();
+    // Create initial region
+    let r0 = engine
+        .create_root_region(
+            d0,
+            AccessRights {
+                start: 0,
+                end: 10,
+                ops: MEMOPS_ALL,
+            },
+        )
+        .unwrap();
+    // Alias a region then carve it and send both to the child.
+    let r1 = engine
+        .alias_region(
+            d0,
+            r0,
+            AccessRights {
+                start: 0,
+                end: 5,
+                ops: MEMOPS_ALL,
+            },
+        )
+        .unwrap();
+    let r2 = engine
+        .carve_region(
+            d0,
+            r1,
+            AccessRights {
+                start: 0,
+                end: 5,
+                ops: MEMOPS_ALL,
+            },
+        )
+        .unwrap();
+
+    let d1_mgmt = engine.create_domain(d0).unwrap();
+    let d1 = engine.get_domain_capa(d0, d1_mgmt).unwrap();
+    engine.send(d0, r1, d1_mgmt).unwrap();
+
+    // This should not unlock a region.
+    snap!("{}", regions(d1, engine));
+
+    engine.send(d0, r2, d1_mgmt).unwrap();
+
+    snap!(
+        "{Region([0x0, 0x5 | P_RWXS]), Region([0x0, 0x5 | __RWXS])}",
+        capas(d1, engine)
+    );
+    snap!("{[0x0, 0x5 | 1 (1 - 1 - 1 - 1)]}", regions(d1, engine));
+
+    // Revoke the aliased (r1).
+    engine.revoke(d1, LocalCapa::new(0)).unwrap();
+    snap!("{}", capas(d1, engine));
+    snap!("{}", regions(d1, engine));
+}
+
+#[test]
+fn alias_then_carve() {
+    let engine = unsafe { static_engine!() };
+    let core = 0;
+
+    // Create initial domain
+    let d0 = engine.create_manager_domain(permission::ALL).unwrap();
+    let _ctx = engine.start_domain_on_core(d0, core).unwrap();
+    // Create initial region
+    let r0 = engine
+        .create_root_region(
+            d0,
+            AccessRights {
+                start: 0,
+                end: 10,
+                ops: MEMOPS_ALL,
+            },
+        )
+        .unwrap();
+
+    // Alias a region with less rights.
+    let r1 = engine
+        .alias_region(
+            d0,
+            r0,
+            AccessRights {
+                start: 0,
+                end: 5,
+                ops: MemOps::READ,
+            },
+        )
+        .unwrap();
+    // Carve that region. This should fail because it's not unique.
+    // We try the carve on the root region.
+    let carved_error = engine.carve_region(
+        d0,
+        r0,
+        AccessRights {
+            start: 0,
+            end: 5,
+            ops: MemOps::READ,
+        },
+    );
+    assert!(carved_error.is_err());
+    assert_eq!(carved_error.err().unwrap(), CapaError::InvalidOperation);
+
+    // Check the state is untouched.
+    snap!(
+        "{Region([0x0, 0xa | PURWXS]), Region([0x0, 0x5 | __R___])}",
+        capas(d0, engine)
+    );
+    snap!(
+        "{[0x0, 0x5 | 2 (2 - 1 - 1 - 1)] -> [0x5, 0xa | 1 (1 - 1 - 1 - 1)]}",
+        regions(d0, engine)
+    );
+
+    // Now try to do a carve that overlaps partially at the head.
+    let carved_error = engine.carve_region(
+        d0,
+        r0,
+        AccessRights {
+            start: 4,
+            end: 6,
+            ops: MemOps::READ,
+        },
+    );
+    assert!(carved_error.is_err());
+    assert_eq!(carved_error.err().unwrap(), CapaError::InvalidOperation);
+
+    // Try to carve outside of alias.
+    let carved_error = engine.carve_region(
+        d0,
+        r1,
+        AccessRights {
+            start: 4,
+            end: 6,
+            ops: MemOps::READ,
+        },
+    );
+    assert!(carved_error.is_err());
+    assert_eq!(carved_error.err().unwrap(), CapaError::InvalidOperation);
+
+    // Now try to carve from r1 instead of r0.
+    let r2 = engine
+        .carve_region(
+            d0,
+            r1,
+            AccessRights {
+                start: 0,
+                end: 5,
+                ops: MemOps::READ,
+            },
+        )
+        .unwrap();
+    snap!(
+        "{Region([0x0, 0xa | PURWXS]), Region([0x0, 0x5 | P_R___]), Region([0x0, 0x5 | __R___])}",
+        capas(d0, engine)
+    );
+    snap!(
+        "{[0x0, 0x5 | 2 (2 - 1 - 1 - 1)] -> [0x5, 0xa | 1 (1 - 1 - 1 - 1)]}",
+        regions(d0, engine)
+    );
+    //assert!(carved_error.is_err());
+    //assert_eq!(carved_error.err().unwrap(), CapaError::InvalidOperation);
+
+    // Carve r1 again.
+    let carved_error = engine.carve_region(
+        d0,
+        r1,
+        AccessRights {
+            start: 1,
+            end: 2,
+            ops: MemOps::READ,
+        },
+    );
+
+    assert!(carved_error.is_err());
+    assert_eq!(carved_error.err().unwrap(), CapaError::InvalidOperation);
+
+    // Alias r1 again.
+    let alias_error = engine.alias_region(
+        d0,
+        r1,
+        AccessRights {
+            start: 1,
+            end: 2,
+            ops: MemOps::READ,
+        },
+    );
+    assert!(alias_error.is_err());
+    assert_eq!(alias_error.err().unwrap(), CapaError::InvalidOperation);
+
+    // Send the alias->carved to a second domain.
+    let d1_mgmt = engine.create_domain(d0).unwrap();
+    let d1 = engine.get_domain_capa(d0, d1_mgmt).unwrap();
+    engine.send(d0, r2, d1_mgmt).unwrap();
+
+    snap!(
+        "{Region([0x0, 0xa | PURWXS]), Region([0x0, 0x5 | P_R___]), Management(2 | _)}",
+        capas(d0, engine)
+    );
+    snap!("{[0x0, 0xa | 1 (1 - 1 - 1 - 1)]}", regions(d0, engine));
+    snap!("{Region([0x0, 0x5 | __R___])}", capas(d1, engine));
+    snap!("{[0x0, 0x5 | 1 (1 - 0 - 0 - 0)]}", regions(d1, engine));
+
+    // We started with an alias so d0 should still have it.
+    engine.send(d0, r1, d1_mgmt).unwrap();
+    snap!(
+        "{Region([0x0, 0xa | PURWXS]), Management(2 | _)}",
+        capas(d0, engine)
+    );
+    // All counters are at 1 because the carve was made from the alias and sent.
+    snap!("{[0x0, 0xa | 1 (1 - 1 - 1 - 1)]}", regions(d0, engine));
+    // One region that's carved from and alias and the carved one.
+    // TODO(Charly) veryyyyy confusing though.
+    snap!(
+        "{Region([0x0, 0x5 | __R___]), Region([0x0, 0x5 | P_R___])}",
+        capas(d1, engine)
+    );
+    snap!("{[0x0, 0x5 | 1 (1 - 0 - 0 - 0)]}", regions(d1, engine));
+}
+
+// —————————————————————————— Adversarial Enclave ——————————————————————————— //
+
+#[test]
+fn enclave_steal_via_alias() {
+    let engine = unsafe { static_engine!() };
+    let core = 0;
+
+    // Create initial domain
+    let d0 = engine.create_manager_domain(permission::ALL).unwrap();
+    let _ctx = engine.start_domain_on_core(d0, core).unwrap();
+    // Create initial region
+    let r0 = engine
+        .create_root_region(
+            d0,
+            AccessRights {
+                start: 0,
+                end: 10,
+                ops: MEMOPS_ALL,
+            },
+        )
+        .unwrap();
+    // Create an enclave region.
+    let e_r0 = engine
+        .carve_region(
+            d0,
+            r0,
+            AccessRights {
+                start: 0,
+                end: 5,
+                ops: MEMOPS_ALL,
+            },
+        )
+        .unwrap();
+
+    // Create the enclave.
+    let d1_mgmt = engine.create_domain(d0).unwrap();
+    let d1 = engine.get_domain_capa(d0, d1_mgmt).unwrap();
+    engine
+        .set_child_config(
+            d0,
+            d1_mgmt,
+            capa_engine::Bitmaps::PERMISSION,
+            permission::ALIAS | permission::CARVE,
+        )
+        .unwrap();
+
+    // Get a revocation handle in the d0.
+    let revoke_r0 = engine.create_revoke_capa(d0, e_r0).unwrap();
+
+    // Send the region to the enclave.
+    engine.send(d0, e_r0, d1_mgmt).unwrap();
+
+    // Check the enclave has the capa.
+    assert!(engine
+        .get_region_capa(d1, LocalCapa::new(0))
+        .unwrap()
+        .is_some());
+
+    // Let the enclave alias part of the memory.
+    let _e_r1 = engine
+        .alias_region(
+            d1,
+            LocalCapa::new(0),
+            AccessRights {
+                start: 1,
+                end: 2,
+                ops: MEMOPS_ALL,
+            },
+        )
+        .unwrap();
+
+    snap!(
+        "{Region([0x0, 0x5 | PURWXS]), Region([0x1, 0x2 | __RWXS])}",
+        capas(d1, engine)
+    );
+    snap!("{[0x0, 0x1 | 1 (1 - 1 - 1 - 1)] -> [0x1, 0x2 | 2 (2 - 2 - 2 - 2)] -> [0x2, 0x5 | 1 (1 - 1 - 1 - 1)]}", regions(d1, engine));
+    // Check the parent only has the second part of the address space.
+    snap!(
+        "{Region([0x0, 0xa | PURWXS]), Management(2 | _), RegionRevoke([0x0, 0x5 | CRWXS])}",
+        capas(d0, engine)
+    );
+    snap!("{[0x5, 0xa | 1 (1 - 1 - 1 - 1)]}", regions(d0, engine));
+
+    // Now revoke with the handle we have.
+    engine.revoke(d0, revoke_r0).unwrap();
+
+    // The child should be left without any capas.
+    snap!("{}", capas(d1, engine));
+    // and without any region.
+    snap!("{}", regions(d1, engine));
+    // The parent should have access to the entire address space.
+    snap!(
+        "{Region([0x0, 0xa | _URWXS]), Management(2 | _)}",
+        capas(d0, engine)
+    );
+    snap!("{[0x0, 0xa | 1 (1 - 1 - 1 - 1)]}", regions(d0, engine));
+}
+
+#[test]
+fn enclave_steal_via_carve() {
+    let engine = unsafe { static_engine!() };
+    let core = 0;
+
+    // Create initial domain
+    let d0 = engine.create_manager_domain(permission::ALL).unwrap();
+    let _ctx = engine.start_domain_on_core(d0, core).unwrap();
+    // Create initial region
+    let r0 = engine
+        .create_root_region(
+            d0,
+            AccessRights {
+                start: 0,
+                end: 10,
+                ops: MEMOPS_ALL,
+            },
+        )
+        .unwrap();
+    // Create an enclave region.
+    let e_r0 = engine
+        .carve_region(
+            d0,
+            r0,
+            AccessRights {
+                start: 0,
+                end: 5,
+                ops: MEMOPS_ALL,
+            },
+        )
+        .unwrap();
+
+    // Create the enclave.
+    let d1_mgmt = engine.create_domain(d0).unwrap();
+    let d1 = engine.get_domain_capa(d0, d1_mgmt).unwrap();
+    engine
+        .set_child_config(
+            d0,
+            d1_mgmt,
+            capa_engine::Bitmaps::PERMISSION,
+            permission::ALIAS | permission::CARVE,
+        )
+        .unwrap();
+
+    // Get a revocation handle in the d0.
+    let revoke_r0 = engine.create_revoke_capa(d0, e_r0).unwrap();
+
+    // Send the region to the enclave.
+    engine.send(d0, e_r0, d1_mgmt).unwrap();
+
+    // Check the enclave has the capa.
+    assert!(engine
+        .get_region_capa(d1, LocalCapa::new(0))
+        .unwrap()
+        .is_some());
+
+    // Let the enclave carve part of the memory.
+    let _e_r1 = engine
+        .carve_region(
+            d1,
+            LocalCapa::new(0),
+            AccessRights {
+                start: 1,
+                end: 2,
+                ops: MemOps::READ,
+            },
+        )
+        .unwrap();
+
+    snap!(
+        "{Region([0x0, 0x5 | PURWXS]), Region([0x1, 0x2 | _UR___])}",
+        capas(d1, engine)
+    );
+    snap!("{[0x0, 0x1 | 1 (1 - 1 - 1 - 1)] -> [0x1, 0x2 | 1 (1 - 0 - 0 - 0)] -> [0x2, 0x5 | 1 (1 - 1 - 1 - 1)]}", regions(d1, engine));
+    // Check the parent only has the second part of the address space.
+    snap!(
+        "{Region([0x0, 0xa | PURWXS]), Management(2 | _), RegionRevoke([0x0, 0x5 | CRWXS])}",
+        capas(d0, engine)
+    );
+    snap!("{[0x5, 0xa | 1 (1 - 1 - 1 - 1)]}", regions(d0, engine));
+
+    // Now revoke with the handle we have.
+    engine.revoke(d0, revoke_r0).unwrap();
+
+    // The child should be left without any capas.
+    snap!("{}", capas(d1, engine));
+    // and without any region.
+    snap!("{}", regions(d1, engine));
+    // The parent should have access to the entire address space.
+    snap!(
+        "{Region([0x0, 0xa | _URWXS]), Management(2 | _)}",
+        capas(d0, engine)
+    );
+    snap!("{[0x0, 0xa | 1 (1 - 1 - 1 - 1)]}", regions(d0, engine));
+}
+
+#[test]
+fn enclave_enclave_steal() {
+    let engine = unsafe { static_engine!() };
+    let core = 0;
+
+    // Create initial domain
+    let d0 = engine.create_manager_domain(permission::ALL).unwrap();
+    let _ctx = engine.start_domain_on_core(d0, core).unwrap();
+    // Create initial region
+    let r0 = engine
+        .create_root_region(
+            d0,
+            AccessRights {
+                start: 0,
+                end: 10,
+                ops: MEMOPS_ALL,
+            },
+        )
+        .unwrap();
+    // Create an enclave region.
+    let e_r0 = engine
+        .carve_region(
+            d0,
+            r0,
+            AccessRights {
+                start: 0,
+                end: 5,
+                ops: MEMOPS_ALL,
+            },
+        )
+        .unwrap();
+
+    // Create the enclave.
+    let d1_mgmt = engine.create_domain(d0).unwrap();
+    let d1 = engine.get_domain_capa(d0, d1_mgmt).unwrap();
+    engine
+        .set_child_config(
+            d0,
+            d1_mgmt,
+            capa_engine::Bitmaps::PERMISSION,
+            permission::ALIAS | permission::CARVE | permission::SEND | permission::SPAWN,
+        )
+        .unwrap();
+
+    // Get a revocation handle in the d0.
+    let revoke_r0 = engine.create_revoke_capa(d0, e_r0).unwrap();
+
+    // Send the region to the enclave.
+    engine.send(d0, e_r0, d1_mgmt).unwrap();
+
+    // Check the enclave has the capa.
+    assert!(engine
+        .get_region_capa(d1, LocalCapa::new(0))
+        .unwrap()
+        .is_some());
+
+    // Let the enclave carve part of the memory.
+    let e_e_r1 = engine
+        .carve_region(
+            d1,
+            LocalCapa::new(0),
+            AccessRights {
+                start: 1,
+                end: 2,
+                ops: MemOps::READ,
+            },
+        )
+        .unwrap();
+
+    // Create another enclave from d1.
+    let d2_mgmt = engine.create_domain(d1).unwrap();
+    let d2 = engine.get_domain_capa(d1, d2_mgmt).unwrap();
+
+    // Give the region to d2.
+    engine.send(d1, e_e_r1, d2_mgmt).unwrap();
+
+    snap!(
+        "{Region([0x0, 0x5 | PURWXS]), Management(3 | _)}",
+        capas(d1, engine)
+    );
+    snap!(
+        "{[0x0, 0x1 | 1 (1 - 1 - 1 - 1)] -> [0x2, 0x5 | 1 (1 - 1 - 1 - 1)]}",
+        regions(d1, engine)
+    );
+    // Check the parent only has the second part of the address space.
+    snap!(
+        "{Region([0x0, 0xa | PURWXS]), Management(2 | _), RegionRevoke([0x0, 0x5 | CRWXS])}",
+        capas(d0, engine)
+    );
+    snap!("{[0x5, 0xa | 1 (1 - 1 - 1 - 1)]}", regions(d0, engine));
+
+    // Check dom2
+    snap!("{Region([0x1, 0x2 | _UR___])}", capas(d2, engine));
+    snap!("{[0x1, 0x2 | 1 (1 - 0 - 0 - 0)]}", regions(d2, engine));
+
+    // Now revoke with the handle we have.
+    engine.revoke(d0, revoke_r0).unwrap();
+
+    // The child should be left without any capas.
+    snap!("{Management(3 | _)}", capas(d1, engine));
+    // and without any region.
+    snap!("{}", regions(d1, engine));
+
+    snap!("{}", capas(d2, engine));
+    snap!("{}", regions(d2, engine));
+    // The parent should have access to the entire address space.
+    snap!(
+        "{Region([0x0, 0xa | _URWXS]), Management(2 | _)}",
+        capas(d0, engine)
+    );
+    snap!("{[0x0, 0xa | 1 (1 - 1 - 1 - 1)]}", regions(d0, engine));
+}
+
+// ——————————————————————— Check domain capabilities ———————————————————————— //
+
+#[test]
+fn test_domain_capabilities() {
+    let engine = unsafe { static_engine!() };
+    let core = 0;
+
+    // Create initial domain
+    let d0 = engine.create_manager_domain(permission::ALL).unwrap();
+    let _ctx = engine.start_domain_on_core(d0, core).unwrap();
+    // Create initial region
+
+    let r0 = engine
+        .create_root_region(
+            d0,
+            AccessRights {
+                start: 0,
+                end: 0x100,
+                ops: MEMOPS_ALL,
+            },
+        )
+        .unwrap();
+
+    // Create d1.
+    let d1_mgmt = engine.create_domain(d0).unwrap();
+    let d1 = engine.get_domain_capa(d0, d1_mgmt).unwrap();
+    // Send the r0 to d1.
+    engine.send(d0, r0, d1_mgmt).unwrap();
+
+    // D1 should be unable to create a domain.
+    let err = engine.create_domain(d1);
+    assert!(err.is_err());
+    assert_eq!(err.err().unwrap(), CapaError::InsufficientPermissions);
+
+    // Add the permission.
+    engine
+        .set_child_config(
+            d0,
+            d1_mgmt,
+            capa_engine::Bitmaps::PERMISSION,
+            permission::SPAWN,
+        )
+        .unwrap();
+    // Try again.
+    let d2_mgmt = engine.create_domain(d1).unwrap();
+    let d2 = engine.get_domain_capa(d1, d2_mgmt).unwrap();
+
+    // Should not be able to send a capa.
+    let err = engine.send(d1, LocalCapa::new(0), d2_mgmt);
+    assert!(err.is_err());
+    assert_eq!(err.err().unwrap(), CapaError::InsufficientPermissions);
+
+    // Add the permission.
+    engine
+        .set_child_config(
+            d0,
+            d1_mgmt,
+            capa_engine::Bitmaps::PERMISSION,
+            permission::SEND,
+        )
+        .unwrap();
+
+    engine.send(d1, LocalCapa::new(0), d2_mgmt).unwrap();
+
+    // Check the regions.
+    snap!("{}", regions(d0, engine));
+    snap!("{}", regions(d1, engine));
+    snap!("{[0x0, 0x100 | 1 (1 - 1 - 1 - 1)]}", regions(d2, engine));
+
+    // Impossible to revoke a root region..
+    let err = engine.revoke(d2, LocalCapa::new(0));
+    assert!(err.is_err());
+}
+
+// ——————————————————————————————— Scenarios ———————————————————————————————— //
+
+//TODO
+// ————————————————————————————— General Capas —————————————————————————————— //
 #[test]
 fn new_capa() {
     let engine = unsafe { static_engine!() };
@@ -514,7 +1749,7 @@ fn new_capa() {
 
     // Create initial region
     let r0 = engine
-        .create_new_root_region(
+        .create_root_region(
             d0,
             AccessRights {
                 start: 0,
@@ -524,7 +1759,7 @@ fn new_capa() {
         )
         .unwrap();
     snap!(
-        "{Management(2 | _), Management(3 | _), Region([0x0, 0x100 | CRWXS])}",
+        "{Management(2 | _), Management(3 | _), Region([0x0, 0x100 | _URWXS])}",
         capas(d0, engine)
     );
     snap!("{[0x0, 0x100 | 1 (1 - 1 - 1 - 1)]}", regions(d0, engine));
@@ -534,7 +1769,7 @@ fn new_capa() {
         .alias_region(d0, r0, dummy_access(0x10, 0x20))
         .unwrap();
     snap!(
-        "{Management(2 | _), Management(3 | _), Region([0x0, 0x100 | CRWXS]), Region([0x10, 0x20 | _RWXS])}",
+        "{Management(2 | _), Management(3 | _), Region([0x0, 0x100 | PURWXS]), Region([0x10, 0x20 | __RWXS])}",
         capas(d0, engine)
     );
     snap!("{[0x0, 0x10 | 1 (1 - 1 - 1 - 1)] -> [0x10, 0x20 | 2 (2 - 2 - 2 - 2)] -> [0x20, 0x100 | 1 (1 - 1 - 1 - 1)]}", regions(d0, engine));
@@ -549,7 +1784,7 @@ fn new_capa() {
         .carve_region(d0, r0, dummy_access(0x60, 0x80))
         .unwrap();
     snap!(
-        "{Management(2 | _), Management(3 | _), Region([0x0, 0x100 | CRWXS]), Region([0x10, 0x20 | _RWXS]), Region([0x30, 0x50 | CRWXS]), Region([0x40, 0x50 | _RWXS]), Region([0x60, 0x80 | CRWXS])}",
+        "{Management(2 | _), Management(3 | _), Region([0x0, 0x100 | PURWXS]), Region([0x10, 0x20 | __RWXS]), Region([0x30, 0x50 | PURWXS]), Region([0x40, 0x50 | __RWXS]), Region([0x60, 0x80 | _URWXS])}",
         capas(d0, engine)
     );
     snap!("{[0x0, 0x10 | 1 (1 - 1 - 1 - 1)] -> [0x10, 0x20 | 2 (2 - 2 - 2 - 2)] -> [0x20, 0x40 | 1 (1 - 1 - 1 - 1)] -> [0x40, 0x50 | 2 (2 - 2 - 2 - 2)] -> [0x50, 0x100 | 1 (1 - 1 - 1 - 1)]}", regions(d0, engine));
@@ -557,25 +1792,25 @@ fn new_capa() {
     // Create a revok capa
     let revoke_r1_capa = engine.create_revoke_capa(d0, r1).unwrap();
     snap!(
-        "{Management(2 | _), Management(3 | _), Region([0x0, 0x100 | CRWXS]), Region([0x10, 0x20 | _RWXS]), Region([0x30, 0x50 | CRWXS]), Region([0x40, 0x50 | _RWXS]), Region([0x60, 0x80 | CRWXS]), RegionRevoke([0x10, 0x20 | _RWXS])}",
+        "{Management(2 | _), Management(3 | _), Region([0x0, 0x100 | PURWXS]), Region([0x10, 0x20 | __RWXS]), Region([0x30, 0x50 | PURWXS]), Region([0x40, 0x50 | __RWXS]), Region([0x60, 0x80 | _URWXS]), RegionRevoke([0x10, 0x20 | _RWXS])}",
         capas(d0, engine)
     );
 
     // Send some of the regions
     engine.send(d0, r1, d1).unwrap();
     snap!(
-        "{Management(2 | _), Management(3 | _), Region([0x0, 0x100 | CRWXS]), Region([0x30, 0x50 | CRWXS]), Region([0x40, 0x50 | _RWXS]), Region([0x60, 0x80 | CRWXS]), RegionRevoke([0x10, 0x20 | _RWXS])}",
+        "{Management(2 | _), Management(3 | _), Region([0x0, 0x100 | PURWXS]), Region([0x30, 0x50 | PURWXS]), Region([0x40, 0x50 | __RWXS]), Region([0x60, 0x80 | _URWXS]), RegionRevoke([0x10, 0x20 | _RWXS])}",
         capas(d0, engine)
     );
     snap!("{[0x0, 0x40 | 1 (1 - 1 - 1 - 1)] -> [0x40, 0x50 | 2 (2 - 2 - 2 - 2)] -> [0x50, 0x100 | 1 (1 - 1 - 1 - 1)]}", regions(d0, engine));
-    snap!("{Region([0x10, 0x20 | _RWXS])}", capas(d1_capa, engine));
+    snap!("{Region([0x10, 0x20 | __RWXS])}", capas(d1_capa, engine));
     snap!(
         "{[0x10, 0x20 | 1 (1 - 1 - 1 - 1)]}",
         regions(d1_capa, engine)
     );
     engine.send(d0, r2, d1).unwrap();
     snap!(
-        "{Management(2 | _), Management(3 | _), Region([0x0, 0x100 | CRWXS]), Region([0x40, 0x50 | _RWXS]), Region([0x60, 0x80 | CRWXS]), RegionRevoke([0x10, 0x20 | _RWXS])}",
+        "{Management(2 | _), Management(3 | _), Region([0x0, 0x100 | PURWXS]), Region([0x40, 0x50 | __RWXS]), Region([0x60, 0x80 | _URWXS]), RegionRevoke([0x10, 0x20 | _RWXS])}",
         capas(d0, engine)
     );
     snap!(
@@ -583,7 +1818,7 @@ fn new_capa() {
         regions(d0, engine)
     );
     snap!(
-        "{Region([0x10, 0x20 | _RWXS]), Region([0x30, 0x50 | CRWXS])}",
+        "{Region([0x10, 0x20 | __RWXS]), Region([0x30, 0x50 | PURWXS])}",
         capas(d1_capa, engine)
     );
     snap!(
@@ -592,21 +1827,21 @@ fn new_capa() {
     );
     engine.send(d0, r3, d2).unwrap();
     snap!(
-        "{Management(2 | _), Management(3 | _), Region([0x0, 0x100 | CRWXS]), Region([0x60, 0x80 | CRWXS]), RegionRevoke([0x10, 0x20 | _RWXS])}",
+        "{Management(2 | _), Management(3 | _), Region([0x0, 0x100 | PURWXS]), Region([0x60, 0x80 | _URWXS]), RegionRevoke([0x10, 0x20 | _RWXS])}",
         capas(d0, engine)
     );
     snap!(
         "{[0x0, 0x30 | 1 (1 - 1 - 1 - 1)] -> [0x50, 0x100 | 1 (1 - 1 - 1 - 1)]}",
         regions(d0, engine)
     );
-    snap!("{Region([0x40, 0x50 | _RWXS])}", capas(d2_capa, engine));
+    snap!("{Region([0x40, 0x50 | __RWXS])}", capas(d2_capa, engine));
     snap!(
         "{[0x40, 0x50 | 1 (1 - 1 - 1 - 1)]}",
         regions(d2_capa, engine)
     );
     engine.send(d0, r4, d2).unwrap();
     snap!(
-        "{Management(2 | _), Management(3 | _), Region([0x0, 0x100 | CRWXS]), RegionRevoke([0x10, 0x20 | _RWXS])}",
+        "{Management(2 | _), Management(3 | _), Region([0x0, 0x100 | PURWXS]), RegionRevoke([0x10, 0x20 | _RWXS])}",
         capas(d0, engine)
     );
     snap!(
@@ -614,7 +1849,7 @@ fn new_capa() {
         regions(d0, engine)
     );
     snap!(
-        "{Region([0x40, 0x50 | _RWXS]), Region([0x60, 0x80 | CRWXS])}",
+        "{Region([0x40, 0x50 | __RWXS]), Region([0x60, 0x80 | _URWXS])}",
         capas(d2_capa, engine)
     );
     snap!(
@@ -625,10 +1860,10 @@ fn new_capa() {
     // Revoke some regions
     engine.revoke(d0, revoke_r1_capa).unwrap();
     snap!(
-        "{Management(2 | _), Management(3 | _), Region([0x0, 0x100 | CRWXS])}",
+        "{Management(2 | _), Management(3 | _), Region([0x0, 0x100 | PURWXS])}",
         capas(d0, engine)
     );
-    snap!("{Region([0x30, 0x50 | CRWXS])}", capas(d1_capa, engine));
+    snap!("{Region([0x30, 0x50 | PURWXS])}", capas(d1_capa, engine));
     snap!(
         "{[0x30, 0x50 | 1 (1 - 1 - 1 - 1)]}",
         regions(d1_capa, engine)
@@ -640,7 +1875,7 @@ fn new_capa() {
     engine.revoke(d1_capa, LocalCapa::new(1)).unwrap();
     snap!("{}", capas(d1_capa, engine));
     snap!("{}", regions(d1_capa, engine));
-    snap!("{Region([0x60, 0x80 | CRWXS])}", capas(d2_capa, engine));
+    snap!("{Region([0x60, 0x80 | _URWXS])}", capas(d2_capa, engine));
     snap!(
         "{[0x60, 0x80 | 1 (1 - 1 - 1 - 1)]}",
         regions(d2_capa, engine)

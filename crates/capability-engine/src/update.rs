@@ -1,9 +1,9 @@
 #![allow(dead_code)]
 
-use core::{fmt, mem};
+use core::fmt;
 
 use crate::config::NB_UPDATES;
-use crate::{Domain, Handle, LocalCapa};
+use crate::{CapaError, Domain, Handle, LocalCapa};
 
 pub type UpdateBuffer = Buffer<Update>;
 
@@ -37,8 +37,9 @@ pub enum Update {
 }
 
 pub struct Buffer<U> {
-    buff: [Option<U>; NB_UPDATES],
-    head: usize,
+    buff: [Option<U>; NB_UPDATES + 1],
+    read: usize,
+    write: usize,
 }
 
 impl<U> Buffer<U>
@@ -47,43 +48,32 @@ where
 {
     pub const fn new() -> Self {
         Buffer {
-            buff: [None; NB_UPDATES],
-            head: 0,
+            buff: [None; NB_UPDATES + 1],
+            read: 0,
+            write: 0,
         }
     }
 
-    pub fn push(&mut self, update: U) {
+    pub fn push(&mut self, update: U) -> Result<(), CapaError> {
         log::trace!("Push {}", update);
 
-        // Safety checks
-        if self.head >= self.buff.len() {
+        let next_write = (self.write + 1) % self.buff.len();
+        if next_write == self.read {
             log::error!("Update buffer is full");
-            panic!("Update buffer if full");
+            return Err(CapaError::OutOfMemory);
         }
-        let None = self.buff[self.head] else {
-            log::error!("Update buffer contains unapplied update");
-            panic!("Update buffer contains unapplied update");
-        };
-
-        self.buff[self.head] = Some(update);
-        self.head += 1;
+        self.buff[self.write] = Some(update);
+        self.write = next_write;
+        Ok(())
     }
 
     pub fn pop(&mut self) -> Option<U> {
-        if self.head == 0 {
-            return None;
-        }
-
-        self.head -= 1;
-        let update = mem::replace(&mut self.buff[self.head], None);
-
-        match update {
-            None => {
-                // Safety checks, there should be no None on the buffer stack
-                log::error!("Update buffer contains unapplied update");
-                panic!("Update buffer contains unapplied update");
-            }
-            Some(update) => Some(update),
+        if self.read == self.write {
+            None // Buffer is empty
+        } else {
+            let item = self.buff[self.read].take(); // Take the item out of the buffer
+            self.read = (self.read + 1) % self.buff.len();
+            item
         }
     }
 
@@ -91,10 +81,12 @@ where
     where
         F: Fn(U) -> bool,
     {
-        for i in 0..self.head {
-            if self.buff[i].is_some() && filter(self.buff[i].unwrap()) {
+        let mut index = self.read;
+        while index != self.write {
+            if filter(self.buff[index].unwrap()) {
                 return true;
             }
+            index = (index + 1) % self.buff.len();
         }
         return false;
     }

@@ -4,29 +4,28 @@ use crate::config::NB_REGIONS;
 use crate::debug::debug_check;
 use crate::domain::{activate_region, deactivate_region, insert_capa, DomainPool};
 use crate::region::TrackerPool;
-use crate::region_capa::RegionPool;
 use crate::update::UpdateBuffer;
 use crate::{AccessRights, CapaError, Domain, GenArena, Handle, LocalCapa};
 
-pub(crate) type NewRegionPool = GenArena<NewRegionCapa, NB_REGIONS>;
-pub const EMPTY_NEW_REGION_CAPA: NewRegionCapa = NewRegionCapa::new_invalid();
+pub(crate) type RegionPool = GenArena<RegionCapa, NB_REGIONS>;
+pub const EMPTY_REGION_CAPA: RegionCapa = RegionCapa::new_invalid();
 
 pub enum RegionKind {
     Root,
-    Alias(Handle<NewRegionCapa>),
-    Carve(Handle<NewRegionCapa>),
+    Alias(Handle<RegionCapa>),
+    Carve(Handle<RegionCapa>),
 }
 
-pub struct NewRegionCapa {
+pub struct RegionCapa {
     domain: Handle<Domain>,
-    child_list_head: Option<Handle<NewRegionCapa>>,
-    next_sibling: Option<Handle<NewRegionCapa>>,
+    pub(crate) child_list_head: Option<Handle<RegionCapa>>,
+    next_sibling: Option<Handle<RegionCapa>>,
     kind: RegionKind,
     pub(crate) is_confidential: bool,
     pub(crate) access: AccessRights,
 }
 
-impl NewRegionCapa {
+impl RegionCapa {
     pub const fn new_invalid() -> Self {
         Self {
             domain: Handle::new_invalid(),
@@ -81,8 +80,7 @@ impl NewRegionCapa {
 
 pub(crate) fn create_root_region(
     domain: Handle<Domain>,
-    regions: &mut NewRegionPool,
-    old_regions: &mut RegionPool,
+    regions: &mut RegionPool,
     domains: &mut DomainPool,
     tracker: &mut TrackerPool,
     updates: &mut UpdateBuffer,
@@ -93,23 +91,23 @@ pub(crate) fn create_root_region(
     domains[domain].has_capacity_for(1)?;
 
     // Validate region
-    if !access.new_is_valid() {
+    if !access.is_valid() {
         return Err(CapaError::InvalidOperation);
     }
 
     // Create and insert capa
     let region = regions
-        .allocate(NewRegionCapa::new(domain, RegionKind::Root, access).confidential(true))
+        .allocate(RegionCapa::new(domain, RegionKind::Root, access).confidential(true))
         .unwrap();
-    let local_capa = insert_capa(domain, region, old_regions, regions, domains)?;
+    let local_capa = insert_capa(domain, region, regions, domains)?;
     activate_region(domain, access, domains, updates, tracker)?;
 
     Ok(local_capa)
 }
 
 pub(crate) fn send(
-    handle: Handle<NewRegionCapa>,
-    regions: &mut NewRegionPool,
+    handle: Handle<RegionCapa>,
+    regions: &mut RegionPool,
     domains: &mut DomainPool,
     tracker: &mut TrackerPool,
     updates: &mut UpdateBuffer,
@@ -117,21 +115,24 @@ pub(crate) fn send(
 ) -> Result<(), CapaError> {
     log::trace!("Sending region {:?}", handle);
 
-    let capa = regions.get_mut(handle).ok_or(CapaError::InvalidCapa)?;
-    let access = capa.access;
-    let old_domain = capa.domain;
-    capa.domain = domain;
+    let old_domain = {
+        let capa = regions.get_mut(handle).ok_or(CapaError::InvalidCapa)?;
+        let old_domain = capa.domain;
+        capa.domain = domain;
+        old_domain
+    };
 
-    deactivate_region(old_domain, access, domains, updates, tracker)?;
-    activate_region(domain, access, domains, updates, tracker)?;
+    for reg in EffectiveRegionIterator::active_regions(handle, regions) {
+        deactivate_region(old_domain, reg, domains, updates, tracker)?;
+        activate_region(domain, reg, domains, updates, tracker)?;
+    }
 
     Ok(())
 }
 
 pub(crate) fn alias(
-    handle: Handle<NewRegionCapa>,
-    regions: &mut NewRegionPool,
-    old_regions: &mut RegionPool,
+    handle: Handle<RegionCapa>,
+    regions: &mut RegionPool,
     domains: &mut DomainPool,
     tracker: &mut TrackerPool,
     updates: &mut UpdateBuffer,
@@ -146,7 +147,7 @@ pub(crate) fn alias(
 
     let new_handle = alias_region(handle, regions, access)?;
     debug_check!(validate_child_list(handle, regions));
-    let local_capa = insert_capa(domain, new_handle, old_regions, regions, domains)?;
+    let local_capa = insert_capa(domain, new_handle, regions, domains)?;
     activate_region(domain, access, domains, updates, tracker)?;
 
     Ok(local_capa)
@@ -154,33 +155,36 @@ pub(crate) fn alias(
 
 /// Create a new child region and append it to the parent.
 fn alias_region(
-    handle: Handle<NewRegionCapa>,
-    regions: &mut NewRegionPool,
+    handle: Handle<RegionCapa>,
+    regions: &mut RegionPool,
     access: AccessRights,
-) -> Result<Handle<NewRegionCapa>, CapaError> {
+) -> Result<Handle<RegionCapa>, CapaError> {
     let region = regions.get(handle).ok_or(CapaError::InvalidCapa)?;
     let domain_handle = region.domain;
 
-    if !access.new_is_valid() || !check_alias(handle, &access, regions) {
+    if !access.is_valid() || !check_alias(handle, &access, regions) {
         return Err(CapaError::InvalidOperation);
     }
 
     let new_region =
-        NewRegionCapa::new(domain_handle, RegionKind::Alias(handle), access).confidential(false);
+        RegionCapa::new(domain_handle, RegionKind::Alias(handle), access).confidential(false);
     let new_handle = regions.allocate(new_region).ok_or(CapaError::OutOfMemory)?;
     insert_child(handle, new_handle, regions);
     Ok(new_handle)
 }
 
 pub(crate) fn carve(
-    handle: Handle<NewRegionCapa>,
-    regions: &mut NewRegionPool,
-    old_regions: &mut RegionPool,
+    handle: Handle<RegionCapa>,
+    regions: &mut RegionPool,
     domains: &mut DomainPool,
+    tracker: &mut TrackerPool,
+    updates: &mut UpdateBuffer,
     access: AccessRights,
 ) -> Result<LocalCapa, CapaError> {
-    let region = &regions[handle];
-    let domain = region.domain;
+    let (region_access, domain) = {
+        let region = &regions[handle];
+        (region.access, region.domain)
+    };
 
     // Check capacity (1 region + 1 local capa)
     regions.has_capacity_for(1)?;
@@ -188,28 +192,36 @@ pub(crate) fn carve(
 
     let new_handle = carve_region(handle, regions, access)?;
     debug_check!(validate_child_list(handle, regions));
-    let local_capa = insert_capa(domain, new_handle, old_regions, regions, domains)?;
-    // No need to update tracker here, the domain lost access to the new region one time ang
-    // gained it back at the same time.
+    let local_capa = insert_capa(domain, new_handle, regions, domains)?;
+    // Update the tracker here if permissions were reduced.
+    if access.ops != region_access.ops {
+        let to_remove = AccessRights {
+            start: access.start,
+            end: access.end,
+            ops: region_access.ops,
+        };
+        deactivate_region(domain, to_remove, domains, updates, tracker)?;
+        activate_region(domain, access, domains, updates, tracker)?;
+    }
 
     Ok(local_capa)
 }
 
 /// Create a new child region and append it to the parent.
 fn carve_region(
-    handle: Handle<NewRegionCapa>,
-    regions: &mut NewRegionPool,
+    handle: Handle<RegionCapa>,
+    regions: &mut RegionPool,
     access: AccessRights,
-) -> Result<Handle<NewRegionCapa>, CapaError> {
+) -> Result<Handle<RegionCapa>, CapaError> {
     let region = regions.get(handle).ok_or(CapaError::InvalidCapa)?;
     let domain_handle = region.domain;
     let is_confidential = region.is_confidential;
 
-    if !access.new_is_valid() || !check_carve(handle, &access, regions) {
+    if !access.is_valid() || !check_carve(handle, &access, regions) {
         return Err(CapaError::InvalidOperation);
     }
 
-    let new_region = NewRegionCapa::new(domain_handle, RegionKind::Carve(handle), access)
+    let new_region = RegionCapa::new(domain_handle, RegionKind::Carve(handle), access)
         .confidential(is_confidential);
     let new_handle = regions.allocate(new_region).ok_or(CapaError::OutOfMemory)?;
     insert_child(handle, new_handle, regions);
@@ -217,8 +229,8 @@ fn carve_region(
 }
 
 pub(crate) fn revoke(
-    handle: Handle<NewRegionCapa>,
-    regions: &mut NewRegionPool,
+    handle: Handle<RegionCapa>,
+    regions: &mut RegionPool,
     domains: &mut DomainPool,
     tracker: &mut TrackerPool,
     updates: &mut UpdateBuffer,
@@ -261,11 +273,7 @@ pub(crate) fn revoke(
 }
 
 /// Insert a child capability in the sorted linked list, while maintaining the ordering.
-fn insert_child(
-    parent: Handle<NewRegionCapa>,
-    child: Handle<NewRegionCapa>,
-    regions: &mut NewRegionPool,
-) {
+fn insert_child(parent: Handle<RegionCapa>, child: Handle<RegionCapa>, regions: &mut RegionPool) {
     let access = regions[child].access;
     assert!(regions[child].next_sibling.is_none());
 
@@ -316,11 +324,7 @@ fn insert_child(
 }
 
 /// Remove a child capability from the parent's linked list.
-fn remove_child(
-    parent: Handle<NewRegionCapa>,
-    child: Handle<NewRegionCapa>,
-    regions: &mut NewRegionPool,
-) {
+fn remove_child(parent: Handle<RegionCapa>, child: Handle<RegionCapa>, regions: &mut RegionPool) {
     // If child is the head of the list
     if regions[parent].child_list_head == Some(child) {
         regions[parent].child_list_head = regions[child].next_sibling;
@@ -338,7 +342,7 @@ fn remove_child(
 
 /// Panics if the child list is malformed.
 #[allow(dead_code)] // Used only in test builds
-fn validate_child_list(region: Handle<NewRegionCapa>, regions: &NewRegionPool) {
+fn validate_child_list(region: Handle<RegionCapa>, regions: &RegionPool) {
     let parent_access = regions[region].access;
     let mut cursor = regions[region].child_list_head;
     let mut prev_access: Option<AccessRights> = None;
@@ -401,11 +405,7 @@ fn validate_child_list(region: Handle<NewRegionCapa>, regions: &NewRegionPool) {
 }
 
 /// Checks that a region with the provided access rights can be carved from the parent.
-fn check_alias(
-    parent: Handle<NewRegionCapa>,
-    access: &AccessRights,
-    regions: &NewRegionPool,
-) -> bool {
+fn check_alias(parent: Handle<RegionCapa>, access: &AccessRights, regions: &RegionPool) -> bool {
     let region = &regions[parent];
     if region.access.start > access.start || region.access.end < access.end {
         return false;
@@ -417,15 +417,11 @@ fn check_alias(
         }
     }
 
-    true
+    return region.access.ops.contains(access.ops);
 }
 
 /// Checks that a region with the provided access rights can be carved from the parent.
-fn check_carve(
-    parent: Handle<NewRegionCapa>,
-    access: &AccessRights,
-    regions: &NewRegionPool,
-) -> bool {
+fn check_carve(parent: Handle<RegionCapa>, access: &AccessRights, regions: &RegionPool) -> bool {
     let region = &regions[parent];
     if region.access.start > access.start || region.access.end < access.end {
         return false;
@@ -437,18 +433,18 @@ fn check_carve(
         }
     }
 
-    true
+    return region.access.ops.contains(access.ops);
 }
 
 // ———————————————————————————————— Iterator ———————————————————————————————— //
 
 struct RegionIterator<'a> {
-    next: Option<Handle<NewRegionCapa>>,
-    regions: &'a NewRegionPool,
+    next: Option<Handle<RegionCapa>>,
+    regions: &'a RegionPool,
 }
 
 impl<'a> RegionIterator<'a> {
-    fn child_list(parent: Handle<NewRegionCapa>, regions: &'a NewRegionPool) -> Self {
+    fn child_list(parent: Handle<RegionCapa>, regions: &'a RegionPool) -> Self {
         RegionIterator {
             next: regions[parent].child_list_head,
             regions,
@@ -457,7 +453,7 @@ impl<'a> RegionIterator<'a> {
 }
 
 impl<'a> Iterator for RegionIterator<'a> {
-    type Item = &'a NewRegionCapa;
+    type Item = &'a RegionCapa;
 
     fn next(&mut self) -> Option<Self::Item> {
         let next = self.next?;
@@ -468,12 +464,12 @@ impl<'a> Iterator for RegionIterator<'a> {
 }
 
 struct HandleIterator<'a> {
-    next: Option<Handle<NewRegionCapa>>,
-    regions: &'a NewRegionPool,
+    next: Option<Handle<RegionCapa>>,
+    regions: &'a RegionPool,
 }
 
 impl<'a> HandleIterator<'a> {
-    fn child_list(parent: Handle<NewRegionCapa>, regions: &'a NewRegionPool) -> Self {
+    fn child_list(parent: Handle<RegionCapa>, regions: &'a RegionPool) -> Self {
         HandleIterator {
             next: regions[parent].child_list_head,
             regions,
@@ -482,12 +478,74 @@ impl<'a> HandleIterator<'a> {
 }
 
 impl<'a> Iterator for HandleIterator<'a> {
-    type Item = Handle<NewRegionCapa>;
+    type Item = Handle<RegionCapa>;
 
     fn next(&mut self) -> Option<Self::Item> {
         let next = self.next?;
         self.next = self.regions[next].next_sibling;
         Some(next)
+    }
+}
+
+pub struct EffectiveRegionIterator<'a> {
+    children: RegionIterator<'a>,
+    access: AccessRights,
+}
+
+impl<'a> EffectiveRegionIterator<'a> {
+    pub(crate) fn active_regions(parent: Handle<RegionCapa>, regions: &'a RegionPool) -> Self {
+        let capa = &regions[parent];
+        EffectiveRegionIterator {
+            children: RegionIterator {
+                next: capa.child_list_head,
+                regions,
+            },
+            access: capa.access.clone(),
+        }
+    }
+}
+
+impl<'a> Iterator for EffectiveRegionIterator<'a> {
+    type Item = AccessRights;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let mut carved: Option<&RegionCapa> = None;
+        assert!(self.access.is_valid());
+        // Reached the end.
+        if self.access.start == self.access.end {
+            return None;
+        }
+
+        // Skip all the aliased values and stop at the first carved within our region.
+        while let Some(n) = self.children.next() {
+            match n.kind {
+                RegionKind::Carve(_) => {
+                    // This can happen, we should update our start and continue;
+                    if n.access.start == self.access.start {
+                        assert!(n.access.end <= self.access.end);
+                        self.access.start = n.access.end;
+                        continue;
+                    }
+                    // We found a limit.
+                    carved = Some(n);
+                    break;
+                }
+                _ => {}
+            };
+        }
+        // We found something.
+        if let Some(carved) = carved {
+            let result = AccessRights {
+                start: self.access.start,
+                end: carved.access.start,
+                ops: self.access.ops,
+            };
+            self.access.start = carved.access.end;
+            return Some(result);
+        }
+        let result = self.access.clone();
+        self.access.start = self.access.end;
+        Some(result)
     }
 }
 
@@ -498,8 +556,8 @@ mod tests {
     use super::*;
     use crate::MEMOPS_ALL;
 
-    fn dummy_region(start: usize, end: usize) -> NewRegionCapa {
-        NewRegionCapa::new(
+    fn dummy_region(start: usize, end: usize) -> RegionCapa {
+        RegionCapa::new(
             Handle::new_invalid(),
             RegionKind::Root,
             AccessRights {
@@ -520,7 +578,7 @@ mod tests {
 
     #[test]
     fn alias() {
-        let mut pool = GenArena::new([EMPTY_NEW_REGION_CAPA; NB_REGIONS]);
+        let mut pool = GenArena::new([EMPTY_REGION_CAPA; NB_REGIONS]);
         let root = pool.allocate(dummy_region(0x10, 0x100)).unwrap();
         validate_child_list(root, &pool);
 
@@ -544,7 +602,7 @@ mod tests {
 
     #[test]
     fn carve() {
-        let mut pool = GenArena::new([EMPTY_NEW_REGION_CAPA; NB_REGIONS]);
+        let mut pool = GenArena::new([EMPTY_REGION_CAPA; NB_REGIONS]);
         let root = pool.allocate(dummy_region(0x10, 0x100)).unwrap();
         validate_child_list(root, &pool);
 

@@ -7,7 +7,6 @@ mod domain;
 mod free_list;
 mod gen_arena;
 mod region;
-mod region_capa;
 mod remapper;
 mod segment;
 mod update;
@@ -27,14 +26,14 @@ pub use region::{
     AccessRights, MemOps, MemoryPermission, Region, RegionIterator, RegionTracker, MEMOPS_ALL,
 };
 use region::{PermissionIterator, TrackerPool, EMPTY_REGION};
-use region_capa::{RegionCapa, RegionPool};
 pub use remapper::Remapper;
-use segment::{NewRegionCapa, NewRegionPool};
+pub use segment::EffectiveRegionIterator;
+use segment::{RegionCapa, RegionPool};
 use update::UpdateBuffer;
 pub use update::{Buffer, Update};
 
 use crate::domain::{core_bits, trap_bits};
-use crate::segment::EMPTY_NEW_REGION_CAPA;
+use crate::segment::EMPTY_REGION_CAPA;
 
 /// Configuration for the static Capa Engine size.
 pub mod config {
@@ -76,7 +75,6 @@ pub struct CapaEngine {
     cores: CoreList,
     domains: DomainPool,
     regions: RegionPool,
-    new_regions: NewRegionPool,
     tracker: TrackerPool,
     updates: UpdateBuffer,
     id_counter: usize,
@@ -85,14 +83,12 @@ pub struct CapaEngine {
 impl CapaEngine {
     pub const fn new() -> Self {
         const EMPTY_DOMAIN: Domain = Domain::new(0, false);
-        const EMPTY_CAPA: RegionCapa = RegionCapa::new_invalid();
         const EMPTY_CORE: Core = Core::new();
 
         Self {
             cores: [EMPTY_CORE; config::NB_CORES],
             domains: GenArena::new([EMPTY_DOMAIN; config::NB_DOMAINS]),
-            regions: GenArena::new([EMPTY_CAPA; config::NB_REGIONS]),
-            new_regions: GenArena::new([EMPTY_NEW_REGION_CAPA; config::NB_REGIONS]),
+            regions: GenArena::new([EMPTY_REGION_CAPA; config::NB_REGIONS]),
             tracker: GenArena::new([EMPTY_REGION; config::NB_TRACKER]),
             updates: UpdateBuffer::new(),
             id_counter: 0,
@@ -126,7 +122,9 @@ impl CapaEngine {
                 log::info!("About to seal");
                 self.domains[handle].set_id(id)?;
                 self.domains[handle].seal()?;
-                self.updates.push(Update::CreateDomain { domain: handle });
+                self.updates
+                    .push(Update::CreateDomain { domain: handle })
+                    .unwrap();
                 Ok(handle)
             }
             None => {
@@ -169,7 +167,6 @@ impl CapaEngine {
     pub fn revoke_domain(&mut self, domain: Handle<Domain>) -> Result<(), CapaError> {
         domain::revoke(
             domain,
-            &mut self.new_regions,
             &mut self.regions,
             &mut self.domains,
             &mut self.tracker,
@@ -184,60 +181,14 @@ impl CapaEngine {
     ) -> Result<LocalCapa, CapaError> {
         log::trace!("Create new root region");
 
-        match self
-            .regions
-            .allocate(RegionCapa::new(domain, access).confidential())
-        {
-            Some(handle) => {
-                let capa = region_capa::install(
-                    handle,
-                    domain,
-                    &mut self.regions,
-                    &mut self.new_regions,
-                    &mut self.domains,
-                    &mut self.tracker,
-                    &mut self.updates,
-                )?;
-                Ok(capa)
-            }
-            None => {
-                log::info!("Failed to create new domain: out of memory");
-                Err(CapaError::OutOfMemory)
-            }
-        }
-    }
-
-    pub fn create_new_root_region(
-        &mut self,
-        domain: DomainHandle,
-        access: AccessRights,
-    ) -> Result<LocalCapa, CapaError> {
-        log::trace!("Create new root region");
-
         self.domains.get(domain).ok_or(CapaError::InvalidCapa)?;
         segment::create_root_region(
             domain,
-            &mut self.new_regions,
             &mut self.regions,
             &mut self.domains,
             &mut self.tracker,
             &mut self.updates,
             access,
-        )
-    }
-
-    pub fn restore_region(
-        &mut self,
-        domain: Handle<Domain>,
-        region: LocalCapa,
-    ) -> Result<(), CapaError> {
-        let region = self.domains[domain].get(region)?.as_region()?;
-        region_capa::restore(
-            region,
-            &mut self.regions,
-            &mut self.domains,
-            &mut self.tracker,
-            &mut self.updates,
         )
     }
 
@@ -255,10 +206,9 @@ impl CapaEngine {
             permission::CARVE,
         )?;
 
-        let region = self.domains[domain].get(region)?.as_new_region()?;
+        let region = self.domains[domain].get(region)?.as_region()?;
         let handle = segment::alias(
             region,
-            &mut self.new_regions,
             &mut self.regions,
             &mut self.domains,
             &mut self.tracker,
@@ -282,12 +232,13 @@ impl CapaEngine {
             permission::CARVE,
         )?;
 
-        let region = self.domains[domain].get(region)?.as_new_region()?;
+        let region = self.domains[domain].get(region)?.as_region()?;
         let handle = segment::carve(
             region,
-            &mut self.new_regions,
             &mut self.regions,
             &mut self.domains,
+            &mut self.tracker,
+            &mut self.updates,
             access,
         )?;
         Ok(handle)
@@ -298,45 +249,10 @@ impl CapaEngine {
         domain: Handle<Domain>,
         region: LocalCapa,
     ) -> Result<LocalCapa, CapaError> {
-        let region = self.domains[domain].get(region)?.as_new_region()?;
+        let region = self.domains[domain].get(region)?.as_region()?;
         self.domains[domain].has_capacity_for(1)?;
         let revoke_capa = Capa::RegionRevoke(region);
-        insert_capa(
-            domain,
-            revoke_capa,
-            &mut self.regions,
-            &mut self.new_regions,
-            &mut self.domains,
-        )
-    }
-
-    pub fn segment_region(
-        &mut self,
-        domain: Handle<Domain>,
-        region: LocalCapa,
-        access_left: AccessRights,
-        access_right: AccessRights,
-    ) -> Result<(LocalCapa, LocalCapa), CapaError> {
-        // Enforce permissions
-        domain::has_config(
-            domain,
-            &self.domains,
-            domain::Bitmaps::PERMISSION,
-            permission::DUPLICATE,
-        )?;
-
-        let region = self.domains[domain].get(region)?.as_region()?;
-        let handles = region_capa::duplicate(
-            region,
-            &mut self.regions,
-            &mut self.new_regions,
-            &mut self.domains,
-            &mut self.tracker,
-            &mut self.updates,
-            access_left,
-            access_right,
-        )?;
-        Ok(handles)
+        insert_capa(domain, revoke_capa, &mut self.regions, &mut self.domains)
     }
 
     pub fn duplicate(
@@ -351,13 +267,7 @@ impl CapaEngine {
             domain::Bitmaps::PERMISSION,
             permission::DUPLICATE,
         )?;
-        domain::duplicate_capa(
-            domain,
-            capa,
-            &mut self.regions,
-            &mut self.new_regions,
-            &mut self.domains,
-        )
+        domain::duplicate_capa(domain, capa, &mut self.regions, &mut self.domains)
     }
 
     pub fn send(
@@ -386,21 +296,10 @@ impl CapaEngine {
             Capa::Switch { .. } => (),
             Capa::RegionRevoke(_) => (),
 
-            // Sending those capa causes side effects
             Capa::Region(region) => {
-                region_capa::send(
-                    region,
-                    &mut self.regions,
-                    &mut self.domains,
-                    &mut self.tracker,
-                    &mut self.updates,
-                    to,
-                )?;
-            }
-            Capa::NewRegion(region) => {
                 segment::send(
                     region,
-                    &mut self.new_regions,
+                    &mut self.regions,
                     &mut self.domains,
                     &mut self.tracker,
                     &mut self.updates,
@@ -414,16 +313,30 @@ impl CapaEngine {
         }
 
         // Move the capa to the new domain, can't fail as we checked for capacity already.
-        insert_capa(
-            to,
-            capa,
-            &mut self.regions,
-            &mut self.new_regions,
-            &mut self.domains,
-        )
-        .unwrap();
+        insert_capa(to, capa, &mut self.regions, &mut self.domains).unwrap();
 
         Ok(())
+    }
+
+    // Mostly for debug.
+    // TODO(Charly) how do I make this accessible to the tests but not the outside?
+    pub fn get_effective_regions(
+        &mut self,
+        domain: Handle<Domain>,
+        capa: LocalCapa,
+    ) -> Result<EffectiveRegionIterator, CapaError> {
+        let capa = self.domains[domain].get(capa)?;
+        match capa {
+            Capa::Region(region) => {
+                return Ok(EffectiveRegionIterator::active_regions(
+                    region,
+                    &mut self.regions,
+                ));
+            }
+            _ => {
+                return Err(CapaError::InvalidCapa);
+            }
+        }
     }
 
     pub fn set_child_config(
@@ -439,6 +352,7 @@ impl CapaEngine {
         Ok(())
     }
 
+    // Should only be used for the root domain.
     pub fn set_domain_config(
         &mut self,
         domain: Handle<Domain>,
@@ -468,7 +382,6 @@ impl CapaEngine {
             domain,
             Capa::Switch { to: capa, core },
             &mut self.regions,
-            &mut self.new_regions,
             &mut self.domains,
         )?;
         Ok(capa)
@@ -476,23 +389,14 @@ impl CapaEngine {
 
     pub fn revoke(&mut self, domain: Handle<Domain>, capa: LocalCapa) -> Result<(), CapaError> {
         match self.domains[domain].get(capa)? {
-            // Region are nor revoked, but restored.
-            Capa::Region(region) => region_capa::restore(
-                region,
-                &mut self.regions,
-                &mut self.domains,
-                &mut self.tracker,
-                &mut self.updates,
-            ),
             // Root regions can't be revoked.
-            Capa::NewRegion(region) if self.new_regions[region].is_root() => {
+            Capa::Region(region) if self.regions[region].is_root() => {
                 Err(CapaError::InvalidOperation)
             }
             // All other are simply revoked
             _ => domain::revoke_capa(
                 domain,
                 capa,
-                &mut self.new_regions,
                 &mut self.regions,
                 &mut self.domains,
                 &mut self.tracker,
@@ -507,13 +411,7 @@ impl CapaEngine {
         domain: Handle<Domain>,
         core: usize,
     ) -> Result<LocalCapa, CapaError> {
-        domain::create_switch(
-            domain,
-            core,
-            &mut self.regions,
-            &mut self.new_regions,
-            &mut self.domains,
-        )
+        domain::create_switch(domain, core, &mut self.regions, &mut self.domains)
     }
 
     /// Returns the new domain if the switch succeeds
@@ -535,7 +433,6 @@ impl CapaEngine {
             next_dom,
             Capa::Switch { to: domain, core },
             &mut self.regions,
-            &mut self.new_regions,
             &mut self.domains,
         )?;
         remove_capa(domain, capa, &mut self.domains).unwrap(); // We already checked the capa
@@ -543,11 +440,13 @@ impl CapaEngine {
         self.domains[domain].remove_from_core(core);
         self.cores[core].set_domain(next_dom);
 
-        self.updates.push(Update::Switch {
-            domain: next_dom,
-            return_capa,
-            core,
-        });
+        self.updates
+            .push(Update::Switch {
+                domain: next_dom,
+                return_capa,
+                core,
+            })
+            .unwrap();
         Ok(())
     }
 
@@ -565,12 +464,14 @@ impl CapaEngine {
         //TODO: fix transition capa. This entire path is unstable and should be removed.
         let manager = domain::find_trap_handler(domain, trap, &self.domains)
             .ok_or(CapaError::CouldNotHandleTrap)?;
-        self.updates.push(Update::Trap {
-            manager,
-            trap,
-            info,
-            core,
-        });
+        self.updates
+            .push(Update::Trap {
+                manager,
+                trap,
+                info,
+                core,
+            })
+            .unwrap();
         Ok(())
     }
 
@@ -602,15 +503,10 @@ impl CapaEngine {
         domain: Handle<Domain>,
         token: NextCapaToken,
     ) -> Option<(CapaInfo, NextCapaToken)> {
-        let (index, next_token) = domain::next_capa(
-            domain,
-            token,
-            &self.new_regions,
-            &self.regions,
-            &mut self.domains,
-        )?;
+        let (index, next_token) =
+            domain::next_capa(domain, token, &self.regions, &mut self.domains)?;
         let capa = self.domains[domain].get(index).unwrap();
-        let info = capa.info(&self.new_regions, &self.regions, &self.domains)?;
+        let info = capa.info(&self.regions, &self.domains)?;
         Some((info, next_token))
     }
 
@@ -642,16 +538,6 @@ impl CapaEngine {
         Ok(self
             .regions
             .get(self.domains[domain].get(capa)?.as_region()?))
-    }
-
-    pub fn get_new_region_capa(
-        &self,
-        domain: Handle<Domain>,
-        capa: LocalCapa,
-    ) -> Result<Option<&NewRegionCapa>, CapaError> {
-        Ok(self
-            .new_regions
-            .get(self.domains[domain].get(capa)?.as_new_region()?))
     }
 
     pub fn get_domain_regions<'a>(
@@ -711,10 +597,11 @@ impl CapaEngine {
                     manager,
                     Capa::management(handle),
                     &mut self.regions,
-                    &mut self.new_regions,
                     &mut self.domains,
                 )?;
-                self.updates.push(Update::CreateDomain { domain: handle });
+                self.updates
+                    .push(Update::CreateDomain { domain: handle })
+                    .unwrap();
                 Ok(capa)
             }
             None => {
@@ -745,10 +632,12 @@ impl CapaEngine {
             return;
         }
         let cores = self.domains[target].cores();
-        self.updates.push(Update::PermissionUpdate {
-            domain: target,
-            core_map: cores,
-        });
+        self.updates
+            .push(Update::PermissionUpdate {
+                domain: target,
+                core_map: cores,
+            })
+            .unwrap();
     }
 }
 
@@ -765,13 +654,5 @@ impl Index<Handle<Domain>> for CapaEngine {
 
     fn index(&self, index: Handle<Domain>) -> &Self::Output {
         &self.domains[index]
-    }
-}
-
-impl Index<Handle<RegionCapa>> for CapaEngine {
-    type Output = RegionCapa;
-
-    fn index(&self, index: Handle<RegionCapa>) -> &Self::Output {
-        &self.regions[index]
     }
 }

@@ -216,12 +216,14 @@ pub fn sbi_ext_rfence_handler(
                         //Push req into buffer
                         //log::info!("All: Sending IPI to hart {} from hart {}", src_hartid, i);
                         let mut ipi_requests = HART_IPI_BUFFER[i as usize].lock();
-                        ipi_requests.push(IPIRequest::RfenceSfenceVMAASID {
-                            src_hartid,
-                            start,
-                            size,
-                            asid,
-                        });
+                        ipi_requests
+                            .push(IPIRequest::RfenceSfenceVMAASID {
+                                src_hartid,
+                                start,
+                                size,
+                                asid,
+                            })
+                            .unwrap();
                         drop(ipi_requests);
                         //Send IPI to the hart.
                         HART_IPI_SYNC[src_hartid].fetch_add(1, Ordering::SeqCst);
@@ -245,12 +247,14 @@ pub fn sbi_ext_rfence_handler(
                             //Push req into buffer
                             //log::info!("Hmask: Sending IPI to hart {} from hart {}", src_hartid, i);
                             let mut ipi_requests = HART_IPI_BUFFER[i as usize].lock();
-                            ipi_requests.push(IPIRequest::RfenceSfenceVMAASID {
-                                src_hartid,
-                                start,
-                                size,
-                                asid,
-                            });
+                            ipi_requests
+                                .push(IPIRequest::RfenceSfenceVMAASID {
+                                    src_hartid,
+                                    start,
+                                    size,
+                                    asid,
+                                })
+                                .unwrap();
                             drop(ipi_requests);
                             //Send IPI to the hart.
                             HART_IPI_SYNC[src_hartid].fetch_add(1, Ordering::SeqCst);

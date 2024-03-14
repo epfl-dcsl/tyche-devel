@@ -6,9 +6,9 @@ use crate::config::{NB_CAPAS_PER_DOMAIN, NB_DOMAINS};
 use crate::free_list::FreeList;
 use crate::gen_arena::{Cleanable, GenArena};
 use crate::region::{PermissionChange, RegionTracker, TrackerPool};
-use crate::segment::{self, NewRegionPool};
+use crate::segment::{self, RegionPool};
 use crate::update::{Update, UpdateBuffer};
-use crate::{region_capa, AccessRights, CapaError, Handle, RegionPool};
+use crate::{AccessRights, CapaError, Handle};
 
 pub type DomainHandle = Handle<Domain>;
 pub(crate) type DomainPool = GenArena<Domain, NB_DOMAINS>;
@@ -313,17 +313,10 @@ impl Domain {
         self.is_io
     }
 
-    fn is_valid(
-        &self,
-        idx: usize,
-        regions: &NewRegionPool,
-        old_regions: &RegionPool,
-        domains: &DomainPool,
-    ) -> bool {
+    fn is_valid(&self, idx: usize, regions: &RegionPool, domains: &DomainPool) -> bool {
         match self.capas[idx] {
             Capa::None => false,
-            Capa::Region(handle) => old_regions.get(handle).is_some(),
-            Capa::NewRegion(handle) => regions.get(handle).is_some(),
+            Capa::Region(handle) => regions.get(handle).is_some(),
             Capa::RegionRevoke(handle) => regions.get(handle).is_some(),
             Capa::Management(handle) => domains.get(handle).is_some(),
             Capa::Channel(handle) => domains.get(handle).is_some(),
@@ -393,8 +386,7 @@ impl Cleanable for Domain {
 pub(crate) fn insert_capa(
     domain: Handle<Domain>,
     capa: impl IntoCapa,
-    old_regions: &mut RegionPool,
-    regions: &mut NewRegionPool,
+    regions: &mut RegionPool,
     domains: &mut DomainPool,
 ) -> Result<LocalCapa, CapaError> {
     // Find a free slot
@@ -402,7 +394,7 @@ pub(crate) fn insert_capa(
         Some(idx) => idx,
         None => {
             // Run the garbage collection and retry
-            free_invalid_capas(domain, old_regions, regions, domains);
+            free_invalid_capas(domain, regions, domains);
             let Some(idx) = domains[domain].free_list.allocate() else {
                 log::trace!("Could not insert capa in domain: out of memory");
                 return Err(CapaError::OutOfMemory);
@@ -431,12 +423,7 @@ pub(crate) fn remove_capa(
 /// Run garbage collection on the domain's capabilities.
 ///
 /// This is necessary as some capabilities are invalidated but not removed eagerly.
-fn free_invalid_capas(
-    domain: Handle<Domain>,
-    old_regions: &mut RegionPool,
-    regions: &mut NewRegionPool,
-    domains: &mut DomainPool,
-) {
+fn free_invalid_capas(domain: Handle<Domain>, regions: &mut RegionPool, domains: &mut DomainPool) {
     log::trace!("Runing garbage collection");
     for idx in 0..NB_CAPAS_PER_DOMAIN {
         if domains[domain].free_list.is_free(idx) {
@@ -448,8 +435,7 @@ fn free_invalid_capas(
         let capa = domains[domain].capas[idx];
         let is_invalid = match capa {
             Capa::None => true,
-            Capa::Region(h) => old_regions.get(h).is_none(),
-            Capa::NewRegion(h) => regions.get(h).is_none(),
+            Capa::Region(h) => regions.get(h).is_none(),
             Capa::RegionRevoke(h) => regions.get(h).is_none(),
             Capa::Management(h) => domains.get(h).is_none(),
             Capa::Channel(h) => domains.get(h).is_none(),
@@ -513,24 +499,19 @@ pub(crate) fn send_management(
 pub(crate) fn duplicate_capa(
     domain: Handle<Domain>,
     capa: LocalCapa,
-    old_regions: &mut RegionPool,
-    regions: &mut NewRegionPool,
+    regions: &mut RegionPool,
     domains: &mut DomainPool,
 ) -> Result<LocalCapa, CapaError> {
     let capa = domains[domain].get(capa)?;
 
     match capa {
         // Capa that can not be duplicated
-        Capa::None
-        | Capa::Region(_)
-        | Capa::NewRegion(_)
-        | Capa::Management(_)
-        | Capa::Switch { .. } => {
+        Capa::None | Capa::Region(_) | Capa::Management(_) | Capa::Switch { .. } => {
             return Err(CapaError::CannotDuplicate);
         }
         Capa::Channel(_) | Capa::RegionRevoke(_) => {
             // NOTE: there is no side effects when duplicating these capas
-            insert_capa(domain, capa, old_regions, regions, domains)
+            insert_capa(domain, capa, regions, domains)
         }
     }
 }
@@ -540,12 +521,11 @@ pub(crate) fn duplicate_capa(
 pub(crate) fn create_switch(
     domain: Handle<Domain>,
     core: usize,
-    old_regions: &mut RegionPool,
-    regions: &mut NewRegionPool,
+    regions: &mut RegionPool,
     domains: &mut DomainPool,
 ) -> Result<LocalCapa, CapaError> {
     let capa = Capa::Switch { to: domain, core };
-    insert_capa(domain, capa, old_regions, regions, domains)
+    insert_capa(domain, capa, regions, domains)
 }
 
 // ———————————————————————————— Activate Region ————————————————————————————— //
@@ -566,11 +546,25 @@ pub(crate) fn activate_region(
     let change = dom
         .regions
         .add_region(access.start, access.end, access.ops, tracker)?;
+
+    let filter = |up: Update| match up {
+        Update::PermissionUpdate {
+            domain: up_dom,
+            core_map: _,
+        } if up_dom == domain => {
+            return true;
+        }
+        _ => false,
+    };
     if let PermissionChange::Some = change {
-        updates.push(Update::PermissionUpdate {
-            domain,
-            core_map: dom.cores(),
-        });
+        if !updates.contains(filter) {
+            updates
+                .push(Update::PermissionUpdate {
+                    domain,
+                    core_map: dom.cores(),
+                })
+                .unwrap();
+        }
     };
 
     Ok(())
@@ -593,11 +587,26 @@ pub(crate) fn deactivate_region(
     let change = dom
         .regions
         .remove_region(access.start, access.end, access.ops, tracker)?;
+
+    let filter = |up: Update| match up {
+        Update::PermissionUpdate {
+            domain: up_dom,
+            core_map: _,
+        } if up_dom == domain => {
+            return true;
+        }
+        _ => false,
+    };
+
     if let PermissionChange::Some = change {
-        updates.push(Update::PermissionUpdate {
-            domain,
-            core_map: dom.cores(),
-        });
+        if !updates.contains(filter) {
+            updates
+                .push(Update::PermissionUpdate {
+                    domain,
+                    core_map: dom.cores(),
+                })
+                .unwrap();
+        }
     };
 
     Ok(())
@@ -635,8 +644,7 @@ pub(crate) fn find_trap_handler(
 pub(crate) fn next_capa(
     domain_handle: Handle<Domain>,
     token: NextCapaToken,
-    regions: &NewRegionPool,
-    old_regions: &RegionPool,
+    regions: &RegionPool,
     domains: &mut DomainPool,
 ) -> Option<(LocalCapa, NextCapaToken)> {
     let mut idx = token.idx;
@@ -644,7 +652,7 @@ pub(crate) fn next_capa(
     while idx < len {
         let domain = &domains[domain_handle];
         if !domain.free_list.is_free(idx) {
-            if domain.is_valid(idx, regions, old_regions, domains) {
+            if domain.is_valid(idx, regions, domains) {
                 // Found a valid capa
                 let next_token = NextCapaToken { idx: idx + 1 };
                 return Some((LocalCapa::new(idx), next_token));
@@ -665,8 +673,7 @@ pub(crate) fn next_capa(
 
 pub(crate) fn revoke(
     handle: DomainHandle,
-    regions: &mut NewRegionPool,
-    old_regions: &mut RegionPool,
+    regions: &mut RegionPool,
     domains: &mut DomainPool,
     tracker: &mut TrackerPool,
     updates: &mut UpdateBuffer,
@@ -680,22 +687,16 @@ pub(crate) fn revoke(
     } else {
         // Mark as being revoked
         domain.is_being_revoked = true;
-        updates.push(Update::RevokeDomain { domain: handle });
+        updates
+            .push(Update::RevokeDomain { domain: handle })
+            .unwrap();
     }
 
     // Drop all capabilities
     let mut token = NextCapaToken::new();
-    while let Some((capa, next_token)) = next_capa(handle, token, regions, old_regions, domains) {
+    while let Some((capa, next_token)) = next_capa(handle, token, regions, domains) {
         token = next_token;
-        revoke_capa(
-            handle,
-            capa,
-            regions,
-            old_regions,
-            domains,
-            tracker,
-            updates,
-        )?;
+        revoke_capa(handle, capa, regions, domains, tracker, updates)?;
     }
 
     domains.free(handle);
@@ -705,8 +706,7 @@ pub(crate) fn revoke(
 pub(crate) fn revoke_capa(
     handle: Handle<Domain>,
     local: LocalCapa,
-    regions: &mut NewRegionPool,
-    old_regions: &mut RegionPool,
+    regions: &mut RegionPool,
     domains: &mut DomainPool,
     tracker: &mut TrackerPool,
     updates: &mut UpdateBuffer,
@@ -720,11 +720,7 @@ pub(crate) fn revoke_capa(
         Capa::Channel(_) => (),
         Capa::Switch { .. } => {}
 
-        // Those capa cause revocation side effects
         Capa::Region(region) => {
-            region_capa::restore(region, old_regions, domains, tracker, updates)?;
-        }
-        Capa::NewRegion(region) => {
             segment::revoke(region, regions, domains, tracker, updates)?;
         }
         Capa::RegionRevoke(region) => {
@@ -733,7 +729,7 @@ pub(crate) fn revoke_capa(
             }
         }
         Capa::Management(domain) => {
-            revoke(domain, regions, old_regions, domains, tracker, updates)?;
+            revoke(domain, regions, domains, tracker, updates)?;
         }
     }
 

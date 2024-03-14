@@ -87,7 +87,7 @@ pub fn init(manifest: &'static Manifest) {
     let domain = engine.create_manager_domain(permission::ALL).unwrap();
     apply_updates(&mut engine);
     engine
-        .create_new_root_region(
+        .create_root_region(
             domain,
             AccessRights {
                 start: 0,
@@ -470,10 +470,6 @@ pub fn do_send(current: Handle<Domain>, capa: LocalCapa, to: LocalCapa) -> Resul
     let mut engine = CAPA_ENGINE.lock();
     // Send is not allowed for region capa.
     // Use do_send_region instead.
-    match engine.get_new_region_capa(current, capa)? {
-        Some(_) => return Err(CapaError::InvalidCapa),
-        _ => {}
-    }
     match engine.get_region_capa(current, capa)? {
         Some(_) => return Err(CapaError::InvalidCapa),
         _ => {}
@@ -494,7 +490,7 @@ pub fn do_send_region(
     let mut engine = CAPA_ENGINE.lock();
     // Get the capa first.
     let region_info = engine
-        .get_new_region_capa(current, capa)?
+        .get_region_capa(current, capa)?
         .ok_or(CapaError::InvalidCapa)?
         .get_access_rights();
     let repeat = {
@@ -685,7 +681,7 @@ fn post_ept_update(core_id: usize, cores: u64, domain: &Handle<Domain>) {
 fn push_core_update(core: usize) {
     log::trace!("cpu {} pushes Tlbshootdown to core={}", cpuid(), core);
     let mut core_updates = CORE_UPDATES[core as usize].lock();
-    core_updates.push(CoreUpdate::TlbShootdown);
+    core_updates.push(CoreUpdate::TlbShootdown).unwrap();
 }
 
 /// General updates, containing both global updates on the domain's states, and core specific
@@ -729,10 +725,12 @@ fn apply_updates(engine: &mut MutexGuard<CapaEngine>) {
                 core,
             } => {
                 let mut core_updates = CORE_UPDATES[core as usize].lock();
-                core_updates.push(CoreUpdate::Switch {
-                    domain,
-                    return_capa,
-                });
+                core_updates
+                    .push(CoreUpdate::Switch {
+                        domain,
+                        return_capa,
+                    })
+                    .unwrap();
             }
             capa_engine::Update::Trap {
                 manager,
@@ -741,11 +739,13 @@ fn apply_updates(engine: &mut MutexGuard<CapaEngine>) {
                 core,
             } => {
                 let mut core_updates = CORE_UPDATES[core as usize].lock();
-                core_updates.push(CoreUpdate::Trap {
-                    manager,
-                    trap,
-                    info,
-                });
+                core_updates
+                    .push(CoreUpdate::Trap {
+                        manager,
+                        trap,
+                        info,
+                    })
+                    .unwrap();
             }
         }
     }

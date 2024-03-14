@@ -73,7 +73,7 @@ pub fn init() {
     let domain = engine.create_manager_domain(permission::ALL).unwrap();
     apply_updates(&mut engine);
     engine
-        .create_new_root_region(
+        .create_root_region(
             domain,
             AccessRights {
                 start: 0x80400000, //Linux Root Region Start Address
@@ -89,7 +89,7 @@ pub fn init() {
         .unwrap();
 
     engine
-        .create_new_root_region(
+        .create_root_region(
             domain,
             AccessRights {
                 start: SIFIVE_TEST_SYSCON_BASE_ADDRESS,
@@ -343,10 +343,6 @@ pub fn do_send(current: Handle<Domain>, capa: LocalCapa, to: LocalCapa) -> Resul
     let mut engine = CAPA_ENGINE.lock();
     // Send is not allowed for region capa.
     // Use do_send_aliased instead.
-    match engine.get_new_region_capa(current, capa)? {
-        Some(_) => return Err(CapaError::InvalidCapa),
-        _ => {}
-    }
     match engine.get_region_capa(current, capa)? {
         Some(_) => return Err(CapaError::InvalidCapa),
         _ => {}
@@ -363,7 +359,7 @@ pub fn do_send_region(
 ) -> Result<(), CapaError> {
     let mut engine = CAPA_ENGINE.lock();
     // send_region is only allowed for region capa.
-    match engine.get_new_region_capa(current, capa)? {
+    match engine.get_region_capa(current, capa)? {
         Some(_) => {}
         _ => return Err(CapaError::InvalidCapa),
     }

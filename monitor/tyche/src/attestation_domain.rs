@@ -25,11 +25,11 @@ fn hash_capa_info(
             CapaInfo::Region {
                 start,
                 end,
-                active,
-                confidential,
+                unique,
+                children: _,
                 ops,
             } => {
-                if ops.contains(MemOps::HASH) && active {
+                if ops.contains(MemOps::HASH) {
                     // Hashing start - end of region
                     hashing::hash_segment(hasher, &(usize::to_le_bytes(start)));
                     hashing::hash_segment(hasher, &(usize::to_le_bytes(end)));
@@ -42,7 +42,7 @@ fn hash_capa_info(
                     hash_access_right(hasher, access_rights, MemOps::READ.bits());
 
                     // Hash conf/shared info
-                    let conf_info = if confidential { 1 as u8 } else { 0 as u8 };
+                    let conf_info = if unique { 1 as u8 } else { 0 as u8 };
                     hashing::hash_segment(hasher, &(u8::to_le_bytes(conf_info)));
 
                     // Hashing region data info

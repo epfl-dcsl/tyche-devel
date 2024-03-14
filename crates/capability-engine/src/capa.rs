@@ -4,16 +4,14 @@ use core::fmt;
 
 use crate::domain::{Domain, DomainPool};
 use crate::gen_arena::Handle;
-use crate::region_capa::{RegionCapa, RegionPool};
-use crate::segment::{NewRegionCapa, NewRegionPool};
+use crate::segment::{RegionCapa, RegionPool};
 use crate::{CapaError, MemOps};
 
 #[derive(Clone, Copy, Debug)]
 pub enum Capa {
     None,
     Region(Handle<RegionCapa>),
-    NewRegion(Handle<NewRegionCapa>),
-    RegionRevoke(Handle<NewRegionCapa>),
+    RegionRevoke(Handle<RegionCapa>),
     Management(Handle<Domain>),
     #[allow(dead_code)] // TODO: remove once channels are implemented
     Channel(Handle<Domain>),
@@ -28,14 +26,8 @@ pub enum CapaInfo {
     Region {
         start: usize,
         end: usize,
-        active: bool,
-        confidential: bool,
-        ops: MemOps,
-    },
-    NewRegion {
-        start: usize,
-        end: usize,
-        confidential: bool,
+        unique: bool,
+        children: bool,
         ops: MemOps,
     },
     RegionRevoke {
@@ -67,32 +59,15 @@ impl CapaInfo {
             CapaInfo::Region {
                 start,
                 end,
-                active,
-                confidential,
-                ops,
-            } => {
-                v1 = *start;
-                v2 = *end;
-                if *active {
-                    flags |= 1 << 0;
-                }
-                if *confidential {
-                    flags |= 1 << 1;
-                }
-                flags |= ops.bits() << 2;
-                capa_type = capa_type::REGION;
-            }
-            CapaInfo::NewRegion {
-                start,
-                end,
-                confidential,
+                unique,
+                children: _,
                 ops,
             } => {
                 v1 = *start;
                 v2 = *end;
                 // New regions are always active
                 flags |= 1;
-                if *confidential {
+                if *unique {
                     flags |= 1 << 1;
                 }
                 flags |= ops.bits() << 2;
@@ -140,24 +115,23 @@ impl CapaInfo {
         let capa_type = (v3 & 0xFF) as u8;
         let flags = v3 >> 8;
         let capa_info = match capa_type {
-            capa_type::REGION => {
-                let active = (flags & 0b01) != 0;
-                let confidential = (flags & 0b10) != 0;
-                let ops = MemOps::from_bits(flags as u8 >> 2).unwrap_or(MemOps::NONE);
-                Self::Region {
-                    start: v1,
-                    end: v2,
-                    active,
-                    confidential,
-                    ops,
-                }
-            }
             capa_type::MANAGEMENT => Self::Management {
                 domain_id: v1,
                 sealed: v2 == 2,
             },
             capa_type::CHANNEL => Self::Channel { domain_id: v1 },
             capa_type::SWITCH => Self::Switch { domain_id: v1 },
+            capa_type::NEW_REGION => {
+                let unique = (flags & 0b10) != 0;
+                let ops = MemOps::from_bits(flags as u8 >> 2).unwrap_or(MemOps::NONE);
+                Self::Region {
+                    start: v1,
+                    end: v2,
+                    unique: unique,
+                    children: false, //TODO fix
+                    ops: ops,
+                }
+            }
             _ => {
                 return Err(CapaError::CouldNotDeserializeInfo);
             }
@@ -168,7 +142,6 @@ impl CapaInfo {
 
 #[rustfmt::skip]
 pub mod capa_type {
-    pub const REGION:        u8 = 0;
     pub const MANAGEMENT:    u8 = 1;
     pub const CHANNEL:       u8 = 2;
     pub const SWITCH:        u8 = 3;
@@ -184,13 +157,6 @@ impl Capa {
     pub fn as_region(self) -> Result<Handle<RegionCapa>, CapaError> {
         match self {
             Capa::Region(region) => Ok(region),
-            _ => Err(CapaError::WrongCapabilityType),
-        }
-    }
-
-    pub fn as_new_region(self) -> Result<Handle<NewRegionCapa>, CapaError> {
-        match self {
-            Capa::NewRegion(region) => Ok(region),
             _ => Err(CapaError::WrongCapabilityType),
         }
     }
@@ -225,30 +191,16 @@ impl Capa {
         }
     }
 
-    pub(crate) fn info(
-        self,
-        regions: &NewRegionPool,
-        old_regions: &RegionPool,
-        domains: &DomainPool,
-    ) -> Option<CapaInfo> {
+    pub(crate) fn info(self, regions: &RegionPool, domains: &DomainPool) -> Option<CapaInfo> {
         match self {
             Capa::None => None,
             Capa::Region(h) => {
-                let region = &old_regions[h];
+                let region = &regions[h];
                 Some(CapaInfo::Region {
                     start: region.access.start,
                     end: region.access.end,
-                    active: region.is_active,
-                    confidential: region.is_confidential,
-                    ops: region.access.ops,
-                })
-            }
-            Capa::NewRegion(h) => {
-                let region = &regions[h];
-                Some(CapaInfo::NewRegion {
-                    start: region.access.start,
-                    end: region.access.end,
-                    confidential: region.is_confidential,
+                    unique: region.is_confidential,
+                    children: region.child_list_head.is_some(),
                     ops: region.access.ops,
                 })
             }
@@ -294,12 +246,6 @@ impl IntoCapa for Handle<RegionCapa> {
     }
 }
 
-impl IntoCapa for Handle<NewRegionCapa> {
-    fn into_capa(self) -> Capa {
-        Capa::NewRegion(self)
-    }
-}
-
 impl IntoCapa for Capa {
     #[inline]
     fn into_capa(self) -> Capa {
@@ -315,26 +261,17 @@ impl fmt::Display for CapaInfo {
             CapaInfo::Region {
                 start,
                 end,
-                active,
-                confidential,
+                unique,
+                children,
                 ops,
             } => {
-                let a = if *active { 'A' } else { '_' };
-                let c = if *confidential { 'C' } else { '_' };
+                let c = if *unique { 'U' } else { '_' };
+                let p = if *children { 'P' } else { '_' };
                 write!(
                     f,
                     "Region([0x{:x}, 0x{:x} | {}{}{}])",
-                    start, end, a, c, ops
+                    start, end, p, c, ops
                 )
-            }
-            CapaInfo::NewRegion {
-                start,
-                end,
-                confidential,
-                ops,
-            } => {
-                let c = if *confidential { 'C' } else { '_' };
-                write!(f, "Region([0x{:x}, 0x{:x} | {}{}])", start, end, c, ops)
             }
             CapaInfo::RegionRevoke {
                 start,

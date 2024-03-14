@@ -68,10 +68,6 @@ impl AccessRights {
         self.start <= self.end
     }
 
-    pub fn new_is_valid(&self) -> bool {
-        self.start <= self.end
-    }
-
     pub const fn none() -> Self {
         Self {
             start: 0,
