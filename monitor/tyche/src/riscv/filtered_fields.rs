@@ -48,9 +48,9 @@ impl RiscVField {
                 log::debug!("Setting sp to {:x}", context.sp);
             }
             Self::Mepc => {
-                context.mepc = value - 0x4;     //Todo: This is a temporary hack - because before returning
-                                                //there's an mepc+4. 
-                log::debug!("Setting mepc to {:x}", context.mepc); 
+                context.mepc = value - 0x4; //Todo: This is a temporary hack - because before returning
+                                            //there's an mepc+4.
+                log::debug!("Setting mepc to {:x}", context.mepc);
             }
         }
     }
