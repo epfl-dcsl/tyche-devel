@@ -107,7 +107,3 @@ cargo krun-linux
 Ubuntu images are supported, to use one simple create a `.qcow2` image (follow a
 tutorial for that), and add it at the root of this folder with the name
 `ubuntu.qcow2`.
-
-## Problems when compiling
-
-If you run into the 'No space left on the device' issue, that means you need to patch the .cargo/registry/.../bootloader/src/bin/builder.rs:255 to add a *1024.

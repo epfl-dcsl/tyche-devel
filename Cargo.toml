@@ -32,6 +32,7 @@ members = [
 [workspace.dependencies]
 log = "0.4.17"
 spin = "0.9.4"
+bootloader = { git = "https://github.com/epfl-dcsl/patched-bootloader.git", branch = "patched-0.10.13" }
 
 [features]
 # Print to VGA text mode
@@ -42,7 +43,6 @@ guest_linux = []
 guest_rawc = []
 
 [dependencies]
-bootloader = { version = "0.10.12" }
 volatile = "0.2.6"
 spin = "0.5.2"
 x86_64 = "0.14.9"
@@ -51,6 +51,7 @@ bitflags = "1.3.2"
 x2apic = "0.4.1"
 acpi = "4.1.1"
 x86 = "0.52.0"
+bootloader = { workspace = true }
 
 [dependencies.font8x8]
 version = "0.2.5"

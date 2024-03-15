@@ -141,8 +141,7 @@ dependencies = [
 [[package]]
 name = "bootloader"
 version = "0.10.13"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "24e13520aa8580a2850fc9f5390dc6753f1062fb66f90e5a61bd5c72b55df731"
+source = "git+https://github.com/epfl-dcsl/patched-bootloader.git?branch=patched-0.10.13#3a53766b87d251e2f9215398ab04f536a5bbac82"
 
 [[package]]
 name = "bootloader-locator"
