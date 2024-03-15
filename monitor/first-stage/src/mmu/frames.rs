@@ -16,6 +16,9 @@ use crate::{allocator, vmx, HostPhysAddr, HostVirtAddr};
 
 pub const PAGE_SIZE: usize = 0x1000;
 
+/// How much memory to reserve for the second stage
+const SECOND_STAGE_RESERVED_MEMORY: u64 = 0x1000000;
+
 // ————————————————————————— Physical Memory Offset ————————————————————————— //
 
 static PHYSICAL_MEMORY_OFFSET: AtomicUsize = AtomicUsize::new(PHYSICAL_OFFSET_GUARD);
@@ -89,11 +92,13 @@ pub unsafe fn init(
 
     // Partition physical memory between host and guest
     let host_region = select_host_region(regions);
+    assert!(host_region.end - host_region.start >= SECOND_STAGE_RESERVED_MEMORY);
     let host_range = PhysRange {
-        start: HostPhysAddr::new(host_region.start as usize),
+        start: HostPhysAddr::new((host_region.end - SECOND_STAGE_RESERVED_MEMORY) as usize),
         end: HostPhysAddr::new(host_region.end as usize),
     };
-    invalidate_higher_regions(host_region.start, regions);
+    host_region.end = host_range.start.as_u64();
+    invalidate_higher_regions(host_range.start.as_u64(), regions);
     let memory_map = MemoryMap {
         guest: regions,
         host: host_range,
@@ -364,7 +369,9 @@ fn select_host_region(regions: &mut [MemoryRegion]) -> &mut MemoryRegion {
     // NOTE: We start from the end of the list (higher regions) to favor high-memory regions.
     for region in regions.iter_mut().rev() {
         // Select a free region that's big enough
-        if region.kind == MemoryRegionKind::Usable && (region.end - region.start) >= 0x1000000 {
+        if region.kind == MemoryRegionKind::Usable
+            && (region.end - region.start) >= SECOND_STAGE_RESERVED_MEMORY
+        {
             return region;
         }
     }
