@@ -71,7 +71,7 @@ impl CapaInfo {
                     flags |= 1 << 1;
                 }
                 flags |= ops.bits() << 2;
-                capa_type = capa_type::NEW_REGION;
+                capa_type = capa_type::REGION;
             }
             CapaInfo::RegionRevoke {
                 start,
@@ -121,14 +121,14 @@ impl CapaInfo {
             },
             capa_type::CHANNEL => Self::Channel { domain_id: v1 },
             capa_type::SWITCH => Self::Switch { domain_id: v1 },
-            capa_type::NEW_REGION => {
+            capa_type::REGION => {
                 let unique = (flags & 0b10) != 0;
                 let ops = MemOps::from_bits(flags as u8 >> 2).unwrap_or(MemOps::NONE);
                 Self::Region {
                     start: v1,
                     end: v2,
                     unique: unique,
-                    children: false, //TODO fix
+                    children: false, // TODO: we do not track children in serialization
                     ops: ops,
                 }
             }
@@ -145,7 +145,7 @@ pub mod capa_type {
     pub const MANAGEMENT:    u8 = 1;
     pub const CHANNEL:       u8 = 2;
     pub const SWITCH:        u8 = 3;
-    pub const NEW_REGION:    u8 = 4;
+    pub const REGION:        u8 = 4;
     pub const REGION_REVOKE: u8 = 5;
 }
 

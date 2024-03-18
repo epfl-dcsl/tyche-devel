@@ -311,7 +311,8 @@ pub fn misaligned_load_handler(reg_state: &mut RegisterState) {
                 reg_state.a1 = to_send.as_usize() as isize;
                 reg_state.a2 = to_revoke.as_usize();
             }
-            calls::REVOKE => {
+            // There are no aliases on riscv so we just ignore the alias info.
+            calls::REVOKE | calls::REVOKE_ALIASED_REGION => {
                 log::debug!("Revoke");
                 monitor::do_revoke(active_dom, LocalCapa::new(arg_1)).expect("TODO");
                 reg_state.a0 = 0x0;

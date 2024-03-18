@@ -319,6 +319,14 @@ fn handle_exit(
                     vs.vcpu.next_instruction()?;
                     Ok(HandlerResult::Resume)
                 }
+                calls::REVOKE_ALIASED_REGION => {
+                    log::trace!("Revoke aliased region");
+                    monitor::do_revoke_region(*domain, LocalCapa::new(arg_1), LocalCapa::new(arg_2), arg_3, arg_4).unwrap();
+                    let mut context = monitor::get_context(*domain, cpuid());
+                    context.set(VmcsField::GuestRax, 0, None)?;
+                    vs.vcpu.next_instruction()?;
+                    Ok(HandlerResult::Resume)
+                }
                 calls::DUPLICATE => {
                     log::trace!("Duplicate");
                     let capa = monitor::do_duplicate(*domain, LocalCapa::new(arg_1)).expect("TODO");

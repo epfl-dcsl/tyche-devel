@@ -12,3 +12,10 @@ run_td1:
 	-bios vms/bios.bin \
 	-chardev file,path="/tyche/chardev/seabios",id=seabios -device isa-debugcon,iobase=0x402,chardev=seabios \
 	-append "noapic lpj=24000000 earlyprintk=serial,tty0 console=ttyS0" 
+
+regression:
+	sudo ./scripts/mod_switch.sh
+	sudo ./programs/sdk_tyche/app_selector
+	sudo ./programs/sdk_tyche/application_with_sandbox
+	sudo ./programs/sdk_kvm/app_selector
+	sudo ./programs/sdk_kvm/application_with_sandbox

@@ -69,6 +69,7 @@ pub enum CapaError {
     InvalidOperation,
     InvalidValue,
     InvalidMemOps,
+    AlreadyAliased,
 }
 
 pub struct CapaEngine {
@@ -275,7 +276,7 @@ impl CapaEngine {
         domain: Handle<Domain>,
         capa: LocalCapa,
         to: LocalCapa,
-    ) -> Result<(), CapaError> {
+    ) -> Result<LocalCapa, CapaError> {
         // Enforce permissions
         domain::has_config(
             domain,
@@ -313,9 +314,7 @@ impl CapaEngine {
         }
 
         // Move the capa to the new domain, can't fail as we checked for capacity already.
-        insert_capa(to, capa, &mut self.regions, &mut self.domains).unwrap();
-
-        Ok(())
+        insert_capa(to, capa, &mut self.regions, &mut self.domains)
     }
 
     // Mostly for debug.

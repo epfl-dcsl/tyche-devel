@@ -505,17 +505,33 @@ pub fn do_send_region(
             1
         }
     };
-    engine.send(current, capa, to)?;
+
+    // Check for an overlap first.
+    {
+        let target = engine.get_domain_capa(current, to)?;
+        let dom_dat = get_domain(target);
+        if dom_dat
+            .remapper
+            .overlaps(alias, repeat * (region_info.end - region_info.start))
+        {
+            return Err(CapaError::AlreadyAliased);
+        }
+    }
+
+    let _ = engine.send(current, capa, to)?;
     // We cannot hold the reference while apply_updates is called.
     {
         let target = engine.get_domain_capa(current, to)?;
         let mut dom_dat = get_domain(target);
-        let _ = dom_dat.remapper.map_range(
-            region_info.start,
-            alias,
-            region_info.end - region_info.start,
-            repeat,
-        );
+        let _ = dom_dat
+            .remapper
+            .map_range(
+                region_info.start,
+                alias,
+                region_info.end - region_info.start,
+                repeat,
+            )
+            .unwrap(); // Overlap is checked again but should not be triggered.
         engine.conditional_permission_update(target);
     };
     apply_updates(&mut engine);
@@ -532,6 +548,27 @@ pub fn do_enumerate(
 
 pub fn do_revoke(current: Handle<Domain>, capa: LocalCapa) -> Result<(), CapaError> {
     let mut engine = CAPA_ENGINE.lock();
+    engine.revoke(current, capa)?;
+    apply_updates(&mut engine);
+    Ok(())
+}
+
+pub fn do_revoke_region(
+    current: Handle<Domain>,
+    capa: LocalCapa,
+    to: LocalCapa,
+    alias: usize,
+    size: usize,
+) -> Result<(), CapaError> {
+    let mut engine = CAPA_ENGINE.lock();
+    //TODO(aghosn): this is not really safe. We should make more checks.
+    //Maybe have a cleaner interface for that after the rebuttal.
+    {
+        //Unmap the gpa range.
+        let dom = engine.get_domain_capa(current, to).unwrap();
+        let mut dom_dat = get_domain(dom);
+        let _ = dom_dat.remapper.unmap_gpa_range(alias, size).unwrap();
+    }
     engine.revoke(current, capa)?;
     apply_updates(&mut engine);
     Ok(())
@@ -568,10 +605,11 @@ pub fn do_debug() {
             engine.get_domain_regions(domain).expect("Invalid domain")
         );
         let dom_dat = get_domain(domain);
+        log::info!("remaps {}", dom_dat.remapper.iter_segments());
         let remap = dom_dat
             .remapper
             .remap(engine.get_domain_permissions(domain).unwrap());
-        log::info!("remap: {}", remap);
+        log::info!("remapped: {}", remap);
     }
 }
 
