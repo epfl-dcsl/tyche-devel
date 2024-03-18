@@ -290,12 +290,6 @@ pub fn misaligned_load_handler(reg_state: &mut RegisterState) {
                 reg_state.a0 = 0x0;
                 reg_state.a1 = capa.as_usize() as isize;
             }
-            calls::_SHARE => {
-                todo!("Share was called...");
-                //let capa = monitor::.do_().expect("TODO");
-                reg_state.a0 = 0x0;
-                reg_state.a1 = 0x0;
-            }
             calls::SEND => {
                 log::debug!("Send");
                 monitor::do_send(active_dom, LocalCapa::new(arg_1), LocalCapa::new(arg_2))

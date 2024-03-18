@@ -6,7 +6,7 @@
 .globl asm_call_gate
 asm_call_gate:
     mv a1, a0
-    li a0, 0x9  
+    li a0, 0x8  
     li a7, 0x5479636865
     ecall 
     ret 

@@ -21,7 +21,7 @@ asm_call_gate:
     //pushq %rsi
     //movq (%rdi), %rdi
     //movq (%rsi), %rsi
-    movq $9, %rax   // TYCHE_SWITCH 
+    movq $8, %rax   // TYCHE_SWITCH 
     vmcall
     // We returned, move the return values into the registers.
     //popq %r15 // &rsi, i.e., void**
