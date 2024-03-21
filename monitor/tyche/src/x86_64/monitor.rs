@@ -282,8 +282,11 @@ pub fn do_get_all_gp(
     if (1 << core) & core_map == 0 {
         return Err(CapaError::InvalidCore);
     }
-
-    let mut curr_ctx = get_context(current, core);
+    if core != cpuid() {
+        log::error!("Attempting to read gp from different core");
+        return Err(CapaError::InvalidCore);
+    }
+    let mut curr_ctx = get_context(current, cpuid());
     let tgt_ctx = get_context(domain, core);
     if curr_ctx.vmcs.is_invalid() || tgt_ctx.vmcs.is_invalid() {
         log::error!(

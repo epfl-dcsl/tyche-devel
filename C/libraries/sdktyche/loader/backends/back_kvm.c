@@ -115,6 +115,7 @@ failure:
 int backend_td_create(tyche_domain_t* domain)
 {
   msg_info_t info = {UNINIT_USIZE, UNINIT_USIZE};
+  usize perms_coremap = 0;
   // Open the kvm driver.
   int kvm_fd = open(KVM_DRIVER, O_RDWR);
   if (kvm_fd < 0) {
@@ -123,7 +124,9 @@ int backend_td_create(tyche_domain_t* domain)
   }
 
   // Create the vm.
-  domain->handle = ioctl(kvm_fd, KVM_CREATE_VM, 0); 
+  // We encode the perms and the coremap inside the machine type.
+  perms_coremap = (domain->perms) << 32 | (domain->core_map);
+  domain->handle = ioctl(kvm_fd, KVM_CREATE_VM, perms_coremap);
   if (domain->handle < 0) {
     ERROR("Unable to create a VM!");
     close(kvm_fd);

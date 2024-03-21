@@ -1,10 +1,13 @@
 all:
 
+TD1_MASK ?= 0x1
+
 install_driver:
 	sudo ./scripts/mod_switch.sh
 
 run_td1:
 	sudo ./scripts/mod_switch.sh && \
+	taskset $(TD1_MASK) \
 	qemu-system-x86_64 \
 	-kernel vms/bzImage \
 	-nographic \

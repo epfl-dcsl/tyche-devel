@@ -1,3 +1,4 @@
+#define _GNU_SOURCE
 #include <elf.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -5,6 +6,7 @@
 #include <string.h>
 #include <sys/mman.h>
 #include <unistd.h>
+#include <sched.h>
 
 #include "elf64.h"
 #include "tyche_capabilities_types.h"
@@ -456,12 +458,21 @@ failure:
   return FAILURE;
 }
 
-int sdk_call_domain(tyche_domain_t* domain, usize core)
+int sdk_call_domain_on_core(tyche_domain_t* domain, usize core)
 {
+  int cpu_id = sched_getcpu();
   if (domain == NULL) {
     ERROR("The provided domain is null.");
     goto failure;
   } 
+
+  // This is just a sanity check but the thread might get migrated between
+  // time of check and until it reaches the vmcall
+  if (core != cpu_id) {
+    ERROR("CPU %d cannot run vcpu on core %lld", cpu_id, core);
+    goto failure;
+  }
+
   if (backend_td_vcpu_run(domain, core) != SUCCESS) {
     ERROR("Unable to switch to the domain %d on core %lld", domain->handle, core);
     goto failure;
@@ -469,6 +480,11 @@ int sdk_call_domain(tyche_domain_t* domain, usize core)
   return SUCCESS;
 failure:
   return FAILURE;
+}
+
+int sdk_call_domain(tyche_domain_t* domain)
+{
+  return sdk_call_domain_on_core(domain, sched_getcpu());
 }
 
 int sdk_delete_domain(tyche_domain_t* domain)

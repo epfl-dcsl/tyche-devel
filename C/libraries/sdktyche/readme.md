@@ -19,3 +19,8 @@ By default, it casts a shared_buffer pointer to the address `0x300000` which sho
 ## Examples
 
 The `example` folder contains code for a simple enclave, a simple sandbox, and an application selector that runs various benchmarks inside an enclave.
+
+They expect to be run with `taskset`, see `configs/Makefile_td0` for an example.
+Failing to do so might lead into failed attempts to switch to the target domain on a given core.
+
+In your own code, you should set thread affinity to make sure that transitions arguments specify the core you are currently running on.
