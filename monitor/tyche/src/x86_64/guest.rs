@@ -509,7 +509,7 @@ fn handle_exit(
             }
         }
         VmxExitReason::InitSignal /*if domain.idx() == 0*/ => {
-            log::info!("cpu {} received init signal", cpuid());
+            log::trace!("cpu {} received init signal", cpuid());
             Ok(HandlerResult::Resume)
         }
         VmxExitReason::Cpuid if domain.idx() == 0 => {
@@ -669,11 +669,12 @@ fn handle_exit(
         | VmxExitReason::Hlt => {
             log::trace!("Handling {:?} for dom {}", reason, domain.idx());
             if reason == VmxExitReason::ExternalInterrupt {
-                let address_eoi = 0xfee000b0 as *mut u32;
+                /*let address_eoi = 0xfee000b0 as *mut u32;
                 unsafe {
                     // Clear the eoi
                     *address_eoi = 0;
-                }
+                }*/
+                x2apic::send_eoi();
             }
             match monitor::do_handle_violation(*domain) {
                 Ok(_) => {

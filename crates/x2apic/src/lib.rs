@@ -153,3 +153,8 @@ pub fn send_init_assert(core: u32) {
         ((core as u64) << 32) | (0x0 << 18) | (0x1 << 15) | (0x1 << 14) | (0x0 << 11) | (0x5 << 8);
     unsafe { wrmsr(IA32_X2APIC_ICR, icr) };
 }
+pub fn send_eoi() {
+    unsafe {
+        wrmsr(IA32_X2APIC_EOI, 0);
+    }
+}
