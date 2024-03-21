@@ -699,18 +699,12 @@ fn post_ept_update(core_id: usize, cores: u64, domain: &Handle<Domain>) {
 
     // If I am the initiating core, then I'm responsible for freeing the original EPT
     // root.
-    log::trace!("core {} freeing the original domain EPT", core_id);
+    log::trace!(
+        "core {} woke up, about to free the original domain EPT",
+        core_id
+    );
     free_original_ept_root(domain);
-    let new_epts = {
-        let domain = get_domain(*domain);
-        domain.ept.unwrap().as_usize()
-    };
-    for core in BitmapIterator::new(cores) {
-        let mut context = get_context(*domain, core);
-        context
-            .set(VmcsField::EptPointer, new_epts | EPT_ROOT_FLAGS, None)
-            .unwrap();
-    }
+
     // We're done with the current TLB flush update
     log::trace!("core {} allows more TLB flushes", core_id);
     TLB_FLUSH[domain.idx()].store(false, Ordering::SeqCst);
@@ -743,8 +737,15 @@ fn apply_updates(engine: &mut MutexGuard<CapaEngine>) {
                         cpuid(),
                         core_map
                     );
+                    // This relies on the fact that the cache marks dirty values.
+                    // We call the tlb_shootdown which will be effective upon reentry in the
+                    // domain.
+                    tlb_shootdown(core_id, &domain, None);
                     // Push TlbShootdown directly into the per-core queue
                     for core in BitmapIterator::new(core_map) {
+                        if core == core_id {
+                            continue;
+                        }
                         push_core_update(core);
                     }
 
@@ -789,8 +790,8 @@ fn apply_updates(engine: &mut MutexGuard<CapaEngine>) {
     }
 }
 
-fn tlb_shootdown(core_id: usize, current_domain: &mut Handle<Domain>, vcpu: &mut ActiveVmcs) {
-    log::trace!("EPT Root update on core {}", core_id);
+fn tlb_shootdown(core_id: usize, current_domain: &Handle<Domain>, vcpu: Option<&mut ActiveVmcs>) {
+    log::trace!("cpu{} processing TLB shootdown", core_id);
     // Reload the EPTs
     let domain = get_domain(*current_domain);
     log::trace!(
@@ -798,10 +799,12 @@ fn tlb_shootdown(core_id: usize, current_domain: &mut Handle<Domain>, vcpu: &mut
         core_id,
         domain.ept.unwrap().as_usize()
     );
-    vcpu.set_ept_ptr(HostPhysAddr::new(
-        domain.ept.unwrap().as_usize() | EPT_ROOT_FLAGS,
-    ))
-    .expect("VMX error, failed to set EPT pointer");
+    let new_epts = domain.ept.unwrap().as_usize();
+    // Update the context.
+    let mut context = get_context(*current_domain, core_id);
+    context
+        .set(VmcsField::EptPointer, new_epts | EPT_ROOT_FLAGS, vcpu)
+        .expect("VMX error, failed to set EPT pointer");
 }
 
 fn free_original_ept_root(current_domain: &Handle<Domain>) {
@@ -823,12 +826,12 @@ pub fn apply_core_updates(
     let vcpu = &mut vmx_state.vcpu;
     let mut update_queue = CORE_UPDATES[core_id].lock();
     while let Some(update) = update_queue.pop() {
-        log::trace!("Core Update: {}", update);
+        log::trace!("Core Update: {} on core {}", update, core);
         match update {
             CoreUpdate::TlbShootdown => {
                 // Into a separate function so that we can drop the domain lock before starting to
                 // wait on the TLB_FLUSH_BARRIER
-                tlb_shootdown(core_id, current_domain, vcpu);
+                tlb_shootdown(core_id, current_domain, Some(vcpu));
                 log::trace!("core {} waits on tlb flush barrier", core_id);
                 unsafe {
                     TLB_FLUSH_BARRIERS[current_domain.idx()]
@@ -836,7 +839,7 @@ pub fn apply_core_updates(
                         .unwrap()
                         .wait();
                 }
-                log::trace!("core {} finished waiting", core_id);
+                log::trace!("core {} done waiting", core_id);
             }
             CoreUpdate::Switch {
                 domain,
@@ -1037,12 +1040,18 @@ fn update_domain_ept(domain_handle: Handle<Domain>, engine: &mut MutexGuard<Capa
 
 fn notify_cores(core_id: usize, domain_core_bitmap: u64) {
     // initialize lapic
+    log::trace!(
+        "The bitmap {:b} for notify cores on core {}",
+        domain_core_bitmap,
+        core_id
+    );
+
     for core in BitmapIterator::new(domain_core_bitmap) {
         if core == core_id {
             continue;
         }
         // send ipi
-        x2apic::send_init_assert(core as u32)
+        x2apic::send_init_assert(core as u32);
     }
 }
 
