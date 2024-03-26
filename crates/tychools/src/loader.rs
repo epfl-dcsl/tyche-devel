@@ -12,7 +12,7 @@ use object::elf;
 use object::read::elf::{FileHeader, ProgramHeader, SectionHeader};
 
 use crate::elf_modifier::{ModifiedELF, ModifiedSegment, TychePhdrTypes, DENDIAN};
-use crate::page_table_mapper::align_address;
+use crate::page_table_mapper::align_address_up;
 
 // ————————————————————————— Constant declarations —————————————————————————— //
 const TYCHE_DRIVER: &str = "/dev/tyche";
@@ -133,7 +133,7 @@ pub fn load(encl: &mut Enclave, riscv_enabled: bool) {
         if !ModifiedSegment::is_loadable(seg.program_header.p_type(DENDIAN)) {
             continue;
         }
-        memsize += align_address(seg.program_header.p_memsz(DENDIAN) as usize);
+        memsize += align_address_up(seg.program_header.p_memsz(DENDIAN) as usize);
     }
     log::debug!("The memory size to load is {:x}", memsize);
 
@@ -200,7 +200,7 @@ pub fn load(encl: &mut Enclave, riscv_enabled: bool) {
         if !ModifiedSegment::is_loadable(seg.program_header.p_type(DENDIAN)) {
             continue;
         }
-        let sz = align_address(seg.program_header.p_memsz(DENDIAN) as usize);
+        let sz = align_address_up(seg.program_header.p_memsz(DENDIAN) as usize);
         content[curr_offset..curr_offset + seg.data.len()].copy_from_slice(&seg.data);
         curr_offset += sz;
     }
@@ -212,7 +212,7 @@ pub fn load(encl: &mut Enclave, riscv_enabled: bool) {
         if !ModifiedSegment::is_loadable(seg.program_header.p_type(DENDIAN)) {
             continue;
         }
-        let sz = align_address(seg.program_header.p_memsz(DENDIAN) as usize) as u64;
+        let sz = align_address_up(seg.program_header.p_memsz(DENDIAN) as usize) as u64;
         let mut args = MsgEnclaveProtect {
             start: curr_va,
             size: sz as usize,

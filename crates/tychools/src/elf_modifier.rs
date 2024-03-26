@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::allocator::PAGE_SIZE;
 use crate::instrument::{MappingPageTables, Security};
-use crate::page_table_mapper::{align_address, generate_page_tables};
+use crate::page_table_mapper::{align_address_up, generate_page_tables};
 
 pub static PF_H: u32 = 1 << 3;
 
@@ -191,7 +191,7 @@ impl ModifiedELF {
                     melf.layout.min_addr = start;
                 }
                 if end > melf.layout.max_addr {
-                    melf.layout.max_addr = align_address(end as usize) as u64;
+                    melf.layout.max_addr = align_address_up(end as usize) as u64;
                     assert!(melf.layout.max_addr % 0x1000 == 0);
                 }
             }
@@ -547,7 +547,7 @@ impl ModifiedELF {
 
         // Update the max address.
         if addr + size as u64 > self.layout.max_addr {
-            self.layout.max_addr = align_address(addr as usize + size) as u64;
+            self.layout.max_addr = align_address_up(addr as usize + size) as u64;
             assert!(self.layout.max_addr % 0x1000 == 0);
         }
 

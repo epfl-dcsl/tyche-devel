@@ -13,11 +13,18 @@ use crate::allocator::{Allocator, BumpAllocator, ADDR_IDX, DEFAULT_BUMP_SIZE, PA
 use crate::elf_modifier::{ModifiedELF, ModifiedSegment, TychePhdrTypes, DENDIAN};
 use crate::instrument::{decode_map, MappingPageTables};
 
-pub fn align_address(addr: usize) -> usize {
+pub fn align_address_up(addr: usize) -> usize {
     if addr % PAGE_SIZE == 0 {
         return addr;
     }
     (PAGE_SIZE + addr) & !(PAGE_SIZE - 1)
+}
+
+pub fn align_address_down(addr: usize) -> usize {
+    if addr % PAGE_SIZE == 0 {
+        return addr;
+    }
+    return (addr / PAGE_SIZE) * PAGE_SIZE;
 }
 
 enum FlagFormat {
@@ -76,7 +83,7 @@ pub fn generate_page_tables(
             continue;
         }
         let mem = ph.program_header.p_memsz(Endianness::Little) as usize;
-        let size = align_address(mem);
+        let size = align_address_up(mem);
         memsz += size;
     }
     log::debug!("Computed size for the binary is {:x}", memsz);
@@ -114,9 +121,9 @@ pub fn generate_page_tables(
             continue;
         }
         let mem_size = ph.program_header.p_memsz(Endianness::Little) as usize;
-        let vaddr = ph.program_header.p_vaddr(Endianness::Little) as usize;
+        let vaddr = align_address_down(ph.program_header.p_vaddr(Endianness::Little) as usize);
         let virt = HostVirtAddr::new(vaddr);
-        let size = align_address(mem_size);
+        let size = align_address_up(mem_size);
         let flags: FlagFormat = if !riscv_enabled {
             FlagFormat::X86(translate_flags(
                 ph.program_header.p_flags(Endianness::Little),
@@ -253,7 +260,7 @@ pub fn print_page_tables(file: &PathBuf, riscv_enabled: bool) {
         {
             if ModifiedSegment::is_loadable(seg.program_header.p_type(DENDIAN)) {
                 let mem = seg.program_header.p_memsz(Endianness::Little) as usize;
-                let size = align_address(mem);
+                let size = align_address_up(mem);
                 memsize += size;
             }
             continue;
@@ -276,7 +283,7 @@ pub fn print_page_tables(file: &PathBuf, riscv_enabled: bool) {
         dumper
             .walk_range(
                 HostVirtAddr::new(0),
-                HostVirtAddr::new(align_address(elf.layout.max_addr as usize)),
+                HostVirtAddr::new(align_address_up(elf.layout.max_addr as usize)),
                 &mut |addr, entry, level| {
                     let phys = *entry & ((1 << 63) - 1) & (page_mask as u64);
 

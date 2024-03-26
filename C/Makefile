@@ -33,6 +33,7 @@ update_disk:
 	make ARCH=x86 KVM=1 DISK_PATH=/tmp/mount/tyche/programs/sdk_kvm -B -C libraries/sdktyche/example/app-selector install_disk
 	make ARCH=x86 KVM=1 DISK_PATH=/tmp/mount/tyche/programs/sdk_kvm -B -C libraries/sdktyche/example/simple-enclave install_disk
 	make ARCH=x86 KVM=1 DISK_PATH=/tmp/mount/tyche/programs/sdk_kvm -B -C libraries/sdktyche/example/simple-sandbox install_disk
+	make ARCH=x86 KVM=1 DISK_PATH=/tmp/mount/tyche/programs/sdk_kvm -B -C libraries/sdktyche/example/redis install_disk
 	#make ARCH=x86 -B -C libraries/tyche-trusted-runtime install_disk
 	#cp scripts/x86_64_install_drivers.sh /tmp/mount/tyche
 	cp $(TYCHOOLS_LOCAL_BIN_PATH)/tychools $(PROGRAMGS_PATH)/tychools 
