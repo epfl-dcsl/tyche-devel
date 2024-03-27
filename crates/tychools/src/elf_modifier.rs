@@ -32,6 +32,8 @@ pub enum ErrorBin {
 #[allow(dead_code)]
 #[repr(u32)]
 pub enum TychePhdrTypes {
+    /// Default value for normal segments.
+    NormalLoad = 0x1,
     /// User sandbox (shared) stack.
     UserStackSB = 0x60000001,
     /// User confidential stack.
@@ -59,6 +61,7 @@ pub enum TychePhdrTypes {
 impl TychePhdrTypes {
     pub fn from_u32(val: u32) -> Option<Self> {
         match val {
+            0x1 => Some(TychePhdrTypes::NormalLoad),
             0x60000001 => Some(TychePhdrTypes::UserStackSB),
             0x60000002 => Some(TychePhdrTypes::UserStackConf),
             0x60000003 => Some(TychePhdrTypes::UserShared),

@@ -309,6 +309,11 @@ pub fn instrument_binary(manifest: &Manifest, riscv_enabled: bool) {
         kern.set_attestation_hash();
         kern
     } else {
+        // There is nothing to instrument we are just adding things to the original binary.
+        if let Some(bin) = &mut untrusted_elf {
+            bin.dump_to_file(&PathBuf::from(&manifest.output), manifest.sort_phdrs);
+            return;
+        }
         panic!("We had nothing to instrument");
     };
 

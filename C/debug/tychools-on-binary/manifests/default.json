@@ -1,0 +1,19 @@
+{
+  "untrusted_bin": {
+    "path": "redis-server-tmp",
+		"ops":[
+      {
+        "AddSegment":{
+          "start": 3145728, 
+          "size":8192,
+          "tpe":"NormalLoad",
+          "write":true,
+          "exec":false
+        }
+      }
+    ]
+  },
+  "generate_pts": false,
+	"sort_phdrs": true,
+  "output": "redis-server-seg"
+}
