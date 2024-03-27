@@ -120,7 +120,8 @@ int hello_world() {
 
   write_to_tychools(msg);
   LOG("Calling the command to tychools to compare the result\n");
-  call_tychools(msg->nonce, enclave->map.physoffset);
+  //TODO: fix this.
+  call_tychools(msg->nonce, /*enclave->map.physoffset*/ 0);
   read_tychools_response();
 
   // Clean up.

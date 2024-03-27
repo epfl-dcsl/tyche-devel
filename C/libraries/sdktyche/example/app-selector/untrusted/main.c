@@ -201,8 +201,8 @@ int malicious() {
   }
   LOG("First enclave message:\n%s", msg->reply);
 
-  LOG("Address we try to read: %llx", enclave->map.virtoffset);
-  int *conf_ptr = (int *)(enclave->map.virtoffset);
+  LOG("Address we try to read: %llx", enclave->mmaps.head->virtoffset);
+  int *conf_ptr = (int *)(enclave->mmaps.head->virtoffset);
   int a = *conf_ptr + 67;
 
   ERROR("We survived the fault (%d)", a);

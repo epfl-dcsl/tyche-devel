@@ -82,14 +82,18 @@ typedef struct {
 } parser_t;
 
 /// Describes the memory layout of the domain.
-typedef struct {
+typedef struct domain_mslot_t {
+  /// slot id
+  usize id;
   /// The virtual offset for the domain.
   usize virtoffset;
   /// The physical offset for the domain.
   usize physoffset;
   /// The overall size of the domain segment.
   usize size;
-} domain_map_t;
+  /// These are store in a list.
+  dll_elem(struct domain_mslot_t, list);
+} domain_mslot_t;
 
 /// Quick access to shared sections.
 typedef struct domain_shared_memory_t {
@@ -126,8 +130,11 @@ typedef struct {
   /// The parser state for the domain.
   parser_t parser;
 
-  /// The memory layout of the domain.
-  domain_map_t map;
+  /// Next available mslot id.
+  usize mslot_id;
+
+  /// The memory slots of the domain.
+  dll_list(domain_mslot_t, mmaps);
 
   /// The domain's core map.
   usize core_map;

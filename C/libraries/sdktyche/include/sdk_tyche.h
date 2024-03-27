@@ -11,7 +11,7 @@
 // ——————————————————————————————— Constants ———————————————————————————————— //
 
 #define MAX_CORES (32)
-
+#define MAX_SLOT_SIZE (0x400000)
 // ————————————————————————————— SDK Tyche API —————————————————————————————— //
 /// Creates a domain by parsing the current program and extracting the nested
 /// binary. It then instantiates the domain's binary.

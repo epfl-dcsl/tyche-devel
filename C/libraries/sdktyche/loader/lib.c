@@ -79,6 +79,14 @@ static addr_t align_up(addr_t addr)
   return (addr + PT_PAGE_SIZE) & ~(PT_PAGE_SIZE-1); 
 }
 
+static addr_t align_down(addr_t addr)
+{
+  if (addr % PT_PAGE_SIZE == 0) {
+    return addr;
+  }
+  return (addr / PT_PAGE_SIZE) * PT_PAGE_SIZE;
+}
+
 /// Look for the domain binary inside the current program's binary.
 /// If destf is not null, it writes the extracted binary to the specified file.
 static int extract_binary(elf_parser_t* parser, const char* self, const char* destf)
@@ -158,6 +166,62 @@ failure:
   return FAILURE;
 }
 
+static int domain_add_mslot(tyche_domain_t *domain, usize size)
+{
+  domain_mslot_t *slot = NULL;
+  if (domain == NULL) {
+    ERROR("Null domain.");
+    goto failure;
+  }
+  if (size >= MAX_SLOT_SIZE) {
+    ERROR("Slot size too big");
+    goto failure;
+  }
+  if (size == 0) {
+    ERROR("Attempt to add a null size slot");
+    goto failure;
+  }
+  slot = malloc(sizeof(domain_mslot_t));
+  if (slot == NULL) {
+    ERROR("Failed to allocate a slot.");
+    goto failure;
+  }
+  memset(slot, 0, sizeof(domain_mslot_t));
+  dll_init_elem(slot, list);
+  slot->id = domain->mslot_id++;
+  slot->size = size;
+  // Add the slot to the domain.
+  dll_add(&(domain->mmaps), slot, list);
+  return SUCCESS;
+failure:
+  return FAILURE;
+}
+
+// Given a page number (pn), find the physical offset inside the domain's segment.
+// Puts the result inside `result` and returns SUCCESS
+// This should work as pn is basically the page address if everything was
+// initialized from address 0. We go through segments looking for the one that
+// contains the (pn >> PAGE_SIZE)th page over all allocations.
+static int find_phys_address(tyche_domain_t *domain, usize pn, usize *result) {
+  domain_mslot_t *slot = NULL;
+  usize accumulated_size = 0;
+  if (domain == NULL || result == NULL) {
+    ERROR("Null argument");
+    goto failure;
+  }
+  dll_foreach(&(domain->mmaps), slot, list) {
+    if (pn >= accumulated_size && pn < (accumulated_size + slot->size)) {
+      // offset within that slot.
+      usize offset = pn - accumulated_size;
+      *result = slot->physoffset + offset;
+      return SUCCESS;
+    }
+    accumulated_size += slot->size;
+  }
+failure:
+  return FAILURE;
+}
+
 // —————————————————————————— Prototype functions ——————————————————————————— //
 
 /// Calls both parse and load domain pointed by the file.
@@ -218,7 +282,12 @@ int parse_domain(tyche_domain_t* domain)
     ERROR("The domain's memory content is null.");
     goto failure;
   }
+  if (domain->mslot_id != 0) {
+    ERROR("The domain already has mslots!");
+    goto failure;
+  }
   dll_init_list(&(domain->shared_regions));
+  dll_init_list(&(domain->mmaps));
   
   // Parse the ELF.
   read_elf64_header(&domain->parser.elf, &(domain->parser.header));
@@ -259,21 +328,38 @@ int parse_domain(tyche_domain_t* domain)
     }
   }
   
-  // Compute the entire size of all segments.
+  // Compute the memory slots required for the segments.
+  // Go through segments.
   for (int i = 0; i < domain->parser.header.e_phnum; i++) {
     Elf64_Word tpe = domain->parser.segments[i].p_type;
+    usize total = 0;
+    usize seg_size = 0;
     // Only consider loadable segments instrumented by tychools.
     if (!is_loadable(tpe)) {
       continue;
     }
-    segments_size += align_up(domain->parser.segments[i].p_memsz);
+    seg_size = align_up(domain->parser.segments[i].p_memsz);
+    if (seg_size % PT_PAGE_SIZE != 0) {
+      ERROR("The segment size is %zu", segments_size);
+      goto close_failure;
+    }
+    // Check if we fit in the current slot.
+    total = segments_size + seg_size;
+    if (total >= MAX_SLOT_SIZE) {
+      if (domain_add_mslot(domain, segments_size) != SUCCESS) {
+        ERROR("Slot failure");
+        goto close_failure;
+      }
+      segments_size = seg_size;
+    } else {
+      segments_size += align_up(domain->parser.segments[i].p_memsz);
+    }
   }
-  if (segments_size % PT_PAGE_SIZE != 0) {
-    ERROR("The computed size for the segments is %zu", segments_size);
+  // Add the last segment.
+  if (domain_add_mslot(domain, segments_size) != SUCCESS) {
+    ERROR("Last slot failure");
     goto close_failure;
   }
-  //DEBUG("The overall size for the binary is %zx", segments_size);
-  domain->map.size = segments_size;
   
   // We are done for now, next step is to load the domain.
   LOG("Parsed tychools binary");
@@ -285,12 +371,11 @@ failure:
   return FAILURE;
 }
 
-
-
 int load_domain(tyche_domain_t* domain)
 {
   usize size = 0;
   usize phys_size = 0;
+  domain_mslot_t *slot = NULL;
   if (domain == NULL) {
     ERROR("The domain is null.");
     goto failure;
@@ -313,20 +398,26 @@ int load_domain(tyche_domain_t* domain)
     goto failure;
   }
 
-  // Add the offset to the domain's page_table_root.
-  domain->config.page_table_root += domain->map.physoffset;
-  DEBUG("The domain's page_table_root is at %llx", domain->config.page_table_root);
-
   // Copy the domain's content.
   phys_size = 0;
+  slot = domain->mmaps.head;
   for (int i = 0; i < domain->parser.header.e_phnum; i++) {
     Elf64_Phdr seg = domain->parser.segments[i];
     // The segment is not loadable.
     if (!is_loadable(seg.p_type)) {
       continue;
     }
-    addr_t dest = domain->map.virtoffset + phys_size;
+    if (slot == NULL) {
+      ERROR("Slot should not be null");
+      goto failure;
+    }
     addr_t size = align_up(seg.p_memsz);
+
+    if (phys_size + size > slot->size) {
+      ERROR("The segment does not fit in the current size.");
+      goto failure;
+    }
+    addr_t dest = slot->virtoffset + phys_size;
     memory_access_right_t flags = translate_flags_to_tyche(seg.p_flags);
     load_elf64_segment(&domain->parser.elf, (void*) dest, seg);
 
@@ -340,21 +431,34 @@ int load_domain(tyche_domain_t* domain)
     }
 
     // Fix the page tables here.
+    // We need to go through and compute the offset of addreses in segments.
+    // We should have the guarantee that start and end fall within the same
+    // memory slot by construction for the moment (provided we don't have 2^11
+    // pages in the page tables).
     if (seg.p_type == PAGE_TABLES_CONF || seg.p_type == PAGE_TABLES_SB) {
       uint64_t* start = (uint64_t*) dest;
       uint64_t* end = (uint64_t*)(((uint64_t) dest) + size);
+      //We should go through the segments and find the right address and fix it.
       for (; start < end; start++) {
         if (*start != 0) {
-#if defined(CONFIG_X86) || defined(__x86_64__) 
-          *start += domain->map.physoffset;
-#elif defined(CONFIG_RISCV) || defined(__riscv)
-          uint64_t ppn = (domain->map.physoffset >> PT_PAGE_WIDTH) + (*start >> PT_FLAGS_RESERVED);
-          *start = (*start & ~PT_PHYS_PAGE_MASK) | (ppn << PT_FLAGS_RESERVED);
-#endif
+            uint64_t page = (*start & PT_PHYS_PAGE_MASK);
+            usize fixed_addr = 0;
+            if (find_phys_address(domain, page, &fixed_addr) != SUCCESS) {
+              ERROR("Unable to find the physaddress for %lx", page);
+              goto failure;
+            }
+            *start &= ~(PT_PHYS_PAGE_MASK);
+            *start |= (uint64_t) fixed_addr;
         }
-      } 
+      }
+      // Fix the root page tables here.
+      usize fixed_cr3 = 0;
+      if (find_phys_address(domain, domain->config.page_table_root, &fixed_cr3) != SUCCESS) {
+        ERROR("Unable to find the cr3 in the mslots");
+        goto failure;
+      }
+      domain->config.page_table_root = fixed_cr3;
     }
-
     // Now map the segment.
     int conf_or_shared = is_confidential(seg.p_type)? CONFIDENTIAL : SHARED; 
     if (conf_or_shared == CONFIDENTIAL) {
@@ -372,7 +476,15 @@ int load_domain(tyche_domain_t* domain)
     }
     // Update the current size.
     phys_size+= size;
-  } 
+    if (phys_size > slot->size) {
+      ERROR("We went above the slot size.");
+      goto failure;
+    }
+    if (phys_size == slot->size) {
+      phys_size = 0;
+      slot = slot->list.next;
+    }
+  }
   DEBUG("Done mprotecting domain %d's sections", domain->handle);
 
   // Set the traps.

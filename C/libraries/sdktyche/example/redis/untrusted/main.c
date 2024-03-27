@@ -61,6 +61,10 @@ int main(int argc, char *argv[]) {
     goto failure;
   }
   LOG("The binary enclave has been loaded!");
+  if (sdk_delete_domain(enclave) != SUCCESS) {
+    ERROR("Unable to delete the redis domain.");
+    goto failure;
+  }
   return SUCCESS;
 failure:
   return FAILURE;

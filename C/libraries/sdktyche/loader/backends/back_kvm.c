@@ -35,15 +35,15 @@ static void ar_to_kvm_segment(struct kvm_segment* var, uint32_t ar)
   var->unusable = (ar >> 16);
 
   /// Model to compute from ar to kvm_segment.
-	/*ar = var->type & 15;
-	ar |= (var->s & 1) << 4;
-	ar |= (var->dpl & 3) << 5;
-	ar |= (var->present & 1) << 7;
-	ar |= (var->avl & 1) << 12;
-	ar |= (var->l & 1) << 13;
-	ar |= (var->db & 1) << 14;
-	ar |= (var->g & 1) << 15;
-	ar |= (var->unusable || !var->present) << 16;*/
+  /*ar = var->type & 15;
+  ar |= (var->s & 1) << 4;
+  ar |= (var->dpl & 3) << 5;
+  ar |= (var->present & 1) << 7;
+  ar |= (var->avl & 1) << 12;
+  ar |= (var->l & 1) << 13;
+  ar |= (var->db & 1) << 14;
+  ar |= (var->g & 1) << 15;
+  ar |= (var->unusable || !var->present) << 16;*/
 }
 
 static int default_sregs(struct kvm_sregs* sregs)
@@ -110,6 +110,22 @@ failure:
   return FAILURE;
 }
 
+static domain_mslot_t* find_mslot(tyche_domain_t *domain, usize vaddr) {
+  domain_mslot_t *slot = NULL;
+  if (domain == NULL) {
+    ERROR("Domain is null");
+    goto failure;
+  }
+  dll_foreach(&(domain->mmaps), slot, list) {
+    if ((slot->virtoffset <= vaddr) &&
+        ((slot->virtoffset + slot->size) > vaddr)) {
+      return slot;
+    }
+  }
+failure:
+  return NULL;
+}
+
 // —————————————————————————————— Backend API ——————————————————————————————— //
 
 int backend_td_create(tyche_domain_t* domain)
@@ -150,6 +166,7 @@ failure:
 int backend_td_alloc_mem(tyche_domain_t* domain)
 {
   msg_info_t info = {0};
+  domain_mslot_t *slot = NULL;
   if (domain == NULL) {
     ERROR("Nul argument.");
     goto failure;
@@ -161,23 +178,25 @@ int backend_td_alloc_mem(tyche_domain_t* domain)
     close(domain->handle);
     goto failure;
   }
-  domain->map.virtoffset = (usize) mmap(NULL, (size_t) domain->map.size,
+  dll_foreach(&(domain->mmaps), slot, list) {
+    slot->virtoffset = (usize) mmap(NULL, (size_t) slot->size,
       PROT_READ|PROT_WRITE, MAP_SHARED|MAP_POPULATE, domain->backend.memfd, 0);
-  if (((void*)(domain->map.virtoffset)) == MAP_FAILED) {
-    ERROR("Unable to allocate memory for the domain.");
-    close(domain->handle);
-    close(domain->backend.memfd);
-    goto failure;
+    if (((void*)(slot->virtoffset)) == MAP_FAILED) {
+      ERROR("Unable to allocate memory for the domain.");
+      close(domain->handle);
+      close(domain->backend.memfd);
+      goto failure;
+    }
+    info.virtaddr = slot->id;
+    if (ioctl(domain->backend.memfd, CONTALLOC_GET_PHYSOFFSET, &info) != SUCCESS) {
+      ERROR("Getting physoffset failed!");
+      close(domain->handle);
+      close(domain->backend.memfd);
+      //TODO: munmap?
+      goto failure;
+    }
+    slot->physoffset = info.physoffset;
   }
-
-  if (ioctl(domain->backend.memfd, CONTALLOC_GET_PHYSOFFSET, &info) != SUCCESS) {
-    ERROR("Getting physoffset failed!");
-    close(domain->handle);
-    close(domain->backend.memfd);
-    //TODO: munmap?
-    goto failure;
-  }
-  domain->map.physoffset = info.physoffset; 
   return SUCCESS;
 failure:
   return FAILURE;
@@ -191,16 +210,18 @@ int backend_td_register_region(
     segment_type_t tpe) {
   
   backend_region_t* new_region = NULL;
+  domain_mslot_t *slot = NULL;
   uint32_t kvm_flags = KVM_FLAGS_ENCODING_PRESENT;
   if (domain == NULL) {
     ERROR("Nul argument.");
     goto failure;
   }
-  if (domain->map.virtoffset > vstart) {
+  slot = find_mslot(domain, vstart);
+  if (slot == NULL) {
     ERROR("Invalid vstart address");
     goto failure;
   }
-  if (domain->map.virtoffset + domain->map.size < vstart + size) {
+  if ((slot->virtoffset + slot->size) < (vstart + size)) {
     ERROR("Overflow of region.");
     goto failure;
   } 
@@ -221,7 +242,7 @@ int backend_td_register_region(
   new_region->kvm_mem.userspace_addr = vstart;
   new_region->kvm_mem.memory_size = size;
   new_region->kvm_mem.flags = kvm_flags;
-  new_region->kvm_mem.guest_phys_addr = (vstart - domain->map.virtoffset) + domain->map.physoffset;
+  new_region->kvm_mem.guest_phys_addr = (vstart - slot->virtoffset) + slot->physoffset;
   //TODO: handle the flags? for now just save them.
   new_region->flags = flags;
   new_region->tpe = tpe;
@@ -234,7 +255,7 @@ int backend_td_register_region(
   /*ERROR("[KVM region %d] uaddr: %llx, gpa: %llx, size: %llx | physoffset: %llx",
       new_region->kvm_mem.slot, new_region->kvm_mem.userspace_addr,
       new_region->kvm_mem.guest_phys_addr, new_region->kvm_mem.memory_size,
-      domain->map.physoffset);*/
+      slot->physoffset);*/
 
   /// Add the region to the list.
   dll_add(&(domain->backend.kvm_regions), new_region, list);
@@ -414,8 +435,13 @@ int backend_td_delete(tyche_domain_t* domain)
     dll_remove(&(domain->backend.kvm_regions), region, list);
     free(region);
   }
-  // Unmap the domain.
-  munmap((void*) domain->map.virtoffset, domain->map.size); 
+  // Unmap the domain's memory slots.
+  while(!dll_is_empty(&(domain->mmaps))) {
+    domain_mslot_t *slot = domain->mmaps.head;
+    dll_remove(&(domain->mmaps), slot, list);
+    munmap((void*)(slot->virtoffset), slot->size);
+    free(slot);
+  }
   close(domain->handle);
   return SUCCESS;
 failure:

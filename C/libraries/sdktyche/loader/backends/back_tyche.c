@@ -24,48 +24,6 @@
 
 // ————————————————————————— Local helper functions ————————————————————————— //
 
-static int ioctl_mmap(handle_t handle, usize size, usize* virtoffset)
-{
-  void* result = NULL;
-  if (virtoffset == NULL) {
-    ERROR("The virtoffset variable is null");
-    goto failure;
-  }
-  result = mmap(
-      NULL,
-      (size_t) size,
-      PROT_READ|PROT_WRITE,
-      MAP_SHARED|MAP_POPULATE,
-      handle,
-      0);
-  if (result == MAP_FAILED) {
-    ERROR("MMap to the driver failed %s", strerror(errno));
-    goto failure;
-  }
-  *virtoffset = (usize) result;
-  //DEBUG("mmap success for %d, address %llx", handle, (usize) result);
-  return SUCCESS;
-failure:
-  return FAILURE;
-}
-
-static int ioctl_getphysoffset(handle_t handle, usize* physoffset)
-{
-  msg_info_t info = {0, 0};
-  if (physoffset == NULL) {
-    ERROR("The physoffset is null.");
-    goto failure;
-  }
-  if (ioctl(handle, TYCHE_GET_PHYSOFFSET, &info) != SUCCESS) {
-    ERROR("Failed to read the physoffset for domain %d", handle);
-    goto failure;
-  }
-  *physoffset = info.physoffset;
-  return SUCCESS;
-failure:
-  return FAILURE;
-}
-
 static int ioctl_mprotect(handle_t handle, usize vstart, usize size, 
     memory_access_right_t flags, segment_type_t tpe)
 {
@@ -154,23 +112,27 @@ failure:
 
 int backend_td_alloc_mem(tyche_domain_t* domain)
 {
+  msg_info_t info = {0};
+  domain_mslot_t *slot = NULL;
   if (domain == NULL) {
     ERROR("Null argument.");
     goto failure;
   }
-  // Mmap the size of memory we need.
-  if (ioctl_mmap(
-        domain->handle,
-        domain->map.size,
-        &(domain->map.virtoffset)) != SUCCESS) {
-    goto failure;
-  }
-  
-  // Get the physoffset.
-  if (ioctl_getphysoffset(
-        domain->handle,
-        &(domain->map.physoffset)) != SUCCESS) {
-    goto failure;
+
+  dll_foreach(&(domain->mmaps), slot, list) {
+    slot->virtoffset = (usize) mmap(NULL, (size_t) (slot->size),
+      PROT_READ|PROT_WRITE, MAP_SHARED|MAP_POPULATE, domain->handle, 0);
+    if (slot->virtoffset == (usize) MAP_FAILED) {
+      ERROR("Unable to map the slot");
+      goto failure;
+    }
+    // Get the physoffset now.
+    info.virtaddr = slot->id;
+    if (ioctl(domain->handle, TYCHE_GET_PHYSOFFSET, &info) != SUCCESS) {
+      ERROR("Failed to read the physoffset for domain %d", domain->handle);
+      goto failure;
+    }
+    slot->physoffset = info.physoffset;
   }
   return SUCCESS;
 failure:
@@ -371,8 +333,13 @@ int backend_td_delete(tyche_domain_t* domain)
     dll_remove(&(domain->vcpus), vcpu, list);
     free(vcpu);
   }
-  // Unmap the domain.
-  munmap((void*) domain->map.virtoffset, domain->map.size); 
+  // Unmap the domain's memory slots.
+  while(!dll_is_empty(&(domain->mmaps))) {
+    domain_mslot_t *slot = domain->mmaps.head;
+    dll_remove(&(domain->mmaps), slot, list);
+    munmap((void*)(slot->virtoffset), slot->size);
+    free(slot);
+  }
   close(domain->handle);
   return SUCCESS;
 failure:
