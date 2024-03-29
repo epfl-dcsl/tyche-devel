@@ -128,6 +128,43 @@ static inline void buff_index_decr(buff_index_t *dest) {
     return FAILURE;                                                            \
   }
 
+/// Attempts to write at most n elements.
+/// Return FAILURE (-1) in case of error.
+/// Returns the number of elements written upon success.
+#define RB_DECLARE_WRITE_N(elem_type)                                          \
+  int rb_##elem_type##_write_n(rb_##elem_type##_t *rb, int n,                  \
+                               elem_type *elems) {                             \
+    int written = 0;                                                           \
+    if (rb == NULL || elems == NULL || n < 0) {                                \
+      goto failure;                                                            \
+    }                                                                          \
+    while (written < n &&                                                      \
+           (rb_##elem_type##_write(rb, elems[written]) == SUCCESS)) {          \
+      written++;                                                               \
+    }                                                                          \
+    return written;                                                            \
+  failure:                                                                     \
+    return FAILURE;                                                            \
+  }
+
+/// Attempts to read at most n elements.
+/// Return FAILURE (-1) in case of error.
+/// Returns the number of elements read in case of success.
+#define RB_DECLARE_READ_N(elem_type)                                           \
+  int rb_##elem_type##_read_n(rb_##elem_type##_t *rb, int n,                   \
+                              elem_type *dest) {                               \
+    int read = 0;                                                              \
+    if (rb == NULL || dest == NULL || n < 0) {                                 \
+      goto failure;                                                            \
+    }                                                                          \
+    while (read < n && (rb_##elem_type##_read(rb, &dest[read]) == SUCCESS)) {  \
+      read++;                                                                  \
+    }                                                                          \
+    return read;                                                               \
+  failure:                                                                     \
+    return FAILURE;                                                            \
+  }
+
 /// Reads from the ring buffer (sets address inside addr_result).
 /// Returns FAILURE if rb is NULL, result is NULL, or buffer is empty.
 /// Return SUCCESS otherwise.
@@ -154,4 +191,6 @@ static inline void buff_index_decr(buff_index_t *dest) {
   RB_DECLARE_IS_FULL(elem_type);                                               \
   RB_DECLARE_IS_EMPTY(elem_type);                                              \
   RB_DECLARE_WRITE(elem_type);                                                 \
-  RB_DECLARE_READ(elem_type);
+  RB_DECLARE_READ(elem_type);                                                  \
+  RB_DECLARE_WRITE_N(elem_type);                                               \
+  RB_DECLARE_READ_N(elem_type);

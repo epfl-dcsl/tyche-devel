@@ -7,6 +7,8 @@
 
 RB_DECLARE_ALL(int);
 
+RB_DECLARE_ALL(char);
+
 static void test_add_until_full(void) {
 	int capacity = 10;
 	int buffer[capacity];
@@ -81,6 +83,26 @@ static void test_circular(void) {
 	LOG("Done with test_circular");
 }
 
+void test_byte_stream(void) {
+	int capacity = 1048;	
+	char buffer[capacity];
+	memset(buffer, 0, capacity);
+	rb_char_t rb;
+	rb_char_init(&rb, capacity, buffer);
+	LOG("Starting byte stream test");
+	// Start by writting an entire string.
+	char* message = "hello world! How are things going?\n";
+	assert(rb_char_write_n(&rb, strlen(message) +1, message) == strlen(message) +1);
+
+	// Then read the entire string back;
+	char* result = malloc(strlen(message) + 1);
+	assert(result != NULL);
+	assert(rb_char_read_n(&rb, strlen(message)+1, result) == strlen(message) +1);
+	assert(strncmp(result, message, strlen(message)) == 0);
+	assert(rb_char_is_empty(&rb) == 1);
+	LOG("Done with bytestream test, message is: %s", result);
+}
+
 int main(void) {
 	printf("Starting the test with ");
 #ifdef RB_NO_ATOMICS
@@ -90,5 +112,6 @@ int main(void) {
 #endif
 	test_add_until_full();
 	test_circular();
+	test_byte_stream();
 	return 0;
 }
