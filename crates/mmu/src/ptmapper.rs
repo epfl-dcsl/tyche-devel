@@ -29,6 +29,8 @@ bitflags! {
         const ACCESS = 1 << 5;
         const PSIZE = 1 << 7;
         const HALT = 1 << 11;
+        // mark an entry as a pipe.
+        const PIPE = 3 << 8;
         const EXEC_DISABLE = 1 << 63;
     }
 

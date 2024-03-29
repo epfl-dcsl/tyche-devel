@@ -29,6 +29,7 @@ bitflags! {
         const GLOBAL = 1 << 5;
         const ACCESSED = 1 << 6;
         const DIRTY = 1 << 7;
+        const PIPE = 3 << 8;
     }
 
     pub struct PageSize: usize {

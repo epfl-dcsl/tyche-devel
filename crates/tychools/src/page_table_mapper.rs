@@ -49,10 +49,13 @@ fn translate_flags(flags: u32, segtype: u32) -> PtFlag {
     if TychePhdrTypes::is_user(segtype) {
         ptflags = ptflags.union(PtFlag::USER);
     }
+    if segtype == TychePhdrTypes::KernelPipe as u32 {
+        ptflags = ptflags.union(PtFlag::PIPE);
+    }
     ptflags
 }
 
-fn riscv_translate_flags(flags: u32, _segtype: u32) -> RVPtFlag {
+fn riscv_translate_flags(flags: u32, segtype: u32) -> RVPtFlag {
     let mut ptflags: RVPtFlag;
     ptflags = RVPtFlag::VALID;
     if flags & elf::PF_R == elf::PF_R {
@@ -65,6 +68,9 @@ fn riscv_translate_flags(flags: u32, _segtype: u32) -> RVPtFlag {
         ptflags = ptflags.union(RVPtFlag::EXECUTE);
     }
     //TODO: User flag is not enabled for now, should be enabled after TRT support is available for RV.
+    if segtype == TychePhdrTypes::KernelPipe as u32 {
+        ptflags = ptflags.union(RVPtFlag::PIPE);
+    }
     ptflags
 }
 
@@ -79,7 +85,7 @@ pub fn generate_page_tables(
     let mut memsz: usize = 0;
     for ph in &melf.segments {
         let segtype = ph.program_header.p_type(Endianness::Little);
-        if !ModifiedSegment::is_loadable(segtype) {
+        if !ModifiedSegment::is_loadable(segtype) || segtype == TychePhdrTypes::KernelPipe as u32 {
             continue;
         }
         let mem = ph.program_header.p_memsz(Endianness::Little) as usize;
@@ -115,6 +121,7 @@ pub fn generate_page_tables(
         ))
     };
     let mut curr_phys: usize = 0;
+    let mut curr_phys_pipe: usize = 0;
     for ph in &melf.segments {
         let segtype = ph.program_header.p_type(Endianness::Little);
         if !ModifiedSegment::is_loadable(segtype) {
@@ -135,19 +142,18 @@ pub fn generate_page_tables(
                 segtype,
             ))
         };
+        let phys_addr = if segtype == TychePhdrTypes::KernelPipe as u32 {
+            HostPhysAddr::new(curr_phys_pipe)
+        } else {
+            HostPhysAddr::new(curr_phys)
+        };
         match flags {
             FlagFormat::RV(rv_flags) => {
                 //We could remove the flags match by making map_range do the flag translation - but
                 //then the mmu lib needs to understand the elf flags format.
                 match mapper {
                     Mapper::RVMapper(ref mut rv_mapper) => {
-                        rv_mapper.map_range(
-                            &allocator,
-                            virt,
-                            HostPhysAddr::new(curr_phys),
-                            size,
-                            rv_flags,
-                        );
+                        rv_mapper.map_range(&allocator, virt, phys_addr, size, rv_flags);
                     }
                     Mapper::X86Mapper(_) => {
                         log::error!(
@@ -159,13 +165,7 @@ pub fn generate_page_tables(
             }
             FlagFormat::X86(x86_flags) => match mapper {
                 Mapper::X86Mapper(ref mut x86_mapper) => {
-                    x86_mapper.map_range(
-                        &allocator,
-                        virt,
-                        HostPhysAddr::new(curr_phys),
-                        size,
-                        x86_flags,
-                    );
+                    x86_mapper.map_range(&allocator, virt, phys_addr, size, x86_flags);
                 }
                 Mapper::RVMapper(_) => {
                     log::error!("The mapper and flags are created for different architectures.");
@@ -173,7 +173,11 @@ pub fn generate_page_tables(
                 }
             },
         }
-        curr_phys += size;
+        if segtype != TychePhdrTypes::KernelPipe as u32 {
+            curr_phys += size;
+        } else {
+            curr_phys_pipe += size;
+        }
     }
     log::debug!(
         "Done mapping all the segments, we consummed {} extra pages",

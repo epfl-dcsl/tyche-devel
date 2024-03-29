@@ -88,6 +88,14 @@ int main(int argc, char *argv[]) {
 	// TODO: make the enclaves runs on separate cores, which will require
 	// to spawn threads etc. and provide different core masks.
 	LOG("TODO: run dem");
+	// Ask tyche to give us a dump of the state.
+	asm volatile (
+		"movq $0xa, %%rax\n\t"
+		"vmcall\n\t"
+		:
+		:
+		: "rax", "memory"
+			);
 
 	// Clean up everything once we've check the results are correct.
 	if (sdk_delete_domain(ping) != SUCCESS) {
