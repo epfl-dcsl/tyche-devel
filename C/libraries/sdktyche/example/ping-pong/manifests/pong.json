@@ -1,0 +1,37 @@
+{
+  "untrusted_bin": {
+    "path": "mock_app"
+  },
+  "kern_bin": {
+    "path":"pong",
+    "ops":[
+      {
+        "AddSegment":{
+          "size":8192,
+          "tpe":"KernelStackConf",
+          "write":true,"exec":false
+        }
+      },
+      {
+        "AddSegment":{
+          "start": 3145728, 
+          "size":4096,
+          "tpe":"KernelShared",
+          "write":true,
+          "exec":false
+        }
+      },
+      {
+        "AddSegment":{
+          "start": 3149824, 
+          "size":4096,
+          "tpe":"KernelPipe",
+          "write":true,
+          "exec":false
+        }
+      }
+    ]
+  },
+  "generate_pts": true,
+  "output": "pong_enclave"
+}

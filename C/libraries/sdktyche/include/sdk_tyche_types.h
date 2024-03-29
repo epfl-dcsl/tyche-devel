@@ -50,6 +50,8 @@ typedef enum {
   KERNEL_SHARED = 0x60000009,
   /// Kernel Confidential segment.
   KERNEL_CONFIDENTIAL = 0x6000000a,
+  /// Kernel pipe shared with other enclaves.
+  KERNEL_PIPE = 0x6000000b,
 } tyche_phdr_t;
 // ————————————————————————————————— Types —————————————————————————————————— //
 

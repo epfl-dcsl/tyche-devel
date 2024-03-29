@@ -54,6 +54,8 @@ pub enum TychePhdrTypes {
     KernelShared = 0x60000009,
     /// Kernel confidential segment.
     KernelConfidential = 0x6000000a,
+    /// Kernel pipe segment.
+    KernelPipe = 0x6000000b,
     /// Full enclave ELF embedded in application.
     EnclaveELF = object::elf::PT_NOTE,
 }
@@ -72,6 +74,7 @@ impl TychePhdrTypes {
             0x60000008 => Some(TychePhdrTypes::KernelStackConf),
             0x60000009 => Some(TychePhdrTypes::KernelShared),
             0x6000000a => Some(TychePhdrTypes::KernelConfidential),
+            0x6000000b => Some(TychePhdrTypes::KernelPipe),
             _ => None,
         }
     }
