@@ -1,5 +1,7 @@
 all: libpts.a test_x86 test_riscv48
 
+ARCH ?=x86
+
 ifeq ($(ARCH), x86)
         GCC = gcc
 else ifeq ($(ARCH), riscv)
@@ -7,7 +9,7 @@ else ifeq ($(ARCH), riscv)
 endif
 
 # External libraries.
-COMMON_LIB=../common
+COMMON_LIB=../../../linux/drivers/tyche/libraries/common
 
 # Configuration for the library.
 CODE_PTS=$(wildcard src/*.c)
