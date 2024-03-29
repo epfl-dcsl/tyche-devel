@@ -103,6 +103,41 @@ void test_byte_stream(void) {
 	LOG("Done with bytestream test, message is: %s", result);
 }
 
+void test_byte_stream_circular(void) {
+	int capacity = 10;	
+	char buffer[capacity];
+	memset(buffer, 0, capacity);
+	rb_char_t rb;
+	rb_char_init(&rb, capacity, buffer);
+	LOG("Starting byte stream circular test");
+	// Start by writting 9 ones.
+	char* message = "111111111";
+	assert(rb_char_write_n(&rb, strlen(message), message) == strlen(message));
+
+	// Then read 4 ones the entire string back;
+	char* result = malloc(4);
+	assert(result != NULL);
+	assert(rb_char_read_n(&rb, 4, result) == 4);
+	assert(strncmp("1111", result, 4) == 0);
+
+	// Now we should be able to write 5 elements.
+	// Attempt to write 6.
+	char *one_too_many = "222222";
+	assert(rb_char_write_n(&rb, 6, one_too_many) == 5);
+	assert(rb_char_is_full(&rb) == 1);
+
+	// Drain the buffer now. We should read the following.
+	char* expected = "1111122222";
+	free(result);
+	result = NULL;
+	result = malloc(capacity);
+	assert(result != NULL);
+	assert(rb_char_read_n(&rb, capacity, result) == capacity);
+	assert(strncmp(expected, result, capacity) == 0);
+	assert(rb_char_is_empty(&rb) == 1);
+	LOG("Done with byte stream circular test");
+}
+
 int main(void) {
 	printf("Starting the test with ");
 #ifdef RB_NO_ATOMICS
@@ -113,5 +148,6 @@ int main(void) {
 	test_add_until_full();
 	test_circular();
 	test_byte_stream();
+	test_byte_stream_circular();
 	return 0;
 }
