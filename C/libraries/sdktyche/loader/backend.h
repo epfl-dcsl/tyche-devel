@@ -9,6 +9,12 @@
 
 typedef struct backend_info_t backend_info_t;
 
+// ———————————————————————— Backend specific defines ———————————————————————— //
+
+#define DOMAIN_DRIVER ("/dev/tyche")
+#define KVM_DRIVER ("/dev/kvm")
+#define CONTALLOC_DRIVER ("/dev/contalloc")
+
 // ————————————————————————————— Default values ————————————————————————————— //
 
 // Bitmap of selected extensions.
@@ -54,3 +60,6 @@ int backend_td_create_vcpu(tyche_domain_t* domain, usize core_idx);
 int backend_td_init_vcpu(tyche_domain_t* domain, usize core_idx);
 // int backend_td_config_vcpu(tyche_domain_t* domain, usize field, usize value);
 int backend_td_vcpu_run(tyche_domain_t* domain, usize core);
+int backend_create_pipe(tyche_domain_t* domain, usize* id, usize physoffset,
+    usize size, memory_access_right_t flags, usize width);
+int backend_acquire_pipe(tyche_domain_t* domain, domain_mslot_t* slot);

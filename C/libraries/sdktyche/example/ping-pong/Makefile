@@ -80,16 +80,15 @@ CODE_APP=$(CODE_ELF64) $(CODE_PTS) $(CODE_LOADER) $(CODE_UNTRUSTED)
 HDRS_APP=$(HDRS_ELF64) $(HDRS_PTS) $(HDRS_LOADER) $(HDRS_UNTRUSTED)
 
 ## ———————————————————————————————— Includes ———————————————————————————————— ##
-COMMON_INCLUDES = -Iinclude -I$(CAPA_LIB)/include -I$(COMMON_LIB)/include -I$(DLL_LIB)/include -I$(SDK)/include -I$(RINGBUF)/include 
+COMMON_INCLUDES = -Iinclude -I$(CAPA_LIB)/include -I$(COMMON_LIB)/include -I$(DLL_LIB)/include -I$(SDK)/include -I$(RINGBUF)/include
 APP_INCLUDES = $(COMMON_INCLUDES) -I$(ELF64)/include -I$(PTS)/include -I$(DRIVER)/include
 
-ifeq ($(KVM), 1)
-	APP_INCLUDES+=-I$(CONTALLOC)/include 
-endif
+# We need it inside the untrusted code.
+APP_INCLUDES+=-I$(CONTALLOC)/include
 
 ## ————————————————————— Configuration for the install —————————————————————— ##
 ifeq ($(ARCH), x86)
-DISK_PATH ?= /tmp/mount/tyche/programs 
+DISK_PATH ?= /tmp/mount/tyche/programs
 else ifeq ($(ARCH), riscv)
 DISK_PATH ?= /tmp/ubuntu_riscv_mount/tyche/programs
 endif
@@ -101,7 +100,7 @@ REDIS_SERVER_PATH ?= ../../../../../../tyche-experiment-redis/tyche-redis/src/re
 
 ## ———————————————————————————————— Targets ————————————————————————————————— ##
 
-ping_pong: $(CODE_APP) $(HDRS_APP) 
+ping_pong: $(CODE_APP) $(HDRS_APP)
 	$(GCC) -DTYCHE_USER_SPACE=1 $(LOADER_BACKEND) -g $(APP_INCLUDES) -o $@ $(CODE_APP)
 
 mock_app: $(CODE_MOCK)

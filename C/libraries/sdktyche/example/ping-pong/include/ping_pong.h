@@ -10,9 +10,11 @@ RB_DECLARE_ALL(char);
 
 typedef enum enclave_status_t {
 	BOOT = 0,
-	IN_MAIN = 1,
-	DONE_SUCCESS = 2,
-	DONE_ERROR = 3,
+	IN_MAIN = 111,
+	POST_INIT = 2,
+	IN_LOOP = 3,
+	DONE_SUCCESS = 4,
+	DONE_ERROR = 5,
 } enclave_status_t;
 
 typedef struct info_t {

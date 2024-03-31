@@ -7,6 +7,10 @@
 #include "common_log.h"
 #include "sdk_tyche.h"
 
+// ————————————————————————————————— Hooks —————————————————————————————————— //
+int (*sdk_handle_pipes)(tyche_domain_t*) = NULL;
+
+// ———————————————————————————— Helper functions ———————————————————————————— //
 int sdk_get_core_count(void) { return sysconf(_SC_NPROCESSORS_ONLN); }
 
 usize sdk_all_cores_mask(void) {

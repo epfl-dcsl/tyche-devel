@@ -18,11 +18,11 @@
 /// If the DUMP_BIN environment variable is set, the loaded binary is dumped
 /// in the file specified by DUMP_BIN.
 int sdk_create_domain(
-		tyche_domain_t* encl,
-		const char* self,
-		usize cores,
-		usize traps,
-		usize perms);
+    tyche_domain_t* encl,
+    const char* self,
+    usize cores,
+    usize traps,
+    usize perms);
 
 /// Transitions into the domain.
 int sdk_call_domain(tyche_domain_t* domain);
@@ -36,6 +36,9 @@ int sdk_delete_domain(tyche_domain_t* domain);
 
 // ——————————————————— Helper functions for applications ———————————————————— //
 
+/// Hook to handle pipes.
+extern int (*sdk_handle_pipes)(tyche_domain_t*);
+
 /// Returns the number of cores on the machine.
 int sdk_get_core_count(void);
 
@@ -46,3 +49,14 @@ usize sdk_all_cores_mask(void);
 /// exits the program on failure.
 /// Returns the bitmap with a single core enabled.
 usize sdk_pin_to_current_core(void);
+
+// ——————————————————————————— Pipe related stuff ——————————————————————————— //
+
+/// Create a pipe at physoffset of size with submitted flags.
+/// The width specifies how many times the pipe can be acquired.
+/// Sets the id back into id.
+int sdk_create_pipe(tyche_domain_t* domain, usize* id, usize physoffset,
+    usize size, memory_access_right_t flags, usize width);
+
+/// Acquire a pipe on pipe id.
+int sdk_acquire_pipe(tyche_domain_t* domain, domain_mslot_t* slot);

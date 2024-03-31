@@ -108,6 +108,7 @@
 #define PT_PAGE_PKEY_BIT2 (PT_AT(entry_t, 1) << PT_PAGE_BIT_PKEY_BIT2)
 #define PT_PAGE_PKEY_BIT3 (PT_AT(entry_t, 1) << PT_PAGE_BIT_PKEY_BIT3)
 #define PT_PAGE_NX (PT_AT(entry_t, 1) << PT_PAGE_BIT_NX)
+#define PT_PAGE_PIPE (PT_AT(entry_t, 3) << PT_PAGE_BIT_SOFTW1)
 
 // ————————————————————————————— Short Versions ————————————————————————————— //
 #define PT_PP PT_PAGE_PRESENT

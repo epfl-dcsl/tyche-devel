@@ -13,8 +13,10 @@ static void ping(void) {
 		shared->status = DONE_ERROR;
 		return;
 	}
+	shared->status = POST_INIT;
 	atomic_store(&(pp->ready), READY);
 	while(written < shared->msg_size) {
+		shared->status = IN_LOOP;
 		int res = rb_char_write_n(&(pp->rb), shared->msg_size - written, &(shared->msg_buffer[written]));
 		if (res == FAILURE) {
 			// Signal error to tyche.

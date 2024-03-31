@@ -65,7 +65,7 @@ static int is_confidential(tyche_phdr_t tpe)
 /// Determines whether a segment type is loadable.
 static int is_loadable(tyche_phdr_t tpe)
 {
-    if (tpe < USER_STACK_SB || tpe > KERNEL_CONFIDENTIAL) {
+    if (tpe < USER_STACK_SB || tpe > KERNEL_PIPE) {
       return 0;
     }
     return 1;
@@ -166,7 +166,7 @@ failure:
   return FAILURE;
 }
 
-static int domain_add_mslot(tyche_domain_t *domain, usize size)
+static int domain_add_mslot(tyche_domain_t *domain, int is_pipe, usize size)
 {
   domain_mslot_t *slot = NULL;
   if (domain == NULL) {
@@ -188,10 +188,14 @@ static int domain_add_mslot(tyche_domain_t *domain, usize size)
   }
   memset(slot, 0, sizeof(domain_mslot_t));
   dll_init_elem(slot, list);
-  slot->id = domain->mslot_id++;
+  slot->id = (is_pipe)? domain->pipe_id++ : domain->mslot_id++;
   slot->size = size;
   // Add the slot to the domain.
-  dll_add(&(domain->mmaps), slot, list);
+  if (is_pipe) {
+    dll_add(&(domain->pipes), slot, list);
+  } else {
+    dll_add(&(domain->mmaps), slot, list);
+  }
   return SUCCESS;
 failure:
   return FAILURE;
@@ -202,21 +206,33 @@ failure:
 // This should work as pn is basically the page address if everything was
 // initialized from address 0. We go through segments looking for the one that
 // contains the (pn >> PAGE_SIZE)th page over all allocations.
-static int find_phys_address(tyche_domain_t *domain, usize pn, usize *result) {
+static int find_phys_address(tyche_domain_t *domain, usize pn, usize *result, int is_pipe) {
   domain_mslot_t *slot = NULL;
   usize accumulated_size = 0;
   if (domain == NULL || result == NULL) {
     ERROR("Null argument");
     goto failure;
   }
-  dll_foreach(&(domain->mmaps), slot, list) {
-    if (pn >= accumulated_size && pn < (accumulated_size + slot->size)) {
-      // offset within that slot.
-      usize offset = pn - accumulated_size;
-      *result = slot->physoffset + offset;
-      return SUCCESS;
+  if (is_pipe) {
+    dll_foreach(&(domain->pipes), slot, list) {
+      if (pn >= accumulated_size && pn < (accumulated_size + slot->size)) {
+        // offset within that slot.
+        usize offset = pn - accumulated_size;
+        *result = slot->physoffset + offset;
+        return SUCCESS;
+      }
+      accumulated_size += slot->size;
     }
-    accumulated_size += slot->size;
+  } else {
+    dll_foreach(&(domain->mmaps), slot, list) {
+      if (pn >= accumulated_size && pn < (accumulated_size + slot->size)) {
+        // offset within that slot.
+        usize offset = pn - accumulated_size;
+        *result = slot->physoffset + offset;
+        return SUCCESS;
+      }
+      accumulated_size += slot->size;
+    }
   }
 failure:
   return FAILURE;
@@ -272,6 +288,7 @@ failure:
 int parse_domain(tyche_domain_t* domain)
 {
   size_t segments_size = 0;
+  size_t pipes_size = 0;
 
   // Common checks.
   if (domain == NULL) {
@@ -288,6 +305,7 @@ int parse_domain(tyche_domain_t* domain)
   }
   dll_init_list(&(domain->shared_regions));
   dll_init_list(&(domain->mmaps));
+  dll_init_list(&(domain->pipes));
   
   // Parse the ELF.
   read_elf64_header(&domain->parser.elf, &(domain->parser.header));
@@ -334,6 +352,7 @@ int parse_domain(tyche_domain_t* domain)
     Elf64_Word tpe = domain->parser.segments[i].p_type;
     usize total = 0;
     usize seg_size = 0;
+    int is_pipe = 0;
     // Only consider loadable segments instrumented by tychools.
     if (!is_loadable(tpe)) {
       continue;
@@ -343,26 +362,41 @@ int parse_domain(tyche_domain_t* domain)
       ERROR("The segment size is %zu", segments_size);
       goto close_failure;
     }
-    // Check if we fit in the current slot.
-    total = segments_size + seg_size;
+
+    // Special case, we handle the pipes.
+    is_pipe = tpe == KERNEL_PIPE;
+
+    // Check if we fit in the current slot for mmaps.
+    total = (is_pipe)? pipes_size + seg_size : segments_size + seg_size;
     if (total >= MAX_SLOT_SIZE) {
-      if (domain_add_mslot(domain, segments_size) != SUCCESS) {
+      if (domain_add_mslot(domain, is_pipe, segments_size) != SUCCESS) {
         ERROR("Slot failure");
         goto close_failure;
       }
-      segments_size = seg_size;
+      if (is_pipe) {
+        pipes_size = seg_size;
+      } else {
+        segments_size = seg_size;
+      }
     } else {
-      segments_size += align_up(domain->parser.segments[i].p_memsz);
+      if (is_pipe) {
+        pipes_size += seg_size;
+      } else {
+        segments_size += seg_size;
+      }
     }
   }
   // Add the last segment.
-  if (domain_add_mslot(domain, segments_size) != SUCCESS) {
+  if (domain_add_mslot(domain, 0, segments_size) != SUCCESS) {
     ERROR("Last slot failure");
     goto close_failure;
   }
+  // Add the last pipe.
+  if (pipes_size != 0 && domain_add_mslot(domain, 1, pipes_size) != SUCCESS) {
+    ERROR("Adding pipe error.");
+    goto close_failure;
+  }
   
-  // We are done for now, next step is to load the domain.
-  LOG("Parsed tychools binary");
   return SUCCESS;
 close_failure:
   free(domain->parser.elf.memory.start);
@@ -398,13 +432,19 @@ int load_domain(tyche_domain_t* domain)
     goto failure;
   }
 
+  // Patch the pipes if any.
+  if (sdk_handle_pipes != NULL && sdk_handle_pipes(domain) != SUCCESS) {
+    ERROR("Problem in callback to handle pipes");
+    goto failure;
+  }
+
   // Copy the domain's content.
   phys_size = 0;
   slot = domain->mmaps.head;
   for (int i = 0; i < domain->parser.header.e_phnum; i++) {
     Elf64_Phdr seg = domain->parser.segments[i];
     // The segment is not loadable.
-    if (!is_loadable(seg.p_type)) {
+    if (!is_loadable(seg.p_type) || seg.p_type == KERNEL_PIPE) {
       continue;
     }
     if (slot == NULL) {
@@ -413,7 +453,8 @@ int load_domain(tyche_domain_t* domain)
     }
     addr_t size = align_up(seg.p_memsz);
 
-    if (phys_size + size > slot->size) {
+    // Safety checks for non-pipe segments.
+    if (seg.p_type != KERNEL_PIPE && phys_size + size > slot->size) {
       ERROR("The segment does not fit in the current size.");
       goto failure;
     }
@@ -431,7 +472,7 @@ int load_domain(tyche_domain_t* domain)
     }
 
     // Fix the page tables here.
-    // We need to go through and compute the offset of addreses in segments.
+    // We need to go through and compute the offset of addresses in segments.
     // We should have the guarantee that start and end fall within the same
     // memory slot by construction for the moment (provided we don't have 2^11
     // pages in the page tables).
@@ -441,19 +482,25 @@ int load_domain(tyche_domain_t* domain)
       //We should go through the segments and find the right address and fix it.
       for (; start < end; start++) {
         if (*start != 0) {
+            //TODO @Neelu figure something out here, we need to define it for riscv.
             uint64_t page = (*start & PT_PHYS_PAGE_MASK);
+            int is_pipe = (*start & PT_PAGE_PIPE) == PT_PAGE_PIPE;
             usize fixed_addr = 0;
-            if (find_phys_address(domain, page, &fixed_addr) != SUCCESS) {
+            if (find_phys_address(domain, page, &fixed_addr, is_pipe) != SUCCESS) {
               ERROR("Unable to find the physaddress for %lx", page);
               goto failure;
             }
             *start &= ~(PT_PHYS_PAGE_MASK);
             *start |= (uint64_t) fixed_addr;
+            // Remove the pipe.
+            if (is_pipe) {
+              *start &= ~(PT_PAGE_PIPE);
+            }
         }
       }
       // Fix the root page tables here.
       usize fixed_cr3 = 0;
-      if (find_phys_address(domain, domain->config.page_table_root, &fixed_cr3) != SUCCESS) {
+      if (find_phys_address(domain, domain->config.page_table_root, &fixed_cr3, 0) != SUCCESS) {
         ERROR("Unable to find the cr3 in the mslots");
         goto failure;
       }
@@ -525,7 +572,7 @@ int load_domain(tyche_domain_t* domain)
   if (backend_td_commit(domain)!= SUCCESS) {
     ERROR("Unable to commit the domain %d", domain->handle);
     goto failure;
-  } 
+  }
   DEBUG("Done loading domain %d", domain->handle);
   return SUCCESS;
 failure:
@@ -622,6 +669,29 @@ int sdk_delete_domain(tyche_domain_t* domain)
   free(domain->parser.strings);
   free(domain->parser.elf.memory.start);
   return SUCCESS;
+failure:
+  return FAILURE;
+}
+
+// ———————————————————————— Pipes related functions ————————————————————————— //
+
+int sdk_create_pipe(tyche_domain_t *domain, usize *id, usize physoffset,
+    usize size, memory_access_right_t flags, usize width) {
+  if (domain == NULL || id == NULL || width == 0) {
+    ERROR("the id is null or width is 0");
+    goto failure;
+  }
+  return backend_create_pipe(domain, id, physoffset, size, flags, width);
+failure:
+  return FAILURE;
+}
+
+int sdk_acquire_pipe(tyche_domain_t *domain, domain_mslot_t *slot) {
+  if (domain == NULL || slot == NULL) {
+    ERROR("The domain is null.");
+    goto failure;
+  }
+  return backend_acquire_pipe(domain, slot);
 failure:
   return FAILURE;
 }

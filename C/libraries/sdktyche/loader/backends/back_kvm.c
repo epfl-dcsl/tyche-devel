@@ -4,6 +4,7 @@
 #include "../backend.h"
 #include "contalloc_driver.h"
 #include "sdk_tyche.h"
+#include "tyche_driver.h"
 
 #include <fcntl.h>
 #include <sys/mman.h>
@@ -13,11 +14,6 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdint.h>
-// ———————————————————————— Backend specific defines ———————————————————————— //
-
-#define KVM_DRIVER ("/dev/kvm")
-#define CONTALLOC_DRIVER ("/dev/contalloc")
-
 
 // ———————————————————————————— Helper functions ———————————————————————————— //
 
@@ -130,7 +126,7 @@ failure:
 
 int backend_td_create(tyche_domain_t* domain)
 {
-  msg_info_t info = {UNINIT_USIZE, UNINIT_USIZE};
+  msg_t info = {UNINIT_USIZE, UNINIT_USIZE};
   usize perms_coremap = 0;
   // Open the kvm driver.
   int kvm_fd = open(KVM_DRIVER, O_RDWR);
@@ -165,7 +161,7 @@ failure:
 
 int backend_td_alloc_mem(tyche_domain_t* domain)
 {
-  msg_info_t info = {0};
+  msg_t info = {0};
   domain_mslot_t *slot = NULL;
   if (domain == NULL) {
     ERROR("Nul argument.");
@@ -447,4 +443,62 @@ int backend_td_delete(tyche_domain_t* domain)
 failure:
   return FAILURE;
 
+}
+
+int backend_create_pipe(tyche_domain_t* domain, usize* id, usize physoffset,
+    usize size, memory_access_right_t flags, usize width) {
+  int fd = 0;
+  msg_create_pipe_t pipe = {0};
+  if (domain == NULL || id == NULL || size == 0) {
+    goto failure;
+  }
+  //Abuse the tyche API, create a fake domain and use it to create the pipe.
+  fd = open(DOMAIN_DRIVER, O_RDWR);
+  if (fd < 0) {
+    ERROR("Unable to access the tyche driver.");
+    goto failure;
+  }
+  pipe.id = 0;
+  pipe.phys_addr = physoffset;
+  pipe.size = size;
+  pipe.flags = flags;
+  pipe.width = width;
+  if (ioctl(fd, TYCHE_CREATE_PIPE, &pipe) != SUCCESS) {
+    ERROR("Driver create pipe failed");
+    goto fail_close;
+  }
+  *id = pipe.id;
+  close(fd);
+  return SUCCESS;
+fail_close:
+  close(fd);
+failure:
+  return FAILURE;
+}
+
+
+/// TODO: use get/set msrs api?
+int backend_acquire_pipe(tyche_domain_t* domain, domain_mslot_t* slot) {
+  struct kvm_userspace_memory_region kvm_mem = {0};
+  uint32_t kvm_flags = KVM_FLAGS_ENCODING_PRESENT;
+  if (domain == NULL || slot == NULL) {
+    goto failure;
+  }
+  kvm_flags |= ((MEM_WRITE|MEM_READ|MEM_SUPER) << KVM_FLAGS_MEM_ACCESS_RIGHTS_IDX)
+    & KVM_FLAGS_MEM_ACCESS_RIGHTS_MASK;
+  kvm_flags |= (PIPE <<  KVM_FLAGS_SEGMENT_TYPE_IDX) & KVM_FLAGS_SEGMENT_TYPE_MASK;
+  kvm_mem.slot = domain->backend.counter_slots++;
+  kvm_mem.userspace_addr = slot->virtoffset;
+  kvm_mem.memory_size = slot->size;
+  kvm_mem.flags = kvm_flags;
+  kvm_mem.guest_phys_addr = slot->physoffset;
+
+  // Register the slot as a region with kvm
+  if (ioctl(domain->handle, KVM_SET_USER_MEMORY_REGION, &kvm_mem) != 0) {
+    ERROR("Failed to register the kvm mem region.");
+    goto failure;
+  }
+  return SUCCESS;
+failure:
+  return FAILURE;
 }

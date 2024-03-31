@@ -138,6 +138,12 @@ typedef struct {
   /// The memory slots of the domain.
   dll_list(domain_mslot_t, mmaps);
 
+  /// Next available pipe mslot id.
+  usize pipe_id;
+
+  /// The pipe slots for the domain.
+  dll_list(domain_mslot_t, pipes);
+
   /// The domain's core map.
   usize core_map;
 

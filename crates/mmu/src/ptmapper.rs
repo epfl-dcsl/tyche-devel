@@ -30,7 +30,7 @@ bitflags! {
         const PSIZE = 1 << 7;
         const HALT = 1 << 11;
         // mark an entry as a pipe.
-        const PIPE = 3 << 8;
+        const PIPE = 3 << 9;
         const EXEC_DISABLE = 1 << 63;
     }
 
@@ -127,6 +127,7 @@ where
                     if (*entry & PtFlag::PRESENT.bits()) != 0 {
                         *entry = *entry | prot.bits();
                         *entry = *entry & !PtFlag::EXEC_DISABLE.bits();
+                        *entry = *entry & !PtFlag::PIPE.bits();
                         return WalkNext::Continue;
                     }
 

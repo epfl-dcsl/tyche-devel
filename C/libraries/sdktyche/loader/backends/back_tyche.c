@@ -18,9 +18,6 @@
 #if defined(CONFIG_X86) || defined(__x86_64__)
 #include <asm/vmx.h>
 #endif
-// ——————————————————————————— Local definitions ———————————————————————————— //
-
-#define DOMAIN_DRIVER ("/dev/tyche")
 
 // ————————————————————————— Local helper functions ————————————————————————— //
 
@@ -345,4 +342,39 @@ int backend_td_delete(tyche_domain_t* domain)
 failure:
   return FAILURE;
 
+}
+
+int backend_create_pipe(tyche_domain_t* domain, usize* id, usize physoffset,
+    usize size, memory_access_right_t flags, usize width) {
+  msg_create_pipe_t pipe = {0};
+  if (domain == NULL || id == NULL || size == 0) {
+    goto failure;
+  }
+  pipe.id = 0;
+  pipe.phys_addr = physoffset;
+  pipe.size = size;
+  pipe.flags = flags;
+  pipe.width = width;
+  if (ioctl(domain->handle, TYCHE_CREATE_PIPE, &pipe) != SUCCESS) {
+    ERROR("Driver create pipe failed");
+    goto failure;
+  }
+  // Set the result.
+  *id = pipe.id;
+  return SUCCESS;
+failure:
+  return FAILURE;
+}
+
+int backend_acquire_pipe(tyche_domain_t* domain, domain_mslot_t *slot) {
+  if (domain == NULL || slot == NULL) {
+    goto failure;
+  }
+  if (ioctl(domain->handle, TYCHE_ACQUIRE_PIPE, slot->id) != SUCCESS) {
+    ERROR("Driver rejected acquiring pipe");
+    goto failure;
+  }
+  return SUCCESS;
+failure:
+  return FAILURE;
 }
