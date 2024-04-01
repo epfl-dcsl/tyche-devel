@@ -90,7 +90,7 @@ fn handle_exit(
                 calls::CREATE_DOMAIN => {
                     log::trace!("Create domain on core {}", cpuid());
                     let capa =
-                        monitor::do_create_domain(*domain)
+                        monitor::do_create_domain(vs, domain)
                             .expect("TODO");
                     let mut context = monitor::get_context(*domain, cpuid());
                     context.set(VmcsField::GuestRdi, capa.as_usize(), None)?;
@@ -102,7 +102,8 @@ fn handle_exit(
                     log::trace!("Configure on core {}", cpuid());
                     let res = if let Ok(bitmap) = Bitmaps::from_usize(arg_1) {
                         match monitor::do_set_config(
-                            *domain,
+                            vs,
+                            domain,
                             LocalCapa::new(arg_2),
                             bitmap,
                             arg_3 as u64,
@@ -137,11 +138,10 @@ fn handle_exit(
                 calls::ALLOC_CORE_CONTEXT => {
                     log::trace!("Alloc core context on core {}", cpuid());
                     let res = match monitor::do_init_child_context(
-                        *domain,
+                        vs,
+                        domain,
                         LocalCapa::new(arg_1),
                         arg_2,
-                        &mut vs.vcpu,
-                        &vs.vmxon,
                     ) {
                         Ok(_) => 0,
                         Err(e) => {
@@ -155,14 +155,14 @@ fn handle_exit(
                 }
                 calls::READ_ALL_GP => {
                     log::trace!("Read all gp register values on core {}", cpuid());
-                    monitor::do_get_all_gp(*domain, LocalCapa::new(arg_1), arg_2)
+                    monitor::do_get_all_gp(vs, domain, LocalCapa::new(arg_1), arg_2)
                         .expect("Problem during copy");
                     vs.vcpu.next_instruction()?;
                     Ok(HandlerResult::Resume)
                 }
                 calls::WRITE_ALL_GP => {
                     log::trace!("Write all gp register values on core {}", cpuid());
-                    monitor::do_set_all_gp(*domain, LocalCapa::new(arg_1))
+                    monitor::do_set_all_gp(vs, domain, LocalCapa::new(arg_1))
                         .expect("Problem during copy");
                     vs.vcpu.next_instruction()?;
                     Ok(HandlerResult::Resume)
@@ -200,7 +200,8 @@ fn handle_exit(
                         ]
                     };
                     let res = match monitor::do_set_fields(
-                        *domain,
+                        vs,
+                        domain,
                         LocalCapa::new(arg_1),
                         arg_2,
                         &values,
@@ -218,7 +219,8 @@ fn handle_exit(
                 calls::CONFIGURE_CORE => {
                     log::trace!("Configure Core on core {}", cpuid());
                     let res = match monitor::do_configure_core(
-                        *domain,
+                        vs,
+                        domain,
                         LocalCapa::new(arg_1),
                         arg_2,
                         arg_3,
@@ -237,7 +239,8 @@ fn handle_exit(
                 calls::GET_CONFIG_CORE => {
                     log::trace!("Get config core on core {}", cpuid());
                     let (rdi, rax) = match monitor::do_get_config_core(
-                        *domain,
+                        vs,
+                        domain,
                         LocalCapa::new(arg_1),
                         arg_2,
                         arg_3,
@@ -256,7 +259,7 @@ fn handle_exit(
                 }
                 calls::SEAL_DOMAIN => {
                     log::trace!("Seal Domain on core {}", cpuid());
-                    let capa = monitor::do_seal(*domain, LocalCapa::new(arg_1)).expect("TODO");
+                    let capa = monitor::do_seal(vs, domain, LocalCapa::new(arg_1)).expect("TODO");
                     let mut context = monitor::get_context(*domain, cpuid());
                     context.set(VmcsField::GuestRdi, capa.as_usize(), None)?;
                     context.set(VmcsField::GuestRax, 0, None)?;
@@ -265,7 +268,7 @@ fn handle_exit(
                 }
                 calls::SEND => {
                     log::trace!("Send on core {}", cpuid());
-                    monitor::do_send(*domain, LocalCapa::new(arg_1), LocalCapa::new(arg_2))
+                    monitor::do_send(vs, domain, LocalCapa::new(arg_1), LocalCapa::new(arg_2))
                         .expect("TODO");
                     let mut context = monitor::get_context(*domain, cpuid());
                     context.set(VmcsField::GuestRax, 0, None)?;
@@ -276,7 +279,8 @@ fn handle_exit(
                     log::trace!("Send aliased on core {}", cpuid());
                     // Send a region capa and adds an alias to it.
                     monitor::do_send_region(
-                        *domain,
+                        vs,
+                        domain,
                         LocalCapa::new(arg_1),
                         LocalCapa::new(arg_2),
                         arg_3,
@@ -292,7 +296,8 @@ fn handle_exit(
                 calls::SEGMENT_REGION => {
                     log::trace!("Segment region on core {}", cpuid());
                     let (to_send, to_revoke) = match monitor::do_segment_region(
-                        *domain,
+                        vs,
+                        domain,
                         LocalCapa::new(arg_1),
                         arg_2 != 0, // is_shared 
                         arg_3,      // start
@@ -301,7 +306,7 @@ fn handle_exit(
                     ) {
                         Ok((l, r)) => (l,r),
                         Err(e) => {
-                            monitor::do_debug();
+                            monitor::do_debug(vs, domain);
                             panic!("Error {:?}", e);
                         }
                     };
@@ -314,7 +319,7 @@ fn handle_exit(
                 }
                 calls::REVOKE => {
                     log::trace!("Revoke on core {}", cpuid());
-                    monitor::do_revoke(*domain, LocalCapa::new(arg_1)).expect("TODO");
+                    monitor::do_revoke(vs, domain, LocalCapa::new(arg_1)).expect("TODO");
                     let mut context = monitor::get_context(*domain, cpuid());
                     context.set(VmcsField::GuestRax, 0, None)?;
                     vs.vcpu.next_instruction()?;
@@ -322,7 +327,7 @@ fn handle_exit(
                 }
                 calls::REVOKE_ALIASED_REGION => {
                     log::trace!("Revoke aliased region on core {}", cpuid());
-                    monitor::do_revoke_region(*domain, LocalCapa::new(arg_1), LocalCapa::new(arg_2), arg_3, arg_4).unwrap();
+                    monitor::do_revoke_region(vs, domain, LocalCapa::new(arg_1), LocalCapa::new(arg_2), arg_3, arg_4).unwrap();
                     let mut context = monitor::get_context(*domain, cpuid());
                     context.set(VmcsField::GuestRax, 0, None)?;
                     vs.vcpu.next_instruction()?;
@@ -330,7 +335,7 @@ fn handle_exit(
                 }
                 calls::DUPLICATE => {
                     log::trace!("Duplicate");
-                    let capa = monitor::do_duplicate(*domain, LocalCapa::new(arg_1)).expect("TODO");
+                    let capa = monitor::do_duplicate(vs, domain, LocalCapa::new(arg_1)).expect("TODO");
                     let mut context = monitor::get_context(*domain, cpuid());
                     context.set(VmcsField::GuestRdi, capa.as_usize(), None)?;
                     context.set(VmcsField::GuestRax, 0, None)?;
@@ -340,7 +345,7 @@ fn handle_exit(
                 calls::ENUMERATE => {
                     log::trace!("Enumerate on core {}", cpuid());
                     if let Some((info, next)) =
-                        monitor::do_enumerate(*domain, NextCapaToken::from_usize(arg_1))
+                        monitor::do_enumerate(vs, domain, NextCapaToken::from_usize(arg_1))
                     {
                         let (v1, v2, v3) = info.serialize();
                         let mut context = monitor::get_context(*domain, cpuid());
@@ -368,13 +373,13 @@ fn handle_exit(
                         }
                     }
                     vs.vcpu.next_instruction()?;
-                    monitor::do_switch(*domain, LocalCapa::new(arg_1), cpuid()).expect("TODO");
+                    monitor::do_switch(vs, domain, LocalCapa::new(arg_1), cpuid()).expect("TODO");
                     Ok(HandlerResult::Resume)
                 }
                 calls::DEBUG => {
                     log::trace!("Debug on core {}", cpuid());
                     log::info!("Debug called on {} vcpu: {:x?}", domain.idx(), vs.vcpu);
-                    monitor::do_debug();
+                    monitor::do_debug(vs, domain);
                     let mut context = monitor::get_context(*domain, cpuid());
                     context.set(VmcsField::GuestRax, 0, None)?;
                     vs.vcpu.next_instruction()?;
@@ -389,8 +394,8 @@ fn handle_exit(
                     log::trace!("Get attestation!");
                     log::trace!("arg1 {:#x}", arg_1);
                     log::trace!("arg2 {:#x}", arg_2);
-                    let mut context = monitor::get_context(*domain, cpuid());
-                    if let Some(report) = monitor::do_domain_attestation(*domain, arg_1, arg_2) {
+                    if let Some(report) = monitor::do_domain_attestation(vs, domain, arg_1, arg_2) {
+                        let mut context = monitor::get_context(*domain, cpuid());
                         context.set(VmcsField::GuestRax, 0, None)?;
                         if arg_2 == 0 {
                             context.set(
@@ -496,6 +501,7 @@ fn handle_exit(
                             )?;
                         }
                     } else {
+                        let mut context = monitor::get_context(*domain, cpuid());
                         log::trace!("Attestation error");
                         context.set(VmcsField::GuestRax, 1, None)?;
                     }
@@ -585,7 +591,7 @@ fn handle_exit(
                     .as_u64(),
                 addr.as_u64(),
             );
-            monitor::do_debug();
+            monitor::do_debug(vs, domain);
             panic!("The vcpu {:x?}", vs.vcpu);
         }
         VmxExitReason::Exception if domain.idx() == 0 => {
@@ -676,7 +682,7 @@ fn handle_exit(
                 }*/
                 x2apic::send_eoi();
             }
-            match monitor::do_handle_violation(*domain) {
+            match monitor::do_handle_violation(vs, domain) {
                 Ok(_) => {
                     return Ok(HandlerResult::Resume);
                 }

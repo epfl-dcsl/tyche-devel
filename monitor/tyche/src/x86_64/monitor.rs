@@ -17,7 +17,7 @@ use stage_two_abi::{GuestInfo, Manifest};
 use utils::{GuestPhysAddr, HostPhysAddr, HostVirtAddr};
 use vmx::bitmaps::EptEntryFlags;
 use vmx::fields::{GeneralPurposeField, VmcsField, REGFILE_SIZE};
-use vmx::{ActiveVmcs, VmExitInterrupt, Vmxon};
+use vmx::{ActiveVmcs, VmExitInterrupt};
 use vtd::Iommu;
 
 use super::context::{
@@ -82,6 +82,18 @@ static IOMMU: Mutex<Iommu> =
 
 // ————————————————————————————— Initialization ————————————————————————————— //
 
+// This is meant to avoid deadlocks due to tlb shootdowns.
+pub fn lock_engine(
+    vmx_state: &mut VmxState,
+    dom: &mut Handle<Domain>,
+) -> MutexGuard<'static, CapaEngine> {
+    let mut locked = CAPA_ENGINE.try_lock();
+    while locked.is_none() {
+        apply_core_updates(vmx_state, dom, cpuid());
+        locked = CAPA_ENGINE.try_lock();
+    }
+    locked.unwrap()
+}
 pub fn init(manifest: &'static Manifest) {
     let mut engine = CAPA_ENGINE.lock();
     let domain = engine.create_manager_domain(permission::ALL).unwrap();
@@ -161,35 +173,40 @@ pub fn get_context(domain: Handle<Domain>, core: usize) -> MutexGuard<'static, C
 
 // ————————————————————————————— Monitor Calls —————————————————————————————— //
 
-pub fn do_create_domain(current: Handle<Domain>) -> Result<LocalCapa, CapaError> {
-    let mut engine = CAPA_ENGINE.lock();
-    let management_capa = engine.create_domain(current)?;
+pub fn do_create_domain(
+    vmx_state: &mut VmxState,
+    current: &mut Handle<Domain>,
+) -> Result<LocalCapa, CapaError> {
+    let mut engine = lock_engine(vmx_state, current);
+    let management_capa = engine.create_domain(*current)?;
     apply_updates(&mut engine);
     Ok(management_capa)
 }
 
 pub fn do_set_config(
-    current: Handle<Domain>,
+    vmx_state: &mut VmxState,
+    current: &mut Handle<Domain>,
     domain: LocalCapa,
     bitmap: Bitmaps,
     value: u64,
 ) -> Result<(), CapaError> {
-    let mut engine = CAPA_ENGINE.lock();
-    engine.set_child_config(current, domain, bitmap, value)?;
+    let mut engine = lock_engine(vmx_state, current);
+    engine.set_child_config(*current, domain, bitmap, value)?;
     apply_updates(&mut engine);
     Ok(())
 }
 
 pub fn do_configure_core(
-    current: Handle<Domain>,
+    vmx_state: &mut VmxState,
+    current: &mut Handle<Domain>,
     domain: LocalCapa,
     core: usize,
     idx: usize,
     value: usize,
 ) -> Result<(), CapaError> {
-    let mut engine = CAPA_ENGINE.lock();
+    let mut engine = lock_engine(vmx_state, current);
     let local_capa = domain;
-    let domain = engine.get_domain_capa(current, domain)?;
+    let domain = engine.get_domain_capa(*current, domain)?;
 
     //TODO(aghosn): check how we could differentiate between registers
     //that can be changed and others. For the moment allow modifications
@@ -218,7 +235,7 @@ pub fn do_configure_core(
     let field = VmcsField::from_u32(idx as u32).unwrap();
     if field == VmcsField::ExceptionBitmap {
         engine
-            .set_child_config(current, local_capa, Bitmaps::TRAP, !(value as u64))
+            .set_child_config(*current, local_capa, Bitmaps::TRAP, !(value as u64))
             .expect("Unable to set the bitmap");
     }
 
@@ -234,13 +251,14 @@ pub fn do_configure_core(
 }
 
 pub fn do_get_config_core(
-    current: Handle<Domain>,
+    vmx_state: &mut VmxState,
+    current: &mut Handle<Domain>,
     domain: LocalCapa,
     core: usize,
     idx: usize,
 ) -> Result<usize, CapaError> {
-    let mut engine = CAPA_ENGINE.lock();
-    let domain = engine.get_domain_capa(current, domain)?;
+    let mut engine = lock_engine(vmx_state, current);
+    let domain = engine.get_domain_capa(*current, domain)?;
 
     // Check the domain is not seal.
     //TODO(aghosn) we will need a way to differentiate between what's readable
@@ -272,12 +290,13 @@ pub fn do_get_config_core(
 }
 
 pub fn do_get_all_gp(
-    current: Handle<Domain>,
+    vmx_state: &mut VmxState,
+    current: &mut Handle<Domain>,
     domain: LocalCapa,
     core: usize,
 ) -> Result<(), CapaError> {
-    let mut engine = CAPA_ENGINE.lock();
-    let domain = engine.get_domain_capa(current, domain)?;
+    let mut engine = lock_engine(vmx_state, current);
+    let domain = engine.get_domain_capa(*current, domain)?;
     let core_map = engine.get_domain_config(domain, Bitmaps::CORE);
     if (1 << core) & core_map == 0 {
         return Err(CapaError::InvalidCore);
@@ -286,7 +305,7 @@ pub fn do_get_all_gp(
         log::error!("Attempting to read gp from different core");
         return Err(CapaError::InvalidCore);
     }
-    let mut curr_ctx = get_context(current, cpuid());
+    let mut curr_ctx = get_context(*current, cpuid());
     let tgt_ctx = get_context(domain, core);
     if curr_ctx.vmcs.is_invalid() || tgt_ctx.vmcs.is_invalid() {
         log::error!(
@@ -302,9 +321,13 @@ pub fn do_get_all_gp(
     Ok(())
 }
 
-pub fn do_set_all_gp(current: Handle<Domain>, domain: LocalCapa) -> Result<(), CapaError> {
-    let mut engine = CAPA_ENGINE.lock();
-    let domain = engine.get_domain_capa(current, domain)?;
+pub fn do_set_all_gp(
+    vmx_state: &mut VmxState,
+    current: &mut Handle<Domain>,
+    domain: LocalCapa,
+) -> Result<(), CapaError> {
+    let mut engine = lock_engine(vmx_state, current);
+    let domain = engine.get_domain_capa(*current, domain)?;
     let core = cpuid();
 
     let core_map = engine.get_domain_config(domain, Bitmaps::CORE);
@@ -312,7 +335,7 @@ pub fn do_set_all_gp(current: Handle<Domain>, domain: LocalCapa) -> Result<(), C
         return Err(CapaError::InvalidCore);
     }
 
-    let curr_ctx = get_context(current, core);
+    let curr_ctx = get_context(*current, core);
     let mut tgt_ctx = get_context(domain, core);
     if curr_ctx.vmcs.is_invalid() || tgt_ctx.vmcs.is_invalid() {
         log::error!(
@@ -333,14 +356,15 @@ pub fn do_set_all_gp(current: Handle<Domain>, domain: LocalCapa) -> Result<(), C
 }
 
 pub fn do_set_fields(
-    current: Handle<Domain>,
+    vmx_state: &mut VmxState,
+    current: &mut Handle<Domain>,
     domain: LocalCapa,
     core: usize,
     values: &[(usize, usize); 6],
 ) -> Result<(), CapaError> {
-    let mut engine = CAPA_ENGINE.lock();
+    let mut engine = lock_engine(vmx_state, current);
     // Check the core.
-    let domain = engine.get_domain_capa(current, domain)?;
+    let domain = engine.get_domain_capa(*current, domain)?;
     let core_map = engine.get_domain_config(domain, Bitmaps::CORE);
     if (1 << core) & core_map == 0 {
         log::error!("Trying to set registers on the wrong core.");
@@ -375,15 +399,14 @@ pub fn do_set_fields(
 }
 
 pub fn do_init_child_context(
-    current: Handle<Domain>,
+    vmx_state: &mut VmxState,
+    current: &mut Handle<Domain>,
     domain: LocalCapa,
     core: usize,
-    vcpu: &mut ActiveVmcs<'static>,
-    vmxon: &Vmxon,
 ) -> Result<(), CapaError> {
-    let mut engine = CAPA_ENGINE.lock();
+    let mut engine = lock_engine(vmx_state, current);
     let domain = engine
-        .get_domain_capa(current, domain)
+        .get_domain_capa(*current, domain)
         .expect("Unable to access child");
     let allocator = allocator();
     let max_cpus = NB_BOOTED_CORES.load(core::sync::atomic::Ordering::SeqCst) + 1;
@@ -401,42 +424,48 @@ pub fn do_init_child_context(
     let rc = RCFrame::new(frame);
     dest.vmcs = rcvmcs.allocate(rc).expect("Unable to allocate rc frame");
     //Init the frame, it needs the identifier.
-    vmxon.init_frame(frame);
+    vmx_state.vmxon.init_frame(frame);
     // Init the host state:
     {
-        let current_ctxt = get_context(current, cpuid());
+        let current_ctxt = get_context(*current, cpuid());
         let mut values: [usize; 13] = [0; 13];
-        dump_host_state(vcpu, &mut values).or(Err(CapaError::InvalidSwitch))?;
+        dump_host_state(&mut vmx_state.vcpu, &mut values).or(Err(CapaError::InvalidSwitch))?;
 
         //TODO(aghosn): we could just set it in the context if we were able to distinguish
         //writable by tyche from writable by parent.
 
         // Switch to the target frame.
-        vcpu.switch_frame(rcvmcs.get(dest.vmcs).unwrap().frame)
+        vmx_state
+            .vcpu
+            .switch_frame(rcvmcs.get(dest.vmcs).unwrap().frame)
             .unwrap();
 
         // Init to the default values.
         let info: GuestInfo = Default::default();
-        vmx_helper::default_vmcs_config(vcpu, &info, false);
+        vmx_helper::default_vmcs_config(&mut vmx_state.vcpu, &info, false);
 
         // Load the default values.
-        load_host_state(vcpu, &mut values).or(Err(CapaError::InvalidSwitch))?;
+        load_host_state(&mut vmx_state.vcpu, &mut values).or(Err(CapaError::InvalidSwitch))?;
 
         // Switch back the frame.
-        vcpu.switch_frame(rcvmcs.get(current_ctxt.vmcs).unwrap().frame)
+        vmx_state
+            .vcpu
+            .switch_frame(rcvmcs.get(current_ctxt.vmcs).unwrap().frame)
             .unwrap();
     }
     Ok(())
 }
 
 /// TODO(aghosn) do we need to seal on all cores?
-pub fn do_seal(current: Handle<Domain>, domain: LocalCapa) -> Result<LocalCapa, CapaError> {
+pub fn do_seal(
+    vmx_state: &mut VmxState,
+    current: &mut Handle<Domain>,
+    domain: LocalCapa,
+) -> Result<LocalCapa, CapaError> {
     let core = cpuid();
-    let mut engine = CAPA_ENGINE.lock();
-
-    let capa = engine.seal(current, core, domain)?;
-
-    if let Ok(domain_capa) = engine.get_domain_capa(current, domain) {
+    let mut engine = lock_engine(vmx_state, current);
+    let capa = engine.seal(*current, core, domain)?;
+    if let Ok(domain_capa) = engine.get_domain_capa(*current, domain) {
         calculate_attestation_hash(&mut engine, domain_capa);
     }
 
@@ -445,7 +474,8 @@ pub fn do_seal(current: Handle<Domain>, domain: LocalCapa) -> Result<LocalCapa, 
 }
 
 pub fn do_segment_region(
-    current: Handle<Domain>,
+    vmx_state: &mut VmxState,
+    current: &mut Handle<Domain>,
     capa: LocalCapa,
     is_shared: bool,
     start: usize,
@@ -453,47 +483,53 @@ pub fn do_segment_region(
     prot: usize,
 ) -> Result<(LocalCapa, LocalCapa), CapaError> {
     let prot = MemOps::from_usize(prot)?;
-    let mut engine = CAPA_ENGINE.lock();
+    let mut engine = lock_engine(vmx_state, current);
     let access = AccessRights {
         start,
         end,
         ops: prot,
     };
     let to_send = if is_shared {
-        engine.alias_region(current, capa, access)?
+        engine.alias_region(*current, capa, access)?
     } else {
-        engine.carve_region(current, capa, access)?
+        engine.carve_region(*current, capa, access)?
     };
-    let to_revoke = engine.create_revoke_capa(current, to_send)?;
+    let to_revoke = engine.create_revoke_capa(*current, to_send)?;
     apply_updates(&mut engine);
     Ok((to_send, to_revoke))
 }
 
-pub fn do_send(current: Handle<Domain>, capa: LocalCapa, to: LocalCapa) -> Result<(), CapaError> {
-    let mut engine = CAPA_ENGINE.lock();
+pub fn do_send(
+    vmx_state: &mut VmxState,
+    current: &mut Handle<Domain>,
+    capa: LocalCapa,
+    to: LocalCapa,
+) -> Result<(), CapaError> {
+    let mut engine = lock_engine(vmx_state, current);
     // Send is not allowed for region capa.
     // Use do_send_region instead.
-    match engine.get_region_capa(current, capa)? {
+    match engine.get_region_capa(*current, capa)? {
         Some(_) => return Err(CapaError::InvalidCapa),
         _ => {}
     }
-    engine.send(current, capa, to)?;
+    engine.send(*current, capa, to)?;
     apply_updates(&mut engine);
     Ok(())
 }
 
 pub fn do_send_region(
-    current: Handle<Domain>,
+    vmx_state: &mut VmxState,
+    current: &mut Handle<Domain>,
     capa: LocalCapa,
     to: LocalCapa,
     alias: usize,
     is_repeat: bool,
     size: usize,
 ) -> Result<(), CapaError> {
-    let mut engine = CAPA_ENGINE.lock();
+    let mut engine = lock_engine(vmx_state, current);
     // Get the capa first.
     let region_info = engine
-        .get_region_capa(current, capa)?
+        .get_region_capa(*current, capa)?
         .ok_or(CapaError::InvalidCapa)?
         .get_access_rights();
     let repeat = {
@@ -511,7 +547,7 @@ pub fn do_send_region(
 
     // Check for an overlap first.
     {
-        let target = engine.get_domain_capa(current, to)?;
+        let target = engine.get_domain_capa(*current, to)?;
         let dom_dat = get_domain(target);
         if dom_dat
             .remapper
@@ -521,10 +557,10 @@ pub fn do_send_region(
         }
     }
 
-    let _ = engine.send(current, capa, to)?;
+    let _ = engine.send(*current, capa, to)?;
     // We cannot hold the reference while apply_updates is called.
     {
-        let target = engine.get_domain_capa(current, to)?;
+        let target = engine.get_domain_capa(*current, to)?;
         let mut dom_dat = get_domain(target);
         let _ = dom_dat
             .remapper
@@ -542,57 +578,72 @@ pub fn do_send_region(
 }
 
 pub fn do_enumerate(
-    current: Handle<Domain>,
+    vmx_state: &mut VmxState,
+    current: &mut Handle<Domain>,
     token: NextCapaToken,
 ) -> Option<(CapaInfo, NextCapaToken)> {
-    let mut engine = CAPA_ENGINE.lock();
-    engine.enumerate(current, token)
+    let mut engine = lock_engine(vmx_state, current);
+    engine.enumerate(*current, token)
 }
 
-pub fn do_revoke(current: Handle<Domain>, capa: LocalCapa) -> Result<(), CapaError> {
-    let mut engine = CAPA_ENGINE.lock();
-    engine.revoke(current, capa)?;
+pub fn do_revoke(
+    vmx_state: &mut VmxState,
+    current: &mut Handle<Domain>,
+    capa: LocalCapa,
+) -> Result<(), CapaError> {
+    let mut engine = lock_engine(vmx_state, current);
+    engine.revoke(*current, capa)?;
     apply_updates(&mut engine);
     Ok(())
 }
 
 pub fn do_revoke_region(
-    current: Handle<Domain>,
+    vmx_state: &mut VmxState,
+    current: &mut Handle<Domain>,
     capa: LocalCapa,
     to: LocalCapa,
     alias: usize,
     size: usize,
 ) -> Result<(), CapaError> {
-    let mut engine = CAPA_ENGINE.lock();
+    let mut engine = lock_engine(vmx_state, current);
     //TODO(aghosn): this is not really safe. We should make more checks.
     //Maybe have a cleaner interface for that after the rebuttal.
     {
         //Unmap the gpa range.
-        let dom = engine.get_domain_capa(current, to).unwrap();
+        let dom = engine.get_domain_capa(*current, to).unwrap();
         let mut dom_dat = get_domain(dom);
         let _ = dom_dat.remapper.unmap_gpa_range(alias, size).unwrap();
     }
-    engine.revoke(current, capa)?;
+    engine.revoke(*current, capa)?;
     apply_updates(&mut engine);
     Ok(())
 }
 
-pub fn do_duplicate(current: Handle<Domain>, capa: LocalCapa) -> Result<LocalCapa, CapaError> {
-    let mut engine = CAPA_ENGINE.lock();
-    let new_capa = engine.duplicate(current, capa)?;
+pub fn do_duplicate(
+    vmx_state: &mut VmxState,
+    current: &mut Handle<Domain>,
+    capa: LocalCapa,
+) -> Result<LocalCapa, CapaError> {
+    let mut engine = lock_engine(vmx_state, current);
+    let new_capa = engine.duplicate(*current, capa)?;
     apply_updates(&mut engine);
     Ok(new_capa)
 }
 
-pub fn do_switch(current: Handle<Domain>, capa: LocalCapa, cpuid: usize) -> Result<(), CapaError> {
-    let mut engine = CAPA_ENGINE.lock();
-    engine.switch(current, cpuid, capa)?;
+pub fn do_switch(
+    vmx_state: &mut VmxState,
+    current: &mut Handle<Domain>,
+    capa: LocalCapa,
+    cpuid: usize,
+) -> Result<(), CapaError> {
+    let mut engine = lock_engine(vmx_state, current);
+    engine.switch(*current, cpuid, capa)?;
     apply_updates(&mut engine);
     Ok(())
 }
 
-pub fn do_debug() {
-    let mut engine = CAPA_ENGINE.lock();
+pub fn do_debug(vmx_state: &mut VmxState, current: &mut Handle<Domain>) {
+    let mut engine = lock_engine(vmx_state, current);
     let mut next = NextCapaToken::new();
     while let Some((domain, next_next)) = engine.enumerate_domains(next) {
         next = next_next;
@@ -629,12 +680,13 @@ pub fn do_debug_addr(dom: Handle<Domain>, addr: usize) {
 }
 
 pub fn do_domain_attestation(
-    current: Handle<Domain>,
+    vmx_state: &mut VmxState,
+    current: &mut Handle<Domain>,
     nonce: usize,
     mode: usize,
 ) -> Option<EnclaveReport> {
-    let mut engine = CAPA_ENGINE.lock();
-    attest_domain(&mut engine, current, nonce, mode)
+    let mut engine = lock_engine(vmx_state, current);
+    attest_domain(&mut engine, *current, nonce, mode)
 }
 
 // —————————————————————— Interrupt Handling functions —————————————————————— //
@@ -651,14 +703,17 @@ pub fn handle_trap(
     Ok(())
 }
 
-pub fn do_handle_violation(current: Handle<Domain>) -> Result<(), CapaError> {
-    let mut engine = CAPA_ENGINE.lock();
+pub fn do_handle_violation(
+    vmx_state: &mut VmxState,
+    current: &mut Handle<Domain>,
+) -> Result<(), CapaError> {
+    let mut engine = lock_engine(vmx_state, current);
     let core = cpuid();
     {
-        let mut current_ctx = get_context(current, core);
+        let mut current_ctx = get_context(*current, core);
         current_ctx.interrupted = true;
     }
-    engine.handle_violation(current, core)?;
+    engine.handle_violation(*current, core)?;
     apply_updates(&mut engine);
     Ok(())
 }
