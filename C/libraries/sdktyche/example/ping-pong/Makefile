@@ -101,7 +101,7 @@ REDIS_SERVER_PATH ?= ../../../../../../tyche-experiment-redis/tyche-redis/src/re
 ## ———————————————————————————————— Targets ————————————————————————————————— ##
 
 ping_pong: $(CODE_APP) $(HDRS_APP)
-	$(GCC) -DTYCHE_USER_SPACE=1 $(LOADER_BACKEND) -g $(APP_INCLUDES) -o $@ $(CODE_APP)
+	$(GCC) -D_GNU_SOURCE -DTYCHE_USER_SPACE=1 $(LOADER_BACKEND) -g $(APP_INCLUDES) -o $@ $(CODE_APP) -pthread
 
 mock_app: $(CODE_MOCK)
 	$(GCC) -g -static -o $@ $(CODE_MOCK)

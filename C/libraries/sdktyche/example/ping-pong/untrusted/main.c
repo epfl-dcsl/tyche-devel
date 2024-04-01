@@ -1,5 +1,4 @@
 #include <string.h>
-#define _GNU_SOURCE
 #include "common.h"
 #include "common_log.h"
 #include "ping_pong.h"
@@ -13,6 +12,8 @@
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <sys/ioctl.h>
+#include <pthread.h>
+#include <sched.h>
 
 // —————————————————————————————— Local types ——————————————————————————————— //
 
@@ -24,6 +25,13 @@ typedef struct pipe_state_t {
 	tyche_domain_t* pipe_holder;
 } pipe_state_t;
 
+typedef struct ping_pong_args_t {
+	/// The core on which we want the thread to execute.
+	usize core;
+	/// The enclave that needs to be executed.
+	tyche_domain_t* domain;
+} ping_pong_args_t;
+
 // ——————————————————————————————— Constants ———————————————————————————————— //
 
 // Enclaves file names.
@@ -34,6 +42,7 @@ static const char* default_message =	"You spin me round round\n"
 																			"Baby right round,\n"
 																			"Like a record baby,\n"
 																			"Round round\n";
+static const char* pong_placeholder = "You should not see this\n";
 
 pipe_state_t* pipes = NULL;
 
@@ -136,14 +145,51 @@ failure:
 }
 
 // ————————————————————————— Application functions —————————————————————————— //
+
+void* run_domain(void* args) {
+	ping_pong_args_t* config = (ping_pong_args_t*) args;
+	pthread_t thread = pthread_self();
+	cpu_set_t affinity_mask;
+	if (args == NULL) {
+		ERROR("received a null argument in the run domain thread.");
+		return NULL;
+	}
+	CPU_ZERO(&affinity_mask);
+	// Trick to convert core mask into an id number.
+	CPU_SET((config->core >> 1), &affinity_mask);
+	if (pthread_setaffinity_np(thread, sizeof(cpu_set_t), &affinity_mask) != 0) {
+		ERROR("Unable to set thread affinity on core %lld", config->core);
+		return NULL;
+	}
+	// Now finally call the domain.
+	if (sdk_call_domain(config->domain) != SUCCESS) {
+		ERROR("Error running the domain on core %lld", config->core);
+		return NULL;
+	}
+	return NULL;
+}
+
 int main(int argc, char *argv[]) {
 	tyche_domain_t* ping = NULL;
 	tyche_domain_t* pong = NULL;
 	info_t* ping_info = NULL;
 	info_t* pong_info = NULL;
-	// Attempt to load both enclaves.
-	// For the moment to run on the same core.
-	usize core_mask = sdk_pin_to_current_core();
+	pthread_t threads[2] = {0};
+	ping_pong_args_t args[2] = {0};
+
+	// Parse the core configuration.
+	// If we run with SDK_TYCHE, i.e., KVM=0, we need at least two cores.
+	// With KVM, we can probably get away with 1 core.
+	usize core_count = sdk_get_core_count();
+	usize core_mask = sdk_all_cores_mask();
+	usize ping_core = 1;
+	usize pong_core = (core_count > 1)? 2 : 1;
+#if !defined(RUN_WITH_KVM) || RUN_WITH_KVM == 0
+	if (core_count <= 1) {
+		ERROR("The # of cores (%lld) is insufficent to run this benchmark with tyche sdk.", core_count);
+		exit(-1);
+	}
+#endif
 
 	// Setup the handler for the pipes.
 	sdk_handle_pipes = handle_pipes;
@@ -159,12 +205,12 @@ int main(int argc, char *argv[]) {
 		ERROR("Unable to allocate pong.");
 		goto failure;
 	}
-	if (sdk_create_domain(ping, ping_name, core_mask, ALL_TRAPS,
+	if (sdk_create_domain(ping, ping_name, ping_core, ALL_TRAPS,
 				DEFAULT_PERM) != SUCCESS) {
 		ERROR("Unable to parse the ping enclave.");
 		goto failure;
 	}
-	if (sdk_create_domain(pong, pong_name, core_mask, ALL_TRAPS,
+	if (sdk_create_domain(pong, pong_name, pong_core, ALL_TRAPS,
 				DEFAULT_PERM) != SUCCESS) {
 		ERROR("Unable to parse the pong enclave");
 		goto failure;
@@ -186,40 +232,46 @@ int main(int argc, char *argv[]) {
 		goto failure;
 	}
 	memset(pong_info, 0, sizeof(info_t));
+	memcpy(pong_info->msg_buffer, pong_placeholder, strlen(pong_placeholder) +1);
 	// This could be hardcoded in pong.
 	pong_info->channel = (void*) 0x301000;
 	pong_info->msg_size = strlen(default_message) + 1;
 
-	// TODO: make the enclaves runs on separate cores, which will require
-	// to spawn threads etc. and provide different core masks.
-	// For a first version I should be able to just run ping first and then pong.
-	LOG("calling ping");
-	if (sdk_call_domain(ping) != SUCCESS) {
-		ERROR("Failed to call ping.");
+
+	// Create the ping thread.
+	args[0].core = ping_core;
+	args[0].domain = ping;
+	if (pthread_create(&threads[0], NULL, run_domain, (void*)(&args[0])) < 0) {
+		ERROR("Failed to create ping thread.");
 		goto failure;
 	}
+
+	// Create the pong thread.
+	args[1].core = pong_core;
+	args[1].domain = pong;
+	if (pthread_create(&threads[1], NULL, run_domain, (void*)(&args[1])) < 0) {
+		ERROR("Failed to create pong thread.");
+		goto failure;
+	}
+
+	// Join on the threads.
+	pthread_join(threads[0], NULL);
+	pthread_join(threads[1], NULL);
+
+	// Check the status.
 	if (ping_info->status != DONE_SUCCESS) {
-		ERROR("Unexpected ping status: %d", ping_info->status);
+		ERROR("The ping status is not success: %d", ping_info->status);
 		goto failure;
 	}
-	LOG("Calling pong");
-	if (sdk_call_domain(pong) != SUCCESS) {
-		ERROR("Failure to call pong");
+	if (pong_info->status != DONE_SUCCESS) {
+		ERROR("The pong status is not success: %d", pong_info->status);
+	}
+	// Check we received the correct message.
+	if (strncmp(pong_info->msg_buffer, default_message, strlen(default_message)) != 0) {
+		ERROR("The messages do not match!");
 		goto failure;
 	}
-	if (pong_info->status != DONE_SUCCESS)  {
-		ERROR("Unexpected pong status: %d", pong_info->status);
-		goto failure;
-	}
-	LOG("Done with pong, here is the message:\n%s", pong_info->msg_buffer);
-	// Ask tyche to give us a dump of the state.
-	/*asm volatile (
-		"movq $0xa, %%rax\n\t"
-		"vmcall\n\t"
-		:
-		:
-		: "rax", "memory"
-			);*/
+	LOG("The message we received: %s", pong_info->msg_buffer);
 
 	// Clean up everything once we've check the results are correct.
 	if (sdk_delete_domain(ping) != SUCCESS) {
