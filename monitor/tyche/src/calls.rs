@@ -25,3 +25,4 @@ pub const WRITE_FIELDS: usize = 18;
 pub const SELF_CONFIG: usize = 19;
 pub const ENCLAVE_ATTESTATION: usize = 20;
 pub const REVOKE_ALIASED_REGION: usize = 21;
+pub const SERIALIZE_ATTESTATION: usize = 22;

@@ -390,6 +390,10 @@ fn handle_exit(
                     log::info!("Vcpu: {:x?}", vs.vcpu);
                     Ok(HandlerResult::Exit)
                 }
+                calls::SERIALIZE_ATTESTATION => {
+                    monitor::do_serialize_attestation(*domain, arg_1, arg_2).expect("TODO");
+                    Ok(HandlerResult::Resume)
+                }
                 calls::ENCLAVE_ATTESTATION => {
                     log::trace!("Get attestation!");
                     log::trace!("arg1 {:#x}", arg_1);
