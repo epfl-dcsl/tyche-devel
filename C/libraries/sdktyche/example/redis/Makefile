@@ -31,6 +31,7 @@ ELF64=$(LIB_PATH)/elf64
 PTS=$(LIB_PATH)/pts
 DRIVER=$(DRIVERS_PATH)/tyche
 CONTALLOC=$(DRIVERS_PATH)/contalloc
+RB=$(LIB_PATH)/ringbuf
 
 ## ——————————————————————— Untrusted code and headers ——————————————————————— ##
 CODE_UNTRUSTED=$(wildcard untrusted/*.c)
@@ -62,7 +63,7 @@ HDRS_APP=$(HDRS_ELF64) $(HDRS_PTS) $(HDRS_LOADER) $(HDRS_UNTRUSTED)
 
 ## ———————————————————————————————— Includes ———————————————————————————————— ##
 COMMON_INCLUDES = -Iinclude -I$(CAPA_LIB)/include -I$(COMMON_LIB)/include -I$(DLL_LIB)/include -I$(SDK)/include 
-APP_INCLUDES = $(COMMON_INCLUDES) -I$(ELF64)/include -I$(PTS)/include -I$(DRIVER)/include
+APP_INCLUDES = $(COMMON_INCLUDES) -I$(ELF64)/include -I$(PTS)/include -I$(DRIVER)/include -I$(RB)/include
 
 ifeq ($(KVM), 1)
 	APP_INCLUDES+=-I$(CONTALLOC)/include 
@@ -93,7 +94,7 @@ redis_enclave: app enclave
 	cargo -Z unstable-options -C $(TYCHOOLS_PATH) install --path . --locked
 	tychools instrument -s manifests/default.json 
 	chmod +x redis_enclave
-	rm app enclave
+	#rm app enclave
 
 install_disk: all 
 	mkdir -p $(DISK_PATH)
@@ -102,4 +103,4 @@ install_disk: all
 .PHONY: clean
 
 clean:
-	rm redis_enclave app enclave 
+	rm -f redis_enclave app enclave 

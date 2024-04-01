@@ -147,24 +147,6 @@ static inline void buff_index_decr(buff_index_t *dest) {
     return FAILURE;                                                            \
   }
 
-/// Attempts to read at most n elements.
-/// Return FAILURE (-1) in case of error.
-/// Returns the number of elements read in case of success.
-#define RB_DECLARE_READ_N(elem_type)                                           \
-  int rb_##elem_type##_read_n(rb_##elem_type##_t *rb, int n,                   \
-                              elem_type *dest) {                               \
-    int read = 0;                                                              \
-    if (rb == NULL || dest == NULL || n < 0) {                                 \
-      goto failure;                                                            \
-    }                                                                          \
-    while (read < n && (rb_##elem_type##_read(rb, &dest[read]) == SUCCESS)) {  \
-      read++;                                                                  \
-    }                                                                          \
-    return read;                                                               \
-  failure:                                                                     \
-    return FAILURE;                                                            \
-  }
-
 /// Reads from the ring buffer (sets address inside addr_result).
 /// Returns FAILURE if rb is NULL, result is NULL, or buffer is empty.
 /// Return SUCCESS otherwise.
@@ -184,9 +166,26 @@ static inline void buff_index_decr(buff_index_t *dest) {
     return FAILURE;                                                            \
   }
 
-/// Helper macro to declare all the functions for a given type.
-#define RB_DECLARE_ALL(elem_type)                                              \
-  RB_DECLARE_TYPE(elem_type);                                                  \
+/// Attempts to read at most n elements.
+/// Return FAILURE (-1) in case of error.
+/// Returns the number of elements read in case of success.
+#define RB_DECLARE_READ_N(elem_type)                                           \
+  int rb_##elem_type##_read_n(rb_##elem_type##_t *rb, int n,                   \
+                              elem_type *dest) {                               \
+    int read = 0;                                                              \
+    if (rb == NULL || dest == NULL || n < 0) {                                 \
+      goto failure;                                                            \
+    }                                                                          \
+    while (read < n && (rb_##elem_type##_read(rb, &dest[read]) == SUCCESS)) {  \
+      read++;                                                                  \
+    }                                                                          \
+    return read;                                                               \
+  failure:                                                                     \
+    return FAILURE;                                                            \
+  }
+
+/// Helper macro to declare all the functions.
+#define RB_DECLARE_FUNCS(elem_type)                                            \
   RB_DECLARE_INIT(elem_type);                                                  \
   RB_DECLARE_IS_FULL(elem_type);                                               \
   RB_DECLARE_IS_EMPTY(elem_type);                                              \
@@ -194,3 +193,20 @@ static inline void buff_index_decr(buff_index_t *dest) {
   RB_DECLARE_READ(elem_type);                                                  \
   RB_DECLARE_WRITE_N(elem_type);                                               \
   RB_DECLARE_READ_N(elem_type);
+
+/// Helper macro to declare the type and all the functions for a given type.
+#define RB_DECLARE_ALL(elem_type)                                              \
+  RB_DECLARE_TYPE(elem_type);                                                  \
+  RB_DECLARE_FUNCS(elem_type);
+
+// Helper macro to declare only the prototype functions.
+#define RB_DECLARE_PROTOS(elem_type)                                           \
+  int rb_##elem_type##_init(rb_##elem_type##_t *rb, int capacity,              \
+                            elem_type *buff);                                  \
+  int rb_##elem_type##_is_full(rb_##elem_type##_t *rb);                        \
+  int rb_##elem_type##_is_empty(rb_##elem_type##_t *rb);                       \
+  int rb_##elem_type##_write(rb_##elem_type##_t *rb, elem_type elem);          \
+  int rb_##elem_type##_write_n(rb_##elem_type##_t *rb, int n,                  \
+                               elem_type *elems);                              \
+  int rb_##elem_type##_read(rb_##elem_type##_t *rb, elem_type *result);        \
+  int rb_##elem_type##_read_n(rb_##elem_type##_t *rb, int n, elem_type *dest);

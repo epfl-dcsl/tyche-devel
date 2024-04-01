@@ -16,6 +16,7 @@ pub struct PtMapper<PhysAddr, VirtAddr> {
     /// Offset between host physical and guest physical.
     offset: usize,
     root: PhysAddr,
+    enable_pse: bool,
     _virt: PhantomData<VirtAddr>,
 }
 
@@ -77,8 +78,15 @@ where
             host_offset,
             offset,
             root,
+            enable_pse: true,
             _virt: PhantomData,
         }
+    }
+
+    pub fn new_disable_pse(host_offset: usize, offset: usize, root: PhysAddr) -> Self {
+        let mut r = Self::new(host_offset, offset, root);
+        r.enable_pse = false;
+        r
     }
 
     pub fn translate(&mut self, virt_addr: VirtAddr) -> Option<PhysAddr> {
@@ -118,6 +126,7 @@ where
         // Align physical address first
         let phys_addr = PhysAddr::from_usize(phys_addr.as_usize() & PAGE_MASK);
         let offset = self.offset;
+        let enable_pse = self.enable_pse;
         unsafe {
             self.walk_range(
                 virt_addr,
@@ -135,7 +144,8 @@ where
                     let phys = phys_addr.as_u64() + (addr.as_u64() - virt_addr.as_u64());
                     // Opportunity to map a 1GB region
                     if level == Level::L3 {
-                        if (addr.as_usize() + PageSize::GIANT.bits() <= end)
+                        if enable_pse
+                            && (addr.as_usize() + PageSize::GIANT.bits() <= end)
                             && (phys % (PageSize::GIANT.bits() as u64) == 0)
                         {
                             *entry = phys | PtFlag::PSIZE.bits() | prot.bits();
@@ -144,7 +154,8 @@ where
                     }
                     // Opportunity to map a 2MB region.
                     if level == Level::L2 {
-                        if (addr.as_usize() + PageSize::HUGE.bits() <= end)
+                        if enable_pse
+                            && (addr.as_usize() + PageSize::HUGE.bits() <= end)
                             && (phys % (PageSize::HUGE.bits() as u64) == 0)
                         {
                             *entry = phys | PtFlag::PSIZE.bits() | prot.bits();

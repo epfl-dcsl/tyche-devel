@@ -108,7 +108,9 @@ pub fn generate_page_tables(
     let allocator = Allocator::new(&mut bump);
     let root = allocator.allocate_frame().unwrap();
     let mut mapper: Mapper = if !riscv_enabled {
-        Mapper::X86Mapper(PtMapper::<HostPhysAddr, HostVirtAddr>::new(
+        // TODO(aghosn): for now we disable big entries because this would require
+        // the corresponding physical memory allocation in the loader to be correctly aligned.
+        Mapper::X86Mapper(PtMapper::<HostPhysAddr, HostVirtAddr>::new_disable_pse(
             offset,
             0,
             root.phys_addr,

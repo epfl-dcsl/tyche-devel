@@ -1,7 +1,9 @@
-#define _GNU_SOURCE
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE 1
+#endif
 #include "common.h"
 #include "common_log.h"
-#include "enclave_app.h"
+#include "redis_app.h"
 #include "sdk_tyche.h"
 #include "sdk_tyche_rt.h"
 #include <signal.h>
@@ -11,17 +13,25 @@
 #include <sys/ucontext.h>
 #include <time.h>
 #include <ucontext.h>
+#include <pthread.h>
+#include <sched.h>
 
 // ———————————————————————————— Local Variables ————————————————————————————— //
 
-usize has_faulted = FAILURE;
-
 tyche_domain_t *enclave = NULL;
 
-config_t *shared = NULL;
+// ———————————————————————— Declare the RB functions ———————————————————————— //
 
-FILE *file_tychools;
-FILE *tychools_response;
+RB_DECLARE_FUNCS(char);
+
+// —————————————————————————————— Local types ——————————————————————————————— //
+
+typedef struct redis_args_t {
+  /// The core for the redis thread.
+  usize core;
+  /// The args.
+  redis_app_t* app;
+} redis_args_t;
 
 // ———————————————————————————————— Helpers ————————————————————————————————— //
 
@@ -43,10 +53,110 @@ failure:
   return NULL;
 }
 
+int pin_self_to_core(usize core) {
+  pthread_t thread = pthread_self();
+  cpu_set_t affinity_mask;
+  CPU_ZERO(&affinity_mask);
+  CPU_SET(core, &affinity_mask);
+  if (pthread_setaffinity_np(thread, sizeof(cpu_set_t), &affinity_mask) != 0) {
+    ERROR("Unable to set thread affinity on core %lld", core);
+    return FAILURE;
+  }
+  return SUCCESS;
+}
+
+#ifdef RUN_DEBUG_REDIS
+
+void* run_redis(void* arg) {
+  redis_args_t* redis_arg = (redis_args_t*) arg;
+  int read = 0;
+  int written = 0;
+  char buffer[MSG_BUFFER_SIZE] = {0};
+  if (pin_self_to_core((redis_arg->core) >> 1) != SUCCESS) {
+      ERROR("Pinning in redis thread did not work.");
+      goto failure;
+  }
+  // main loop, read on a channel, write on the other.
+  while(1) {
+    // Start by reading.
+    while((read = rb_char_read_n(&(redis_arg->app->to_redis),
+            MSG_BUFFER_SIZE, buffer)) == 0) {
+      //TODO: if we want to sleep, do it here.
+    }
+    if (read == FAILURE) {
+      ERROR("Reading in run redis returned a failure.");
+      goto failure;
+    }
+    printf("redis_in: %s\n", buffer);
+    // Now write.
+    written = 0;
+    while(written < read) {
+      int res = rb_char_write_n(&(redis_arg->app->from_redis), read - written, &buffer[written]);
+      if (res == FAILURE) {
+        ERROR("Failed to write to the from channel");
+        goto failure;
+      }
+      written += res;
+    }
+    read = 0;
+  }
+
+  LOG("Done running redis!");
+  return NULL;
+failure:
+  return NULL;
+}
+
+#else
+// Thread running redis.
+void* run_redis(void* arg) {
+  redis_args_t* redis_arg = (redis_args_t*) arg;
+  if (pin_self_to_core((redis_arg->core) >> 1) != SUCCESS) {
+      ERROR("Pinning in redis thread did not work.");
+      goto failure;
+  }
+  // For the moment do not run it yet
+  if (sdk_call_domain(enclave) != SUCCESS) {
+    ERROR("Failure running the redis enclave");
+    goto failure;
+  }
+  LOG("Redis exited!");
+  exit(-1);
+  return NULL;
+failure:
+  return NULL;
+}
+#endif
+
 // —————————————————————————————————— Main —————————————————————————————————— //
 int main(int argc, char *argv[]) {
-  // Figure out sched-affinity.
-  usize core_mask = sdk_pin_to_current_core();
+  // Thread to run redis.
+  pthread_t redis_thread;
+  // Number of cores.
+  usize core_count = sdk_get_core_count();
+  // The mask of runable cores.
+  usize core_mask = sdk_all_cores_mask();
+  // The core for redis.
+  usize redis_core = (core_count > 1)? 2 : 1;
+  // The output core
+  usize output_core = 1;
+  // The datastructure shared with the redis enclave.
+  redis_app_t* comm = NULL;
+  // Arguments for the redis thread.
+  redis_args_t redis_args = {0};
+
+  // Pin ourselves to the core 0.
+  if (pin_self_to_core(0) != SUCCESS) {
+    goto failure;
+  } 
+
+  // Avoid running thread benchmarks with sdktyche that does not have interrupts.
+#if !defined(RUN_WITH_KVM) || RUN_WITH_KVM == 0
+  if (core_count <= 1) {
+    ERROR("The # of cores (%lld) must be > 1 for tyche sdk", core_count);
+    goto failure;
+  } 
+#endif
 
   // Allocate the enclave.
   enclave = malloc(sizeof(tyche_domain_t));
@@ -54,13 +164,57 @@ int main(int argc, char *argv[]) {
     ERROR("Unable to allocate enclave structure");
     goto failure;
   }
-  // Init the enclave.
-  if (sdk_create_domain(enclave, argv[0], core_mask, ALL_TRAPS, DEFAULT_PERM) !=
+  // Init the redis enclave.
+  if (sdk_create_domain(enclave, argv[0], redis_core, 0, DEFAULT_PERM) !=
       SUCCESS) {
     ERROR("Unable to parse the enclave");
     goto failure;
   }
-  LOG("The binary enclave has been loaded!");
+
+  // Initialize the communication channels.
+  comm = (redis_app_t*) find_default_shared(enclave);
+  if (comm == NULL) {
+    ERROR("Unable to find the default shared region.");
+    goto failure;
+  }
+  // Initialize the channels.
+  if (rb_char_init(&(comm->to_redis), MSG_BUFFER_SIZE, comm->to_buffer) != SUCCESS) {
+    ERROR("Problem in the init of the to_redis channel.");
+    goto failure;
+  }
+  if (rb_char_init(&(comm->from_redis), MSG_BUFFER_SIZE, comm->from_buffer) != SUCCESS) {
+    ERROR("Problem in the init of from redis channel.");
+    goto failure;
+  }
+  memset(comm->to_buffer, 0, sizeof(char) * MSG_BUFFER_SIZE);
+  memset(comm->from_buffer, 0, sizeof(char) * MSG_BUFFER_SIZE);
+  
+  // Run the thread for redis.
+  redis_args.core = redis_core;
+  redis_args.app = comm;
+  if (pthread_create(&redis_thread, NULL, run_redis, (void*) &redis_args) < 0) {
+    ERROR("Failed to create the redis thread");
+    goto failure;
+  }
+
+#ifdef RUN_TCP
+  // run the tcp server.
+  if (tcp_start_server(output_core, comm) != SUCCESS) {
+    ERROR("TCP server failed.");
+    goto failure;
+  }
+#else
+  // By default we run the stdin version.
+  if (stdin_start_server(output_core, comm) != SUCCESS) {
+    ERROR("Stdin server failed.");
+    goto failure;
+  }
+#endif
+
+  // Join the threads.
+  pthread_join(redis_thread, NULL);
+
+  // Delete the enclave.
   if (sdk_delete_domain(enclave) != SUCCESS) {
     ERROR("Unable to delete the redis domain.");
     goto failure;
