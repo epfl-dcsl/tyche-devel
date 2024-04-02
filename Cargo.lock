@@ -1128,6 +1128,7 @@ dependencies = [
 name = "tychools"
 version = "0.1.0"
 dependencies = [
+ "attest_client",
  "clap",
  "clap-num",
  "ed25519-compact",

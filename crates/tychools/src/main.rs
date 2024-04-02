@@ -5,6 +5,7 @@ mod instrument;
 mod loader;
 mod page_table_mapper;
 mod tychools_const;
+mod new_attestation;
 
 use std::path::PathBuf;
 
@@ -34,6 +35,7 @@ enum Commands {
     Hash(FileAndOffset),
     Extract(SrcDestArgs),
     Attestation(AttestationArgs),
+    NewAttestation(NewAttestationArgs),
 }
 
 #[derive(Args)]
@@ -78,6 +80,12 @@ struct AttestationArgs {
     riscv_enabled: bool,
 }
 
+#[derive(Args)]
+struct NewAttestationArgs {
+    #[arg(short, long, value_name = "SRC")]
+    src: PathBuf,
+}
+
 fn main() {
     simple_logger::init().unwrap();
     let cli = Cli::parse();
@@ -111,6 +119,9 @@ fn main() {
                 args.nonce,
                 args.riscv_enabled,
             );
+        }
+        Commands::NewAttestation(args) => {
+            new_attestation::display(args);
         }
     }
 }

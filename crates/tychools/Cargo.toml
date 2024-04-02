@@ -25,6 +25,7 @@ libc = "0.2.146"
 ioctl-sys = "0.8.0"
 sha2 = "0.6.0"
 clap-num = "1.0.2"
-ed25519-compact = {path = "../../vendor/forked_signature"}
+ed25519-compact = { path = "../../vendor/forked_signature" }
+attest_client = { path = "../attest_client" }
 
 [features] 
