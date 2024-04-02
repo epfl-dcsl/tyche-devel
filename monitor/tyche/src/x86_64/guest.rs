@@ -391,7 +391,12 @@ fn handle_exit(
                     Ok(HandlerResult::Exit)
                 }
                 calls::SERIALIZE_ATTESTATION => {
-                    monitor::do_serialize_attestation(*domain, arg_1, arg_2).expect("TODO");
+                    let written = monitor::do_serialize_attestation(vs, domain, arg_1, arg_2).expect("TODO");
+                    log::trace!("Wrote {} bytes of attestation", written);
+                    let mut context = monitor::get_context(*domain, cpuid());
+                    context.set(VmcsField::GuestRdi, written, None)?;
+                    context.set(VmcsField::GuestRax, 0, None)?;
+                    vs.vcpu.next_instruction()?;
                     Ok(HandlerResult::Resume)
                 }
                 calls::ENCLAVE_ATTESTATION => {
@@ -514,6 +519,7 @@ fn handle_exit(
                 }
                 _ => {
                     log::info!("Unknown MonCall: 0x{:x}", vmcall);
+                    log::error!("Exisint on unknown MonCall: {:x?}", vs.vcpu);
                     todo!("Unknown VMCall");
                 }
             }

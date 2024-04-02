@@ -680,19 +680,20 @@ pub fn do_debug_addr(dom: Handle<Domain>, addr: usize) {
 }
 
 pub fn do_serialize_attestation(
-    domain_handle: Handle<Domain>,
+    vmx_state: &mut VmxState,
+    domain_handle: &mut Handle<Domain>,
     addr: usize,
     len: usize,
 ) -> Result<usize, CapaError> {
-    let engine = CAPA_ENGINE.lock();
-    let domain = get_domain(domain_handle);
-    log::info!("Serializing attestation");
+    let engine = lock_engine(vmx_state, domain_handle);
+    let domain = get_domain(*domain_handle);
+    log::trace!("Serializing attestation");
 
     // First, check if the buffer is valid and can be accessed by the current domain
     let buff_start = addr;
     let buff_end = buff_start + len;
     let mut buff = None;
-    let permission_iter = engine.get_domain_permissions(domain_handle).unwrap();
+    let permission_iter = engine.get_domain_permissions(*domain_handle).unwrap();
     for range in domain.remapper.remap(permission_iter) {
         let range_start = range.gpa;
         let range_end = range_start + range.size;

@@ -155,6 +155,9 @@ pub fn load(
         );
     }
 
+    // Map the guest (e.g. linux) memory into Tyche.
+    // This is required for hashing content and writing back attestation into Linux-controlled
+    // buffers.
     let guest_regions = memory_map.guest;
     for mem_region in guest_regions {
         let region_size = mem_region.end - mem_region.start;
@@ -163,7 +166,7 @@ pub fn load(
             HostVirtAddr::new(mem_region.start as usize),
             HostPhysAddr::new(mem_region.start as usize),
             region_size as usize,
-            PtFlag::PRESENT,
+            PtFlag::PRESENT | PtFlag::WRITE,
         );
     }
 
