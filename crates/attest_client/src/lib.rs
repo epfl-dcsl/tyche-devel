@@ -5,7 +5,7 @@ use std::hash::Hash;
 use std::marker::PhantomData;
 use std::ops::{Index, IndexMut};
 
-pub use capa_engine::permission;
+pub use capa_engine::{permission, MemOps};
 pub use deserializer::deserialize;
 
 #[derive(Clone, Copy)]
@@ -18,8 +18,7 @@ pub enum RegionKind {
 pub struct Region {
     start: u64,
     end: u64,
-    #[allow(unused)]
-    ops: u8,
+    ops: MemOps,
     kind: RegionKind,
 }
 
@@ -79,7 +78,7 @@ impl Context {
         }
     }
 
-    pub fn root(&mut self, start: u64, end: u64, ops: u8) -> Handle<Region> {
+    pub fn root(&mut self, start: u64, end: u64, ops: MemOps) -> Handle<Region> {
         // TODO: check validity
         let region = Region {
             start,
@@ -95,7 +94,7 @@ impl Context {
         parent: Handle<Region>,
         start: u64,
         end: u64,
-        ops: u8,
+        ops: MemOps,
     ) -> Handle<Region> {
         // TODO: check validity
         let region = Region {
@@ -112,7 +111,7 @@ impl Context {
         parent: Handle<Region>,
         start: u64,
         end: u64,
-        ops: u8,
+        ops: MemOps,
     ) -> Handle<Region> {
         // TODO: check validity
         let region = Region {
@@ -294,15 +293,27 @@ fn display_capas(f: &mut fmt::Formatter<'_>, capas: &Vec<Capa>) -> fmt::Result {
 
 impl fmt::Debug for Context {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "Context {{")?;
+        writeln!(f, "Attestation {{")?;
         let mut idx = 0;
         for region in &self.regions.store {
             match region.kind {
-                RegionKind::Root => writeln!(
-                    f,
-                    "  r{} = root 0x{:x} 0x{:x}",
-                    idx, region.start, region.end
-                )?,
+                RegionKind::Root => {
+                    let cleanup = if region.ops.contains(MemOps::CLEANUP) {
+                        " | CLEANUP"
+                    } else {
+                        ""
+                    };
+                    let vital = if region.ops.contains(MemOps::VITAL) {
+                        " | VITAL"
+                    } else {
+                        ""
+                    };
+                    writeln!(
+                        f,
+                        "  r{} = root 0x{:x} 0x{:x} with {}{}{}",
+                        idx, region.start, region.end, region.ops, cleanup, vital
+                    )?
+                }
                 RegionKind::Alias(r) => writeln!(
                     f,
                     "  r{} = alias r{} 0x{:x} 0x{:x}",

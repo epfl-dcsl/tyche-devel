@@ -1,4 +1,5 @@
 use capa_engine::serializer::serde;
+use capa_engine::MemOps;
 
 use crate::{Capa, Context, Domain, Region, RegionKind};
 
@@ -39,7 +40,7 @@ fn deserialize_regions(ctx: &mut Context, buff: &mut Buffer) {
             start,
             end,
             kind,
-            ops,
+            ops: MemOps::from_bits(ops).expect("Invalid MemOps"),
         });
     }
     assert_eq!(serde::END_MARKER, buff.u8());
