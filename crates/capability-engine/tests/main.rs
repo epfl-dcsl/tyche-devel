@@ -1346,6 +1346,106 @@ fn alias_then_carve() {
     snap!("{[0x0, 0x5 | 1 (1 - 0 - 0 - 0)]}", regions(d1, engine));
 }
 
+#[test]
+fn cleanup() {
+    let engine = unsafe { static_engine!() };
+    let core = 0;
+
+    // Create initial domain
+    let d0 = engine.create_manager_domain(permission::ALL).unwrap();
+    let _ctx = engine.start_domain_on_core(d0, core).unwrap();
+    // Create initial region
+    let r0 = engine
+        .create_root_region(
+            d0,
+            AccessRights {
+                start: 0,
+                end: 0x1000,
+                ops: MEMOPS_ALL,
+            },
+        )
+        .unwrap();
+    let r1 = engine
+        .carve_region(
+            d0,
+            r0,
+            AccessRights {
+                start: 0x200,
+                end: 0x300,
+                ops: MEMOPS_ALL | MemOps::CLEANUP,
+            },
+        )
+        .unwrap();
+    snap!(
+        "{Region([0x0, 0x1000 | PURWXS]), Region([0x200, 0x300 | _URWXS])}",
+        capas(d0, engine)
+    );
+
+    // Drain updates
+    while let Some(_) = engine.pop_update() {
+        // Draining...
+    }
+
+    // Then revoke the region and expect a cleanup update
+    engine.revoke(d0, r1).unwrap();
+    snap!(
+        "{PermissionUpdate(H(0, gen 0)), Cleanup([0x200, 0x300])}",
+        updates(engine)
+    );
+}
+
+#[test]
+fn vital_regions() {
+    let engine = unsafe { static_engine!() };
+    let core = 0;
+
+    // Create initial domain
+    let d0 = engine.create_manager_domain(permission::ALL).unwrap();
+    let _ctx = engine.start_domain_on_core(d0, core).unwrap();
+    // Create initial region
+    let r0 = engine
+        .create_root_region(
+            d0,
+            AccessRights {
+                start: 0,
+                end: 0x1000,
+                ops: MEMOPS_ALL,
+            },
+        )
+        .unwrap();
+    let r1 = engine
+        .carve_region(
+            d0,
+            r0,
+            AccessRights {
+                start: 0x200,
+                end: 0x300,
+                ops: MEMOPS_ALL | MemOps::VITAL,
+            },
+        )
+        .unwrap();
+    snap!(
+        "{Region([0x0, 0x1000 | PURWXS]), Region([0x200, 0x300 | _URWXS])}",
+        capas(d0, engine)
+    );
+
+    // Create new domain and send region
+    let d1 = engine.create_domain(d0).unwrap();
+    let revok = engine.create_revoke_capa(d0, r1).unwrap();
+    engine.send(d0, r1, d1).unwrap();
+    let d1_capa = engine.get_domain_capa(d0, d1).unwrap();
+    snap!("{Region([0x200, 0x300 | _URWXS])}", capas(d1_capa, engine));
+
+    snap!(
+        "{Region([0x0, 0x1000 | PURWXS]), Management(2 | _), RegionRevoke([0x200, 0x300 | CRWXS])}",
+        capas(d0, engine)
+    );
+    engine.revoke(d0, revok).unwrap();
+    let d1_capa = engine.get_domain_capa(d0, d1).unwrap();
+    snap!("{}", capas(d1_capa, engine));
+    snap!("{Region([0x0, 0x1000 | _URWXS])}", capas(d0, engine));
+}
+
 // —————————————————————————— Adversarial Enclave ——————————————————————————— //
 
 #[test]

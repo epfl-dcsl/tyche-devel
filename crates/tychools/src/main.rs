@@ -3,9 +3,9 @@ mod attestation;
 mod elf_modifier;
 mod instrument;
 mod loader;
+mod new_attestation;
 mod page_table_mapper;
 mod tychools_const;
-mod new_attestation;
 
 use std::path::PathBuf;
 

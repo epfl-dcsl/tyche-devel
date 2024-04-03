@@ -6,8 +6,8 @@ use crate::config::NB_REGIONS;
 use crate::debug::debug_check;
 use crate::domain::{activate_region, deactivate_region, insert_capa, DomainPool};
 use crate::region::TrackerPool;
-use crate::update::UpdateBuffer;
-use crate::{AccessRights, CapaError, Domain, GenArena, Handle, LocalCapa};
+use crate::update::{Update, UpdateBuffer};
+use crate::{domain, AccessRights, CapaError, Domain, GenArena, Handle, LocalCapa, MemOps};
 
 pub(crate) type RegionPool = GenArena<RegionCapa, NB_REGIONS>;
 pub const EMPTY_REGION_CAPA: RegionCapa = RegionCapa::new_invalid();
@@ -242,6 +242,8 @@ pub(crate) fn revoke(
     updates: &mut UpdateBuffer,
 ) -> Result<(), CapaError> {
     let region = &regions[handle];
+    let region_owner = region.domain;
+    let region_access = region.access;
     let parent = match region.kind {
         RegionKind::Root => panic!("Trying to revoke a root region"),
         RegionKind::Alias(h) => h,
@@ -274,6 +276,19 @@ pub(crate) fn revoke(
     // Definitively free the handle
     regions.free(handle);
     debug_check!(validate_child_list(parent, regions));
+
+    // Apply side effetcs, if any
+    if region_access.ops.contains(MemOps::VITAL) {
+        // This was a vital region, we need to revoke the current domain
+        domain::revoke(region_owner, regions, domains, tracker, updates)?;
+    }
+    if region_access.ops.contains(MemOps::CLEANUP) && region_access.ops.contains(MemOps::WRITE) {
+        // We need to zero-out this region, emmit an update
+        updates.push(Update::Cleanup {
+            start: region_access.start,
+            end: region_access.end,
+        })?;
+    }
 
     Ok(())
 }
@@ -423,7 +438,7 @@ fn check_alias(parent: Handle<RegionCapa>, access: &AccessRights, regions: &Regi
         }
     }
 
-    return region.access.ops.contains(access.ops);
+    return check_ops(region.access.ops, access.ops);
 }
 
 /// Checks that a region with the provided access rights can be carved from the parent.
@@ -439,7 +454,14 @@ fn check_carve(parent: Handle<RegionCapa>, access: &AccessRights, regions: &Regi
         }
     }
 
-    return region.access.ops.contains(access.ops);
+    return check_ops(region.access.ops, access.ops);
+}
+
+fn check_ops(parent: MemOps, child: MemOps) -> bool {
+    // Some ops can be added to the child
+    let max_ops = parent | MemOps::HASH | MemOps::CLEANUP | MemOps::VITAL;
+
+    return max_ops.contains(child);
 }
 
 // ———————————————————————————————— Iterator ———————————————————————————————— //

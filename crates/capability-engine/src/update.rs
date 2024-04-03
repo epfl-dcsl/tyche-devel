@@ -34,6 +34,10 @@ pub enum Update {
         /// Core on which the trap happenend
         core: usize,
     },
+    Cleanup {
+        start: usize,
+        end: usize,
+    },
 }
 
 pub struct Buffer<U> {
@@ -103,6 +107,7 @@ impl fmt::Display for Update {
             Update::RevokeDomain { domain } => write!(f, "RevokeDomain({})", domain),
             Update::CreateDomain { domain } => write!(f, "CreateDomain({})", domain),
             Update::Switch { domain, core, .. } => write!(f, "Switch({}, core {})", domain, core),
+            Update::Cleanup { start, end } => write!(f, "Cleanup([0x{:x}, 0x{:x}])", start, end),
             Update::Trap {
                 manager,
                 trap,

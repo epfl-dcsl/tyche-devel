@@ -855,6 +855,18 @@ fn apply_updates(engine: &mut MutexGuard<CapaEngine>) {
                     post_ept_update(core_id, core_map, &domain);
                 }
             }
+            capa_engine::Update::Cleanup { start, end } => {
+                let size = end.checked_sub(start).unwrap();
+                log::info!("Cleaning up region [0x{:x}, 0x{:x}]", start, end);
+
+                // WARNING: for now we do not check that the region points to valid memory!
+                // In particular, the current root region contains more than valid ram, and also
+                // include devices.
+                unsafe {
+                    let region = core::slice::from_raw_parts_mut(start as *mut u8, size);
+                    region.fill(0);
+                }
+            }
             capa_engine::Update::RevokeDomain { domain } => revoke_domain(domain),
             capa_engine::Update::CreateDomain { domain } => create_domain(domain),
 

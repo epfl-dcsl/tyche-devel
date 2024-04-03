@@ -8,12 +8,14 @@ use crate::CapaError;
 
 bitflags! {
     pub struct MemOps: u8 {
-         const NONE  = 0;
-         const READ  = 1 << 0;
-         const WRITE = 1 << 1;
-         const EXEC  = 1 << 2;
-         const SUPER = 1 << 3;
-         const HASH = 1 << 4; //flag for do we want to hash particular RegionCapa
+        const NONE  = 0;
+        const READ  = 1 << 0;
+        const WRITE = 1 << 1;
+        const EXEC  = 1 << 2;
+        const SUPER = 1 << 3;
+        const HASH = 1 << 4; // Flag for do we want to hash particular RegionCapa
+        const CLEANUP = 1 << 5;
+        const VITAL = 1 << 6;
     }
 }
 

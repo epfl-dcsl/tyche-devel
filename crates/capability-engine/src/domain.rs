@@ -636,7 +636,10 @@ pub(crate) fn next_capa(
     domains: &mut DomainPool,
 ) -> Option<(LocalCapa, NextCapaToken)> {
     let mut idx = token.idx;
-    let len = domains[domain_handle].capas.len();
+    let Some(domain) = &domains.get(domain_handle) else {
+        return None;
+    };
+    let len = domain.capas.len();
     while idx < len {
         let domain = &domains[domain_handle];
         if !domain.free_list.is_free(idx) {
