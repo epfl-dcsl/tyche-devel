@@ -72,7 +72,7 @@ void* run_redis(void* arg) {
   int read = 0;
   int written = 0;
   char buffer[MSG_BUFFER_SIZE] = {0};
-  if (pin_self_to_core((redis_arg->core) >> 1) != SUCCESS) {
+  if (pin_self_to_core((redis_arg->core)) != SUCCESS) {
       ERROR("Pinning in redis thread did not work.");
       goto failure;
   }
@@ -111,7 +111,7 @@ failure:
 // Thread running redis.
 void* run_redis(void* arg) {
   redis_args_t* redis_arg = (redis_args_t*) arg;
-  if (pin_self_to_core((redis_arg->core) >> 1) != SUCCESS) {
+  if (pin_self_to_core((redis_arg->core)) != SUCCESS) {
       ERROR("Pinning in redis thread did not work.");
       goto failure;
   }
@@ -128,6 +128,17 @@ failure:
 }
 #endif
 
+static usize coremap_to_core(usize coremap) {
+  for (usize i = 0; i < 32; i++) {
+    if (((1ULL << i) & coremap) != 0) {
+        return i;
+    }
+  }
+  ERROR("Unable to find the core index in %llx", coremap);
+  exit(-1);
+  return 0;
+}
+
 // —————————————————————————————————— Main —————————————————————————————————— //
 int main(int argc, char *argv[]) {
   // Thread to run redis.
@@ -137,7 +148,7 @@ int main(int argc, char *argv[]) {
   // The mask of runable cores.
   usize core_mask = sdk_all_cores_mask();
   // The core for redis.
-  usize redis_core = (core_count > 1)? 2 : 1;
+  usize redis_coremap = (core_count > 1)? (1UL << 1) : (1UL << 0);
   // The output core
   usize output_core = 1;
   // The datastructure shared with the redis enclave.
@@ -165,7 +176,7 @@ int main(int argc, char *argv[]) {
     goto failure;
   }
   // Init the redis enclave.
-  if (sdk_create_domain(enclave, argv[0], redis_core, 0, DEFAULT_PERM) !=
+  if (sdk_create_domain(enclave, argv[0], redis_coremap, 0, DEFAULT_PERM) !=
       SUCCESS) {
     ERROR("Unable to parse the enclave");
     goto failure;
@@ -190,7 +201,7 @@ int main(int argc, char *argv[]) {
   memset(comm->from_buffer, 0, sizeof(char) * MSG_BUFFER_SIZE);
   
   // Run the thread for redis.
-  redis_args.core = redis_core;
+  redis_args.core = coremap_to_core(redis_coremap);
   redis_args.app = comm;
   if (pthread_create(&redis_thread, NULL, run_redis, (void*) &redis_args) < 0) {
     ERROR("Failed to create the redis thread");

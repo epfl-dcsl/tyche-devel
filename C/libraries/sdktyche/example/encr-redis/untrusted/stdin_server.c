@@ -8,7 +8,7 @@
 #include <string.h>
 
 #include "common_log.h"
-#include "redis_app.h"
+#include "encr_redis_app.h"
 #include "ringbuf_generic.h"
 
 // —————————————————————————————— Local types ——————————————————————————————— //
@@ -16,8 +16,8 @@
 typedef struct thread_arg_t {
   /// the core to stick to.
   usize core;
-  /// The shared info with the redis enclave.
-  redis_app_t *comm;
+  /// The shared info with the encryption enclave.
+  encr_channel_t *comm;
 } thread_arg_t;
 
 // ——————————————————————————————— Functions ———————————————————————————————— //
@@ -25,14 +25,14 @@ typedef struct thread_arg_t {
 void *run_output(void *arg) {
   thread_arg_t *thread_arg = (thread_arg_t *)arg;
   char buffer[MSG_BUFFER_SIZE] = {0};
-  if (pin_self_to_core((thread_arg->core)) != SUCCESS) {
+  if (pin_self_to_core(thread_arg->core) != SUCCESS) {
     ERROR("Pinning output thread failed %lld", thread_arg->core);
     goto failure;
   }
   LOG("Running output thread on core %lld", thread_arg->core);
   // Keep reading the channel.
   while (1) {
-    int res = rb_char_read_n(&(thread_arg->comm->from_redis), MSG_BUFFER_SIZE,
+    int res = rb_char_read_n(&(thread_arg->comm->response), MSG_BUFFER_SIZE,
                              buffer);
     if (res == FAILURE) {
       ERROR("Failure reading the channel.");
@@ -51,13 +51,14 @@ failure:
 }
 
 //TODO: maybe write a size or something.
-static int process_input(char *input, redis_app_t *app) {
-  // Send the message to the redis enclave.
+static int process_input(char *input, encr_channel_t *app) {
+  // Send the message to encr.
+  // Do not include the \0 in this version.
   int to_write = strlen(input);
   int written = 0;
-  printf("Sending `%s` to redis....", input);
+  printf("Sending `%s` to encr....", input);
   while(written < to_write) {
-    int res = rb_char_write_n(&(app->to_redis), to_write - written, &input[written]);
+    int res = rb_char_write_n(&(app->request), to_write - written, &input[written]);
     if (res == FAILURE) {
       // This should not happen with the stdin_server.
       ERROR("Failed to write to the channel");
@@ -71,7 +72,7 @@ failure:
   return FAILURE;
 }
 
-int stdin_start_server(usize core, redis_app_t *comm) {
+int stdin_start_server(usize core, encr_channel_t *comm) {
   // Untrusted thread for prints.
   pthread_t out_thread;
   char input[NET_BUFFER_SIZE];
@@ -96,8 +97,6 @@ int stdin_start_server(usize core, redis_app_t *comm) {
     input[backslash] = '\r';
     input[backslash+1] = '\n';
     input[backslash+2] = '\0';
-    //input[strcspn(input, "\n")] = '\0';
-
 
     // Check for exit condition
     if (strcmp(input, "exit") == 0) {

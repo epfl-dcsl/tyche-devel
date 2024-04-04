@@ -1,0 +1,7 @@
+encr_redis_app
+mock_app
+redis-server
+encr-server
+encr_redis_enclave
+encr_enclave
+redis_enclave
