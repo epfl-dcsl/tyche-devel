@@ -83,24 +83,29 @@ REDIS_SERVER_PATH ?= ../../../../../../tyche-experiment-redis/tyche-redis/src/re
 
 ## ———————————————————————————————— Targets ————————————————————————————————— ##
 
-app: $(CODE_APP) $(HDRS_APP) 
+stdin_app: $(CODE_APP) $(HDRS_APP)
 	$(GCC) -DTYCHE_USER_SPACE=1 $(LOADER_BACKEND) -g $(APP_INCLUDES) -o $@ $(CODE_APP)
+
+tcp_app: $(CODE_APP) $(HDRS_APP)
+	$(GCC) -DRUN_TCP=1 -DTYCHE_USER_SPACE=1 $(LOADER_BACKEND) -g $(APP_INCLUDES) -o $@ $(CODE_APP)
 
 enclave:
 	test -s $(REDIS_SERVER_PATH) && cp $(REDIS_SERVER_PATH) $@
 
 
-redis_enclave: app enclave
+redis_enclave: stdin_app tcp_app enclave
 	cargo -Z unstable-options -C $(TYCHOOLS_PATH) install --path . --locked
-	tychools instrument -s manifests/default.json 
-	chmod +x redis_enclave
-	#rm app enclave
+	tychools instrument -s manifests/stdin.json
+	tychools instrument -s manifests/tcp.json
+	chmod +x redis_stdin_enclave
+	chmod +x redis_tcp_enclave
+	rm stdin_app tcp_app enclave
 
 install_disk: all 
 	mkdir -p $(DISK_PATH)
-	cp -t $(DISK_PATH) redis_enclave 
+	cp -t $(DISK_PATH) redis_stdin_enclave redis_tcp_enclave
 
 .PHONY: clean
 
 clean:
-	rm -f redis_enclave app enclave 
+	rm -f redis_stdin_enclave redis_tcp_enclave stdin_app tcp_app enclave

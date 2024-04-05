@@ -96,8 +96,11 @@ REDIS_SERVER_PATH ?= ../../../../../../tyche-experiment-redis/tyche-redis/src/re
 
 ## ———————————————————————————————— Targets ————————————————————————————————— ##
 
-encr_redis_app: $(CODE_APP) $(HDRS_APP)
+encr_redis_stdin_app: $(CODE_APP) $(HDRS_APP)
 	$(GCC) -D_GNU_SOURCE -DTYCHE_USER_SPACE=1 $(LOADER_BACKEND) -g $(APP_INCLUDES) -o $@ $(CODE_APP)
+
+encr_redis_tcp_app: $(CODE_APP) $(HDRS_APP)
+	$(GCC) -DRUN_TCP=1 -D_GNU_SOURCE -DTYCHE_USER_SPACE=1 $(LOADER_BACKEND) -g $(APP_INCLUDES) -o $@ $(CODE_APP)
 
 mock_app: $(CODE_MOCK)
 	$(GCC) -g -static -o $@ $(CODE_MOCK)
@@ -108,7 +111,7 @@ redis-server:
 encr-server: $(CODE_ENCR) $(HDRS_ENCR)
 	$(GCC) -DTYCHE_USER_SPACE=2 -g $(COMMON_INCLUDES) -nostdlib -static -o $@ $(CODE_ENCR)
 
-encr_redis_enclave: encr_redis_app mock_app redis-server encr-server
+encr_redis_enclave: encr_redis_stdin_app encr_redis_tcp_app mock_app redis-server encr-server
 	cargo -Z unstable-options -C $(TYCHOOLS_PATH) install --path . --locked
 	tychools instrument -s manifests/redis.json
 	tychools instrument -s manifests/encr.json
@@ -116,9 +119,9 @@ encr_redis_enclave: encr_redis_app mock_app redis-server encr-server
 
 install_disk: all
 	mkdir -p $(DISK_PATH)/encr-redis
-	cp -t $(DISK_PATH)/encr-redis encr_redis_app encr_enclave redis_enclave
+	cp -t $(DISK_PATH)/encr-redis encr_redis_stdin_app encr_redis_tcp_app encr_enclave redis_enclave
 
 .PHONY: clean
 
 clean:
-	rm -f redis_enclave encr_redis_app encr_enclave redis-server encr-server mock_app
+	rm -f redis_enclave encr_redis_stdin_app encr_redis_tcp_app encr_enclave redis-server encr-server mock_app

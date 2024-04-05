@@ -1,6 +1,6 @@
 {
   "untrusted_bin": {
-    "path": "app"
+    "path": "tcp_app"
   },
   "kern_bin": {
     "path":"enclave",
@@ -24,5 +24,5 @@
     ]
   },
   "generate_pts": true,
-  "output": "redis_enclave"
+  "output": "redis_tcp_enclave"
 }

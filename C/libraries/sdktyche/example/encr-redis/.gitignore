@@ -1,3 +1,5 @@
+encr_redis_tcp_app
+encr_redis_stdin_app
 encr_redis_app
 mock_app
 redis-server

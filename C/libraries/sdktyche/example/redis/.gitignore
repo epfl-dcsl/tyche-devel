@@ -1,5 +1,7 @@
-app
+stdin_app
+tcp_app
 enclave
-simple_enclave
-enclave_iso
+redis_stdin_enclave
+redis_tcp_enclave
+app
 redis_enclave

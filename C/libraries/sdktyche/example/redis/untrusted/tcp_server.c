@@ -18,7 +18,7 @@
 
 typedef struct thread_arg_t {
   // Client socket.
-  int* socket;
+  int socket;
   // Pointer to the mutex for the channel.
   pthread_mutex_t *mutex;
   // the redis_app info
@@ -28,11 +28,12 @@ typedef struct thread_arg_t {
 // Function to handle each client connection
 void *tcp_connection_handler(void *arg) {
   thread_arg_t *arguments = (thread_arg_t*) arg;
-  int new_socket = *arguments->socket;
+  int new_socket = arguments->socket;
   char buffer[NET_BUFFER_SIZE] = {0};
   ssize_t valread;
   pthread_t reader;
 
+  LOG("Started a TCP connexion handler for a client");
   while ((valread = read(new_socket, buffer, NET_BUFFER_SIZE)) > 0) {
     // Lock the channels.
     pthread_mutex_lock(arguments->mutex);
@@ -76,7 +77,7 @@ void *tcp_connection_handler(void *arg) {
 
 finish:
   close(new_socket);
-  free(arguments->socket);
+  free(arguments);
   pthread_exit(NULL);
 }
 
@@ -115,6 +116,7 @@ int tcp_start_server(usize core, redis_app_t* comm) {
   }
 
   // Accept connections and handle each in a new thread
+  LOG("Started TCP server on %d", NET_PORT);
   while (1) {
     if ((new_socket = accept(server_fd, (struct sockaddr *)&address,
                              (socklen_t *)&addrlen)) < 0) {
@@ -123,18 +125,20 @@ int tcp_start_server(usize core, redis_app_t* comm) {
     }
 
     pthread_t thread;
-    int *new_sock = malloc(sizeof(int));
-    if (!new_sock) {
-      perror("malloc");
+    thread_arg_t* args = malloc(sizeof(thread_arg_t));
+    if (args == NULL) {
+      ERROR("Unable to allocate thread args.");
       close(new_socket);
-      continue;
+      exit(-1);
     }
-    *new_sock = new_socket;
+    args->socket = new_socket;
+    args->mutex = &mutex;
+    args->app = comm;
 
-    if (pthread_create(&thread, NULL, tcp_connection_handler, (void *)new_sock) <
+    if (pthread_create(&thread, NULL, tcp_connection_handler, (void *)args) <
         0) {
       perror("pthread_create");
-      free(new_sock);
+      free(args);
       close(new_socket);
       continue;
     }

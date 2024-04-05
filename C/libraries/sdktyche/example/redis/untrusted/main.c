@@ -150,7 +150,7 @@ int main(int argc, char *argv[]) {
   // The core for redis.
   usize redis_coremap = (core_count > 1)? (1UL << 1) : (1UL << 0);
   // The output core
-  usize output_core = 1;
+  usize output_core = 0;
   // The datastructure shared with the redis enclave.
   redis_app_t* comm = NULL;
   // Arguments for the redis thread.
