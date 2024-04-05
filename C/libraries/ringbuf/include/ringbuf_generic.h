@@ -108,6 +108,11 @@ static inline void buff_index_decr(buff_index_t *dest) {
     return 0;                                                                  \
   }
 
+#define RB_DECLARE_GET_COUNT(elem_type)                                        \
+  int rb_##elem_type##_get_count(rb_##elem_type##_t *rb) {                     \
+    return buff_index_load(&(rb->count));                                      \
+  }
+
 /// Write the element inside the ring buffer.
 /// Returns FAILURE if rb is NULL or buffer is full.
 /// Returns SUCCESS otherwise.
@@ -255,6 +260,7 @@ static inline void buff_index_decr(buff_index_t *dest) {
   RB_DECLARE_INIT(elem_type);                                                  \
   RB_DECLARE_IS_FULL(elem_type);                                               \
   RB_DECLARE_IS_EMPTY(elem_type);                                              \
+  RB_DECLARE_GET_COUNT(elem_type);                                             \
   RB_DECLARE_WRITE(elem_type);                                                 \
   RB_DECLARE_WRITE_ALIAS(elem_type);                                           \
   RB_DECLARE_READ(elem_type);                                                  \
@@ -275,6 +281,7 @@ static inline void buff_index_decr(buff_index_t *dest) {
                             elem_type *buff);                                  \
   int rb_##elem_type##_is_full(rb_##elem_type##_t *rb);                        \
   int rb_##elem_type##_is_empty(rb_##elem_type##_t *rb);                       \
+  int rb_##elem_type##_get_count(rb_##elem_type##_t *rb);                      \
   int rb_##elem_type##_write(rb_##elem_type##_t *rb, elem_type elem);          \
   int rb_##elem_type##_write_alias(rb_##elem_type##_t *rb, elem_type *dest,    \
                                    elem_type elem);                            \
