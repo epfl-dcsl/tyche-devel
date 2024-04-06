@@ -89,6 +89,10 @@ static addr_t align_down(addr_t addr)
   return (addr / PT_PAGE_SIZE) * PT_PAGE_SIZE;
 }
 
+static addr_t compute_real_size(addr_t start, addr_t size) {
+  return (align_up(start + size) - align_down(start));
+}
+
 /// Look for the domain binary inside the current program's binary.
 /// If destf is not null, it writes the extracted binary to the specified file.
 static int extract_binary(elf_parser_t* parser, const char* self, const char* destf)
@@ -375,7 +379,8 @@ int parse_domain(tyche_domain_t* domain)
     if (!is_loadable(tpe)) {
       continue;
     }
-    seg_size = align_up(domain->parser.segments[i].p_memsz);
+    seg_size = compute_real_size(domain->parser.segments[i].p_vaddr,
+        domain->parser.segments[i].p_memsz);
     if (seg_size % PT_PAGE_SIZE != 0) {
       ERROR("The segment size is %zu", segments_size);
       goto close_failure;
@@ -469,23 +474,30 @@ int load_domain(tyche_domain_t* domain)
       ERROR("Slot should not be null");
       goto failure;
     }
-    addr_t size = align_up(seg.p_memsz);
+    addr_t size = compute_real_size(seg.p_vaddr, seg.p_memsz);
 
     // Safety checks for non-pipe segments.
     if (seg.p_type != KERNEL_PIPE && phys_size + size > slot->size) {
       ERROR("The segment does not fit in the current size.");
       goto failure;
     }
+    addr_t seg_offset = seg.p_vaddr - align_down(seg.p_vaddr);
     addr_t dest = slot->virtoffset + phys_size;
+    addr_t load_dest = dest + seg_offset;
     memory_access_right_t flags = translate_flags_to_tyche(seg.p_flags);
-    load_elf64_segment(&domain->parser.elf, (void*) dest, seg);
+    load_elf64_segment(&domain->parser.elf, (void*) load_dest, seg);
 
     // If segment is shared, fix it in the shared_segments.
     // For now, do it in a non-efficient way.
     domain_shared_memory_t* shared =  NULL;
     dll_foreach(&(domain->shared_regions), shared, list) {
       if (shared->segment->p_vaddr == seg.p_vaddr) {
-          shared->untrusted_vaddr = dest;
+        // This should be page aligned too.
+        if (dest != load_dest) {
+          ERROR("A shared region is not page aligned.");
+          goto failure;
+        }
+        shared->untrusted_vaddr = load_dest;
       }
     }
 
@@ -495,6 +507,11 @@ int load_domain(tyche_domain_t* domain)
     // memory slot by construction for the moment (provided we don't have 2^11
     // pages in the page tables).
     if (seg.p_type == PAGE_TABLES_CONF || seg.p_type == PAGE_TABLES_SB) {
+      // We hope the page tables are aligned, let's do a quick check.
+      if (seg_offset != 0) {
+        ERROR("Page tables are not page aligned");
+        goto failure;
+      }
       uint64_t* start = (uint64_t*) dest;
       uint64_t* end = (uint64_t*)(((uint64_t) dest) + size);
       //We should go through the segments and find the right address and fix it.
