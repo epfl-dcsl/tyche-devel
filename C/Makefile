@@ -34,12 +34,14 @@ update_disk:
 	make ARCH=x86 KVM=0 DISK_PATH=/tmp/mount/tyche/programs/sdk_tyche -B -C libraries/sdktyche/example/ping-pong install_disk
 	make ARCH=x86 KVM=0 DISK_PATH=/tmp/mount/tyche/programs/sdk_tyche -B -C libraries/sdktyche/example/encr-redis install_disk
 	make ARCH=x86 KVM=0 DISK_PATH=/tmp/mount/tyche/programs/sdk_tyche -B -C libraries/sdktyche/example/simple-attestation install_disk
+	make ARCH=x86 KVM=0 DISK_PATH=/tmp/mount/tyche/programs/sdk_tyche -B -C libraries/sdktyche/example/ssl-redis install_disk
 	make ARCH=x86 KVM=1 DISK_PATH=/tmp/mount/tyche/programs/sdk_kvm -B -C libraries/sdktyche/example/app-selector install_disk
 	make ARCH=x86 KVM=1 DISK_PATH=/tmp/mount/tyche/programs/sdk_kvm -B -C libraries/sdktyche/example/simple-enclave install_disk
 	make ARCH=x86 KVM=1 DISK_PATH=/tmp/mount/tyche/programs/sdk_kvm -B -C libraries/sdktyche/example/simple-sandbox install_disk
 	make ARCH=x86 KVM=1 DISK_PATH=/tmp/mount/tyche/programs/sdk_kvm -B -C libraries/sdktyche/example/redis install_disk
 	make ARCH=x86 KVM=1 DISK_PATH=/tmp/mount/tyche/programs/sdk_kvm -B -C libraries/sdktyche/example/ping-pong install_disk
 	make ARCH=x86 KVM=1 DISK_PATH=/tmp/mount/tyche/programs/sdk_kvm -B -C libraries/sdktyche/example/encr-redis install_disk
+	make ARCH=x86 KVM=1 DISK_PATH=/tmp/mount/tyche/programs/sdk_kvm -B -C libraries/sdktyche/example/ssl-redis install_disk
 	make -B -C debug/test-contalloc/ install_disk
 	#make ARCH=x86 -B -C libraries/tyche-trusted-runtime install_disk
 	#cp scripts/x86_64_install_drivers.sh /tmp/mount/tyche

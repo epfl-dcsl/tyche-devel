@@ -109,6 +109,8 @@ redis-server:
 	test -s $(REDIS_SERVER_PATH) && cp $(REDIS_SERVER_PATH) $@
 
 ssl-server: $(CODE_SSL) $(HDRS_SSL)
+	make -C $(BEAR) clean
+	make -C $(BEAR) CC=gcc CFLAGS+="-fno-stack-protector -fPIC" LIBS="-static"
 	$(GCC) -DTYCHE_USER_SPACE=2 -g $(COMMON_INCLUDES) -nostdlib -static -o $@ $(CODE_SSL)
 
 ssl_redis_enclave: ssl_redis_tcp_app mock_app redis-server ssl-server

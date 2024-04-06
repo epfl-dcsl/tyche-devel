@@ -79,9 +79,9 @@ void *memset(void *dest, int value, size_t len) {
     return dest;
 }
 
-void __attribute__((noreturn)) __stack_chk_fail(void) {
+/*void __attribute__((noreturn)) __stack_chk_fail(void) {
   suicide(); 
-}
+}*/
 
 void *__memcpy_chk(void *dest, const void *src, size_t len, size_t dest_size) {
   if (len > dest_size) {
