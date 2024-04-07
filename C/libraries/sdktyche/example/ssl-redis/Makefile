@@ -97,6 +97,8 @@ TYCHOOLS_PATH ?= ../../../../../crates/tychools/
 # TODO: make that clean
 REDIS_SERVER_PATH ?= ../../../../../../tyche-experiment-redis/tyche-redis/src/redis-server
 
+BEAR_CFLAGS="-static -Os -Wl,-z,norelro -fno-stack-protector -fPIC"
+
 ## ———————————————————————————————— Targets ————————————————————————————————— ##
 
 ssl_redis_tcp_app: $(CODE_APP) $(HDRS_APP)
@@ -108,10 +110,13 @@ mock_app: $(CODE_MOCK)
 redis-server:
 	test -s $(REDIS_SERVER_PATH) && cp $(REDIS_SERVER_PATH) $@
 
-ssl-server: $(CODE_SSL) $(HDRS_SSL)
+
+$(BEAR_LIB):
 	make -C $(BEAR) clean
-	make -C $(BEAR) CC=gcc CFLAGS+="-fno-stack-protector -fPIC" LIBS="-static"
-	$(GCC) -DTYCHE_USER_SPACE=2 -g $(COMMON_INCLUDES) -nostdlib -static -o $@ $(CODE_SSL)
+	make -C $(BEAR) CC=gcc CFLAGS+=$(BEAR_CFLAGS) LDFLAGS="-static -z norelro"
+
+ssl-server: $(CODE_SSL) $(HDRS_SSL)
+	$(GCC) -DTYCHE_USER_SPACE=2 -g $(COMMON_INCLUDES) -nostdlib -static -z norelro -o $@ $(CODE_SSL)
 
 ssl_redis_enclave: ssl_redis_tcp_app mock_app redis-server ssl-server
 	cargo -Z unstable-options -C $(TYCHOOLS_PATH) install --path . --locked
@@ -121,7 +126,7 @@ ssl_redis_enclave: ssl_redis_tcp_app mock_app redis-server ssl-server
 
 install_disk: all
 	mkdir -p $(DISK_PATH)/ssl-redis
-	cp -t $(DISK_PATH)/ssl-redis ssl_redis_tcp_app ssl_enclave redis_enclave
+	cp -t $(DISK_PATH)/ssl-redis ssl_redis_tcp_app ssl_enclave redis_enclave client.sh server.cert
 
 .PHONY: clean
 

@@ -49,18 +49,6 @@ sock_write(void *ctx, const unsigned char *buf, size_t len)
 /*
  * Sample HTTP response to send.
  */
-static const char *HTTP_RES =
-	"HTTP/1.0 200 OK\r\n"
-	"Content-Length: 46\r\n"
-	"Connection: close\r\n"
-	"Content-Type: text/html; charset=iso-8859-1\r\n"
-	"\r\n"
-	"<html>\r\n"
-	"<body>\r\n"
-	"<p>Test!</p>\r\n"
-	"</body>\r\n"
-	"</html>\r\n";
-
 
 void * ssl_handler(void* arg) {
 		int *new_socket = (int *) arg;
@@ -114,12 +102,13 @@ void * ssl_handler(void* arg) {
 				lcwn = 0;
 			}
 			putchar(x);
+			// Implement an echo server.
+			br_sslio_write_all(&ioc, &x, 1);
+			br_sslio_flush(&ioc);
 		}
 		/*
 		 * Write a response and close the connection.
 		 */
-		br_sslio_write_all(&ioc, HTTP_RES, strlen(HTTP_RES));
-		printf("Wrote all \n");
 		br_sslio_close(&ioc);
 
 client_drop:

@@ -27,9 +27,10 @@ int read_worker(void* ctx, unsigned char* buf, size_t len) {
     // Bear ssl has tricked us or we miss-configured it.
     suicide();
   }
-  // This should never be called if the channels is empty.
-  if (rb_char_is_empty(&(ssl->request))) {
-    suicide();
+  // This can be called on empty channels.
+  // bearssl uses this to further the ssl protocol.
+  while (rb_char_is_empty(&(ssl->request))) {
+    // Nothing to do we need to return at least one byte.
   }
   // The buffer cannot be NULL.
   if (buf == NULL) {
@@ -52,7 +53,6 @@ int read_worker(void* ctx, unsigned char* buf, size_t len) {
 
 
 /// The bear ssl API expects this to block until at least one byte is written.
-/// We should only call this if a previous check on the channel said it was not full.
 /// We block until we're able to flush the entire buffer because bear is just 
 /// going to keep asking us to do so.
 int write_worker(void* ctx, const unsigned char* buf, size_t len) {
@@ -97,23 +97,46 @@ static void run_ssl(void) {
   ssl_context_t ssl_ctxt = {0};
   ssl_ctxt.read_chan = &(ssl->request);
   ssl_ctxt.write_chan = &(ssl->response);
+  // Safety checks.
+  if (ssl->request.capacity != MSG_BUFFER_SIZE || ssl->response.capacity != MSG_BUFFER_SIZE) {
+    suicide();
+  }
+  if (redis->request.capacity != MSG_BUFFER_SIZE || redis->response.capacity != MSG_BUFFER_SIZE) {
+    suicide();
+  }
   if (init_bear(&ssl_ctxt, read_worker, write_worker) != SUCCESS) {
     // Something went wrong.
     suicide();
   }
+
+  // Trick: This will block until the handshake is done.
+  // It only receives the first byte of the application.
+  do {
+    unsigned char first_byte;
+    int written = 0;
+    if (br_sslio_read(&(ssl_ctxt.io), &first_byte, 1) < 0) {
+      // Something went wrong.
+      suicide();
+    }
+    // Write that byte to redis. It MAY NOT fail.
+    if (rb_char_write(&(redis->request), first_byte) != SUCCESS) {
+      // Something went wrong.
+      suicide();
+    }
+  } while(0);
 
   // Implement a busy poll/select.
   // Start by draining shared queues then moving stuff around.
   while (1) {
     // We have some input to decrypt and enqueue to_redis.
     if (!rb_char_is_empty(&(ssl->request))) {
-      // Check we have some room for redis rquests.
+      // Check we have some room for redis requests.
       int count = redis->request.capacity - rb_char_get_count(&(redis->request));
       if (count > 0) {
         int written = 0;
         int read = br_sslio_read(&(ssl_ctxt.io), buffer, count);
-        if (read < 0) {
-          // Client dropped apparently.
+        if (read <= 0) {
+          // Client dropped or bug, we checked it wasn't empty.
           suicide();
         }
         written = rb_char_write_n(&(redis->request), read, buffer);
@@ -130,19 +153,21 @@ static void run_ssl(void) {
       int count = ssl->response.capacity - rb_char_get_count(&(ssl->response));
       if (count > 0) {
         int read = rb_char_read_n(&(redis->response), count, buffer);
-        if (read < 0) {
-          // Something went wrong.
+        if (read <= 0) {
+          // Something went wrong, we checked it wasn't empty.
           suicide();
         }
         if (br_sslio_write_all(&(ssl_ctxt.io), buffer, read) < 0) {
           // Something went wrong.
           suicide();
         }
+        // Force bear to flush.
+        br_sslio_flush(&(ssl_ctxt.io));
       }
     }
   }
 failure:
-  // Something went wrong, crash.
+  // Should never reach that.
   suicide();
 }
 

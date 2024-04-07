@@ -1,0 +1,5 @@
+Compile with:
+
+```
+make CC=gcc CFLAGS+="-fno-stack-protector -fPIC" LIBS="-static"
+```

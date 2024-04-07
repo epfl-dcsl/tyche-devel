@@ -7,7 +7,7 @@
 #include <sys/types.h>
 
 // —————————————————————————— Debugging functions ——————————————————————————— //
-void suicide() {
+inline void suicide(void) {
   int *suicide = (int *)0xdeadbabe;
   *suicide = 666;
 }
@@ -20,7 +20,6 @@ void tyche_debug(unsigned long long marker) {
                : "rm"(marker)
                : "rax", "rdi", "memory");
 }
-
 
 // ————————————————————— Replacement for libc functions ————————————————————— //
 
@@ -79,10 +78,6 @@ void *memset(void *dest, int value, size_t len) {
     return dest;
 }
 
-/*void __attribute__((noreturn)) __stack_chk_fail(void) {
-  suicide(); 
-}*/
-
 void *__memcpy_chk(void *dest, const void *src, size_t len, size_t dest_size) {
   if (len > dest_size) {
     suicide();
@@ -116,7 +111,24 @@ int close(int fd) {
   return 0;
 }
 
+// Simple xorshift PRNG
+static unsigned int xorshift32(unsigned int *state) {
+  unsigned int x = *state;
+  x ^= x << 13;
+  x ^= x >> 17;
+  x ^= x << 5;
+  *state = x;
+  return x;
+}
+
 int getentropy(void *buf, size_t buflen) {
-  suicide();
+  unsigned char *buffer = (unsigned char *)buf;
+  unsigned int state = 123456789; // Initial seed
+  size_t i;
+
+  // Generate random bytes
+  for (i = 0; i < buflen; i++) {
+    buffer[i] = (unsigned char)(xorshift32(&state) % 256);
+  }
   return 0;
 }

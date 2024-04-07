@@ -1,3 +1,5 @@
+#include <asm-generic/errno.h>
+#include <errno.h>
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE 1
 #endif
@@ -13,6 +15,9 @@
 #include "common_log.h"
 #include "ssl_redis_app.h"
 #include "ringbuf_generic.h"
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <fcntl.h>
 
 // —————————————————————————————— Local types ——————————————————————————————— //
 
@@ -30,13 +35,70 @@ void *tcp_connection_handler(void *arg) {
   thread_arg_t *arguments = (thread_arg_t*) arg;
   int new_socket = arguments->socket;
   char buffer[NET_BUFFER_SIZE] = {0};
-  ssize_t valread;
-  pthread_t reader;
+
+  // Set client socket to non-blocking mode
+  //int flags = fcntl(new_socket, F_GETFL, 0);
+  //fcntl(new_socket, F_SETFL, flags | O_NONBLOCK);
   LOG("Started a TCP connexion handler for a client.");
+
+  while(1) {
+    int written = 0;
+    int read = recv(new_socket, buffer, NET_BUFFER_SIZE, MSG_DONTWAIT);
+    if (read == -1) {
+      if (errno != EAGAIN && errno != EWOULDBLOCK) {
+        ERROR("Something went wrong with the socket");
+        return NULL;
+      }
+      goto try_read;
+    }
+    if (read == 0) {
+      goto try_read;
+    }
+    LOG("Received %d bytes", read);
+    // We have some things to transmit to ssl.
+    written = rb_char_write_n(&(arguments->app->request), read, buffer);
+    if (written == FAILURE || written != read) {
+      if (written == FAILURE) {
+        ERROR("Failure on write channel");
+        exit(-1);
+      }
+      ERROR("failed to write everything to ssl %d, expected %d | %d is full",
+          written, read, rb_char_is_full(&(arguments->app->request)));
+      return NULL;
+    }
+    LOG("Wrote %d bytes on the ssl request", written);
+
+try_read:
+    written = 0;
+    read = rb_char_read_n(&(arguments->app->response), MSG_BUFFER_SIZE, buffer);
+    if (read == FAILURE) {
+      ERROR("Error reading from ssl");
+      exit(-1);
+    }
+    if (read > 0) {
+      LOG("Read %d bytes from ssl response", read);
+    }
+    while (written < read) {
+      int res = write(new_socket, buffer, read - written);
+      if (res < 0) {
+        ERROR("Failed to write back the response");
+        exit(-1);
+      }
+      written += res;
+    }
+    if (read > 0) 
+      LOG("Wrote %d to tcp", written);
+  }
+
+  // Previous implementation that was 1 thread per client.
+  // It is blocking however and needs to be fixed.
+  // For now run one client to completion.
+  /*
   while ((valread = read(new_socket, buffer, NET_BUFFER_SIZE)) > 0) {
     // Lock the channels.
     pthread_mutex_lock(arguments->mutex);
     //TODO: let's figure things out to have the size.
+    LOG("Writting %ld bytes into the ssl request channel.", valread);
     int res = rb_char_write_n(&(arguments->app->request), valread, buffer);
     if (res == FAILURE || res != valread) {
         ERROR("Could not write everything to redis");
@@ -45,14 +107,13 @@ void *tcp_connection_handler(void *arg) {
     }
 
     // Now read the reply.
-    do {
-      res = rb_char_read_n(&(arguments->app->response), MSG_BUFFER_SIZE, buffer); 
-      if (res == FAILURE) {
-        ERROR("Error reading from ssl");
-        pthread_mutex_unlock(arguments->mutex);
-        goto finish;
-      }
-    } while(res == 0);
+    res = rb_char_read_n(&(arguments->app->response), MSG_BUFFER_SIZE, buffer);
+    LOG("Read %d bytes", res);
+    if (res == FAILURE) {
+      ERROR("Error reading from ssl");
+      pthread_mutex_unlock(arguments->mutex);
+      goto finish;
+    }
 
     // Unlock.
     pthread_mutex_unlock(arguments->mutex);
@@ -77,7 +138,7 @@ void *tcp_connection_handler(void *arg) {
 finish:
   close(new_socket);
   free(arguments);
-  pthread_exit(NULL);
+  pthread_exit(NULL);*/
 }
 
 int tcp_start_server(usize core, ssl_channel_t* comm) {
@@ -135,16 +196,20 @@ int tcp_start_server(usize core, ssl_channel_t* comm) {
     args->mutex = &mutex;
     args->app = comm;
 
-    if (pthread_create(&thread, NULL, tcp_connection_handler, (void *)args) <
+    // Previous implementation with threads.
+    // For now run the handler directly.
+    /*if (pthread_create(&thread, NULL, tcp_connection_handler, (void *)args) <
         0) {
       perror("pthread_create");
       free(args);
       close(new_socket);
       continue;
-    }
-
+    }*/
+    tcp_connection_handler((void*) args);
+    LOG("Returned from handling client");
+    exit(-1);
     // Detach the thread, so its resources are automatically released when it
     // finishes
-    pthread_detach(thread);
+    //pthread_detach(thread);
   }
 }
