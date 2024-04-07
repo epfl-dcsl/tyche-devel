@@ -43,7 +43,7 @@ typedef enum DOMAIN_IDX_E {
 
 // —————————————————————————— Server configuration —————————————————————————— //
 /// Port for the server.
-#define NET_PORT 1234
+extern unsigned int NET_PORT;
 /// Size of tcp buffer.
 #define NET_BUFFER_SIZE 1048
 

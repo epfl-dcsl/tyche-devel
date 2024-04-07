@@ -56,6 +56,8 @@ char * domain_names[NB_DOMAINS]  = {
   "REDIS",
 };
 
+unsigned int NET_PORT = 1234;
+
 // ———————————————————————————————— Helpers ————————————————————————————————— //
 
 /// Looks up for the shared memory region with the enclave.
@@ -315,6 +317,21 @@ int main(int argc, char *argv[]) {
   usize untrusted_core = 0;
   // The encryption channel.
   encr_channel_t * encr_comm = NULL;
+
+#ifdef RUN_TCP
+  if (argc > 1) {
+    char *endptr;
+    unsigned int arg = strtoul(argv[1], &endptr, 10);
+    if (*endptr != '\0') {
+        LOG("Invalid input port, default %d is used...", NET_PORT);
+    } else {
+      NET_PORT = arg;
+      LOG("PORT changed to %d", NET_PORT);
+    }
+  } else {
+    LOG("No port provided, using the default %d", NET_PORT);
+  }
+#endif
 
   // Do the core allocation.
   if (core_allocation(&untrusted_core, domains_coremap) != SUCCESS) {

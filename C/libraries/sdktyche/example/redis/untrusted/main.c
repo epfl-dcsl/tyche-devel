@@ -20,6 +20,8 @@
 
 tyche_domain_t *enclave = NULL;
 
+unsigned int NET_PORT = 1234;
+
 // ———————————————————————— Declare the RB functions ———————————————————————— //
 
 RB_DECLARE_FUNCS(char);
@@ -155,6 +157,21 @@ int main(int argc, char *argv[]) {
   redis_app_t* comm = NULL;
   // Arguments for the redis thread.
   redis_args_t redis_args = {0};
+
+#ifdef RUN_TCP
+  if (argc > 1) {
+    char *endptr;
+    unsigned int arg = strtoul(argv[1], &endptr, 10);
+    if (*endptr != '\0') {
+        LOG("Invalid input port, default %d is used...", NET_PORT);
+    } else {
+      NET_PORT = arg;
+      LOG("PORT changed to %d", NET_PORT);
+    }
+  } else {
+    LOG("No port provided, using the default %d", NET_PORT);
+  }
+#endif
 
   // Pin ourselves to the core 0.
   if (pin_self_to_core(0) != SUCCESS) {
