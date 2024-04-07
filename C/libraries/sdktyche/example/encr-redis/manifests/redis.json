@@ -14,9 +14,27 @@
       },
       {
         "AddSegment":{
-          "start": 3145728, 
+          "start": 3145728,
           "size":4096,
           "tpe":"KernelPipe",
+          "write":true,
+          "exec":false
+        }
+      },
+      {
+        "AddSegment":{
+          "start": 7340032,
+          "size":3276800,
+          "tpe":"KernelConfidential",
+          "write":true,
+          "exec":false
+        }
+      },
+      {
+        "AddSegment":{
+          "start": 10616832,
+          "size":3276800,
+          "tpe":"KernelConfidential",
           "write":true,
           "exec":false
         }
