@@ -8,6 +8,7 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#include <errno.h>
 
 #include "common.h"
 #include "common_log.h"
@@ -34,6 +35,57 @@ void *tcp_connection_handler(void *arg) {
   pthread_t reader;
 
   LOG("Started a TCP connexion handler for a client");
+  while(1) {
+    int written = 0;
+    int read = recv(new_socket, buffer, NET_BUFFER_SIZE, MSG_DONTWAIT);
+    if (read == -1) {
+      if (errno != EAGAIN && errno != EWOULDBLOCK) {
+        ERROR("Something went wrong with the socket");
+        return NULL;
+      }
+      goto try_read;
+    }
+    if (read == 0) {
+      goto try_read;
+    }
+    LOG("Received %d bytes", read);
+    // We have some things to transmit to ssl.
+    written = rb_char_write_n(&(arguments->app->to_redis), read, buffer);
+    if (written == FAILURE || written != read) {
+      if (written == FAILURE) {
+        ERROR("Failure on write channel");
+        exit(-1);
+      }
+      ERROR("failed to write everything to ssl %d, expected %d | %d is full",
+          written, read, rb_char_is_full(&(arguments->app->to_redis)));
+      return NULL;
+    }
+    LOG("Wrote %d bytes on the ssl request", written);
+
+try_read:
+    written = 0;
+    read = rb_char_read_n(&(arguments->app->from_redis), MSG_BUFFER_SIZE, buffer);
+    if (read == FAILURE) {
+      ERROR("Error reading from ssl");
+      exit(-1);
+    }
+    if (read > 0) {
+      LOG("Read %d bytes from ssl response", read);
+    }
+    while (written < read) {
+      int res = write(new_socket, buffer, read - written);
+      if (res < 0) {
+        ERROR("Failed to write back the response");
+        exit(-1);
+      }
+      written += res;
+    }
+    if (read > 0) 
+      LOG("Wrote %d to tcp", written);
+  }
+
+  // Previous implementation that was blocking.
+  /*
   while ((valread = read(new_socket, buffer, NET_BUFFER_SIZE)) > 0) {
     // Lock the channels.
     pthread_mutex_lock(arguments->mutex);
@@ -73,7 +125,7 @@ void *tcp_connection_handler(void *arg) {
     printf("Client disconnected\n");
   } else {
     perror("read");
-  }
+  }*/
 
 finish:
   close(new_socket);
@@ -135,7 +187,12 @@ int tcp_start_server(usize core, redis_app_t* comm) {
     args->mutex = &mutex;
     args->app = comm;
 
-    if (pthread_create(&thread, NULL, tcp_connection_handler, (void *)args) <
+
+    // Allow only a single client.
+    tcp_connection_handler((void*) args);
+    LOG("Client disconnected");
+    break;
+    /*if (pthread_create(&thread, NULL, tcp_connection_handler, (void *)args) <
         0) {
       perror("pthread_create");
       free(args);
@@ -145,6 +202,7 @@ int tcp_start_server(usize core, redis_app_t* comm) {
 
     // Detach the thread, so its resources are automatically released when it
     // finishes
-    pthread_detach(thread);
+    pthread_detach(thread);*/
   }
+  close(server_fd);
 }
