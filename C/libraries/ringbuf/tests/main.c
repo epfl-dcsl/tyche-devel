@@ -1,6 +1,8 @@
 #include <stdio.h>
 #include <string.h>
 #include <assert.h>
+#include <pthread.h>
+#include <unistd.h>
 
 #include "ringbuf_generic.h"
 #include "common_log.h"
@@ -138,6 +140,99 @@ void test_byte_stream_circular(void) {
 	LOG("Done with byte stream circular test");
 }
 
+const int MAX_RUN = 10000000;
+typedef struct bench_t {
+	rb_int_t* request;
+	rb_int_t* response;
+} bench_t;
+
+void* spammer_handler(void* args) {
+	bench_t* comm = (bench_t*) args;
+	assert(comm != NULL);
+	int last_value_written = 0;
+	int last_value_read = 0;
+
+	// Count from 1 to 10000, ten times the buffer capacity.
+	while (last_value_read < MAX_RUN) {
+		int read = 0;
+		// Try to write.
+		if (last_value_written < MAX_RUN &&
+				rb_int_write(comm->request, last_value_written + 1) == SUCCESS) {
+			last_value_written++;
+		}
+		if (rb_int_read(comm->response, &read) == SUCCESS) {
+			assert(read == (last_value_read+1));
+			last_value_read++;
+		}
+	}
+	assert(last_value_read == last_value_written);
+	assert(last_value_written == MAX_RUN);
+	LOG("Spammer finished");
+	return NULL;
+}
+
+void* consummer_handler(void* args) {
+	bench_t* comm = (bench_t*) args;
+	assert(comm != NULL);
+	int last_value_written = 0;
+	int last_value_read = 0;
+
+	// Count from 1 to MAX_RUN, ten times the buffer capacity.
+	while (last_value_read < MAX_RUN) {
+		int read = 0;
+		// Try to read
+		if (rb_int_read(comm->request, &read) == SUCCESS) {
+			assert(read == (last_value_read+1));
+			last_value_read++;
+		} else {
+			// Haven't read anything yet.
+			continue;
+		}
+		
+		// Write that back forcefully.
+		while (rb_int_write(comm->response, last_value_written + 1) != SUCCESS) {}
+		last_value_written++;
+	}
+	assert(last_value_read == last_value_written);
+	assert(last_value_written == MAX_RUN);
+	LOG("Consummer finished.");
+	return NULL;
+}
+
+
+void test_threads() {
+	int capacity = 1000;
+	pthread_t threads[2];
+	bench_t *bench = malloc(sizeof(bench_t));
+	rb_int_t *requests = malloc(sizeof(rb_int_t));
+	rb_int_t *responses = malloc(sizeof(rb_int_t));
+	int* buff_req = calloc(capacity, sizeof(int));
+	int* buff_resp = calloc(capacity, sizeof(int));
+	assert(requests != NULL);
+	assert(responses != NULL);
+	assert(buff_req != NULL);
+	assert(buff_resp != NULL);
+	assert(bench != NULL);
+	memset(requests, 0, sizeof(rb_int_t));
+	memset(responses, 0, sizeof(rb_int_t));
+	memset(buff_req, 0, sizeof(int) * capacity);
+	memset(buff_resp, 0, sizeof(int) * capacity);
+	memset(bench, 0, sizeof(bench_t));
+	assert(rb_int_init(requests, capacity, buff_req) == SUCCESS);
+	assert(rb_int_init(responses, capacity, buff_resp) == SUCCESS);
+	bench->request = requests;
+	bench->response = responses;
+	LOG("Starting thread benchmark");
+
+	assert(pthread_create(&threads[0], NULL, spammer_handler, (void*) bench) >= 0);
+	assert(pthread_create(&threads[1], NULL, consummer_handler, (void*) bench) >= 0);
+
+	pthread_join(threads[0], NULL);
+	pthread_join(threads[1], NULL);
+
+	LOG("Done running the thread benchmark");
+}
+
 int main(void) {
 	printf("Starting the test with ");
 #ifdef RB_NO_ATOMICS
@@ -149,5 +244,6 @@ int main(void) {
 	test_circular();
 	test_byte_stream();
 	test_byte_stream_circular();
+	test_threads();
 	return 0;
 }
