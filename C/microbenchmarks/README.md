@@ -1,49 +1,57 @@
-# Create Delete Benchmark
+# Microbenchmarks
 
-The binary `create_delete_bench` measures the creation and deletion of domains.
+# Overview
 
-## Overview
+There are mainly three distinct microbenchmarks:
 
-The main logic loop is as follows:
+`create/delete`:
 
-```
-// For all the selected sizes such that:
-// RUN_MIN and RUN_MAX in [8k, 12k, 128k, 256k, 512k, 1M, 10M]
-// with RUN_MIN <= RUN_MAX
+This benchmarks the creation/deletion time for domains of various size.
+It provides measurements for (1) enclave (carve/hash/cleanup), (2) carves (carve/no hash/no cleanup)
+and (3) sandboxes (no carve/ no hash/ no cleanup).
+The available domain sizes are: `[8k, 12k, 256k, 512k, 1M, 10M]`
 
-// Creation
-for s <- [run_min, run_max]:
-	create_res[s] = measure {
-		for i <- [0, run_nb_iter[:
-			create(s)
-		}
+`transitions`:
 
-//Deletion
-for s <- [run_min, run_max]:
-	delete_res[s] = measure {
-		for i <- [0, run_nb_iter[:
-			delete(s)
-		}
+This benchmark measures the time needed to transition and come back from a domain.
+It outputs an estimated cost per-call (1 direction).
 
-// source code in src/internal.c
-```
+`attestation`:
 
-It will run for `enclaves` and `sandboxes` separately.
+TODO.
 
-## Parameters
+# Environment variables
 
-The following parameters are supported as environment variables, but all have default values defined in `src/main.c`
+The benchmark binary uses environment variables for configuration.
 
 ### Boolean
+
 Boolean values accept `true`, `True`, `TRUE`, and `1`
 and `false`, `False`, `FALSE`, and `0`.
 
-`RUN_ENCLAVES`: run the enclaves.
+We use booleans to select benchmarks to run and workloads.
+Multiple benchmarks and multiple workloads can be selected at once.
 
-`RUN_SANDBOXES`: run the sandboxes.
+The benchmarks are:
+
+`RUN_CREATE_DELETE`: the create/delete benchmark.
+
+`RUN_TRANSITION`: the transition benchmark.
+
+`RUN_ATTESTATION`: the attestation benchmark.
+
+The workloads are:
+
+`RUN_ENCLAVES`: run selected benchs with enclaves (carve/hash/cleanup).
+
+`RUN_SANDBOXES`: run selected benchs with sandboxes (no carve/no hash/no cleanup)
+
+`RUN_CARVES`: run selected benchs with carves (carve/no hash/no cleanup)
+
 
 ### Domain size argument.
 
+Used for create/delete and attestation benchmarks.
 A name that solely identifies the size of the dom.
 The valid names are defined in src/main.c:
 
@@ -64,12 +72,74 @@ const char* domain_size_names[7] = {
 
 We check the invariant `RUN_MIN` <= `RUN_MAX`
 
+
 ### Number of iterations
 
-`RUN_NB_ITER`: change the default number of iterations
+`RUN_NB_ITER`: 
+
+Change the default number of iterations.
 Must be a valid number parsed with `strtoul`
 
-## Compilation
+### Repetition per iterations
+
+`RUN_REP_PER_ITER`:
+
+In case we want to run the same benchmark many times.
+
+### Defaults 
+
+We have default values defined in `src/main.c` for all environment variables.
+
+# Benchmarks algorithms 
+
+## Create/ Delete
+
+The main logic loop is as follows:
+
+```
+// For all the selected sizes such that:
+// RUN_MIN and RUN_MAX in [8k, 12k, 128k, 256k, 512k, 1M, 10M]
+// with RUN_MIN <= RUN_MAX
+
+// Creation
+for s <- [RUN_MIN, RUN_MAX]:
+	create_res[s] = measure {
+		for i <- [0, RUN_NB_ITER[:
+			create(s)
+		}
+
+//Deletion
+for s <- [RUN_MIN, RUN_MAX]:
+	delete_res[s] = measure {
+		for i <- [0, RUN_NB_ITER[:
+			delete(s)
+		}
+
+// source code in src/internal.c
+```
+
+It can run for `enclaves`, `carves`, and `sandboxes`.
+
+## Transitions
+
+The main logic loop is as follows:
+
+```
+/// For PATH in [bin/enclaves, bin/sandboxes, bin/carves]
+
+for s <- [0, RUN_REP_ITER[:
+	res[s] = measure {
+		for i <- [0, RUN_NB_ITER[:
+			call(PATH/transition)
+	}
+	
+// source code in src/internal.c
+```
+It can run for `enclaves`, `carves`, and `sandboxes`.
+
+# Compilation
+
+## Create/Delete
 
 The `Makefile` creates a `mock_dom` to be used as the domain.
 It contains two regions (TEXT and RO) by default, so 2 pages.
@@ -80,4 +150,12 @@ Note that when we add segments, we take care of computing real byte size, e.g., 
 
 Enclaves have their manifests in `manifests/enclaves/` and generate their binaries in `bin/enclaves/`.
 Sandboxes have their manifests in `manifests/sandboxes` and generate their binaries in `bin/sandboxes`.
+Carves have their manifests in `manifests/carve` and generate their binaries in `bin/carve`.
+
+## Transitions
+
+The transition domain source code is in `transition/`.
+It contains a loop that keeps switching back to the parent.
+The `Makefile` generates a binary called `trans_dom`.
+It packages it with `mock_app` using tychools and manifests in `manifests/{enclaves,carve,sandboxes}/transition,json` and puts the binary in the correspond `bin` sub folder.
 
