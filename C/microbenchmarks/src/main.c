@@ -28,12 +28,12 @@ const char* domain_size_names[7] = {
 
 /// The default benchmark configuration.
 static ubench_config_t bench = {
-	.run_create_delete = true,
+	.run_create_delete = false,
 	.run_transition = false,
 	.run_attestation = false,
-	.run_sandboxes = true,
-	.run_enclaves = true,
-	.run_carves = true,
+	.run_sandboxes = false,
+	.run_enclaves = false,
+	.run_carves = false,
 	.min = default_min_size,
 	.max = default_max_size,
 	.nb_iterations = default_nb_iterations,
