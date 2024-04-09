@@ -122,12 +122,48 @@ static void proxy_transition_bench(ubench_config_t *bench) {
 	if (bench->run_enclaves) {
 		assert(run_transition(enclave_prefix, bench, results));
 		display_transition(enclave_prefix, bench, results);
+		memset(results, 0, bench->rep_iter * sizeof(time_diff_t));
+	}
+	if (bench->run_carves) {
+		assert(run_transition(carve_prefix, bench, results));
+		display_transition(carve_prefix, bench, results);
+		memset(results, 0, bench->rep_iter * sizeof(time_diff_t));
 	}
 	free(results);
 }
 
 static void proxy_attestation_bench(ubench_config_t *bench) {
-	printf("Attestation benchmark not yet implemented!\n");
+	time_diff_t* results = NULL;
+	usize *sizes = NULL;
+	results = calloc(bench->rep_iter, sizeof(time_diff_t));
+	assert(results != NULL);
+	sizes = calloc(bench->rep_iter, sizeof(usize));
+	assert(results != NULL);
+	memset(results, 0, sizeof(time_diff_t)*bench->rep_iter);
+	memset(sizes, 0, sizeof(usize)*bench->rep_iter);
+	if (bench->run_sandboxes) {
+		assert(run_attestation(sandbox_prefix, bench, results, sizes));
+		display_attestation(sandbox_prefix, bench, results, sizes);
+		memset(results, 0, bench->rep_iter * sizeof(time_diff_t));
+		memset(sizes, 0, bench->rep_iter * sizeof(usize));
+	}
+
+	if (bench->run_enclaves) {
+		assert(run_attestation(enclave_prefix, bench, results, sizes));
+		display_attestation(enclave_prefix, bench, results, sizes);
+		memset(results, 0, bench->rep_iter * sizeof(time_diff_t));
+		memset(sizes, 0, bench->rep_iter * sizeof(usize));
+	}
+
+	if (bench->run_carves) {
+		assert(run_attestation(carve_prefix, bench, results, sizes));
+		display_attestation(carve_prefix, bench, results, sizes);
+		memset(results, 0, bench->rep_iter * sizeof(time_diff_t));
+		memset(sizes, 0, bench->rep_iter * sizeof(usize));
+	}
+
+	free(results);
+	free(sizes);
 }
 
 // ————————————————————————————— Main function —————————————————————————————— //

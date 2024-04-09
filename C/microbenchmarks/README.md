@@ -18,7 +18,9 @@ It outputs an estimated cost per-call (1 direction).
 
 `attestation`:
 
-TODO.
+This benchmarks measures
+(1) the time to create an attestation when domains are loaded.
+(2) the number of bytes in the attestation.
 
 # Environment variables
 
@@ -137,6 +139,26 @@ for s <- [0, RUN_REP_ITER[:
 ```
 It can run for `enclaves`, `carves`, and `sandboxes`.
 
+## Attestation
+
+The main logic loop is as follows
+
+```
+for d <- [RUN_MIN, RUN_MAX]:
+	create(d)
+
+for i <- [0, RUN_REP_ITER[:
+	results[i] = measure {
+		for j <- [0, RUN_NB_ITER[:
+			sizes[i] = attest(all)
+	}
+
+// Reports (results[i], results[i]/RUN_NB_ITER, sizes[i])
+// source code in src/internal.c
+```
+
+It can run for `enclaves`, `carves`, and `sandboxes`.
+
 # Compilation
 
 ## Create/Delete
@@ -159,3 +181,7 @@ It contains a loop that keeps switching back to the parent.
 The `Makefile` generates a binary called `trans_dom`.
 It packages it with `mock_app` using tychools and manifests in `manifests/{enclaves,carve,sandboxes}/transition,json` and puts the binary in the correspond `bin` sub folder.
 
+## Attestation
+
+This benchmark reuses the same domains as the create/delete one.
+We load the selected domains and take our measurements.

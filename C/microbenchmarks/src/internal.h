@@ -1,5 +1,6 @@
 #pragma once
 
+#include "common.h"
 #include "measurement.h"
 #include "ubench.h"
 #include <stddef.h>
@@ -20,3 +21,15 @@ void display_create_delete(
 bool run_transition(const char* prefix, ubench_config_t* bench, time_diff_t* results);
 
 void display_transition(const char* prefix, ubench_config_t* bench, time_diff_t* results);
+
+bool run_attestation(
+		const char* prefix,
+		ubench_config_t* bench,
+		time_diff_t* results,
+		usize* sizes);
+
+void display_attestation(
+		const char* prefix,
+		ubench_config_t* bench,
+		time_diff_t* results,
+		usize* sizes);
