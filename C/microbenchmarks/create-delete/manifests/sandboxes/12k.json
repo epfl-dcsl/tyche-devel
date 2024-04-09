@@ -1,0 +1,20 @@
+{
+  "untrusted_bin": {
+    "path": "mock_app"
+  },
+  "kern_bin": {
+    "path":"mock_dom",
+    "ops":[
+      {
+        "AddSegment":{
+          "size": 4096,
+          "tpe":"KernelShared",
+          "write":true,"exec":false
+        }
+      }
+    ]
+  },
+  "generate_pts": false,
+  "security": "Sandbox",
+  "output": "bin/sandboxes/12k"
+}
