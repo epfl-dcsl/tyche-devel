@@ -70,6 +70,17 @@ HDRS_PTS=$(wildcard $(PTS)/include/*.h)
 CODE_APP=$(CODE_ELF64) $(CODE_PTS) $(CODE_LOADER) $(CODE_BENCH)
 HDRS_APP=$(HDRS_ELF64) $(HDRS_PTS) $(HDRS_LOADER) $(HDRS_BENCH)
 
+## ———————————————————————— Trusted code and headers ———————————————————————— ##
+CODE_TRANS=$(wildcard transition/*.c)
+HDRS_TRANS=$(wildcard include/*.h)
+
+# Configuration for runtime.
+ifeq ($(ARCH), x86)
+	CODE_TRANS += transition/asm.S
+else ifeq ($(ARCH), riscv)
+	CODE_TRANS += transition/riscv_asm.S
+endif
+
 ## ———————————————————————————————— Includes ———————————————————————————————— ##
 COMMON_INCLUDES = -Iinclude -I$(CAPA_LIB)/include -I$(COMMON_LIB)/include -I$(DLL_LIB)/include -I$(SDK)/include 
 APP_INCLUDES = $(COMMON_INCLUDES) -I$(ELF64)/include -I$(PTS)/include -I$(DRIVER)/include -I$(RB)/include
@@ -100,6 +111,10 @@ mock_app: $(CODE_MOCK)
 mock_dom: $(CODE_DOM)
 	$(GCC) -g -nostdlib -static -o $@ $(CODE_DOM)
 
+# Transition domain
+trans_dom: $(CODE_TRANS) $(HDRS_TRANS)
+	$(GCC) -DTYCHE_USER_SPACE=2 -g $(COMMON_INCLUDES) -nostdlib -static -o $@ $(CODE_TRANS)
+
 sandboxes: mock_app mock_dom
 	mkdir -p bin/sandboxes
 	cargo -C $(TYCHOOLS_PATH) install --path . --locked -Z unstable-options
@@ -122,7 +137,24 @@ enclaves: mock_app mock_dom
 	tychools instrument -s manifests/enclaves/1M.json $(TYCHOOLS_ARG)
 	tychools instrument -s manifests/enclaves/10M.json $(TYCHOOLS_ARG)
 
-runbench: $(CODE_APP) $(HDRS_APP) sandboxes enclaves 
+carve: mock_app mock_dom
+	mkdir -p bin/carve
+	cargo -C $(TYCHOOLS_PATH) install --path . --locked -Z unstable-options
+	tychools instrument -s manifests/carve/8k.json $(TYCHOOLS_ARG)
+	tychools instrument -s manifests/carve/12k.json $(TYCHOOLS_ARG)
+	tychools instrument -s manifests/carve/128k.json $(TYCHOOLS_ARG)
+	tychools instrument -s manifests/carve/256k.json $(TYCHOOLS_ARG)
+	tychools instrument -s manifests/carve/512k.json $(TYCHOOLS_ARG)
+	tychools instrument -s manifests/carve/1M.json $(TYCHOOLS_ARG)
+	tychools instrument -s manifests/carve/10M.json $(TYCHOOLS_ARG)
+
+transitions: mock_app trans_dom
+	cargo -C $(TYCHOOLS_PATH) install --path . --locked -Z unstable-options
+	tychools instrument -s manifests/enclaves/transition.json $(TYCHOOLS_ARG)
+	tychools instrument -s manifests/sandboxes/transition.json $(TYCHOOLS_ARG)
+	tychools instrument -s manifests/carve/transition.json $(TYCHOOLS_ARG)
+
+runbench: $(CODE_APP) $(HDRS_APP) sandboxes enclaves carve transitions 
 	$(GCC) -DTYCHE_USER_SPACE=1 $(LOADER_BACKEND) -g $(APP_INCLUDES) -static -o $@ $(CODE_APP)
 
 install_disk: runbench 
@@ -132,4 +164,4 @@ install_disk: runbench
 .PHONY: clean
 
 clean:
-	rm -rf bin/enclaves/ bin/sandboxes/ runbench mock_app mock_dom
+	rm -rf bin/enclaves/ bin/sandboxes/ runbench mock_app mock_dom trans_dom

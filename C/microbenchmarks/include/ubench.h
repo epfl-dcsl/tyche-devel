@@ -4,15 +4,17 @@
 #include <stddef.h>
 
 // ————————————————————————— Environment Variables —————————————————————————— //
-#define NB_ENV_VARS (8)
+#define NB_ENV_VARS (10)
 #define RUN_CREATE_DELETE "RUN_CREATE"
 #define RUN_TRANSITION "RUN_TRANSITION"
 #define RUN_ATTESTATION "RUN_ATTESTION"
 #define RUN_ENCLAVES "RUN_ENCLAVES"
 #define RUN_SANDBOXES "RUN_SANDBOXES"
+#define RUN_CARVES "RUN_CARVES"
 #define RUN_MIN "RUN_MIN"
 #define RUN_MAX "RUN_MAX"
 #define RUN_NB_ITER "RUN_NB_ITER"
+#define RUN_REP_PER_ITER "RUN_REP_ITER"
 
 // ———————————————————————————— Global variables ———————————————————————————— //
 extern const char* domain_size_names[7];
@@ -42,10 +44,14 @@ typedef struct ubench_config_t {
 	bool run_sandboxes;
 	/// Run enclaves
 	bool run_enclaves;
+	/// Run carves
+	bool run_carves;
 	/// Minimal size of enclave in pages;
 	domain_size_t min;
 	/// Maximal size of enclave in pages;
 	domain_size_t max;
 	/// Iterations per operation measured.
 	size_t nb_iterations;
+	/// Transition benchmark repeat iterations.
+	size_t rep_iter;
 } ubench_config_t;

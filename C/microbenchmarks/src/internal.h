@@ -16,3 +16,7 @@ void display_create_delete(
 		ubench_config_t* bench,
 		time_diff_t* create_res,
 		time_diff_t* delete_res);
+
+bool run_transition(const char* prefix, ubench_config_t* bench, time_diff_t* results);
+
+void display_transition(const char* prefix, ubench_config_t* bench, time_diff_t* results);

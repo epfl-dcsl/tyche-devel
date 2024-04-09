@@ -13,6 +13,7 @@
 static const domain_size_t default_min_size = S_8k;
 static const domain_size_t default_max_size = S_10M;
 static const size_t default_nb_iterations = 10;
+static const size_t default_rep_iter = 1;
 
 /// The names for the benchmarks sizes.
 const char* domain_size_names[7] = {
@@ -32,14 +33,17 @@ static ubench_config_t bench = {
 	.run_attestation = false,
 	.run_sandboxes = true,
 	.run_enclaves = true,
+	.run_carves = true,
 	.min = default_min_size,
 	.max = default_max_size,
 	.nb_iterations = default_nb_iterations,
+	.rep_iter = default_rep_iter,
 };
 
 /// Prefixes where to find sandboxes and enclaves binaries.
 static const char* sandbox_prefix = "bin/sandboxes/";
 static const char* enclave_prefix = "bin/enclaves/";
+static const char* carve_prefix = "bin/carve/";
 
 // ———————————————————————————— Local functions ————————————————————————————— //
 
@@ -51,6 +55,9 @@ static bool check_configuration(ubench_config_t* bench) {
 		goto failure;
 	}
 	if (bench->nb_iterations <= 0) {
+		goto failure;
+	}
+	if (bench->rep_iter <= 0) {
 		goto failure;
 	}
 	return true;
@@ -89,13 +96,34 @@ static void proxy_create_delete_bench(ubench_config_t* bench) {
 		memset(create_res, 0, nb_results * sizeof(time_diff_t));
 		memset(delete_res, 0, nb_results * sizeof(time_diff_t));
 	}
+	// Run carves.
+	if (bench->run_carves) {
+		assert(run_create_delete(carve_prefix, bench, create_res, delete_res, nb_results));
+		display_create_delete(carve_prefix, bench, create_res, delete_res);
+		memset(create_res, 0, nb_results * sizeof(time_diff_t));
+		memset(delete_res, 0, nb_results * sizeof(time_diff_t));
+	}
 	// Free the results.
 	free(create_res);
 	free(delete_res);
 }
 
 static void proxy_transition_bench(ubench_config_t *bench) {
-	printf("Transition benchmark not yet implemented!\n");
+	time_diff_t* results = NULL;
+	assert(bench != NULL);
+	results = calloc(bench->rep_iter, sizeof(time_diff_t));
+	assert(results != NULL);
+	memset(results, 0, bench->rep_iter * sizeof(time_diff_t));
+	if (bench->run_sandboxes) {
+		assert(run_transition(sandbox_prefix, bench, results));
+		display_transition(sandbox_prefix, bench, results);
+		memset(results, 0, bench->rep_iter * sizeof(time_diff_t));
+	}
+	if (bench->run_enclaves) {
+		assert(run_transition(enclave_prefix, bench, results));
+		display_transition(enclave_prefix, bench, results);
+	}
+	free(results);
 }
 
 static void proxy_attestation_bench(ubench_config_t *bench) {

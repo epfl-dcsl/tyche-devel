@@ -1,0 +1,11 @@
+{
+  "untrusted_bin": {
+    "path": "mock_app"
+  },
+  "kern_bin": {
+    "path":"trans_dom"
+  },
+  "generate_pts": true,
+  "security": "Confidential",
+  "output": "bin/carve/transition"
+}

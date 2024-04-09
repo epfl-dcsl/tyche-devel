@@ -33,9 +33,11 @@ const char* env_variables[NB_ENV_VARS] = {
 	RUN_ATTESTATION,
 	RUN_ENCLAVES,
 	RUN_SANDBOXES,
+	RUN_CARVES,
 	RUN_MIN,
 	RUN_MAX,
 	RUN_NB_ITER,
+	RUN_REP_PER_ITER,
 };
 
 // ———————————————————————————— Static Functions ———————————————————————————— //
@@ -100,11 +102,13 @@ DECLARE_PARSER(run_transition, bool, parse_bool);
 DECLARE_PARSER(run_attestation, bool, parse_bool);
 DECLARE_PARSER(run_sandboxes, bool, parse_bool);
 DECLARE_PARSER(run_enclaves, bool, parse_bool);
+DECLARE_PARSER(run_carves, bool, parse_bool);
 // Domain size parsers.
 DECLARE_PARSER(min, domain_size_t, parse_size);
 DECLARE_PARSER(max, domain_size_t, parse_size);
 /// Parser for size_t.
 DECLARE_PARSER(nb_iterations, size_t, parse_size_t);
+DECLARE_PARSER(rep_iter, size_t, parse_size_t);
 
 // ————————————————————————————— API functions —————————————————————————————— //
 
@@ -115,9 +119,11 @@ env_parser_fn parsers[NB_ENV_VARS] = {
 	parse_run_attestation_f,
 	parse_run_sandboxes_f,
 	parse_run_enclaves_f,
+	parse_run_carves_f,
 	parse_min_f,
 	parse_max_f,
 	parse_nb_iterations_f,
+	parse_rep_iter_f,
 };
 
 /// Parses the configuration from evironment variables.

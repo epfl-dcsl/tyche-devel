@@ -1,0 +1,41 @@
+{
+  "untrusted_bin": {
+    "path": "mock_app"
+  },
+  "kern_bin": {
+    "path":"mock_dom",
+    "ops":[
+      {
+        "AddSegment":{
+          "size": 3276800,
+          "tpe":"KernelConfidential",
+          "write":true,"exec":false
+        }
+      },
+      {
+        "AddSegment":{
+          "size": 3276800,
+          "tpe":"KernelConfidential",
+          "write":true,"exec":false
+        }
+      },
+      {
+        "AddSegment":{
+          "size": 3276800,
+          "tpe":"KernelConfidential",
+          "write":true,"exec":false
+        }
+      },
+      {
+        "AddSegment":{
+          "size": 647168,
+          "tpe":"KernelConfidential",
+          "write":true,"exec":false
+        }
+      }
+    ]
+  },
+  "generate_pts": false,
+  "security": "Confidential",
+  "output": "bin/carve/10M"
+}

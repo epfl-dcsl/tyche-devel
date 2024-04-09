@@ -1,4 +1,5 @@
 bin/*
 mock_app
 mock_dom
+trans_dom
 runbench
