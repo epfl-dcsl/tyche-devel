@@ -73,11 +73,15 @@ HDRS_APP=$(HDRS_ELF64) $(HDRS_PTS) $(HDRS_LOADER) $(HDRS_BENCH)
 ## ———————————————————————— Trusted code and headers ———————————————————————— ##
 CODE_TRANS=$(wildcard transition/*.c)
 HDRS_TRANS=$(wildcard include/*.h)
+CODE_TRANS+=$(wildcard $(CAPA_LIB)/src/*.c)
+HDRS_TRANS += $(wildcard $(SDK)/include/*.h)
 
 # Configuration for runtime.
 ifeq ($(ARCH), x86)
+	CODE_TRANS += $(wildcard $(SDK)/runtime/*.c) $(wildcard $(SDK)/runtime/asm.S)
 	CODE_TRANS += transition/asm.S
 else ifeq ($(ARCH), riscv)
+	CODE_TRANS += $(wildcard $(SDK)/runtime/*.c) $(wildcard $(SDK)/runtime/riscv_asm.S)
 	CODE_TRANS += transition/riscv_asm.S
 endif
 

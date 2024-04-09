@@ -8,11 +8,4 @@ fast_call_gate:
     vmcall
     ret
 
-.globl _start
-_start:
-  callq trusted_entry
-  // Should never return here, call exit if we do.
-  movq $1, %rax
-  vmcall
-
 #endif 

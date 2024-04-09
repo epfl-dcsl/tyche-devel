@@ -8,5 +8,6 @@
 
 // —————————————————————————————————— API ——————————————————————————————————— //
 int gate_call(void);
+capa_index_t find_switch(void);
 void trusted_main(void);
 void* get_default_shared_buffer();

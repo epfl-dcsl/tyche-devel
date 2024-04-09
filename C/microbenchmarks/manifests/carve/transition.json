@@ -3,7 +3,16 @@
     "path": "mock_app"
   },
   "kern_bin": {
-    "path":"trans_dom"
+    "path":"trans_dom",
+    "ops":[
+      {
+        "AddSegment":{
+          "size":4096,
+          "tpe":"KernelStackConf",
+          "write":true,"exec":false
+        }
+      }
+    ]
   },
   "generate_pts": true,
   "security": "Confidential",
