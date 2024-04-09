@@ -25,7 +25,12 @@
 #include "tyche_api.h"
 
 // ———————————————————————————— Local Functions ————————————————————————————— //
+// Hash the region
 static uint32_t PF_H = 1 << 3;
+// Cleanup the region
+static uint32_t PF_C = 1 << 4;
+// Vital region
+static uint32_t PF_V = 1 << 5;
 /// Translate ELF flags into tyche memory access rights.
 static memory_access_right_t translate_flags_to_tyche(Elf64_Word flags) {
   memory_access_right_t rights = 0;
@@ -40,6 +45,12 @@ static memory_access_right_t translate_flags_to_tyche(Elf64_Word flags) {
   }
   if((flags & PF_H) == PF_H) {
     rights |= MEM_HASH;
+  }
+  if ((flags & PF_C) == PF_C) {
+    rights |= MEM_CLEANUP;
+  }
+  if ((flags & PF_V) == PF_V) {
+    rights |= MEM_VITAL;
   }
   //TODO do user?
   rights |= MEM_SUPER;

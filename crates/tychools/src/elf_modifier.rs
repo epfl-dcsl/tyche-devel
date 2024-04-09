@@ -9,10 +9,18 @@ use object::{elf, Endianness, U16Bytes, U32Bytes, U64Bytes};
 use serde::{Deserialize, Serialize};
 
 use crate::allocator::PAGE_SIZE;
-use crate::instrument::{MappingPageTables, Security};
+use crate::instrument::{CleanupConfig, HashingConfig, MappingPageTables, Security, VitalConfig};
 use crate::page_table_mapper::{align_address_up, generate_page_tables};
 
-pub static PF_H: u32 = 1 << 3;
+/// Flags defined by tyche for segments.
+#[allow(dead_code)]
+#[repr(u32)]
+pub enum TychePF {
+    #[allow(non_snake_case)]
+    PfH = 1 << 3,
+    PfC = 1 << 4,
+    PfV = 1 << 5,
+}
 
 const PT_PHYS_PAGE_MASK: u64 = ((1 << 44) - 1) << RVPtFlag::flags_count(); //TODO(neelu): This is specific for SV48.
 
@@ -258,12 +266,61 @@ impl ModifiedELF {
     }
 
     /// Change the type of the elf segments.
-    pub fn mark(&mut self, default: TychePhdrTypes) {
+    pub fn mark(
+        &mut self,
+        default: TychePhdrTypes,
+        cleanup: CleanupConfig,
+        vital: VitalConfig,
+        hash: HashingConfig,
+    ) {
         for seg in &mut self.segments {
             if seg.program_header.p_type(DENDIAN) != object::elf::PT_LOAD {
                 continue;
             }
             seg.program_header.p_type = U32Bytes::<Endianness>::new(DENDIAN, default as u32);
+
+            // Mark vital if needed.
+            if vital == VitalConfig::AllVital {
+                let mut flags = seg.program_header.p_flags(DENDIAN);
+                flags |= TychePF::PfV as u32;
+                seg.program_header.p_flags = U32Bytes::<Endianness>::new(DENDIAN, flags as u32);
+            }
+            // Chose the cleanup strategy.
+            match cleanup {
+                CleanupConfig::AllCleanup => {
+                    let mut flags = seg.program_header.p_flags(DENDIAN);
+                    flags |= TychePF::PfC as u32;
+                    seg.program_header.p_flags = U32Bytes::<Endianness>::new(DENDIAN, flags as u32);
+                }
+                CleanupConfig::WritableCleanup => {
+                    if (seg.program_header.p_flags(DENDIAN) & object::elf::PF_W)
+                        == object::elf::PF_W
+                    {
+                        let mut flags = seg.program_header.p_flags(DENDIAN);
+                        flags |= TychePF::PfC as u32;
+                        seg.program_header.p_flags =
+                            U32Bytes::<Endianness>::new(DENDIAN, flags as u32);
+                    }
+                }
+                _ => {}
+            }
+            // Chose the hashing strategy.
+            match hash {
+                HashingConfig::NoHash => {}
+                HashingConfig::AllHash => {
+                    let mut flags = seg.program_header.p_flags(DENDIAN);
+                    flags |= TychePF::PfH as u32;
+                    seg.program_header.p_flags = U32Bytes::<Endianness>::new(DENDIAN, flags as u32);
+                }
+                HashingConfig::ContentHash => {
+                    if seg.program_header.p_filesz(DENDIAN) != 0 {
+                        let mut flags = seg.program_header.p_flags(DENDIAN);
+                        flags |= TychePF::PfH as u32;
+                        seg.program_header.p_flags =
+                            U32Bytes::<Endianness>::new(DENDIAN, flags as u32);
+                    }
+                }
+            }
         }
     }
 
@@ -713,7 +770,7 @@ impl ModifiedELF {
             if ModifiedSegment::is_loadable(seg.program_header.p_type(DENDIAN)) {
                 if let Some(_tpe) = TychePhdrTypes::from_u32(seg.program_header.p_type(DENDIAN)) {
                     if seg.should_include_attestation() {
-                        seg.set_mask_flags(PF_H);
+                        seg.set_mask_flags(TychePF::PfH as u32);
                     }
                 }
             }

@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{self};
 
 use crate::allocator::PAGE_SIZE;
-use crate::elf_modifier::{ModifiedELF, ModifiedSection, TychePhdrTypes};
+use crate::elf_modifier::{ModifiedELF, ModifiedSection, TychePF, TychePhdrTypes};
 use crate::page_table_mapper::generate_page_tables;
 use crate::tychools_const::{
     BRICKS_DATA_INFO, BRICKS_DATA_INFO_SIZE, DEFAULT_MEMPOOL_PNUM, DEFAULT_STACK_PNUM,
@@ -17,6 +17,12 @@ pub struct SegmentDescriptor {
     size: usize,
     tpe: TychePhdrTypes,
     write: bool,
+    #[serde(default = "default_ops_false")]
+    clean: bool,
+    #[serde(default = "default_ops_false")]
+    vital: bool,
+    #[serde(default = "default_ops_false")]
+    hash: bool,
     exec: bool,
 }
 
@@ -57,6 +63,26 @@ pub enum Security {
     Sandbox = 2,
 }
 
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone, Copy)]
+pub enum VitalConfig {
+    NoVital = 0,
+    AllVital = 1,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone, Copy)]
+pub enum CleanupConfig {
+    NoCleanup = 0,
+    AllCleanup = 1,
+    WritableCleanup = 2,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone, Copy)]
+pub enum HashingConfig {
+    NoHash = 0,
+    AllHash = 1,
+    ContentHash = 2,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct BinaryInstrumentation {
     /// Path to the binary.
@@ -86,6 +112,15 @@ pub struct Manifest {
     /// Is this a sandbox or an enclave.
     #[serde(default = "default_security")]
     security: Security,
+    /// Cleanup config
+    #[serde(default = "default_cleanup")]
+    cleanup: CleanupConfig,
+    /// Vital configuration.
+    #[serde(default = "default_vital")]
+    vital: VitalConfig,
+    /// Hashing strategy
+    #[serde(default = "default_hash")]
+    hash: HashingConfig,
     /// Should we generate page tables.
     #[serde(default = "default_ops_true")]
     generate_pts: bool,
@@ -108,6 +143,18 @@ fn default_ops_false() -> bool {
 
 fn default_security() -> Security {
     Security::Confidential
+}
+
+fn default_vital() -> VitalConfig {
+    VitalConfig::NoVital
+}
+
+fn default_cleanup() -> CleanupConfig {
+    CleanupConfig::NoCleanup
+}
+
+fn default_hash() -> HashingConfig {
+    HashingConfig::NoHash
 }
 
 fn should_we_map(map: &Option<MappingPageTables>) -> bool {
@@ -189,6 +236,15 @@ pub fn parse_binary(
                     if descr.exec {
                         rights |= object::elf::PF_X;
                     }
+                    if descr.clean {
+                        rights |= TychePF::PfC as u32;
+                    }
+                    if descr.vital {
+                        rights |= TychePF::PfV as u32;
+                    }
+                    if descr.hash {
+                        rights |= TychePF::PfH as u32;
+                    }
                     elf.append_nodata_segment(descr.start, descr.tpe as u32, rights, descr.size);
                 }
             }
@@ -263,9 +319,19 @@ pub fn instrument_binary(manifest: &Manifest, riscv_enabled: bool) {
     let mut user_elf = if let Some(user) = &manifest.user_bin {
         let mut bin = parse_binary(user, &None);
         if manifest.security == Security::Confidential {
-            bin.mark(TychePhdrTypes::UserConfidential);
+            bin.mark(
+                TychePhdrTypes::UserConfidential,
+                manifest.cleanup,
+                manifest.vital,
+                manifest.hash,
+            );
         } else {
-            bin.mark(TychePhdrTypes::UserShared);
+            bin.mark(
+                TychePhdrTypes::UserShared,
+                manifest.cleanup,
+                manifest.vital,
+                manifest.hash,
+            );
         }
         Some(bin)
     } else {
@@ -275,9 +341,19 @@ pub fn instrument_binary(manifest: &Manifest, riscv_enabled: bool) {
     let mut kern_elf = if let Some(kern) = &manifest.kern_bin {
         let mut bin = parse_binary(kern, &user_elf);
         if manifest.security == Security::Confidential {
-            bin.mark(TychePhdrTypes::KernelConfidential);
+            bin.mark(
+                TychePhdrTypes::KernelConfidential,
+                manifest.cleanup,
+                manifest.vital,
+                manifest.hash,
+            );
         } else {
-            bin.mark(TychePhdrTypes::KernelShared);
+            bin.mark(
+                TychePhdrTypes::KernelShared,
+                manifest.cleanup,
+                manifest.vital,
+                manifest.hash,
+            );
         }
         Some(bin)
     } else {
@@ -349,6 +425,9 @@ pub fn print_enum() {
                 size: 0x2000,
                 tpe: TychePhdrTypes::UserStackConf,
                 write: true,
+                clean: false,
+                vital: false,
+                hash: false,
                 exec: false,
             }),
             BinaryOperation::AddSegment(SegmentDescriptor {
@@ -356,6 +435,9 @@ pub fn print_enum() {
                 size: 0x2000,
                 tpe: TychePhdrTypes::UserShared,
                 write: true,
+                clean: false,
+                vital: false,
+                hash: false,
                 exec: false,
             }),
         ]),

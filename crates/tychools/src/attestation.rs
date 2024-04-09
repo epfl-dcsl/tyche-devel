@@ -6,7 +6,8 @@ use object::elf::{PF_R, PF_W, PF_X};
 use object::read::elf::ProgramHeader;
 use sha2::{Digest, Sha256};
 
-use crate::elf_modifier::{ModifiedELF, ModifiedSegment, TychePhdrTypes, DENDIAN, PF_H};
+use crate::elf_modifier::TychePF::PfH;
+use crate::elf_modifier::{ModifiedELF, ModifiedSegment, TychePhdrTypes, DENDIAN};
 
 fn hash_acc_rights(hasher: &mut Sha256, flags: u32, mask: u32) {
     if flags & mask != 0 {
@@ -33,14 +34,14 @@ fn hash_segments_info(enclave: &Box<ModifiedELF>, hasher: &mut Sha256, offset: u
                 let mut diff = (memsz + align - 1) / align * align;
                 diff = diff - (seg.data.len() as u64);
                 log::trace!("Attestation right");
-                let should_hash = (flags & PF_H) != 0;
+                let should_hash = (flags & (PfH as u32)) != 0;
                 log::trace!("{}", should_hash);
                 if should_hash {
                     //hashing start - end of segment
                     hasher.input(&u64::to_le_bytes(start));
                     hasher.input(&u64::to_le_bytes(start + sz));
                     //hashing access rights
-                    hash_acc_rights(hasher, flags, PF_H);
+                    hash_acc_rights(hasher, flags, PfH as u32);
                     log::trace!("X right");
                     hash_acc_rights(hasher, flags, PF_X);
                     log::trace!("W right");
