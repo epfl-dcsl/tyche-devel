@@ -1,4 +1,4 @@
-all: create_delete_bench
+all: runbench 
 
 ARCH ?=x86
 GCC ?=gcc
@@ -16,9 +16,9 @@ ifeq ($(KVM), 1)
 endif
 
 ## ————————————————————————————————— Paths —————————————————————————————————— ##
-LIB_PATH=../../libraries/
-LIB_DRIVER=../../../linux/drivers/tyche/libraries/
-DRIVERS_PATH=../../../linux/drivers/
+LIB_PATH=../libraries/
+LIB_DRIVER=../../linux/drivers/tyche/libraries/
+DRIVERS_PATH=../../linux/drivers/
 #LINKER_SCRIPT=../../../../../configs/riscv-linker-script-domain.x
 
 ## ——————————————————————————————— Libraries ———————————————————————————————— ##
@@ -80,16 +80,16 @@ endif
 
 ## ————————————————————— Configuration for the install —————————————————————— ##
 ifeq ($(ARCH), x86)
-DISK_PATH ?= /tmp/mount/tyche/benchmarks/create_delete 
+DISK_PATH ?= /tmp/mount/tyche/benchmarks/
 else ifeq ($(ARCH), riscv)
-DISK_PATH ?= /tmp/ubuntu_riscv_mount/tyche/benchmarks/create_delete
+DISK_PATH ?= /tmp/ubuntu_riscv_mount/tyche/benchmarks/
 endif
 
 ifeq ($(ARCH), riscv)
 	TYCHOOLS_ARG=--riscv-enabled
 endif
 
-TYCHOOLS_PATH ?= ../../../crates/tychools/
+TYCHOOLS_PATH ?= ../../crates/tychools/
 ## ———————————————————————————————— Targets ————————————————————————————————— ##
 
 # Mock application to instrument with enclaves.
@@ -122,14 +122,14 @@ enclaves: mock_app mock_dom
 	tychools instrument -s manifests/enclaves/1M.json $(TYCHOOLS_ARG)
 	tychools instrument -s manifests/enclaves/10M.json $(TYCHOOLS_ARG)
 
-create_delete_bench: $(CODE_APP) $(HDRS_APP) sandboxes enclaves 
+runbench: $(CODE_APP) $(HDRS_APP) sandboxes enclaves 
 	$(GCC) -DTYCHE_USER_SPACE=1 $(LOADER_BACKEND) -g $(APP_INCLUDES) -static -o $@ $(CODE_APP)
 
-install_disk: create_delete_bench
-	mkdir -p $(DISK_PATH)
-	cp -r -t $(DISK_PATH) create_delete_bench bin
+install_disk: runbench 
+	mkdir -p $(DISK_PATH)/
+	cp -rt $(DISK_PATH)/ runbench bin
 
 .PHONY: clean
 
 clean:
-	rm -rf bin/enclaves/ bin/sandboxes/ create_delete_bench mock_app mock_dom
+	rm -rf bin/enclaves/ bin/sandboxes/ runbench mock_app mock_dom

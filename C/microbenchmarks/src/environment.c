@@ -3,14 +3,14 @@
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
-#include "create_delete.h"
+#include "ubench.h"
 #include "common.h"
 
 
 // ————————————————————————————— Useful defines ————————————————————————————— //
 
 #define DECLARE_PARSER(name, tpe, fn_raw)\
-	static void parse_##name##_f(create_delete_config_t* bench, char* value) {\
+	static void parse_##name##_f(ubench_config_t* bench, char* value) {\
 		tpe result; \
 		if (bench == NULL || value == NULL) {\
 			return;\
@@ -23,11 +23,14 @@
 // —————————————————————————————— Local Types ——————————————————————————————— //
 
 /// Type for functions that process the environment variables.
-typedef void (*env_parser_fn)(create_delete_config_t*, char*);
+typedef void (*env_parser_fn)(ubench_config_t*, char*);
 
 
 // ———————————————————————————— Global Constants ———————————————————————————— //
 const char* env_variables[NB_ENV_VARS] = {
+	RUN_CREATE_DELETE,
+	RUN_TRANSITION,
+	RUN_ATTESTATION,
 	RUN_ENCLAVES,
 	RUN_SANDBOXES,
 	RUN_MIN,
@@ -92,6 +95,9 @@ failure:
 }
 
 /// Boolean parsers.
+DECLARE_PARSER(run_create_delete, bool, parse_bool);
+DECLARE_PARSER(run_transition, bool, parse_bool);
+DECLARE_PARSER(run_attestation, bool, parse_bool);
 DECLARE_PARSER(run_sandboxes, bool, parse_bool);
 DECLARE_PARSER(run_enclaves, bool, parse_bool);
 // Domain size parsers.
@@ -104,6 +110,9 @@ DECLARE_PARSER(nb_iterations, size_t, parse_size_t);
 
 /// The array of parsers.
 env_parser_fn parsers[NB_ENV_VARS] = {
+	parse_run_create_delete_f,
+	parse_run_transition_f,
+	parse_run_attestation_f,
 	parse_run_sandboxes_f,
 	parse_run_enclaves_f,
 	parse_min_f,
@@ -112,10 +121,10 @@ env_parser_fn parsers[NB_ENV_VARS] = {
 };
 
 /// Parses the configuration from evironment variables.
-void parse_configuration(create_delete_config_t* bench) {
+void parse_configuration(ubench_config_t* bench) {
 	for (int i = 0; i < NB_ENV_VARS; i++) {
 		char* value = getenv(env_variables[i]);
-		if (value != NULL) {
+		if (value == NULL) {
 			continue;
 		}
 		parsers[i](bench, value);

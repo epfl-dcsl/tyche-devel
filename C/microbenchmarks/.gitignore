@@ -1,4 +1,4 @@
 bin/*
 mock_app
 mock_dom
-create_delete_bench
+runbench

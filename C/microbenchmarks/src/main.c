@@ -3,7 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "create_delete.h"
+#include "ubench.h"
 #include "environment.h"
 #include "measurement.h"
 #include "internal.h"
@@ -12,7 +12,7 @@
 
 static const domain_size_t default_min_size = S_8k;
 static const domain_size_t default_max_size = S_10M;
-static const size_t default_nb_iterations = 1000;
+static const size_t default_nb_iterations = 10;
 
 /// The names for the benchmarks sizes.
 const char* domain_size_names[7] = {
@@ -26,7 +26,10 @@ const char* domain_size_names[7] = {
 };
 
 /// The default benchmark configuration.
-static create_delete_config_t bench = {
+static ubench_config_t bench = {
+	.run_create_delete = true,
+	.run_transition = false,
+	.run_attestation = false,
 	.run_sandboxes = true,
 	.run_enclaves = true,
 	.min = default_min_size,
@@ -40,7 +43,7 @@ static const char* enclave_prefix = "bin/enclaves/";
 
 // ———————————————————————————— Local functions ————————————————————————————— //
 
-static bool check_configuration(create_delete_config_t* bench) {
+static bool check_configuration(ubench_config_t* bench) {
 	if (bench == NULL) {
 		goto failure;
 	}
@@ -55,7 +58,7 @@ failure:
 	return false;
 }
 
-static void run_bench(create_delete_config_t* bench) {
+static void proxy_create_delete_bench(ubench_config_t* bench) {
 	assert(bench != NULL);
 	// Allocate the arrays for results.	
 	time_diff_t* create_res = NULL; 
@@ -73,26 +76,30 @@ static void run_bench(create_delete_config_t* bench) {
 	// Run sandboxes.
 	// Run_internal checks what needs to be measured (create and or delete).
 	if (bench->run_sandboxes) {
-		assert(run_internal(sandbox_prefix, bench, create_res, delete_res, nb_results));
-		//display(sandbox_prefix, bench->min, bench->max, results);
+		assert(run_create_delete(sandbox_prefix, bench, create_res, delete_res, nb_results));
+		display_create_delete(sandbox_prefix, bench, create_res, delete_res);
 		memset(create_res, 0, nb_results * sizeof(time_diff_t));
 		memset(delete_res, 0, nb_results * sizeof(time_diff_t));
 	}
 
 	// Run enclaves.
 	if (bench->run_enclaves) {
-		assert(run_internal(enclave_prefix, bench, create_res, delete_res, nb_results));
-		//display(sandbox_prefix, bench->min, bench->max, results);
+		assert(run_create_delete(enclave_prefix, bench, create_res, delete_res, nb_results));
+		display_create_delete(enclave_prefix, bench, create_res, delete_res);
 		memset(create_res, 0, nb_results * sizeof(time_diff_t));
 		memset(delete_res, 0, nb_results * sizeof(time_diff_t));
 	}
 	// Free the results.
-	if (create_res != NULL) {
-		free(create_res);
-	}
-	if (delete_res != NULL) {
-		free(delete_res);
-	}
+	free(create_res);
+	free(delete_res);
+}
+
+static void proxy_transition_bench(ubench_config_t *bench) {
+	printf("Transition benchmark not yet implemented!\n");
+}
+
+static void proxy_attestation_bench(ubench_config_t *bench) {
+	printf("Attestation benchmark not yet implemented!\n");
 }
 
 // ————————————————————————————— Main function —————————————————————————————— //
@@ -101,7 +108,15 @@ int main(void) {
 	parse_configuration(&bench);
 	// Check that the configuration is correct.
 	assert(check_configuration(&bench));
-	// Run the bench.
-	run_bench(&bench);	
+	// Run the selected benchmarks.
+	if (bench.run_create_delete) {
+		proxy_create_delete_bench(&bench);	
+	}
+	if (bench.run_transition) {
+		proxy_transition_bench(&bench);
+	}
+	if (bench.run_attestation) {
+		proxy_attestation_bench(&bench);
+	}
 	return 0;
 }
