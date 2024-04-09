@@ -9,12 +9,15 @@
         "AddSegment":{
           "size": 516096,
           "tpe":"KernelConfidential",
-          "write":true,"exec":false
+          "write":true,"clean":true,"vital":true,"hash":true,"exec":false
         }
       }
     ]
   },
   "generate_pts": false,
   "security": "Confidential",
+  "cleanup": "WritableCleanup",
+  "vital": "AllVital",
+  "hash": "ContentHash",
   "output": "bin/enclaves/512k"
 }

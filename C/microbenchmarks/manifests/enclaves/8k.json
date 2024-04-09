@@ -7,5 +7,8 @@
   },
   "generate_pts": false,
   "security": "Confidential",
+  "cleanup": "WritableCleanup",
+  "vital": "AllVital",
+  "hash": "ContentHash",
   "output": "bin/enclaves/8k"
 }

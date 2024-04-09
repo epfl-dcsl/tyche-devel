@@ -9,33 +9,36 @@
         "AddSegment":{
           "size": 3276800,
           "tpe":"KernelConfidential",
-          "write":true,"exec":false
+          "write":true,"clean":true,"vital":true,"hash":true,"exec":false
         }
       },
       {
         "AddSegment":{
           "size": 3276800,
           "tpe":"KernelConfidential",
-          "write":true,"exec":false
+          "write":true,"clean":true,"vital":true,"hash":true,"exec":false
         }
       },
       {
         "AddSegment":{
           "size": 3276800,
           "tpe":"KernelConfidential",
-          "write":true,"exec":false
+          "write":true,"clean":true,"vital":true,"hash":true,"exec":false
         }
       },
       {
         "AddSegment":{
           "size": 647168,
           "tpe":"KernelConfidential",
-          "write":true,"exec":false
+          "write":true,"clean":true,"vital":true,"hash":true,"exec":false
         }
       }
     ]
   },
   "generate_pts": false,
   "security": "Confidential",
+  "cleanup": "WritableCleanup",
+  "vital": "AllVital",
+  "hash": "ContentHash",
   "output": "bin/enclaves/10M"
 }
