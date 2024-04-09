@@ -67,13 +67,14 @@ CODE_PTS=$(wildcard $(PTS)/src/*.c)
 HDRS_PTS=$(wildcard $(PTS)/include/*.h)
 
 ## —————————————————————— Application code and headers —————————————————————— ##
-CODE_APP=$(CODE_ELF64) $(CODE_PTS) $(CODE_LOADER) $(CODE_BENCH)
+CODE_CAPAS=$(wildcard $(CAPA_LIB)/src/*.c)
+CODE_APP=$(CODE_ELF64) $(CODE_PTS) $(CODE_LOADER) $(CODE_CAPAS) $(CODE_BENCH)
 HDRS_APP=$(HDRS_ELF64) $(HDRS_PTS) $(HDRS_LOADER) $(HDRS_BENCH)
 
 ## ———————————————————————— Trusted code and headers ———————————————————————— ##
 CODE_TRANS=$(wildcard transition/*.c)
 HDRS_TRANS=$(wildcard include/*.h)
-CODE_TRANS+=$(wildcard $(CAPA_LIB)/src/*.c)
+CODE_TRANS+=$(CODE_CAPAS)
 HDRS_TRANS += $(wildcard $(SDK)/include/*.h)
 
 # Configuration for runtime.

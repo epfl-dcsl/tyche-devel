@@ -110,26 +110,33 @@ static void proxy_create_delete_bench(ubench_config_t* bench) {
 
 static void proxy_transition_bench(ubench_config_t *bench) {
 	time_diff_t* results = NULL;
+	time_diff_t* raws = NULL;
 	assert(bench != NULL);
 	results = calloc(bench->rep_iter, sizeof(time_diff_t));
-	assert(results != NULL);
+	raws = calloc(bench->rep_iter, sizeof(time_diff_t));
+	assert(results != NULL && raws != NULL);
 	memset(results, 0, bench->rep_iter * sizeof(time_diff_t));
+	memset(raws, 0, bench->rep_iter * sizeof(time_diff_t));
 	if (bench->run_sandboxes) {
-		assert(run_transition(sandbox_prefix, bench, results));
-		display_transition(sandbox_prefix, bench, results);
+		assert(run_transition(sandbox_prefix, bench, results, raws));
+		display_transition(sandbox_prefix, bench, results, raws);
 		memset(results, 0, bench->rep_iter * sizeof(time_diff_t));
+		memset(raws, 0, bench->rep_iter * sizeof(time_diff_t));
 	}
 	if (bench->run_enclaves) {
-		assert(run_transition(enclave_prefix, bench, results));
-		display_transition(enclave_prefix, bench, results);
+		assert(run_transition(enclave_prefix, bench, results, raws));
+		display_transition(enclave_prefix, bench, results, raws);
 		memset(results, 0, bench->rep_iter * sizeof(time_diff_t));
+		memset(raws, 0, bench->rep_iter * sizeof(time_diff_t));
 	}
 	if (bench->run_carves) {
-		assert(run_transition(carve_prefix, bench, results));
-		display_transition(carve_prefix, bench, results);
+		assert(run_transition(carve_prefix, bench, results, raws));
+		display_transition(carve_prefix, bench, results, raws);
 		memset(results, 0, bench->rep_iter * sizeof(time_diff_t));
+		memset(raws, 0, bench->rep_iter * sizeof(time_diff_t));
 	}
 	free(results);
+	free(raws);
 }
 
 static void proxy_attestation_bench(ubench_config_t *bench) {

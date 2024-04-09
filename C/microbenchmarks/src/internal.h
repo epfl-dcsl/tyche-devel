@@ -18,9 +18,17 @@ void display_create_delete(
 		time_diff_t* create_res,
 		time_diff_t* delete_res);
 
-bool run_transition(const char* prefix, ubench_config_t* bench, time_diff_t* results);
+bool run_transition(
+		const char* prefix,
+		ubench_config_t* bench,
+		time_diff_t* results,
+		time_diff_t* raws);
 
-void display_transition(const char* prefix, ubench_config_t* bench, time_diff_t* results);
+void display_transition(
+		const char* prefix,
+		ubench_config_t* bench,
+		time_diff_t* results,
+		time_diff_t* raws);
 
 bool run_attestation(
 		const char* prefix,

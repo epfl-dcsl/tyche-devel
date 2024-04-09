@@ -3,6 +3,8 @@
 #include "common.h"
 #include "sdk_tyche.h"
 #include "sdk_tyche_rt.h"
+#include "tyche_api.h"
+#include "ecs.h"
 #include "tyche_driver.h"
 #include <assert.h>
 #include <stdio.h>
@@ -81,6 +83,25 @@ static bool run_create_delete_iterations(
 	return true;
 }
 
+static bool bench_find_switch(capa_index_t* res) {
+	capa_index_t next = 0;
+	assert(res != NULL);
+	do {
+		capability_t tmp_capa;
+		if (enumerate_capa(next, &next, &tmp_capa) != SUCCESS || next == 0) {
+			goto failure;
+		}
+		/// We found it.
+		if (tmp_capa.capa_type == Switch) {
+			*res = tmp_capa.local_id;
+			return true;
+		}
+	} while (next != 0);
+failure:
+	// Something went wrong.
+	return false;
+}
+
 // ————————————————————————————— API functions —————————————————————————————— //
 
 void display_create_delete(
@@ -126,16 +147,21 @@ bool run_create_delete(
 	return true;
 }
 
-bool run_transition(const char* prefix, ubench_config_t *bench, time_diff_t* results) {
+bool run_transition(
+		const char* prefix,
+		ubench_config_t *bench,
+		time_diff_t* results,
+		time_diff_t* raws) {
 	tyche_domain_t domain;
 	char name[100] = {0};
+	capa_index_t capa_switch = 0;
 	usize core_mask = sdk_pin_to_current_core();
-	assert(prefix != NULL && bench != NULL && results != NULL);
+	assert(prefix != NULL && bench != NULL && results != NULL && raws != NULL);
 	sprintf(name, "%s/transition", prefix);
 	assert(sdk_create_domain(&domain, name, core_mask, ALL_TRAPS, DEFAULT_PERM) == SUCCESS);
 	// Warmup transition.
 	assert(sdk_call_domain(&domain) == SUCCESS);
-	// Let's go for the benchmark.
+	// Let's go for the sdk benchmark.
 	for (int i = 0; i < bench->rep_iter; i++) {
 		time_measurement_t start;
 		time_measurement_t end;
@@ -146,27 +172,53 @@ bool run_transition(const char* prefix, ubench_config_t *bench, time_diff_t* res
 		assert(take_time(&end));
 		results[i] = compute_elapsed(&start, &end);
 	}
+	// Now perform the raws benchmark.
+	// First find the transition handle.
+	assert(bench_find_switch(&capa_switch));
+	for (int i = 0; i < bench->rep_iter; i++) {
+		time_measurement_t start;
+		time_measurement_t end;
+		assert(take_time(&start));
+		for (int j = 0; j < bench->nb_iterations; j++) {
+			// A raw syscall.
+			asm volatile(
+					"movq %0, %%rdi\n\t"
+					"movq %1, %%rax\n\t"
+					"vmcall\n\t"
+					:
+					: "rm" (capa_switch), "rm" ((usize)TYCHE_SWITCH)
+					: "rax", "rdi", "memory");
+		}
+		assert(take_time(&end));
+		raws[i] = compute_elapsed(&start, &end);
+	}
 	// Clean up the domain.
 	assert(sdk_delete_domain(&domain) == SUCCESS);
 	return true;
 }
 
-void display_transition(const char* prefix, ubench_config_t* bench, time_diff_t *results) {
-	assert(prefix != NULL && results != NULL);
+void display_transition(
+		const char* prefix,
+		ubench_config_t* bench,
+		time_diff_t *results,
+		time_diff_t *raws) {
+	assert(prefix != NULL && results != NULL && raws != NULL);
 	// Print the header.
-	printf("Transition: Repeated %ld times %ld calls\n", bench->rep_iter, bench->nb_iterations);
+	printf("Transition %s: Repeated %ld times %ld calls\n", prefix, bench->rep_iter, bench->nb_iterations);
 	char buf1[COL_WIDTH] = {0};
 	char buf2[COL_WIDTH] = {0};
 	char buf3[COL_WIDTH] = {0};
-	sprintf(buf2, "%ld calls (%s)", bench->nb_iterations, TIME_MEASUREMENT_UNIT);
-	sprintf(buf3, "per transition (%s)", TIME_MEASUREMENT_UNIT);
-	print_line(prefix, buf2, buf3);
+	sprintf(buf1, "%ld sdkcalls/rawcalls (%s)", bench->nb_iterations, TIME_MEASUREMENT_UNIT);
+	sprintf(buf2, "per sdk-transition (%s)", TIME_MEASUREMENT_UNIT);
+	sprintf(buf3, "per raw-transition (%s)", TIME_MEASUREMENT_UNIT);
+	print_line(buf1, buf2, buf3);
 	
 	for (int i = 0; i < bench->rep_iter; i++) {
 		double estimate = (results[i]) / (2.0 * ((double)bench->nb_iterations));
-		sprintf(buf1, "iter %d", i);
-		sprintf(buf2, "%.3f", results[i]);
-		sprintf(buf3, "%.3f", estimate);
+		double estimate2 = (raws[i]) / (2.0 * ((double)bench->nb_iterations));
+		sprintf(buf1, "%.3f/%.3f", results[i], raws[i]);
+		sprintf(buf2, "%.3f", estimate);
+		sprintf(buf3, "%.3f", estimate2);
 		print_line(buf1, buf2, buf3);
 	}
 	printf("\n");
