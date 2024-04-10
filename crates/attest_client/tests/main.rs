@@ -1,5 +1,5 @@
 use attest_client::deserialize;
-use capa_engine::{permission, AccessRights, CapaEngine, MEMOPS_ALL};
+use capa_engine::{permission, AccessRights, CapaEngine, MemOps, MEMOPS_ALL};
 
 /// Snapshot testing
 ///
@@ -69,7 +69,7 @@ fn scenario_1() {
     // Send some of the regions
     engine.send(d0, r1, d1).unwrap();
     engine
-        .send_with_hash(d0, r2, d1, Some(&[0xfe; 32]))
+        .send_with_flags(d0, r2, d1, Some(MemOps::HASH), Some([0xfe; 32]))
         .unwrap();
     engine.send(d0, r3, d2).unwrap();
     engine.send(d0, r4, d2).unwrap();

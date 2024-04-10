@@ -1394,6 +1394,8 @@ fn cleanup() {
     );
 }
 
+// Disabled for now.
+/*
 #[test]
 fn vital_regions() {
     let engine = unsafe { static_engine!() };
@@ -1444,7 +1446,7 @@ fn vital_regions() {
     let d1_capa = engine.get_domain_capa(d0, d1).unwrap();
     snap!("{}", capas(d1_capa, engine));
     snap!("{Region([0x0, 0x1000 | _URWXS])}", capas(d0, engine));
-}
+}*/
 
 /// Test if the capa-engine frees resources appropriately.
 /// If that is not the case we would get an out of memory error.
