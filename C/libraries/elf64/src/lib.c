@@ -50,7 +50,7 @@ size_t read_elf64_sections(elf_parser_t* parser, Elf64_Ehdr eh, Elf64_Shdr** sec
 {
   TEST(sections!=NULL);
   TEST(eh.e_shnum > 0);
-  *sections = calloc(sizeof(Elf64_Shdr), eh.e_shnum);
+  *sections = calloc(eh.e_shnum, sizeof(Elf64_Shdr));
   TEST(*sections != NULL);
   TEST(elf_seek(parser, eh.e_shoff) == eh.e_shoff);
   for (int i = 0; i < eh.e_shnum; i++) {
@@ -70,7 +70,7 @@ size_t read_elf64_segments(
 {
   TEST(segments != NULL);
   TEST(eh.e_phnum > 0);
-  *segments = calloc(sizeof(Elf64_Phdr), eh.e_phnum);
+  *segments = calloc(eh.e_phnum, sizeof(Elf64_Phdr));
   TEST(*segments != NULL);
   TEST(elf_seek(parser, eh.e_phoff) == eh.e_phoff);
   TEST(sizeof(Elf64_Phdr) == eh.e_phentsize);
