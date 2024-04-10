@@ -12,7 +12,7 @@
 
 static const domain_size_t default_min_size = S_8k;
 static const domain_size_t default_max_size = S_10M;
-static const size_t default_nb_iterations = 10;
+static const size_t default_nb_iterations = 100;
 static const size_t default_rep_iter = 1;
 
 /// The names for the benchmarks sizes.

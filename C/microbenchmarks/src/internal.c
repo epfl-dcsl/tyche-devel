@@ -172,6 +172,10 @@ bool run_transition(
 		assert(take_time(&end));
 		results[i] = compute_elapsed(&start, &end);
 	}
+
+#ifdef RUN_WITH_KVM
+  printf("RAW SEEMS UNSTABLE WITH KVM\n. DISABLED\n");
+#else
 	// Now perform the raws benchmark.
 	// First find the transition handle.
 	assert(bench_find_switch(&capa_switch));
@@ -192,6 +196,7 @@ bool run_transition(
 		assert(take_time(&end));
 		raws[i] = compute_elapsed(&start, &end);
 	}
+#endif
 	// Clean up the domain.
 	assert(sdk_delete_domain(&domain) == SUCCESS);
 	return true;
@@ -218,7 +223,11 @@ void display_transition(
 		double estimate2 = (raws[i]) / (2.0 * ((double)bench->nb_iterations));
 		sprintf(buf1, "%.3f/%.3f", results[i], raws[i]);
 		sprintf(buf2, "%.3f", estimate);
+#ifdef RUN_WITH_KVM
+    sprintf(buf3, "NA");
+#else
 		sprintf(buf3, "%.3f", estimate2);
+#endif
 		print_line(buf1, buf2, buf3);
 	}
 	printf("\n");
