@@ -77,7 +77,7 @@ fn handle_exit(
 ) -> Result<HandlerResult, TycheError> {
     match reason {
         VmxExitReason::Vmcall => {
-            let (vmcall, arg_1, arg_2, arg_3, arg_4, arg_5, _arg_6) = {
+            let (vmcall, arg_1, arg_2, arg_3, arg_4, arg_5, arg_6) = {
                 let mut context = monitor::get_context(*domain, cpuid());
                 let vmcall = context.get(VmcsField::GuestRax, None)?;
                 let arg_1 = context.get(VmcsField::GuestRdi, None)?;
@@ -283,7 +283,6 @@ fn handle_exit(
                 }
                 calls::SEND_REGION => {
                     log::trace!("Send aliased on core {}", cpuid());
-                    let with_hash = false; // TODO: get this argument from the guest
                     // Send a region capa and adds an alias to it.
                     monitor::do_send_region(
                         vs,
@@ -293,7 +292,7 @@ fn handle_exit(
                         arg_3,
                         arg_4 != 0,
                         arg_5,
-                        with_hash,
+                        arg_6,
                     )
                     .expect("Failed send aliased");
                     let mut context = monitor::get_context(*domain, cpuid());

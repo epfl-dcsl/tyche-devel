@@ -8,7 +8,7 @@ use capa_engine::config::{NB_CORES, NB_DOMAINS, NB_REMAP_REGIONS};
 use capa_engine::utils::BitmapIterator;
 use capa_engine::{
     permission, AccessRights, Bitmaps, Buffer, CapaEngine, CapaError, CapaInfo, Domain, GenArena,
-    Handle, LocalCapa, MemOps, NextCapaToken, Remapper, MEMOPS_ALL,
+    Handle, LocalCapa, MemOps, NextCapaToken, Remapper, MEMOPS_ALL, MEMOPS_EXTRAS,
 };
 use mmu::eptmapper::EPT_ROOT_FLAGS;
 use mmu::{EptMapper, FrameAllocator, IoPtFlag, IoPtMapper};
@@ -484,6 +484,10 @@ pub fn do_segment_region(
     prot: usize,
 ) -> Result<(LocalCapa, LocalCapa), CapaError> {
     let prot = MemOps::from_usize(prot)?;
+    if prot.intersects(MEMOPS_EXTRAS) {
+        log::error!("Invalid prots for segment region {:?}", prot);
+        return Err(CapaError::InvalidOperation);
+    }
     let mut engine = lock_engine(vmx_state, current);
     let access = AccessRights {
         start,
@@ -526,9 +530,14 @@ pub fn do_send_region(
     alias: usize,
     is_repeat: bool,
     size: usize,
-    with_hash: bool,
+    extra_rights: usize,
 ) -> Result<(), CapaError> {
     let mut engine = lock_engine(vmx_state, current);
+    let flags = MemOps::from_usize(extra_rights)?;
+    if !flags.is_empty() && !flags.is_only_hcv() {
+        log::error!("Invalid send region flags received: {:?}", flags);
+        return Err(CapaError::InvalidPermissions);
+    }
     // Get the capa first.
     let region_info = engine
         .get_region_capa(*current, capa)?
@@ -559,17 +568,23 @@ pub fn do_send_region(
         }
     }
 
-    if with_hash {
+    if !flags.is_empty() {
         // NOTE: we are missing some checks here, not all memory covered by regions can be accessed
         // in the current design.
-        let data = unsafe {
-            core::slice::from_raw_parts(
-                region_info.start as *const u8,
-                region_info.end - region_info.start,
-            )
+        let hash = if flags.contains(MemOps::HASH) {
+            let data = unsafe {
+                core::slice::from_raw_parts(
+                    region_info.start as *const u8,
+                    region_info.end - region_info.start,
+                )
+            };
+            let hash = hash_region(data);
+            Some(hash)
+        } else {
+            None
         };
-        let hash = hash_region(data);
-        let _ = engine.send_with_hash(*current, capa, to, Some(&hash));
+        let opt_flags = if flags.is_empty() { None } else { Some(flags) };
+        let _ = engine.send_with_flags(*current, capa, to, opt_flags, hash);
     } else {
         let _ = engine.send(*current, capa, to)?;
     }

@@ -345,6 +345,7 @@ impl ModifiedELF {
     pub fn generate_page_tables(
         &mut self,
         security: Security,
+        flags: u32,
         map_page_tables: &Option<MappingPageTables>,
         riscv_enabled: bool,
     ) {
@@ -357,7 +358,7 @@ impl ModifiedELF {
         self.append_data_segment(
             Some(cr3 as u64),
             tpe as u32,
-            object::elf::PF_R | object::elf::PF_W,
+            flags,
             nb_pages * PAGE_SIZE,
             &pts,
         );

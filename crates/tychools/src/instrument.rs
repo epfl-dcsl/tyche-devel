@@ -361,6 +361,16 @@ pub fn instrument_binary(manifest: &Manifest, riscv_enabled: bool) {
     };
 
     // Complex case.
+    let mut default_pts_flags = object::elf::PF_R | object::elf::PF_W;
+    if manifest.cleanup != CleanupConfig::NoCleanup {
+        default_pts_flags |= TychePF::PfC as u32;
+    }
+    if manifest.hash != HashingConfig::NoHash {
+        default_pts_flags |= TychePF::PfH as u32;
+    }
+    if manifest.vital == VitalConfig::AllVital {
+        default_pts_flags |= TychePF::PfV as u32;
+    }
     let main_conf = if let (Some(ref mut user), Some(kern)) = (&mut user_elf, &mut kern_elf) {
         let user = user.as_mut();
         let kern = kern.as_mut();
@@ -370,17 +380,32 @@ pub fn instrument_binary(manifest: &Manifest, riscv_enabled: bool) {
         kern.set_attestation_hash();
         user.merge(kern);
         if manifest.generate_pts {
-            user.generate_page_tables(manifest.security, &manifest.map_page_tables, riscv_enabled);
+            user.generate_page_tables(
+                manifest.security,
+                default_pts_flags,
+                &manifest.map_page_tables,
+                riscv_enabled,
+            );
         }
         user
     } else if let Some(ref mut user) = &mut user_elf {
         if manifest.generate_pts {
-            user.generate_page_tables(manifest.security, &manifest.map_page_tables, riscv_enabled);
+            user.generate_page_tables(
+                manifest.security,
+                default_pts_flags,
+                &manifest.map_page_tables,
+                riscv_enabled,
+            );
         }
         user
     } else if let Some(ref mut kern) = &mut kern_elf {
         if manifest.generate_pts {
-            kern.generate_page_tables(manifest.security, &manifest.map_page_tables, riscv_enabled);
+            kern.generate_page_tables(
+                manifest.security,
+                default_pts_flags,
+                &manifest.map_page_tables,
+                riscv_enabled,
+            );
         }
         kern.set_attestation_hash();
         kern

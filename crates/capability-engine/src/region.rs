@@ -22,8 +22,9 @@ bitflags! {
 pub const MEMOPS_ALL: MemOps = MemOps::READ
     .union(MemOps::WRITE)
     .union(MemOps::EXEC)
-    .union(MemOps::SUPER)
-    .union(MemOps::HASH);
+    .union(MemOps::SUPER);
+
+pub const MEMOPS_EXTRAS: MemOps = MemOps::HASH.union(MemOps::CLEANUP).union(MemOps::VITAL);
 
 impl MemOps {
     pub fn from_usize(val: usize) -> Result<Self, CapaError> {
@@ -47,6 +48,9 @@ impl MemOps {
             return false;
         }
         return true;
+    }
+    pub fn is_only_hcv(&self) -> bool {
+        !self.intersects(MEMOPS_ALL)
     }
 
     pub fn as_counters(&self) -> (usize, usize, usize, usize) {

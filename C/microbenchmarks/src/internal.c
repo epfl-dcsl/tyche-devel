@@ -174,7 +174,7 @@ bool run_transition(
 	}
 
 #ifdef RUN_WITH_KVM
-  printf("RAW SEEMS UNSTABLE WITH KVM\n. DISABLED\n");
+  printf("RAW SEEMS UNSTABLE WITH KVM: DISABLED\n");
 #else
 	// Now perform the raws benchmark.
 	// First find the transition handle.

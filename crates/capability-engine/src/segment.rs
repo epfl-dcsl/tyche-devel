@@ -7,7 +7,9 @@ use crate::debug::debug_check;
 use crate::domain::{activate_region, deactivate_region, insert_capa, DomainPool};
 use crate::region::TrackerPool;
 use crate::update::{Update, UpdateBuffer};
-use crate::{domain, AccessRights, CapaError, Domain, GenArena, Handle, LocalCapa, MemOps};
+use crate::{
+    domain, AccessRights, CapaError, Domain, GenArena, Handle, LocalCapa, MemOps, MEMOPS_ALL,
+};
 
 pub type RegionHash = [u8; 32];
 pub(crate) type RegionPool = GenArena<RegionCapa, NB_REGIONS>;
@@ -80,6 +82,14 @@ impl RegionCapa {
 
     pub fn get_access_rights(&self) -> AccessRights {
         self.access
+    }
+
+    pub fn add_hcv(&mut self, flags: MemOps) -> bool {
+        if flags.intersects(MEMOPS_ALL) {
+            return false;
+        }
+        self.access.ops = self.access.ops.union(flags);
+        return true;
     }
 
     /// Returns true if the region starts before the other
@@ -254,7 +264,7 @@ pub(crate) fn revoke(
     updates: &mut UpdateBuffer,
 ) -> Result<(), CapaError> {
     let region = &regions[handle];
-    let region_owner = region.domain;
+    //let region_owner = region.domain;
     let region_access = region.access;
     let parent = match region.kind {
         RegionKind::Root => panic!("Trying to revoke a root region"),
@@ -292,9 +302,12 @@ pub(crate) fn revoke(
     // Apply side effetcs, if any
     if region_access.ops.contains(MemOps::VITAL) {
         // This was a vital region, we need to revoke the current domain
-        domain::revoke(region_owner, regions, domains, tracker, updates)?;
+        //TODO(aghosn): disabled for now
+        //domain::revoke(region_owner, regions, domains, tracker, updates)?;
     }
-    if region_access.ops.contains(MemOps::CLEANUP) && region_access.ops.contains(MemOps::WRITE) {
+    if region_access.ops.contains(MemOps::CLEANUP)
+    /*&& region_access.ops.contains(MemOps::WRITE)*/
+    {
         // We need to zero-out this region, emmit an update
         updates.push(Update::Cleanup {
             start: region_access.start,

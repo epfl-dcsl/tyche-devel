@@ -25,6 +25,7 @@ pub use domain::{permission, Bitmaps, Domain, LocalCapa, NextCapaToken};
 pub use gen_arena::{GenArena, Handle};
 pub use region::{
     AccessRights, MemOps, MemoryPermission, Region, RegionIterator, RegionTracker, MEMOPS_ALL,
+    MEMOPS_EXTRAS,
 };
 use region::{PermissionIterator, TrackerPool, EMPTY_REGION};
 pub use remapper::Remapper;
@@ -278,15 +279,16 @@ impl CapaEngine {
         capa: LocalCapa,
         to: LocalCapa,
     ) -> Result<LocalCapa, CapaError> {
-        self.send_with_hash(domain, capa, to, None)
+        self.send_with_flags(domain, capa, to, None, None)
     }
 
-    pub fn send_with_hash(
+    pub fn send_with_flags(
         &mut self,
         domain: Handle<Domain>,
         capa: LocalCapa,
         to: LocalCapa,
-        hash: Option<&RegionHash>,
+        flags: Option<MemOps>,
+        hash: Option<RegionHash>,
     ) -> Result<LocalCapa, CapaError> {
         // Enforce permissions
         domain::has_config(
@@ -319,9 +321,19 @@ impl CapaEngine {
                 )?;
 
                 // Set or unset the hash when sending the region
-                match hash {
-                    Some(hash) => self.regions[region].set_hash(hash),
-                    None => self.regions[region].reset_hash(),
+                if let Some(flags) = flags {
+                    if !self.regions[region].add_hcv(flags) {
+                        log::error!("Invalid hcvs! {:?}", flags);
+                        return Err(CapaError::InvalidPermissions);
+                    }
+                    if flags.contains(MemOps::HASH) && hash.is_none() {
+                        log::error!("Missing hash");
+                        return Err(CapaError::InvalidValue);
+                    }
+                    match hash {
+                        Some(hash) => self.regions[region].set_hash(&hash),
+                        None => self.regions[region].reset_hash(),
+                    }
                 }
             }
             Capa::Management(domain) => {
