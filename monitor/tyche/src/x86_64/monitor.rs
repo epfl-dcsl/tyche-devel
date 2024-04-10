@@ -885,7 +885,7 @@ fn apply_updates(engine: &mut MutexGuard<CapaEngine>) {
             }
             capa_engine::Update::Cleanup { start, end } => {
                 let size = end.checked_sub(start).unwrap();
-                log::info!("Cleaning up region [0x{:x}, 0x{:x}]", start, end);
+                log::trace!("Cleaning up region [0x{:x}, 0x{:x}]", start, end);
 
                 // WARNING: for now we do not check that the region points to valid memory!
                 // In particular, the current root region contains more than valid ram, and also

@@ -164,7 +164,7 @@ runbench: $(CODE_APP) $(HDRS_APP) sandboxes enclaves carve transitions
 
 install_disk: runbench 
 	mkdir -p $(DISK_PATH)/
-	cp -rt $(DISK_PATH)/ runbench bin
+	cp -rt $(DISK_PATH)/ runbench bin config/Makefile
 
 .PHONY: clean
 

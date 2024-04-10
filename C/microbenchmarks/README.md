@@ -26,138 +26,121 @@ This benchmarks measures
 
 The benchmark binary uses environment variables for configuration.
 
-### Boolean
+`Boolean` accept `true`, `True`, `TRUE`, and `1` to enable them.
+To disable them `false`, `False`, `FALSE`, and `0`
 
-Boolean values accept `true`, `True`, `TRUE`, and `1`
-and `false`, `False`, `FALSE`, and `0`.
+`Loop Bounds` arguments must be valid non-zero positive numbers.
+They are parsed with `strtoul`.
 
-We use booleans to select benchmarks to run and workloads.
-Multiple benchmarks and multiple workloads can be selected at once.
-
-The benchmarks are:
-
-`RUN_CREATE_DELETE`: the create/delete benchmark.
-
-`RUN_TRANSITION`: the transition benchmark.
-
-`RUN_ATTESTATION`: the attestation benchmark.
-
-The workloads are:
-
-`RUN_ENCLAVES`: run selected benchs with enclaves (carve/hash/cleanup).
-
-`RUN_SANDBOXES`: run selected benchs with sandboxes (no carve/no hash/no cleanup)
-
-`RUN_CARVES`: run selected benchs with carves (carve/no hash/no cleanup)
+`Domain Sizes` arguments must be in `[8k, 12k, 128k, 256k, 512k, 1M, 10M]`.
 
 
-### Domain size argument.
+## Workloads
 
-Used for create/delete and attestation benchmarks.
-A name that solely identifies the size of the dom.
-The valid names are defined in src/main.c:
+The available `Boolean` environment parameters are:
 
 ```
-const char* domain_size_names[7] = {
-	"8k",
-	"12k",
-	"128k",
-	"256k",
-	"512k",
-	"1M",
-	"10M",
-};
+CREATION
+TRANSITION
+ATTESTATION
+```
+
+## Benchmarks
+
+The available `Boolean` environment parameters are:
 
 ```
-`RUN_MIN`: size to start from (inclusive).
-`RUN_MAX`: size to finish at (incusive).
+ENCLAVES
+SANDBOXES
+CARVES
+```
 
-We check the invariant `RUN_MIN` <= `RUN_MAX`
+## Configuration parameters
 
+The algorithm ran by the selected benchmarks is influenced by parameters (see algorithms below).
 
-### Number of iterations
+The `Domain Sizes` parameters are:
 
-`RUN_NB_ITER`: 
+```
+MIN_SIZE
+MAX_SIZE
+```
+`MIN_SIZE` must be smaller or equal to `MAX_SIZE`.
+These two parameters select the range of domain sizes used by the relevant benchmark (creation and attestation).
+The `Loop Bounds` parameters are:
 
-Change the default number of iterations.
-Must be a valid number parsed with `strtoul`
+```
+INNER
+OUTER
+```
 
-### Repetition per iterations
+# Algorithms
 
-`RUN_REP_PER_ITER`:
+All benchmarks run on all workloads selected:
 
-In case we want to run the same benchmark many times.
+```
+/// Workloads are [ENCLAVES, SANDBOXES, CARVES]
+/// Benchmarks are [CREATE, TRANSITION, ATTESTATION]
+  for Bench <- Selected Benchmarks
+    for Workload <- Selected Workloads
+      Bench(Workload)
+```
 
-### Defaults 
-
-We have default values defined in `src/main.c` for all environment variables.
-
-# Benchmarks algorithms 
-
-## Create/ Delete
+## Create/Delete
 
 The main logic loop is as follows:
 
 ```
 // For all the selected sizes such that:
-// RUN_MIN and RUN_MAX in [8k, 12k, 128k, 256k, 512k, 1M, 10M]
-// with RUN_MIN <= RUN_MAX
+// MIN_SIZE and MAX_SIZE in [8k, 12k, 128k, 256k, 512k, 1M, 10M]
+// with MIN_SIZE <= MAX_SIZE
 
 // Creation
-for s <- [RUN_MIN, RUN_MAX]:
-	create_res[s] = measure {
-		for i <- [0, RUN_NB_ITER[:
-			create(s)
-		}
+for s <- [MIN_SIZE, MAX_SIZE]:
+  for i <- [0, OUTER[:
+    measure = {
+      for j <- [0, INNER[:
+        Create(S)
+    };
+    display(measure/INNER);
 
-//Deletion
-for s <- [RUN_MIN, RUN_MAX]:
-	delete_res[s] = measure {
-		for i <- [0, RUN_NB_ITER[:
-			delete(s)
-		}
-
-// source code in src/internal.c
 ```
 
-It can run for `enclaves`, `carves`, and `sandboxes`.
 
 ## Transitions
 
-The main logic loop is as follows:
+This benchmark reports transition numbers with the selected sdk and with raw vmcalls.
+:warning: Raw vmcalls seem to pose a problem to KVM and got disabled.
 
 ```
-/// For PATH in [bin/enclaves, bin/sandboxes, bin/carves]
-
-for s <- [0, RUN_REP_ITER[:
-	res[s] = measure {
-		for i <- [0, RUN_NB_ITER[:
-			call(PATH/transition)
-	}
-	
-// source code in src/internal.c
+/// 
+for s <- [0, OUTER[:
+  sdk_measure = {
+    for i <- [0, INNER[:
+      sdk_call(WORKLOAD/transition)
+  };
+  raw_measure = {
+    for i <- [0, INNER[:
+      raw_call(WORKLOAD/transition)
+  };
+  display(sdk_measure/INNER, raw_measure/INNER)
+  
 ```
-It can run for `enclaves`, `carves`, and `sandboxes`.
 
 ## Attestation
 
-The main logic loop is as follows
 
 ```
-for d <- [RUN_MIN, RUN_MAX]:
-	create(d)
+for d <- [MIN_SIZE, MAX_SIZE]:
+  create(d)
 
-for i <- [0, RUN_REP_ITER[:
-	results[i] = measure {
-		for j <- [0, RUN_NB_ITER[:
-			sizes[i] = attest(all)
-	}
-
-// Reports (results[i], results[i]/RUN_NB_ITER, sizes[i])
-// source code in src/internal.c
+for i <- [0, OUTER[:
+  measure = {
+    for j <- [0, INNER[:
+      sizes[i] = attest()
+  };
+  display(measure.time/INNER, measure.size of attestation)
 ```
-
-It can run for `enclaves`, `carves`, and `sandboxes`.
 
 # Compilation
 

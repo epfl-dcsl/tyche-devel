@@ -1,0 +1,37 @@
+all:
+
+transition_enclaves:
+	sudo ENCLAVES=1 TRANSITION=1 INNER=5000 OUTER=10 ./runbench
+
+transition_sandboxes:
+	sudo SANDBOXES=1 TRANSITION=1 INNER=5000 OUTER=10 ./runbench
+
+transition_carves:
+	sudo CARVES=1 TRANSITION=1 INNER=5000 OUTER=10 ./runbench
+
+transition_all:
+	sudo ENCLAVES=1 SANDBOXES=1 CARVES=1 TRANSITION=1 INNER=5000 OUTER=10 ./runbench
+
+create_enclaves:
+	sudo ENCLAVES=1 CREATION=1 INNER=10 OUTER=10 MIN_SIZE=8k MAX_SIZE=10M ./runbench
+
+create_sandboxes:
+	sudo SANDBOXES=1 CREATION=1 INNER=10 OUTER=10 MIN_SIZE=8k MAX_SIZE=10M./runbench
+
+create_carves:
+	sudo CARVES=1 CREATION=1 INNER=10 OUTER=10 MIN_SIZE=8k MAX_SIZE=10M ./runbench
+
+create_all:
+	sudo CREATION=1 ENCLAVES=1 SANDBOXES=1 CARVES=1 INNER=10 OUTER=10 MIN_SIZE=8k MAX_SIZE=10M ./runbench 
+
+attestation_enclaves:
+	sudo ENCLAVES=1 INNER=1000 OUTER=10 ATTESTATION=1 MIN_SIZE=8k MAX_SIZE=10M ./runbench
+
+attestation_sandboxes:
+	sudo SANDBOXES=1 INNER=1000 OUTER=10 ATTESTATION=1 MIN_SIZE=8k MAX_SIZE=10M ./runbench
+
+attestation_carves:
+	sudo CARVES=1 INNER=1000 OUTER=10 ATTESTATION=1 MIN_SIZE=8k MAX_SIZE=10M ./runbench
+
+attestation_all:
+	sudo ENCLAVES=1 SANDBOXES=1 CARVES=1 INNER=1000 OUTER=10 ATTESTATION=1 MIN_SIZE=8k MAX_SIZE=10M ./runbench
