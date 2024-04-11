@@ -766,6 +766,7 @@ impl ModifiedELF {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub fn set_attestation_hash(&mut self) {
         for seg in &mut self.segments {
             if ModifiedSegment::is_loadable(seg.program_header.p_type(DENDIAN)) {
@@ -829,6 +830,7 @@ impl ModifiedSegment {
         }
     }
 
+    #[allow(dead_code)]
     pub fn set_mask_flags(&mut self, mask: u32) {
         let fl = self.program_header.p_flags(DENDIAN);
         self.program_header.p_flags = U32Bytes::new(DENDIAN, fl | mask);

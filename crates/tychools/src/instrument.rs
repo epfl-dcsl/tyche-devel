@@ -377,7 +377,7 @@ pub fn instrument_binary(manifest: &Manifest, riscv_enabled: bool) {
         if user.overlap(kern) {
             panic!("The two binaries overlap");
         }
-        kern.set_attestation_hash();
+        //kern.set_attestation_hash();
         user.merge(kern);
         if manifest.generate_pts {
             user.generate_page_tables(
@@ -407,7 +407,7 @@ pub fn instrument_binary(manifest: &Manifest, riscv_enabled: bool) {
                 riscv_enabled,
             );
         }
-        kern.set_attestation_hash();
+        //kern.set_attestation_hash();
         kern
     } else {
         // There is nothing to instrument we are just adding things to the original binary.
