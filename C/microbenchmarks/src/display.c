@@ -26,6 +26,11 @@ void print_line(char** cols, size_t len) {
 
 void display_config(ubench_config_t *bench) {
   assert(bench != NULL);
+#ifdef RUN_WITH_KVM
+    printf("Running with sdk-kvm\n");
+#else
+    printf("Running with sdk-tyche\n");
+#endif
   printf("Selected benchmarks:");
   if (bench->creation) {
     printf(" creation");

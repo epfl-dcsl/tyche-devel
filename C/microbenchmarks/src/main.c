@@ -14,19 +14,20 @@
 #define NB_BENCHMARKS 3
 
 static const domain_size_t default_min_size = S_8k;
-static const domain_size_t default_max_size = S_10M;
+static const domain_size_t default_max_size = S_1M;
 static const size_t defautl_inner = 1;
 static const size_t default_outer = 1;
 
 /// The names for the benchmarks sizes.
-const char* domain_size_names[7] = {
+const char* domain_size_names[S_Max] = {
   "8k",
-  "12k",
+  "16k",
+  "32k",
+  "64k",
   "128k",
   "256k",
   "512k",
   "1M",
-  "10M",
 };
 
 /// The default benchmark configuration.

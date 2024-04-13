@@ -55,7 +55,7 @@ static int parse_size(char* value, domain_size_t* size) {
   if (value == NULL || size == NULL) {
     goto failure;
   }
-  for (int i = S_8k; i <= S_10M; i++) {
+  for (int i = S_8k; i < S_Max; i++) {
     if (strcmp(domain_size_names[i], value) == 0) {
       *size = i;
       return SUCCESS;

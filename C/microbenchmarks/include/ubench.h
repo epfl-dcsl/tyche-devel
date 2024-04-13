@@ -19,21 +19,23 @@
 #define INNER "INNER"
 #define OUTER "OUTER"
 
-// ———————————————————————————— Global variables ———————————————————————————— //
-extern const char* domain_size_names[7];
-
 // ————————————————————————————————— Types —————————————————————————————————— //
 
 /// The available sizes for the benchmarks.
 typedef enum domain_size_t {
   S_8k = 0,
-  S_12k = 1,
-  S_128k = 2,
-  S_256k = 3,
-  S_512k = 4,
-  S_1M = 5,
-  S_10M = 6,
+  S_16k = 1,
+  S_32k = 2,
+  S_64k = 3,
+  S_128k = 4,
+  S_256k = 5,
+  S_512k = 6,
+  S_1M = 7,
+  S_Max = 8,
 } domain_size_t;
+
+/// Names for the domains.
+extern const char* domain_size_names[S_Max];
 
 /// The configuration for the benchmark.
 typedef struct ubench_config_t {

@@ -124,7 +124,9 @@ sandboxes: mock_app mock_dom
 	mkdir -p bin/sandboxes
 	cargo -C $(TYCHOOLS_PATH) install --path . --locked -Z unstable-options
 	tychools instrument -s manifests/sandboxes/8k.json $(TYCHOOLS_ARG)
-	tychools instrument -s manifests/sandboxes/12k.json $(TYCHOOLS_ARG)
+	tychools instrument -s manifests/sandboxes/16k.json $(TYCHOOLS_ARG)
+	tychools instrument -s manifests/sandboxes/32k.json $(TYCHOOLS_ARG)
+	tychools instrument -s manifests/sandboxes/64k.json $(TYCHOOLS_ARG)
 	tychools instrument -s manifests/sandboxes/128k.json $(TYCHOOLS_ARG)
 	tychools instrument -s manifests/sandboxes/256k.json $(TYCHOOLS_ARG)
 	tychools instrument -s manifests/sandboxes/512k.json $(TYCHOOLS_ARG)
@@ -135,7 +137,9 @@ enclaves: mock_app mock_dom
 	mkdir -p bin/enclaves
 	cargo -C $(TYCHOOLS_PATH) install --path . --locked -Z unstable-options
 	tychools instrument -s manifests/enclaves/8k.json $(TYCHOOLS_ARG)
-	tychools instrument -s manifests/enclaves/12k.json $(TYCHOOLS_ARG)
+	tychools instrument -s manifests/enclaves/16k.json $(TYCHOOLS_ARG)
+	tychools instrument -s manifests/enclaves/32k.json $(TYCHOOLS_ARG)
+	tychools instrument -s manifests/enclaves/64k.json $(TYCHOOLS_ARG)
 	tychools instrument -s manifests/enclaves/128k.json $(TYCHOOLS_ARG)
 	tychools instrument -s manifests/enclaves/256k.json $(TYCHOOLS_ARG)
 	tychools instrument -s manifests/enclaves/512k.json $(TYCHOOLS_ARG)
@@ -146,7 +150,9 @@ carve: mock_app mock_dom
 	mkdir -p bin/carve
 	cargo -C $(TYCHOOLS_PATH) install --path . --locked -Z unstable-options
 	tychools instrument -s manifests/carve/8k.json $(TYCHOOLS_ARG)
-	tychools instrument -s manifests/carve/12k.json $(TYCHOOLS_ARG)
+	tychools instrument -s manifests/carve/16k.json $(TYCHOOLS_ARG)
+	tychools instrument -s manifests/carve/32k.json $(TYCHOOLS_ARG)
+	tychools instrument -s manifests/carve/64k.json $(TYCHOOLS_ARG)
 	tychools instrument -s manifests/carve/128k.json $(TYCHOOLS_ARG)
 	tychools instrument -s manifests/carve/256k.json $(TYCHOOLS_ARG)
 	tychools instrument -s manifests/carve/512k.json $(TYCHOOLS_ARG)
