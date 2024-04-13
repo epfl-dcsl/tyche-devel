@@ -7,7 +7,7 @@
     "ops":[
       {
         "AddSegment":{
-          "size": 253952,
+          "size": 995328,
           "tpe":"KernelConfidential",
           "write":true,"clean":true,"vital":true,"hash":true,"exec":false
         }
