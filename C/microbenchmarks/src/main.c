@@ -11,7 +11,7 @@
 // ———————————————————————————————— Globals ————————————————————————————————— //
 
 #define NB_WORKLOADS 3
-#define NB_BENCHMARKS 3
+#define NB_BENCHMARKS 4
 
 static const domain_size_t default_min_size = S_8k;
 static const domain_size_t default_max_size = S_1M;
@@ -78,6 +78,7 @@ int main(void) {
     run_creation,
     run_transition,
     run_attestation,
+    run_hwcomm,
   };
 
   // Parse the benchmark configuration.
@@ -96,11 +97,16 @@ int main(void) {
   benchmarks[0] = bench.creation;
   benchmarks[1] = bench.transition;
   benchmarks[2] = bench.attestation;
+  benchmarks[3] = bench.hwcomm;
 
   // Run the benchmarks.
   for (int i = 0; i < NB_BENCHMARKS; i++) {
     if (benchmarks[i] == false) {
       continue;
+    }
+    // Special case for hardware measurement.
+    if (run_bench[i] == run_hwcomm) {
+      run_bench[i](NULL, &bench);
     }
     for (int j = 0; j < NB_WORKLOADS; j++) {
       if (workloads[j] == false) {

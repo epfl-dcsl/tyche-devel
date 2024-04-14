@@ -4,11 +4,12 @@
 #include <stddef.h>
 
 // ————————————————————————— Environment Variables —————————————————————————— //
-#define NB_ENV_VARS (10)
+#define NB_ENV_VARS (11)
 /// Benchmarks
 #define CREATION "CREATION"
 #define TRANSITION "TRANSITION"
 #define ATTESTATION "ATTESTATION"
+#define HWCOMM "HWCOMM"
 /// Workloads
 #define ENCLAVES "ENCLAVES"
 #define SANDBOXES "SANDBOXES"
@@ -45,6 +46,8 @@ typedef struct ubench_config_t {
   bool transition;
   /// Run attestation ubench
   bool attestation;
+  /// Run the hardware communication benchmark.
+  bool hwcomm;
   /// Run enclaves
   bool enclaves;
   /// Run sandboxes

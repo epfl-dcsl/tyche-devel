@@ -392,6 +392,11 @@ fn handle_exit(
                     vs.vcpu.next_instruction()?;
                     Ok(HandlerResult::Resume)
                 }
+                calls::TEST_CALL => {
+                    // Do nothing.
+                    vs.vcpu.next_instruction()?;
+                    Ok(HandlerResult::Resume)
+                }
                 calls::EXIT => {
                     log::info!("MonCall: exit");
                     log::info!("Vcpu: {:x?}", vs.vcpu);

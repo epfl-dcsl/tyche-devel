@@ -22,6 +22,11 @@ This benchmarks measures
 (1) the time to create an attestation when domains are loaded.
 (2) the number of bytes in the attestation.
 
+`hardware communication`:
+
+Measures the cost to call the monitor and come back.
+Runs without any workload.
+
 # Environment variables
 
 The benchmark binary uses environment variables for configuration.
@@ -35,7 +40,7 @@ They are parsed with `strtoul`.
 `Domain Sizes` arguments must be in `[8k, 12k, 128k, 256k, 512k, 1M, 10M]`.
 
 
-## Workloads
+## Benchmarks 
 
 The available `Boolean` environment parameters are:
 
@@ -43,9 +48,10 @@ The available `Boolean` environment parameters are:
 CREATION
 TRANSITION
 ATTESTATION
+HWCOMM
 ```
 
-## Benchmarks
+## Workloads 
 
 The available `Boolean` environment parameters are:
 
@@ -140,6 +146,18 @@ for i <- [0, OUTER[:
       sizes[i] = attest()
   };
   display(measure.time/INNER, measure.size of attestation)
+```
+
+
+## Hardware Communication
+
+```
+for i <- [0, OUTER[:
+  measure = {
+    for j <- [0, INNER[:
+      call_monitor()
+  };
+  display(i, measure/INNER)
 ```
 
 # Compilation

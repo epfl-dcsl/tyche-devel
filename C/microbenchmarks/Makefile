@@ -9,6 +9,7 @@ ifeq ($(ARCH), x86)
 else ifeq ($(ARCH), riscv)
 	GCC = riscv64-unknown-linux-gnu-gcc
 	KVM = 0
+	ARCH_FLAGS=-DCONFIG_RISCV
 endif
 
 ifeq ($(KVM), 1)
@@ -118,7 +119,7 @@ mock_dom: $(CODE_DOM)
 
 # Transition domain
 trans_dom: $(CODE_TRANS) $(HDRS_TRANS)
-	$(GCC) -DTYCHE_USER_SPACE=2 -g $(COMMON_INCLUDES) -nostdlib -static -o $@ $(CODE_TRANS)
+	$(GCC) $(ARCH_FLAGS) -DTYCHE_USER_SPACE=2 -g $(COMMON_INCLUDES) -nostdlib -static -o $@ $(CODE_TRANS)
 
 sandboxes: mock_app mock_dom
 	mkdir -p bin/sandboxes
@@ -166,7 +167,7 @@ transitions: mock_app trans_dom
 	tychools instrument -s manifests/carve/transition.json $(TYCHOOLS_ARG)
 
 runbench: $(CODE_APP) $(HDRS_APP) sandboxes enclaves carve transitions 
-	$(GCC) -DTYCHE_USER_SPACE=1 $(LOADER_BACKEND) -g $(APP_INCLUDES) -static -o $@ $(CODE_APP)
+	$(GCC) $(ARCH_FLAGS) -DTYCHE_USER_SPACE=1 $(LOADER_BACKEND) -g $(APP_INCLUDES) -static -o $@ $(CODE_APP)
 
 install_disk: runbench 
 	mkdir -p $(DISK_PATH)/

@@ -14,6 +14,11 @@ transition_carves:
 transition_all:
 	sudo ENCLAVES=1 SANDBOXES=1 CARVES=1 TRANSITION=1 INNER=5000 OUTER=10 ./runbench
 
+# ———————————— Special benchmark to measure overhead of hardware ————————————— #
+
+hardware_communication:
+	sudo INNER=5000 OUTER=10 HWCOMM=1 ./runbench
+
 # ———————————————————————————— Create Benchmarks ————————————————————————————— #
 
 create_enclaves:

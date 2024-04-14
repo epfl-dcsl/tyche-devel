@@ -85,6 +85,7 @@ failure:
 DECLARE_PARSER(creation, bool, parse_bool);
 DECLARE_PARSER(transition, bool, parse_bool);
 DECLARE_PARSER(attestation, bool, parse_bool);
+DECLARE_PARSER(hwcomm, bool, parse_bool);
 /// Workloads: Boolean parsers.
 DECLARE_PARSER(enclaves, bool, parse_bool);
 DECLARE_PARSER(sandboxes, bool, parse_bool);
@@ -101,6 +102,7 @@ const char* env_variables[NB_ENV_VARS] = {
   CREATION,
   TRANSITION,
   ATTESTATION,
+  HWCOMM,
   ENCLAVES,
   SANDBOXES,
   CARVES,
@@ -117,6 +119,7 @@ env_parser_fn parsers[NB_ENV_VARS] = {
   parse_creation_f,
   parse_transition_f,
   parse_attestation_f,
+  parse_hwcomm_f,
   parse_enclaves_f,
   parse_sandboxes_f,
   parse_carves_f,

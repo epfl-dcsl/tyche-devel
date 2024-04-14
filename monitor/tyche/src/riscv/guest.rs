@@ -358,6 +358,10 @@ pub fn misaligned_load_handler(reg_state: &mut RegisterState) {
                 //monitor::do_debug();
                 reg_state.a0 = 0x0;
             }
+            calls::TEST_CALL => {
+                // Do nothing.
+                reg_state.a0 = 0x0;
+            }
             calls::CONFIGURE => {
                 log::debug!("Configure");
                 if let Ok(bitmap) = Bitmaps::from_usize(arg_1) {
