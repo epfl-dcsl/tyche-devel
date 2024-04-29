@@ -8,6 +8,7 @@ pub mod attestation_domain;
 mod calls;
 pub mod debug;
 pub mod error;
+pub mod monitor;
 mod rcframe;
 pub mod statics;
 mod sync;

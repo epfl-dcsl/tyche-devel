@@ -23,8 +23,9 @@ pub const READ_ALL_GP: usize = 16;
 pub const WRITE_ALL_GP: usize = 17;
 pub const WRITE_FIELDS: usize = 18;
 pub const SELF_CONFIG: usize = 19;
-pub const ENCLAVE_ATTESTATION: usize = 20;
+// TODO: remove deadcode at some point
+pub const _ENCLAVE_ATTESTATION: usize = 20;
 pub const REVOKE_ALIASED_REGION: usize = 21;
 pub const SERIALIZE_ATTESTATION: usize = 22;
 /// For benchmarks to measure the cost of communication with tyche.
-pub const TEST_CALL: usize = 30;
+pub const _TEST_CALL: usize = 30;

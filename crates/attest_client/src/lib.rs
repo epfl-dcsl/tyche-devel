@@ -251,23 +251,23 @@ fn separator(f: &mut fmt::Formatter<'_>, first: &mut bool) -> fmt::Result {
 
 fn display_permissions(f: &mut fmt::Formatter<'_>, permissions: u64) -> fmt::Result {
     let mut first = true;
-    if permissions & permission::SPAWN != 0 {
+    if permissions & permission::monitor_inter_perm::SPAWN != 0 {
         separator(f, &mut first)?;
         write!(f, "SPAWN")?;
     }
-    if permissions & permission::SEND != 0 {
+    if permissions & permission::monitor_inter_perm::SEND != 0 {
         separator(f, &mut first)?;
         write!(f, "SEND")?;
     }
-    if permissions & permission::ALIAS != 0 {
+    if permissions & permission::monitor_inter_perm::ALIAS != 0 {
         separator(f, &mut first)?;
         write!(f, "ALIAS")?;
     }
-    if permissions & permission::CARVE != 0 {
+    if permissions & permission::monitor_inter_perm::CARVE != 0 {
         separator(f, &mut first)?;
         write!(f, "CARVE")?;
     }
-    if permissions == permission::NONE {
+    if permissions == permission::monitor_inter_perm::NONE {
         write!(f, "NONE")?;
     }
 

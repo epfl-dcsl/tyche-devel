@@ -131,7 +131,9 @@ fn no_children_eri_direct() {
     let core = 0;
 
     // Create initial domain
-    let d0 = engine.create_manager_domain(permission::ALL).unwrap();
+    let d0 = engine
+        .create_manager_domain(permission::monitor_inter_perm::ALL)
+        .unwrap();
     let _ctx = engine.start_domain_on_core(d0, core).unwrap();
     // Create initial region
     let r0 = engine
@@ -159,7 +161,9 @@ fn start_carve_eri_direct() {
     let core = 0;
 
     // Create initial domain
-    let d0 = engine.create_manager_domain(permission::ALL).unwrap();
+    let d0 = engine
+        .create_manager_domain(permission::monitor_inter_perm::ALL)
+        .unwrap();
     let _ctx = engine.start_domain_on_core(d0, core).unwrap();
     // Create initial region
     let r0 = engine
@@ -204,7 +208,9 @@ fn middle_carve_eri_direct() {
     let core = 0;
 
     // Create initial domain
-    let d0 = engine.create_manager_domain(permission::ALL).unwrap();
+    let d0 = engine
+        .create_manager_domain(permission::monitor_inter_perm::ALL)
+        .unwrap();
     let _ctx = engine.start_domain_on_core(d0, core).unwrap();
     // Create initial region
     let r0 = engine
@@ -250,7 +256,9 @@ fn end_carve_eri_direct() {
     let core = 0;
 
     // Create initial domain
-    let d0 = engine.create_manager_domain(permission::ALL).unwrap();
+    let d0 = engine
+        .create_manager_domain(permission::monitor_inter_perm::ALL)
+        .unwrap();
     let _ctx = engine.start_domain_on_core(d0, core).unwrap();
     // Create initial region
     let r0 = engine
@@ -294,7 +302,9 @@ fn chop_chop_eri_direct() {
     let core = 0;
 
     // Create initial domain
-    let d0 = engine.create_manager_domain(permission::ALL).unwrap();
+    let d0 = engine
+        .create_manager_domain(permission::monitor_inter_perm::ALL)
+        .unwrap();
     let _ctx = engine.start_domain_on_core(d0, core).unwrap();
     // Create initial region
     let r0 = engine
@@ -369,7 +379,9 @@ fn no_children_eri() {
     let core = 0;
 
     // Create initial domain
-    let d0 = engine.create_manager_domain(permission::ALL).unwrap();
+    let d0 = engine
+        .create_manager_domain(permission::monitor_inter_perm::ALL)
+        .unwrap();
     let _ctx = engine.start_domain_on_core(d0, core).unwrap();
     // Create initial region
     let r0 = engine
@@ -397,7 +409,9 @@ fn one_carve_eri() {
     let core = 0;
 
     // Create initial domain
-    let d0 = engine.create_manager_domain(permission::ALL).unwrap();
+    let d0 = engine
+        .create_manager_domain(permission::monitor_inter_perm::ALL)
+        .unwrap();
     let _ctx = engine.start_domain_on_core(d0, core).unwrap();
     // Create initial region
     let r0 = engine
@@ -440,7 +454,9 @@ fn updates_order() {
     let core = 0;
 
     // Create initial domain
-    let d0 = engine.create_manager_domain(permission::ALL).unwrap();
+    let d0 = engine
+        .create_manager_domain(permission::monitor_inter_perm::ALL)
+        .unwrap();
     let _ctx = engine.start_domain_on_core(d0, core).unwrap();
     // Create initial region
     let _r0 = engine
@@ -472,7 +488,9 @@ fn simple_carve() {
     let core = 0;
 
     // Create initial domain
-    let d0 = engine.create_manager_domain(permission::ALL).unwrap();
+    let d0 = engine
+        .create_manager_domain(permission::monitor_inter_perm::ALL)
+        .unwrap();
     let _ctx = engine.start_domain_on_core(d0, core).unwrap();
     snap!("{CreateDomain(H(0, gen 0))}", updates(engine));
 
@@ -522,7 +540,9 @@ fn carve_lose_permissions() {
     let core = 0;
 
     // Create initial domain
-    let d0 = engine.create_manager_domain(permission::ALL).unwrap();
+    let d0 = engine
+        .create_manager_domain(permission::monitor_inter_perm::ALL)
+        .unwrap();
     let _ctx = engine.start_domain_on_core(d0, core).unwrap();
     snap!("{CreateDomain(H(0, gen 0))}", updates(engine));
 
@@ -575,7 +595,9 @@ fn double_carve() {
     let core = 0;
 
     // Create initial domain
-    let d0 = engine.create_manager_domain(permission::ALL).unwrap();
+    let d0 = engine
+        .create_manager_domain(permission::monitor_inter_perm::ALL)
+        .unwrap();
     let _ctx = engine.start_domain_on_core(d0, core).unwrap();
     // Create initial region
     let r0 = engine
@@ -622,7 +644,9 @@ fn carve_send() {
     let core = 0;
 
     // Create initial domain
-    let d0 = engine.create_manager_domain(permission::ALL).unwrap();
+    let d0 = engine
+        .create_manager_domain(permission::monitor_inter_perm::ALL)
+        .unwrap();
     let _ctx = engine.start_domain_on_core(d0, core).unwrap();
     // Create initial region
     let r0 = engine
@@ -677,7 +701,9 @@ fn carve_chop_chop() {
     let core = 0;
 
     // Create initial domain
-    let d0 = engine.create_manager_domain(permission::ALL).unwrap();
+    let d0 = engine
+        .create_manager_domain(permission::monitor_inter_perm::ALL)
+        .unwrap();
     let _ctx = engine.start_domain_on_core(d0, core).unwrap();
     // Create initial region
     let r0 = engine
@@ -714,7 +740,9 @@ fn carve_recursive_chop() {
     let core = 0;
 
     // Create initial domain
-    let d0 = engine.create_manager_domain(permission::ALL).unwrap();
+    let d0 = engine
+        .create_manager_domain(permission::monitor_inter_perm::ALL)
+        .unwrap();
     let _ctx = engine.start_domain_on_core(d0, core).unwrap();
     // Create initial region
     let mut carver = engine
@@ -752,7 +780,9 @@ fn carve_access_rights() {
     let core = 0;
 
     // Create initial domain
-    let d0 = engine.create_manager_domain(permission::ALL).unwrap();
+    let d0 = engine
+        .create_manager_domain(permission::monitor_inter_perm::ALL)
+        .unwrap();
     let _ctx = engine.start_domain_on_core(d0, core).unwrap();
     // Create initial region
     let r0 = engine
@@ -821,7 +851,9 @@ fn simple_alias() {
     let core = 0;
 
     // Create initial domain
-    let d0 = engine.create_manager_domain(permission::ALL).unwrap();
+    let d0 = engine
+        .create_manager_domain(permission::monitor_inter_perm::ALL)
+        .unwrap();
     let _ctx = engine.start_domain_on_core(d0, core).unwrap();
     snap!("{CreateDomain(H(0, gen 0))}", updates(engine));
 
@@ -875,7 +907,9 @@ fn double_alias() {
     let core = 0;
 
     // Create initial domain
-    let d0 = engine.create_manager_domain(permission::ALL).unwrap();
+    let d0 = engine
+        .create_manager_domain(permission::monitor_inter_perm::ALL)
+        .unwrap();
     let _ctx = engine.start_domain_on_core(d0, core).unwrap();
     // Create initial region
     let r0 = engine
@@ -927,7 +961,9 @@ fn alias_send() {
     let core = 0;
 
     // Create initial domain
-    let d0 = engine.create_manager_domain(permission::ALL).unwrap();
+    let d0 = engine
+        .create_manager_domain(permission::monitor_inter_perm::ALL)
+        .unwrap();
     let _ctx = engine.start_domain_on_core(d0, core).unwrap();
     // Create initial region
     let r0 = engine
@@ -982,7 +1018,9 @@ fn alias_chop_chop() {
     let core = 0;
 
     // Create initial domain
-    let d0 = engine.create_manager_domain(permission::ALL).unwrap();
+    let d0 = engine
+        .create_manager_domain(permission::monitor_inter_perm::ALL)
+        .unwrap();
     let _ctx = engine.start_domain_on_core(d0, core).unwrap();
     // Create initial region
     let r0 = engine
@@ -1019,7 +1057,9 @@ fn alias_recursive_chop() {
     let core = 0;
 
     // Create initial domain
-    let d0 = engine.create_manager_domain(permission::ALL).unwrap();
+    let d0 = engine
+        .create_manager_domain(permission::monitor_inter_perm::ALL)
+        .unwrap();
     let _ctx = engine.start_domain_on_core(d0, core).unwrap();
     // Create initial region
     let mut carver = engine
@@ -1057,7 +1097,9 @@ fn alias_access_rights() {
     let core = 0;
 
     // Create initial domain
-    let d0 = engine.create_manager_domain(permission::ALL).unwrap();
+    let d0 = engine
+        .create_manager_domain(permission::monitor_inter_perm::ALL)
+        .unwrap();
     let _ctx = engine.start_domain_on_core(d0, core).unwrap();
     // Create initial region
     let r0 = engine
@@ -1126,7 +1168,9 @@ fn counter_alias_carve_bug() {
     let core = 0;
 
     // Create initial domain
-    let d0 = engine.create_manager_domain(permission::ALL).unwrap();
+    let d0 = engine
+        .create_manager_domain(permission::monitor_inter_perm::ALL)
+        .unwrap();
     let _ctx = engine.start_domain_on_core(d0, core).unwrap();
     // Create initial region
     let r0 = engine
@@ -1190,7 +1234,9 @@ fn alias_then_carve() {
     let core = 0;
 
     // Create initial domain
-    let d0 = engine.create_manager_domain(permission::ALL).unwrap();
+    let d0 = engine
+        .create_manager_domain(permission::monitor_inter_perm::ALL)
+        .unwrap();
     let _ctx = engine.start_domain_on_core(d0, core).unwrap();
     // Create initial region
     let r0 = engine
@@ -1352,7 +1398,9 @@ fn cleanup() {
     let core = 0;
 
     // Create initial domain
-    let d0 = engine.create_manager_domain(permission::ALL).unwrap();
+    let d0 = engine
+        .create_manager_domain(permission::monitor_inter_perm::ALL)
+        .unwrap();
     let _ctx = engine.start_domain_on_core(d0, core).unwrap();
     // Create initial region
     let r0 = engine
@@ -1459,7 +1507,9 @@ fn free_resources() {
     let core = 0;
 
     // Create initial domain
-    let d0 = engine.create_manager_domain(permission::ALL).unwrap();
+    let d0 = engine
+        .create_manager_domain(permission::monitor_inter_perm::ALL)
+        .unwrap();
     let _ctx = engine.start_domain_on_core(d0, core).unwrap();
     // Create initial region
     let r0 = engine
@@ -1543,7 +1593,9 @@ fn enclave_steal_via_alias() {
     let core = 0;
 
     // Create initial domain
-    let d0 = engine.create_manager_domain(permission::ALL).unwrap();
+    let d0 = engine
+        .create_manager_domain(permission::monitor_inter_perm::ALL)
+        .unwrap();
     let _ctx = engine.start_domain_on_core(d0, core).unwrap();
     // Create initial region
     let r0 = engine
@@ -1573,11 +1625,11 @@ fn enclave_steal_via_alias() {
     let d1_mgmt = engine.create_domain(d0).unwrap();
     let d1 = engine.get_domain_capa(d0, d1_mgmt).unwrap();
     engine
-        .set_child_config(
+        .set_child_permission(
             d0,
             d1_mgmt,
-            capa_engine::Bitmaps::PERMISSION,
-            permission::ALIAS | permission::CARVE,
+            permission::PermissionIndex::MonitorInterface,
+            permission::monitor_inter_perm::ALIAS | permission::monitor_inter_perm::CARVE,
         )
         .unwrap();
 
@@ -1639,7 +1691,9 @@ fn enclave_steal_via_carve() {
     let core = 0;
 
     // Create initial domain
-    let d0 = engine.create_manager_domain(permission::ALL).unwrap();
+    let d0 = engine
+        .create_manager_domain(permission::monitor_inter_perm::ALL)
+        .unwrap();
     let _ctx = engine.start_domain_on_core(d0, core).unwrap();
     // Create initial region
     let r0 = engine
@@ -1669,11 +1723,11 @@ fn enclave_steal_via_carve() {
     let d1_mgmt = engine.create_domain(d0).unwrap();
     let d1 = engine.get_domain_capa(d0, d1_mgmt).unwrap();
     engine
-        .set_child_config(
+        .set_child_permission(
             d0,
             d1_mgmt,
-            capa_engine::Bitmaps::PERMISSION,
-            permission::ALIAS | permission::CARVE,
+            permission::PermissionIndex::MonitorInterface,
+            permission::monitor_inter_perm::ALIAS | permission::monitor_inter_perm::CARVE,
         )
         .unwrap();
 
@@ -1735,7 +1789,9 @@ fn enclave_enclave_steal() {
     let core = 0;
 
     // Create initial domain
-    let d0 = engine.create_manager_domain(permission::ALL).unwrap();
+    let d0 = engine
+        .create_manager_domain(permission::monitor_inter_perm::ALL)
+        .unwrap();
     let _ctx = engine.start_domain_on_core(d0, core).unwrap();
     // Create initial region
     let r0 = engine
@@ -1765,11 +1821,14 @@ fn enclave_enclave_steal() {
     let d1_mgmt = engine.create_domain(d0).unwrap();
     let d1 = engine.get_domain_capa(d0, d1_mgmt).unwrap();
     engine
-        .set_child_config(
+        .set_child_permission(
             d0,
             d1_mgmt,
-            capa_engine::Bitmaps::PERMISSION,
-            permission::ALIAS | permission::CARVE | permission::SEND | permission::SPAWN,
+            permission::PermissionIndex::MonitorInterface,
+            permission::monitor_inter_perm::ALIAS
+                | permission::monitor_inter_perm::CARVE
+                | permission::monitor_inter_perm::SEND
+                | permission::monitor_inter_perm::SPAWN,
         )
         .unwrap();
 
@@ -1850,7 +1909,9 @@ fn test_domain_capabilities() {
     let core = 0;
 
     // Create initial domain
-    let d0 = engine.create_manager_domain(permission::ALL).unwrap();
+    let d0 = engine
+        .create_manager_domain(permission::monitor_inter_perm::ALL)
+        .unwrap();
     let _ctx = engine.start_domain_on_core(d0, core).unwrap();
     // Create initial region
 
@@ -1878,11 +1939,11 @@ fn test_domain_capabilities() {
 
     // Add the permission.
     engine
-        .set_child_config(
+        .set_child_permission(
             d0,
             d1_mgmt,
-            capa_engine::Bitmaps::PERMISSION,
-            permission::SPAWN,
+            permission::PermissionIndex::MonitorInterface,
+            permission::monitor_inter_perm::SPAWN,
         )
         .unwrap();
     // Try again.
@@ -1896,11 +1957,11 @@ fn test_domain_capabilities() {
 
     // Add the permission.
     engine
-        .set_child_config(
+        .set_child_permission(
             d0,
             d1_mgmt,
-            capa_engine::Bitmaps::PERMISSION,
-            permission::SEND,
+            permission::PermissionIndex::MonitorInterface,
+            permission::monitor_inter_perm::SEND,
         )
         .unwrap();
 
@@ -1926,7 +1987,9 @@ fn new_capa() {
     let core = 0;
 
     // Create initial domain
-    let d0 = engine.create_manager_domain(permission::ALL).unwrap();
+    let d0 = engine
+        .create_manager_domain(permission::monitor_inter_perm::ALL)
+        .unwrap();
     let _ctx = engine.start_domain_on_core(d0, core).unwrap();
 
     // Create two new domains

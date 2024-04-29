@@ -597,6 +597,14 @@ int load_domain(tyche_domain_t* domain)
     ERROR("Unable to set the permission on domain %d", domain->handle);
     goto failure;
   }
+
+  // Do the default configuration for mgmt.
+  for (unsigned int p = TYCHE_CONFIG_R16; p < TYCHE_NR_CONFIGS; p++) {
+    if (backend_td_config(domain, p, ~((usize) 0)) != SUCCESS) {
+      ERROR("Unable to set the permission %u", p);
+      goto failure;
+    }
+  }
   // For the moment support maximum 32 cores, 
   for (usize i = 0; i < MAX_CORES; i++) {
     // Create the core context.

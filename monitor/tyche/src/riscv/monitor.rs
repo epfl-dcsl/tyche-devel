@@ -8,8 +8,8 @@ use attestation::signature::EnclaveReport;
 use capa_engine::config::{NB_CORES, NB_DOMAINS};
 use capa_engine::utils::BitmapIterator;
 use capa_engine::{
-    permission, AccessRights, Bitmaps, Buffer, CapaEngine, CapaError, CapaInfo, Domain, Handle,
-    LocalCapa, MemOps, NextCapaToken, MEMOPS_ALL,
+    permission, AccessRights, Buffer, CapaEngine, CapaError, CapaInfo, Domain, Handle, LocalCapa,
+    MemOps, NextCapaToken, MEMOPS_ALL,
 };
 use riscv_csrs::pmpcfg;
 use riscv_pmp::csrs::{pmpaddr_csr_read, pmpaddr_csr_write, pmpcfg_csr_read, pmpcfg_csr_write};
@@ -70,7 +70,9 @@ const EMPTY_CONTEXT_ARRAY: [Mutex<ContextData>; NB_CORES] = [EMPTY_CONTEXT; NB_C
 
 pub fn init() {
     let mut engine = CAPA_ENGINE.lock();
-    let domain = engine.create_manager_domain(permission::ALL).unwrap();
+    let domain = engine
+        .create_manager_domain(permission::monitor_inter_perm::ALL)
+        .unwrap();
     apply_updates(&mut engine);
     engine
         .create_root_region(
@@ -151,11 +153,11 @@ pub fn do_create_domain(current: Handle<Domain>) -> Result<LocalCapa, CapaError>
 pub fn do_set_config(
     current: Handle<Domain>,
     domain: LocalCapa,
-    bitmap: Bitmaps,
+    bitmap: permission::PermissionIndex,
     value: u64,
 ) -> Result<(), CapaError> {
     let mut engine = CAPA_ENGINE.lock();
-    engine.set_child_config(current, domain, bitmap, value)?;
+    engine.set_child_permission(current, domain, bitmap, value)?;
     apply_updates(&mut engine);
     Ok(())
 }
@@ -180,7 +182,7 @@ pub fn do_configure_core(
     }*/
 
     // Check this is a valid core for the operation.
-    let core_map = engine.get_domain_config(domain, Bitmaps::CORE);
+    let core_map = engine.get_domain_permission(domain, permission::PermissionIndex::AllowedCores);
     if (1 << core) & core_map == 0 {
         log::error!(
             "Invalid core {} for coremap {:b} in configure core",
@@ -226,7 +228,7 @@ pub fn do_get_config_core(
     }*/
 
     // Check this is a valid core for the operation.
-    let core_map = engine.get_domain_config(domain, Bitmaps::CORE);
+    let core_map = engine.get_domain_permission(domain, permission::PermissionIndex::AllowedCores);
     if (1 << core) & core_map == 0 {
         return Err(CapaError::InvalidCore);
     }
@@ -251,7 +253,7 @@ pub fn do_set_field(
     let mut engine = CAPA_ENGINE.lock();
     // Check the core.
     let domain = engine.get_domain_capa(current, domain)?;
-    let core_map = engine.get_domain_config(domain, Bitmaps::CORE);
+    let core_map = engine.get_domain_permission(domain, permission::PermissionIndex::AllowedCores);
     if (1 << core) & core_map == 0 {
         log::error!("Trying to set registers on the wrong core.");
         return Err(CapaError::InvalidCore);
@@ -283,7 +285,7 @@ pub fn do_set_entry(
     );
     let mut engine = CAPA_ENGINE.lock();
     let domain = engine.get_domain_capa(current, domain)?;
-    let cores = engine.get_domain_config(domain, Bitmaps::CORE);
+    let cores = engine.get_domain_permission(domain, permission::PermissionIndex::AllowedCores);
     if (1 << core) & cores == 0 {
         return Err(CapaError::InvalidCore);
     }
@@ -377,7 +379,7 @@ pub fn do_init_child_context(
     let domain = engine.get_domain_capa(current, domain)?;
 
     // Check this is a valid core for the operation.
-    let core_map = engine.get_domain_config(domain, Bitmaps::CORE);
+    let core_map = engine.get_domain_permission(domain, permission::PermissionIndex::AllowedCores);
     if (1 << core) & core_map == 0 {
         return Err(CapaError::InvalidCore);
     }

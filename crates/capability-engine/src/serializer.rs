@@ -170,7 +170,7 @@ fn serialize_domain(
     regions: &RegionPool,
 ) -> Result<(), CapaError> {
     buff.u64(td.temporary_id.get())?;
-    buff.u64(td.permissions())?;
+    buff.u64(td.monitor_interface())?;
     buff.u8(serde::DOMAIN_CAPA_START)?;
     for capa in td.iter_capa() {
         match capa {

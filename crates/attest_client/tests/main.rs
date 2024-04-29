@@ -33,7 +33,9 @@ fn scenario_1() {
     let core = 0;
 
     // Create initial domain
-    let d0 = engine.create_manager_domain(permission::ALL).unwrap();
+    let d0 = engine
+        .create_manager_domain(permission::monitor_inter_perm::ALL)
+        .unwrap();
     let _ctx = engine.start_domain_on_core(d0, core).unwrap();
 
     // Create two new domains

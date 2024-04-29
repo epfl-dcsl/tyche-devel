@@ -1,3 +1,4 @@
+use capa_engine::context::{RegisterContext, RegisterGroup};
 use capa_engine::Handle;
 use spin::Mutex;
 use vmx::fields::{VmcsField, VmcsFieldWidth};
@@ -13,7 +14,6 @@ trait ContextRegisterx86 {
     fn from_usize(v: usize) -> Self;
 }
 
-#[allow(dead_code)]
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[repr(usize)]
 pub enum ContextGpx86 {
@@ -35,7 +35,6 @@ pub enum ContextGpx86 {
     Lstar = 15,
 }
 
-#[allow(dead_code)]
 impl ContextGpx86 {
     pub fn as_vmcs_field(&self) -> VmcsField {
         match self {
@@ -105,7 +104,6 @@ impl ContextGpx86 {
     }
 }
 
-#[allow(dead_code)]
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[repr(usize)]
 pub enum Context64x86 {
@@ -160,7 +158,6 @@ pub enum Context64x86 {
     VmxPreemptionTimerValue = 48,
 }
 
-#[allow(dead_code)]
 impl Context64x86 {
     pub fn as_vmcs_field(&self) -> VmcsField {
         match self {
@@ -331,7 +328,6 @@ impl Context64x86 {
     }
 }
 
-#[allow(dead_code)]
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[repr(usize)]
 pub enum Context32x86 {
@@ -377,7 +373,6 @@ pub enum Context32x86 {
     HostIa32PerfGlobalCtrl = 39,
 }
 
-#[allow(dead_code)]
 impl Context32x86 {
     pub fn as_vmcs_field(&self) -> VmcsField {
         match self {
@@ -521,7 +516,6 @@ impl Context32x86 {
     }
 }
 
-#[allow(dead_code)]
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[repr(usize)]
 pub enum Context16x86 {
@@ -547,7 +541,6 @@ pub enum Context16x86 {
     HostTrSelector = 19,
 }
 
-#[allow(dead_code)]
 impl Context16x86 {
     pub fn as_vmcs_field(&self) -> VmcsField {
         match self {
@@ -631,7 +624,6 @@ impl Context16x86 {
     }
 }
 
-#[allow(dead_code)]
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[repr(usize)]
 pub enum ContextNatx86 {
@@ -667,7 +659,6 @@ pub enum ContextNatx86 {
     GuestSysenterEip = 29,
 }
 
-#[allow(dead_code)]
 impl ContextNatx86 {
     pub fn as_vmcs_field(&self) -> VmcsField {
         match self {
@@ -781,62 +772,6 @@ impl ContextNatx86 {
     }
 }
 
-#[repr(usize)]
-pub enum DirtyRegGroups {
-    Reg16 = 0,
-    Reg32,
-    Reg64,
-    RegNat,
-}
-
-impl DirtyRegGroups {
-    pub fn from_usize(v: usize) -> Self {
-        match v {
-            0 => Self::Reg16,
-            1 => Self::Reg32,
-            2 => Self::Reg64,
-            3 => Self::RegNat,
-            _ => panic!("Invalid"),
-        }
-    }
-    pub const fn size() -> usize {
-        return Self::RegNat as usize + 1;
-    }
-}
-
-/// Simple cache implementation.
-#[derive(Debug)]
-pub struct Cache<const N: usize> {
-    pub bitmap: u64,
-}
-
-impl<const N: usize> Cache<N> {
-    pub fn is_on(&self, idx: usize) -> bool {
-        if idx >= N {
-            return false;
-        }
-        self.bitmap & (1 << idx) != 0
-    }
-    pub fn set(&mut self, idx: usize) -> bool {
-        if idx >= N {
-            return false;
-        }
-        self.bitmap |= 1 << idx;
-        return true;
-    }
-    pub fn clear(&mut self, idx: usize) -> bool {
-        if idx >= N {
-            return false;
-        }
-        self.bitmap &= !(1 << idx);
-        return true;
-    }
-    #[allow(dead_code)]
-    pub fn clear_all(&mut self) {
-        self.bitmap = 0;
-    }
-}
-
 pub const DUMP_FRAME: [(VmcsField, VmcsField); 9] = [
     (VmcsField::GuestRbx, VmcsField::GuestRip),
     (VmcsField::GuestRcx, VmcsField::GuestRsp),
@@ -849,188 +784,90 @@ pub const DUMP_FRAME: [(VmcsField, VmcsField); 9] = [
     (VmcsField::GuestR12, VmcsField::VmInstructionError),
 ];
 
-#[allow(dead_code)]
 pub struct Contextx86 {
-    // Quick way to mark register groups that need to be visited.
-    pub dirty: Cache<{ DirtyRegGroups::size() }>,
-    // 16-bits registers.
-    pub vmcs_16: [u16; Context16x86::size()],
-    pub dirty_16: Cache<{ Context16x86::size() }>,
-    // 32-bits registers that occupy low and high.
-    pub vmcs_32: [u64; Context32x86::size()],
-    pub dirty_32: Cache<{ Context32x86::size() }>,
-    // 64-bits registers.
-    pub vmcs_64: [u64; Context64x86::size()],
-    pub dirty_64: Cache<{ Context64x86::size() }>,
-    // Nat-width registers.
-    pub vmcs_nat: [usize; ContextNatx86::size()],
-    pub dirty_nat: Cache<{ ContextNatx86::size() }>,
-    // General purpose registers.
-    pub vmcs_gp: [usize; ContextGpx86::size()],
-    pub dirty_gp: Cache<{ ContextGpx86::size() }>,
+    pub regs: RegisterContext<
+        { Context16x86::size() },
+        { Context32x86::size() },
+        { Context64x86::size() },
+        { ContextNatx86::size() },
+        { ContextGpx86::size() },
+    >,
     // State.
     pub interrupted: bool,
     pub vmcs: Handle<RCFrame>,
 }
 
-#[allow(dead_code)]
 impl Contextx86 {
+    pub fn translate_field(field: VmcsField) -> (RegisterGroup, usize) {
+        match (field.width(), field.is_gp_register()) {
+            (_, true) => (
+                RegisterGroup::RegGp,
+                ContextGpx86::from_vmcs_field(field).unwrap() as usize,
+            ),
+
+            (VmcsFieldWidth::Width16, _) => (
+                RegisterGroup::Reg16,
+                Context16x86::from_vmcs_field(field).unwrap() as usize,
+            ),
+            (VmcsFieldWidth::Width32, _) => (
+                RegisterGroup::Reg32,
+                Context32x86::from_vmcs_field(field).unwrap() as usize,
+            ),
+            (VmcsFieldWidth::Width64, _) => (
+                RegisterGroup::Reg64,
+                Context64x86::from_vmcs_field(field).unwrap() as usize,
+            ),
+            (VmcsFieldWidth::WidthNat, _) => (
+                RegisterGroup::RegNat,
+                ContextNatx86::from_vmcs_field(field).unwrap() as usize,
+            ),
+        }
+    }
+
     pub fn set(
         &mut self,
         field: VmcsField,
         value: usize,
         vcpu: Option<&mut ActiveVmcs>,
     ) -> Result<(), VmxError> {
-        match (field.width(), field.is_gp_register()) {
-            (_, true) => {
-                let reg = ContextGpx86::from_vmcs_field(field).expect("Invalid GP");
-                self.vmcs_gp[reg as usize] = value;
-                self.dirty_gp.set(reg as usize);
-            }
-            (VmcsFieldWidth::Width16, _) => {
-                let reg = Context16x86::from_vmcs_field(field).expect("Invalid 16");
-                self.vmcs_16[reg as usize] = value as u16;
-                if let Some(vcpu) = vcpu {
-                    vcpu.set(field, value)?;
-                } else {
-                    self.dirty_16.set(reg as usize);
-                    self.dirty.set(DirtyRegGroups::Reg16 as usize);
-                }
-            }
-            (VmcsFieldWidth::Width32, _) => {
-                let reg = Context32x86::from_vmcs_field(field).expect("Invalid 32");
-                self.vmcs_32[reg as usize] = value as u64;
-                if let Some(vcpu) = vcpu {
-                    vcpu.set(field, value)?;
-                } else {
-                    self.dirty_32.set(reg as usize);
-                    self.dirty.set(DirtyRegGroups::Reg32 as usize);
-                }
-            }
-            (VmcsFieldWidth::Width64, _) => {
-                let reg = Context64x86::from_vmcs_field(field).expect("Invalid 64");
-                self.vmcs_64[reg as usize] = value as u64;
-                if let Some(vcpu) = vcpu {
-                    vcpu.set(field, value)?;
-                } else {
-                    self.dirty_64.set(reg as usize);
-                    self.dirty.set(DirtyRegGroups::Reg64 as usize);
-                }
-            }
-            (VmcsFieldWidth::WidthNat, _) => {
-                let reg = ContextNatx86::from_vmcs_field(field).expect("Invalid Nat");
-                self.vmcs_nat[reg as usize] = value;
-                if let Some(vcpu) = vcpu {
-                    vcpu.set(field, value)?;
-                } else {
-                    self.dirty_nat.set(reg as usize);
-                    self.dirty.set(DirtyRegGroups::RegNat as usize);
-                }
-            }
+        let (group, idx) = Self::translate_field(field);
+        self.regs.set(group, idx, value).unwrap();
+        if group == RegisterGroup::RegGp {
+            self.regs.clear(group, idx);
+        } else if let Some(vcpu) = vcpu {
+            vcpu.set(field, value)?;
+            self.regs.clear(group, idx);
         }
         Ok(())
     }
 
     pub fn get(&mut self, field: VmcsField, vcpu: Option<&ActiveVmcs>) -> Result<usize, VmxError> {
-        let res = match (field.width(), field.is_gp_register()) {
-            (_, true) => {
-                let reg = ContextGpx86::from_vmcs_field(field).expect("Invalid GP");
-                self.vmcs_gp[reg as usize] as usize
+        let (group, idx) = Self::translate_field(field);
+        if group != RegisterGroup::RegGp {
+            if let Some(vcpu) = vcpu {
+                self.regs.set(group, idx, vcpu.get(field)?).unwrap();
+                self.regs.clear(group, idx);
             }
-            (VmcsFieldWidth::Width16, _) => {
-                let reg = Context16x86::from_vmcs_field(field).expect("Invalid 16");
-                if let Some(vcpu) = vcpu {
-                    self.vmcs_16[reg as usize] = vcpu.get(field)? as u16;
-                }
-                self.vmcs_16[reg as usize] as usize
-            }
-            (VmcsFieldWidth::Width32, _) => {
-                let reg = Context32x86::from_vmcs_field(field).expect("Invalid 32");
-                if let Some(vcpu) = vcpu {
-                    self.vmcs_32[reg as usize] = vcpu.get(field)? as u64;
-                }
-                self.vmcs_32[reg as usize] as usize
-            }
-            (VmcsFieldWidth::Width64, _) => {
-                let reg = Context64x86::from_vmcs_field(field).expect("Invalid 64");
-                if let Some(vcpu) = vcpu {
-                    self.vmcs_64[reg as usize] = vcpu.get(field)? as u64;
-                }
-                self.vmcs_64[reg as usize] as usize
-            }
-            (VmcsFieldWidth::WidthNat, _) => {
-                let reg = ContextNatx86::from_vmcs_field(field).expect("Invalid Nat");
-                if let Some(vcpu) = vcpu {
-                    self.vmcs_nat[reg as usize] = vcpu.get(field)?;
-                }
-                self.vmcs_nat[reg as usize]
-            }
-        };
-        Ok(res)
+        }
+        Ok(self.regs.get(group, idx).unwrap())
     }
 
     /// Read context, write vcpu.
     pub fn flush(&mut self, vcpu: &mut ActiveVmcs) {
-        for i in 0..DirtyRegGroups::size() {
-            if !self.dirty.is_on(i) {
-                continue;
+        let update = |g: RegisterGroup, idx: usize, value: usize| {
+            let field = match g {
+                RegisterGroup::Reg16 => Context16x86::from_usize(idx).as_vmcs_field(),
+                RegisterGroup::Reg32 => Context32x86::from_usize(idx).as_vmcs_field(),
+                RegisterGroup::Reg64 => Context64x86::from_usize(idx).as_vmcs_field(),
+                RegisterGroup::RegNat => ContextNatx86::from_usize(idx).as_vmcs_field(),
+                RegisterGroup::RegGp => ContextGpx86::from_usize(idx).as_vmcs_field(),
+            };
+            if field.is_gp_register() {
+                return;
             }
-            match DirtyRegGroups::from_usize(i) {
-                DirtyRegGroups::Reg16 => {
-                    for j in 0..Context16x86::size() {
-                        if !self.dirty_16.is_on(j) {
-                            continue;
-                        }
-                        vcpu.set(
-                            Context16x86::from_usize(j).as_vmcs_field(),
-                            self.vmcs_16[j] as usize,
-                        )
-                        .unwrap();
-                        self.dirty_16.clear(j);
-                    }
-                }
-                DirtyRegGroups::Reg32 => {
-                    for j in 0..Context32x86::size() {
-                        if !self.dirty_32.is_on(j) {
-                            continue;
-                        }
-                        vcpu.set(
-                            Context32x86::from_usize(j).as_vmcs_field(),
-                            self.vmcs_32[j] as usize,
-                        )
-                        .unwrap();
-                        self.dirty_32.clear(j);
-                    }
-                }
-                DirtyRegGroups::Reg64 => {
-                    for j in 0..Context64x86::size() {
-                        if !self.dirty_64.is_on(j) {
-                            continue;
-                        }
-                        vcpu.set(
-                            Context64x86::from_usize(j).as_vmcs_field(),
-                            self.vmcs_64[j] as usize,
-                        )
-                        .unwrap();
-                        self.dirty_64.clear(j);
-                    }
-                }
-                DirtyRegGroups::RegNat => {
-                    for j in 0..ContextNatx86::size() {
-                        if !self.dirty_nat.is_on(j) {
-                            continue;
-                        }
-                        vcpu.set(
-                            ContextNatx86::from_usize(j).as_vmcs_field(),
-                            self.vmcs_nat[j],
-                        )
-                        .unwrap();
-                        self.dirty_nat.clear(j);
-                    }
-                }
-            }
-            self.dirty.clear(i);
-        }
+            vcpu.set(field, value).unwrap();
+        };
+        self.regs.flush(update);
     }
 
     /// Read vcpu, write context.
@@ -1038,90 +875,30 @@ impl Contextx86 {
         // General purpose registers are handled by vmlaunch/vmresume.
         // 16-bits.
         for i in 0..Context16x86::size() {
-            self.vmcs_16[i] = vcpu
+            self.regs.state_16.values[i] = vcpu
                 .get(Context16x86::from_usize(i).as_vmcs_field())
-                .unwrap_or(0) as u16;
-        }
-
-        // 32-bits.
-        for i in 0..Context32x86::size() {
-            self.vmcs_32[i] = vcpu
-                .get(Context32x86::from_usize(i).as_vmcs_field())
-                .unwrap_or(0) as u64;
-        }
-
-        // 64-bits.
-        for i in 0..Context64x86::size() {
-            self.vmcs_64[i] = vcpu
-                .get(Context64x86::from_usize(i).as_vmcs_field())
-                .unwrap_or(0) as u64;
-        }
-
-        // Nat-bits.
-        for i in 0..ContextNatx86::size() {
-            if i == 30 {
-                log::trace!("We are calling with usize 30: {}", ContextNatx86::size());
-                log::trace!(
-                    "Other sizes: {}, {}, {}",
-                    Context64x86::size(),
-                    Context32x86::size(),
-                    Context16x86::size()
-                );
-            }
-            self.vmcs_nat[i] = vcpu
-                .get(ContextNatx86::from_usize(i).as_vmcs_field())
                 .unwrap_or(0);
         }
-    }
-
-    pub fn compare_to(&self, other: &Contextx86) {
-        // General purpose registers are handled by vmlaunch/vmresume.
-        // 16-bits.
-        for i in 0..Context16x86::size() {
-            if self.vmcs_16[i] != other.vmcs_16[i] {
-                log::info!(
-                    "{:?}: {:x} - {:x}",
-                    Context16x86::from_usize(i),
-                    self.vmcs_16[i],
-                    other.vmcs_16[i]
-                );
-            }
-        }
 
         // 32-bits.
         for i in 0..Context32x86::size() {
-            if self.vmcs_32[i] != other.vmcs_32[i] {
-                log::info!(
-                    "{:?}: {:x} - {:x}",
-                    Context32x86::from_usize(i),
-                    self.vmcs_32[i],
-                    other.vmcs_32[i]
-                );
-            }
+            self.regs.state_32.values[i] = vcpu
+                .get(Context32x86::from_usize(i).as_vmcs_field())
+                .unwrap_or(0);
         }
 
         // 64-bits.
         for i in 0..Context64x86::size() {
-            if self.vmcs_64[i] != other.vmcs_64[i] {
-                log::info!(
-                    "{:?}: {:x} - {:x}",
-                    Context64x86::from_usize(i),
-                    self.vmcs_64[i],
-                    other.vmcs_64[i]
-                );
-            }
+            self.regs.state_64.values[i] = vcpu
+                .get(Context64x86::from_usize(i).as_vmcs_field())
+                .unwrap_or(0);
         }
 
         // Nat-bits.
         for i in 0..ContextNatx86::size() {
-            if self.vmcs_nat[i] != other.vmcs_nat[i] {
-                log::info!(
-                    "{:?}: {:x} - {:x}",
-                    ContextNatx86::from_usize(i),
-                    self.vmcs_nat[i],
-                    other.vmcs_nat[i]
-                );
-            }
+            self.regs.state_nat.values[i] = vcpu
+                .get(ContextNatx86::from_usize(i).as_vmcs_field())
+                .unwrap_or(0);
         }
     }
 
@@ -1135,27 +912,15 @@ impl Contextx86 {
         self.flush(vcpu);
     }
 
-    /// Save only Cr3, Rip, Rsp for shared vmcs.
-    pub fn save_shared(&mut self, vcpu: &ActiveVmcs) -> Result<(), VmxError> {
-        self.set(VmcsField::GuestCr3, vcpu.get(VmcsField::GuestCr3)?, None)?;
-        self.set(VmcsField::GuestRip, vcpu.get(VmcsField::GuestRip)?, None)?;
-        self.set(VmcsField::GuestRsp, vcpu.get(VmcsField::GuestRsp)?, None)?;
-        Ok(())
-    }
-
     // TODO: maybe more efficient if we dump the frame first?
     pub fn copy_interrupt_frame(
         &mut self,
-        _child: &Self,
-        capa: usize,
+        child: &mut Self,
         vcpu: &ActiveVmcs,
     ) -> Result<(), VmxError> {
-        // Return state: 1 means failure, rdi holds resume capa.
-        self.set(VmcsField::GuestRax, 0, None)?;
-        self.set(VmcsField::GuestRdi, capa, None)?;
-
         for i in DUMP_FRAME {
-            self.set(i.0, vcpu.get(i.1)?, None)?;
+            let value = child.get(i.1, Some(vcpu))?;
+            self.set(i.0, value, None)?;
         }
 
         Ok(())
@@ -1172,7 +937,7 @@ impl core::fmt::Debug for Contextx86 {
                 f,
                 "   {:?}: {:#x}",
                 ContextGpx86::from_usize(i),
-                self.vmcs_gp[i]
+                self.regs.state_gp.values[i]
             )?;
         }
         writeln!(f, "}}")?;

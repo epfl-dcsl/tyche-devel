@@ -8,6 +8,7 @@ use crate::capa::{Capa, IntoCapa};
 use crate::config::{NB_CAPAS_PER_DOMAIN, NB_DOMAINS};
 use crate::free_list::FreeList;
 use crate::gen_arena::GenArena;
+use crate::permission::{self, PermissionIndex, Permissions};
 use crate::region::{PermissionChange, RegionTracker, TrackerPool};
 use crate::segment::{self, RegionPool};
 use crate::update::{Update, UpdateBuffer};
@@ -16,40 +17,6 @@ use crate::{AccessRights, CapaError, Handle};
 pub type DomainHandle = Handle<Domain>;
 pub(crate) type DomainPool = GenArena<Domain, NB_DOMAINS>;
 
-// —————————————————————————————— Permissions ——————————————————————————————— //
-
-#[rustfmt::skip]
-pub mod permission {
-    pub const SPAWN:     u64 = 1 << 0;
-    pub const SEND:      u64 = 1 << 1;
-    pub const DUPLICATE: u64 = 1 << 2;
-    pub const ALIAS:     u64 = 1 << 3;
-    pub const CARVE:     u64 = 1 << 4;
-
-    /// All possible permissions
-    pub const ALL:  u64 = SPAWN | SEND | DUPLICATE | ALIAS | CARVE;
-    /// None of the existing permissions
-    pub const NONE: u64 = 0;
-}
-
-// ————————————————————————————————— Traps —————————————————————————————————— //
-
-pub mod trap_bits {
-    /// No trap can be handled by the domain.
-    pub const NONE: u64 = 0;
-
-    /// All traps can be handled by the domain.
-    pub const ALL: u64 = !(NONE);
-}
-
-// ——————————————————————————————— Core Bits ———————————————————————————————— //
-pub mod core_bits {
-    /// No core.
-    pub const NONE: u64 = 0;
-
-    /// All cores.
-    pub const ALL: u64 = !(NONE);
-}
 // —————————————————————————— Domain Capabilities ——————————————————————————— //
 
 /// An index into the capability table of a domain.
@@ -98,48 +65,6 @@ impl NextCapaToken {
 
 // ————————————————————————————————— Domain ————————————————————————————————— //
 
-/// Valid indices in the configuration.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[repr(usize)]
-pub enum Bitmaps {
-    PERMISSION = 0,
-    TRAP = 1,
-    CORE = 2,
-    _SIZE = 3,
-}
-
-impl Bitmaps {
-    pub fn from_usize(v: usize) -> Result<Self, CapaError> {
-        match v {
-            0 => Ok(Self::PERMISSION),
-            1 => Ok(Self::TRAP),
-            2 => Ok(Self::CORE),
-            _ => Err(CapaError::InvalidValue),
-        }
-    }
-}
-
-/// Domain configuration bitmaps.
-pub struct Configuration {
-    /// Values for the domain for each bitmap.
-    values: [u64; Bitmaps::_SIZE as usize],
-    /// Mask of valid bits for the bitmaps.
-    valid_masks: [u64; Bitmaps::_SIZE as usize],
-    /// Keeps track initialization of the bitmaps.
-    initialized: [bool; Bitmaps::_SIZE as usize],
-}
-
-impl Configuration {
-    pub fn is_inited(&self) -> bool {
-        for i in self.initialized.iter() {
-            if !i {
-                return false;
-            }
-        }
-        return true;
-    }
-}
-
 pub struct Domain {
     /// Unique domain ID.
     id: usize,
@@ -151,8 +76,8 @@ pub struct Domain {
     regions: RegionTracker,
     /// The (optional) manager of this domain.
     manager: Option<Handle<Domain>>,
-    /// Configuration bitmaps for the domain.
-    config: Configuration,
+    /// Permissions bitmaps for the domain.
+    permissions: Permissions,
     /// A bitmap of cores the domain runs on.
     cores: u64,
     /// Is this domain in the process of being revoked?
@@ -179,12 +104,8 @@ impl Domain {
             free_list: FreeList::new(),
             regions: RegionTracker::new(),
             manager: None,
-            config: Configuration {
-                values: [permission::NONE, trap_bits::NONE, core_bits::NONE],
-                valid_masks: [permission::ALL, trap_bits::ALL, core_bits::ALL],
-                initialized: [false; Bitmaps::_SIZE as usize],
-            },
-            cores: core_bits::NONE,
+            permissions: permission::DEFAULT,
+            cores: permission::core_bits::NONE,
             is_being_revoked: false,
             is_sealed: false,
             attestation_hash: None,
@@ -194,7 +115,7 @@ impl Domain {
         }
     }
 
-    pub fn get_config(&self, bitmap: Bitmaps) -> u64 {
+    /*pub fn get_config(&self, bitmap: Bitmaps) -> u64 {
         self.config.values[bitmap as usize]
     }
 
@@ -208,7 +129,7 @@ impl Domain {
         self.config.values[bitmap as usize] = value;
         self.config.initialized[bitmap as usize] = true;
         Ok(())
-    }
+    }*/
 
     pub(crate) fn get_manager(&self) -> Option<Handle<Domain>> {
         self.manager
@@ -285,7 +206,7 @@ impl Domain {
     }
 
     pub fn traps(&self) -> u64 {
-        self.get_config(Bitmaps::TRAP)
+        self.permissions.perm[PermissionIndex::AllowedTraps as usize]
     }
 
     pub fn cores(&self) -> u64 {
@@ -293,22 +214,21 @@ impl Domain {
     }
 
     pub fn core_map(&self) -> u64 {
-        self.get_config(Bitmaps::CORE)
+        self.permissions.perm[PermissionIndex::AllowedCores as usize]
     }
 
-    pub fn permissions(&self) -> u64 {
-        self.get_config(Bitmaps::PERMISSION)
+    pub fn monitor_interface(&self) -> u64 {
+        self.permissions.perm[PermissionIndex::MonitorInterface as usize]
     }
     /// Returns Wether or not this domain can handle the given trap
     pub fn can_handle(&self, trap: u64) -> bool {
-        self.traps() & trap != 0 && self.is_sealed
+        let traps = self.permissions.perm[PermissionIndex::AllowedTraps as usize];
+        traps & trap != 0 && self.is_sealed
     }
 
     pub fn seal(&mut self) -> Result<(), CapaError> {
         if self.is_sealed {
             Err(CapaError::AlreadySealed)
-        } else if !self.config.is_inited() {
-            Err(CapaError::InvalidOperation)
         } else {
             self.is_sealed = true;
             Ok(())
@@ -451,28 +371,44 @@ fn free_invalid_capas(domain: Handle<Domain>, regions: &mut RegionPool, domains:
 // —————————————————————————————— Permissions ——————————————————————————————— //
 
 /// Check wether a given domain has the expected subset of permissions.
-pub(crate) fn has_config(
+pub(crate) fn has_permission(
     domain: Handle<Domain>,
     domains: &DomainPool,
-    bitmap: Bitmaps,
+    perm: PermissionIndex,
     value: u64,
 ) -> Result<(), CapaError> {
     let domain = &domains[domain];
-    if domain.get_config(bitmap) & value == value {
+    // Let's ignore the read/write for the moment.
+    if perm >= PermissionIndex::MgmtRead16
+        || domain.permissions.perm[perm as usize] & value == value
+    {
         Ok(())
     } else {
         Err(CapaError::InsufficientPermissions)
     }
 }
 
-pub(crate) fn set_config(
+pub(crate) fn set_permission(
     domain: Handle<Domain>,
     domains: &mut DomainPool,
-    bitmap: Bitmaps,
+    perm: PermissionIndex,
     value: u64,
 ) -> Result<(), CapaError> {
     let domain = &mut domains[domain];
-    domain.set_config(bitmap, value)
+    if domain.is_sealed() {
+        return Err(CapaError::AlreadySealed);
+    }
+    domain.permissions.perm[perm as usize] = value;
+    Ok(())
+}
+
+pub(crate) fn get_permission(
+    domain: Handle<Domain>,
+    domains: &DomainPool,
+    perm: PermissionIndex,
+) -> u64 {
+    let domain = &domains[domain];
+    domain.permissions.perm[perm as usize]
 }
 
 // —————————————————————————————————— Send —————————————————————————————————— //

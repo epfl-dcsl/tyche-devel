@@ -3,38 +3,19 @@
 mod arch;
 mod context;
 mod cpuid_filter;
-mod filtered_fields;
-pub mod guest;
 mod init;
-mod monitor;
 mod platform;
+mod state;
 mod vmx_helper;
 
 use core::arch::asm;
 
-use capa_engine::{Domain, Handle};
 pub use init::arch_entry_point;
-use stage_two_abi::Manifest;
 pub use vmx::{ActiveVmcs, VmxError as BackendError};
 
-use self::guest::VmxState;
-use crate::debug::qemu;
 use crate::debug::qemu::ExitCode;
 
 // —————————————————————————————— x86_64 Arch ——————————————————————————————— //
-
-pub fn launch_guest(manifest: &'static Manifest, vmx_state: VmxState, domain: Handle<Domain>) {
-    if !manifest.info.loaded {
-        log::warn!("No guest found, exiting");
-        return;
-    }
-
-    log::info!("Starting main loop");
-    guest::main_loop(vmx_state, domain);
-
-    qemu::exit(qemu::ExitCode::Success);
-}
-
 pub fn cpuid() -> usize {
     let cpuid = unsafe { core::arch::x86_64::__cpuid(0x01) };
     ((cpuid.ebx & 0xffffffff) >> 24) as usize
