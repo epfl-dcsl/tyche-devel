@@ -197,7 +197,7 @@ impl PlatformState for StateX86 {
         let vcpu = &mut self.vcpu;
         log::trace!("Core Update: {} on core {}", update, core);
         match update {
-            CoreUpdate::TlbShootdown => {
+            CoreUpdate::TlbShootdown { src_core: _ } => {
                 // Into a separate function so that we can drop the domain lock before starting to
                 // wait on the TLB_FLUSH_BARRIER
                 self.platform_shootdown(current_domain, core, false);
@@ -584,17 +584,16 @@ impl MonitorX86 {
                 // Put the results back.
                 let mut context = StateX86::get_context(*domain, cpuid());
                 match success {
-                    Ok(copy) => {
-                        if copy {
-                            context.set(VmcsField::GuestRax, 0, None).unwrap();
-                            context.set(VmcsField::GuestRdi, res[0], None).unwrap();
-                            context.set(VmcsField::GuestRsi, res[1], None).unwrap();
-                            context.set(VmcsField::GuestRdx, res[2], None).unwrap();
-                            context.set(VmcsField::GuestRcx, res[3], None).unwrap();
-                            context.set(VmcsField::GuestR8, res[4], None).unwrap();
-                            context.set(VmcsField::GuestR9, res[5], None).unwrap();
-                        }
+                    Ok(true) => {
+                          context.set(VmcsField::GuestRax, 0, None).unwrap();
+                          context.set(VmcsField::GuestRdi, res[0], None).unwrap();
+                          context.set(VmcsField::GuestRsi, res[1], None).unwrap();
+                          context.set(VmcsField::GuestRdx, res[2], None).unwrap();
+                          context.set(VmcsField::GuestRcx, res[3], None).unwrap();
+                          context.set(VmcsField::GuestR8, res[4], None).unwrap();
+                          context.set(VmcsField::GuestR9, res[5], None).unwrap();
                     },
+                    Ok(false) => {},
                     Err(e) => {
                         log::error!("Failure monitor call: {:?}, call: {}", e, vmcall);
                         context.set(VmcsField::GuestRax, 1, None).unwrap();

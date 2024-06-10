@@ -8,7 +8,7 @@ use riscv_tyche::*;
 use riscv_utils::*;
 
 use crate::println;
-use crate::riscv::guest::machine_trap_handler;
+use crate::riscv::platform::machine_trap_handler;
 
 pub fn init(hartid: usize) {
     unsafe {

@@ -12,9 +12,13 @@ mount_ubuntu_riscv() {
 
   modprobe loop max_part=8
 
-  losetup -P /dev/loop0 $DISK
+  losetup -P /dev/loop66 $DISK
 
-  LOC=`fdisk /dev/loop0 -l | grep "G Linux" | awk '{print $1}'`
+  if [ ! -f "$MOUNT_POINT" ]; then
+    mkdir -p $MOUNT_POINT
+  fi
+
+  LOC=`fdisk /dev/loop66 -l | grep "G Linux" | awk '{print $1}'`
   mount $LOC $MOUNT_POINT
 }
 
@@ -24,7 +28,7 @@ umount_ubuntu_riscv() {
     exit 1
   fi
   umount $MOUNT_POINT
-  sudo losetup -d /dev/loop0
+  sudo losetup -d /dev/loop66
 }
 
 mount_ubuntu() {

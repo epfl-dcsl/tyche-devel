@@ -8,9 +8,10 @@ use riscv_utils::{
     NUM_HARTS_AVAILABLE,
 };
 
-use super::{arch, guest, launch_guest, monitor};
+use super::{arch, launch_guest};
 use crate::debug::qemu;
 use crate::riscv::cpuid;
+use crate::riscv::platform::MonitorRiscv;
 
 pub fn arch_entry_point(hartid: usize, manifest: RVManifest, log_level: log::LevelFilter) -> ! {
     if hartid == manifest.coldboot_hartid {
@@ -41,16 +42,16 @@ pub fn arch_entry_point(hartid: usize, manifest: RVManifest, log_level: log::Lev
         AVAILABLE_HART_MASK.store(available_harts_mask, Ordering::SeqCst);
         NUM_HARTS_AVAILABLE.store(manifest.num_harts, Ordering::SeqCst);
 
-        monitor::init();
+        MonitorRiscv::init();
 
-        let mut domain = monitor::start_initial_domain_on_cpu();
+        let mut domain = MonitorRiscv::start_initial_domain_on_cpu();
 
         log::info!("Initial domain is ready.");
 
         arch::init(hartid);
 
         //Set the active domain.
-        guest::set_active_dom(hartid, domain);
+        MonitorRiscv::set_active_dom(hartid, domain);
 
         //monitor::do_debug();
 
@@ -104,9 +105,9 @@ pub fn arch_entry_point(hartid: usize, manifest: RVManifest, log_level: log::Lev
 
         log::info!("Done spinning for hart {}", hartid);
 
-        let mut domain = monitor::start_initial_domain_on_cpu();
+        let mut domain = MonitorRiscv::start_initial_domain_on_cpu();
 
-        guest::set_active_dom(hartid, domain);
+        MonitorRiscv::set_active_dom(hartid, domain);
 
         let jump_addr = HART_START_ADDR[hartid].load(Ordering::SeqCst);
         let jump_arg = HART_START_ARG1[hartid].load(Ordering::SeqCst);

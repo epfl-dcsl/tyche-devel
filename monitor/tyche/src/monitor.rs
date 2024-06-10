@@ -16,7 +16,9 @@ use crate::calls;
 /// Per-core updates
 #[derive(Debug, Clone, Copy)]
 pub enum CoreUpdate {
-    TlbShootdown,
+    TlbShootdown {
+        src_core: usize,
+    },
     Switch {
         domain: Handle<Domain>,
         return_capa: LocalCapa,
@@ -827,7 +829,9 @@ pub trait Monitor<T: PlatformState + 'static> {
                                 continue;
                             }
                             let mut core_updates = CORE_UPDATES[core as usize].lock();
-                            core_updates.push(CoreUpdate::TlbShootdown).unwrap();
+                            core_updates
+                                .push(CoreUpdate::TlbShootdown { src_core: core })
+                                .unwrap();
                         }
                         T::notify_cores(&domain, core_id, core_map as usize);
                         T::acknowledge_notify(&domain);
@@ -891,7 +895,7 @@ pub trait Monitor<T: PlatformState + 'static> {
 impl core::fmt::Display for CoreUpdate {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
-            CoreUpdate::TlbShootdown => write!(f, "TLB Shootdown"),
+            CoreUpdate::TlbShootdown { src_core } => write!(f, "TLB Shootdown {}", src_core),
             CoreUpdate::Switch { domain, .. } => write!(f, "Switch({})", domain),
             CoreUpdate::Trap {
                 manager,

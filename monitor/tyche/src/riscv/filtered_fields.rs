@@ -1,6 +1,6 @@
 use riscv_utils::PAGING_MODE_SV48;
 
-use crate::riscv::monitor::ContextData;
+use crate::riscv::context::ContextRiscv;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[repr(usize)]
@@ -33,7 +33,7 @@ impl RiscVField {
         *self as usize
     }
 
-    pub fn set(&self, context: &mut ContextData, value: usize) {
+    pub fn set(&self, context: &mut ContextRiscv, value: usize) {
         match *self {
             Self::Medeleg => {
                 context.medeleg = value;
@@ -55,7 +55,7 @@ impl RiscVField {
         }
     }
 
-    pub fn get(&self, context: &ContextData) -> usize {
+    pub fn get(&self, context: &ContextRiscv) -> usize {
         match *self {
             Self::Medeleg => context.medeleg,
             Self::Satp => context.satp,
