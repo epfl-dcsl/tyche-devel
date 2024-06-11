@@ -743,6 +743,7 @@ impl MonitorRiscv {
                 panic!("Error in vmcall {:?}", e);
             }
         }
+        drop(ctx);
         Self::apply_core_updates(&mut state, &mut active_dom, hartid);
         // TODO(aghosn): I commented that out because what about switch?
         // set_active_dom(hartid active_dom);
