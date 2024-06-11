@@ -29,6 +29,17 @@ Welcome to Tyche
 
 !
 
+# When running on the CI set this to true
+runs_on_ci=false
+
+if [ "$runs_on_ci" = true ] ; then
+    echo "Powering off!"
+    poweroff -f
+    echo "Failed to poweroff"
+
+    exec /bin/sh
+fi
+
 # Open a shell if switch root fail
 error() {
     echo "Failed to switch root to Ubuntu"
