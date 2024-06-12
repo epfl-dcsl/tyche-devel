@@ -772,6 +772,7 @@ pub trait Monitor<T: PlatformState + 'static> {
                 return Ok(true);
             }
             calls::SELF_CONFIG => {
+                todo!("Implement!!!");
                 // !!! IMPORTANT !!! Neelu: This needs to be platform-specific! 
                 //This part will not change the context of the domain - it's essentially only being
                 //used to deleg/undeleg ecalls from u-mode at the moment.

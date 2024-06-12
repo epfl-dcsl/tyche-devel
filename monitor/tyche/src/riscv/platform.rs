@@ -136,14 +136,13 @@ pub fn illegal_instruction_handler(
     mepc: usize,
     mtval: usize,
     mstatus: usize,
-    mip: usize,
-    mie: usize,
+    reg_state: &mut RegisterState,
 ) {
     if (mtval & 3) == 3 {
         if ((mtval & 0x7c) >> 2) == 0x1c {
             if mtval == 0x10500073 {
                 //WFI
-                println!("Trapped on WFI: MEPC: {:x} RA: {:x} ", mepc, reg_state.ra);
+                log::debug!("Trapped on WFI: MEPC: {:x} RA: {:x} ", mepc, reg_state.ra);
                 //I'm also gonna raise timer interrupts to S-mode, how does that sound?
                 //set_mip_stip();
             } else {
@@ -985,10 +984,11 @@ impl MonitorRiscv {
                     log::debug!("Illegal instruction: Tyche call from U-mode using Mret");
                     //MPP check for U-mode.
                     assert!((mstatus & (3 << 11)) == 0);
-                    tyche_call_handler(reg_state);
+                    //tyche_call_handler(reg_state);
+                    Self::wrapper_monitor_call();
                     reg_state.a7 = 0;
                 } else {
-                    illegal_instruction_handler(mepc, mtval, mstatus, mip, mie);
+                    illegal_instruction_handler(mepc, mtval, mstatus, reg_state);
                 }
             }
             mcause::ECALL_FROM_SMODE => {

@@ -10,7 +10,7 @@ use riscv_pmp::{
 };
 use riscv_utils::{
     read_medeleg, read_mepc, read_mscratch, read_satp, toggle_supervisor_interrupts, write_medeleg,
-    write_mepc, write_mscratch, write_satp, RegisterState, NUM_HARTS, read_mstatus,
+    write_mepc, write_mscratch, write_satp, RegisterState, NUM_HARTS, read_mstatus, write_mstatus,
 };
 use spin::{Mutex, MutexGuard};
 
