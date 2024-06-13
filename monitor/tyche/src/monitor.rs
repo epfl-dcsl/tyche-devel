@@ -739,7 +739,12 @@ pub trait Monitor<T: PlatformState + 'static> {
                 return Ok(true);
             }
             calls::ALLOC_CORE_CONTEXT => {
-                Self::do_init_child_context(state, domain, LocalCapa::new(args[0]), args[1])?;
+                Self::do_init_child_context(
+                    state,
+                    domain,
+                    LocalCapa::new(args[0]),
+                    T::remap_core(args[1]),
+                )?;
                 return Ok(true);
             }
             calls::READ_ALL_GP => {
