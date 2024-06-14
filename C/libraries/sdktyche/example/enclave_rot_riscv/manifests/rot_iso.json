@@ -1,0 +1,26 @@
+{
+    "kern_bin": {
+      "path":"enclave",
+      "ops":[
+        {
+          "AddSegment":{
+            "size":8192,
+            "tpe":"KernelStackConf",
+            "write":true,"exec":false
+          }
+        },
+        {
+          "AddSegment":{
+            "start": 3145728, 
+            "size":8192,
+            "tpe":"KernelShared",
+            "write":true,
+            "exec":false
+          }
+        }
+      ]
+    },
+    "generate_pts": true,
+    "output": "rot_iso"
+  }
+  

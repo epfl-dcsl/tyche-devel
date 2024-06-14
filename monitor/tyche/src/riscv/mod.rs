@@ -9,6 +9,7 @@ mod filtered_fields;
 pub mod guest;
 mod init;
 mod monitor;
+mod riscv_tpm_attestation;
 use core::arch::asm;
 
 pub use init::arch_entry_point;

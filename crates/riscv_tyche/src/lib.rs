@@ -16,4 +16,7 @@ pub struct RVManifest {
     pub next_mode: usize,
     pub coldboot_hartid: usize,
     pub num_harts: usize,
+    pub modulus: [u8; 384],
+    pub signature: [u8; 384],
+    pub attestation: [u8; 129],
 }

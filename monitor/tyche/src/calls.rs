@@ -28,3 +28,7 @@ pub const REVOKE_ALIASED_REGION: usize = 21;
 pub const SERIALIZE_ATTESTATION: usize = 22;
 /// For benchmarks to measure the cost of communication with tyche.
 pub const TEST_CALL: usize = 30;
+#[cfg(target_arch = "riscv64")]
+/// This call is only used by the Dynamic Root of Trust example.
+/// As such, it is not exposed by the Tyche driver API.
+pub const ENCLAVE_ATTESTATION_SIZE: usize = 23;

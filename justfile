@@ -24,11 +24,12 @@ default_dbg         := "/tmp/dbg-" + env_var('USER')
 default_smp         := "1"
 extra_arg           := ""
 
-qemu-riscv			:= "../qemu/build/riscv64-softmmu/qemu-system-riscv64"
+qemu-riscv			:= "../qemu-riscv/build/riscv64-softmmu/qemu-system-riscv64"
 drive-riscv			:= "ubuntu-22.04.3-preinstalled-server-riscv64+unmatched.img"
 kernel-riscv		:= "builds/linux-riscv/arch/riscv/boot/Image"
 bios-riscv			:= "opensbi-stage1/build/platform/generic/firmware/fw_payload.bin"
 dev-riscv			:= "-device virtio-rng-pci" 
+tpm-dev 			:= "-device tpm-tis-device,tpmdev=tpm0 -tpmdev emulator,id=tpm0,chardev=tpm-chardev -chardev socket,id=tpm-chardev,path=/tmp/tpm-dev-" + env_var('USER')+ "/sock"
 bios-riscv-gdb		:= "opensbi-stage1/build/platform/generic/firmware/fw_payload.elf"
 riscv-linux-dir     := "builds/linux-riscv"
 riscv-vmlinux       := "builds/linux-riscv/vmlinux"
@@ -263,8 +264,20 @@ _tpm:
 		swtpm socket --tpm2 --tpmstate dir={{tpm_path}} --ctrl type=unixio,path={{tpm_path}}/sock &
 	fi
 
+_tpm_riscv:
+	#!/usr/bin/env sh
+	if pgrep -u $USER swtpm;
+	then
+		echo "TPM is running"
+	else
+		echo "Starting TPM"
+		mkdir -p {{tpm_path}}/
+		swtpm socket --tpm2 --tpmstate dir={{tpm_path}} --ctrl type=unixio,path={{tpm_path}}/sock --locality allow-set-locality &
+	fi
+
 run_riscv:
-	{{qemu-riscv}} -nographic -drive "file={{drive-riscv}},format=raw,if=virtio" -cpu rv64,h=true -M virt -m 4G -bios {{bios-riscv}} -kernel {{kernel-riscv}} -append "root=/dev/vda1 rw console=ttyS0 earlycon=sbi quiet" -smp 1 {{dev-riscv}} 
+	@just _tpm_riscv
+	{{qemu-riscv}} -nographic -drive "file={{drive-riscv}},format=raw,if=virtio" -cpu rv64,h=true -M virt -m 4G -bios {{bios-riscv}} -kernel {{kernel-riscv}} -append "root=/dev/vda1 rw console=ttyS0 earlycon=sbi quiet" -smp 1 {{dev-riscv}} {{tpm-dev}}
 
 run_riscv_gdb: 
 	{{qemu-riscv}} -nographic -drive "file={{drive-riscv}},format=raw,if=virtio" -cpu rv64,h=true -M virt -m 4G -bios {{bios-riscv}} -kernel {{kernel-riscv}} -append "root=/dev/vda1 rw console=ttyS0 earlycon=sbi quiet" -smp 1 {{dev-riscv}} -gdb tcp::1234 -S 

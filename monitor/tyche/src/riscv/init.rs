@@ -1,6 +1,7 @@
 use core::arch::asm;
 use core::sync::atomic::Ordering;
 
+use attestation::signature::{TPM_ATTESTATION, TPM_MODULUS, TPM_SIGNATURE};
 use capa_engine::{Domain, Handle};
 use riscv_tyche::RVManifest;
 use riscv_utils::{
@@ -21,13 +22,22 @@ pub fn arch_entry_point(hartid: usize, manifest: RVManifest, log_level: log::Lev
             hartid
         );
         log::info!(
-            "Manifest Content: {:x} {:x} {:x} {:x} {:x}",
+            "Manifest Content: {:x} {:x} {:x} {:x} {:x}, {:?}\n {:?}\n, {:?}",
             manifest.coldboot_hartid,
             manifest.next_arg1,
             manifest.next_addr,
             manifest.next_mode,
-            manifest.num_harts
+            manifest.num_harts,
+            manifest.modulus,
+            manifest.signature,
+            manifest.attestation
         );
+        unsafe {
+            TPM_MODULUS = manifest.modulus;
+            TPM_SIGNATURE = manifest.signature;
+            TPM_ATTESTATION = manifest.attestation;
+        }
+
         let mhartid = cpuid();
         log::debug!("==========Coldboot MHARTID: {} ===========", mhartid);
 
