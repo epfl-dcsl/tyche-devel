@@ -40,80 +40,75 @@ static ACTIVE_DOMAIN: [Mutex<Option<Handle<Domain>>>; NUM_HARTS] = [EMPTY_ACTIVE
 pub extern "C" fn machine_trap_handler() {
     unsafe {
         asm!(
-            "csrrw sp, mscratch, sp
+        "csrrw sp, mscratch, sp
         addi sp, sp, -34*8
-        sd ra, 0*8(sp)
-        sd a0, 1*8(sp)
-        sd a1, 2*8(sp)
-        sd a2, 3*8(sp)
-        sd a3, 4*8(sp)
-        sd a4, 5*8(sp)
-        sd a5, 6*8(sp)
-        sd a6, 7*8(sp)
-        sd a7, 8*8(sp)
-        sd t0, 9*8(sp)
-        sd t1, 10*8(sp)
-        sd t2, 11*8(sp)
-        sd t3, 12*8(sp)
-        sd t4, 13*8(sp)
-        sd t5, 14*8(sp)
-        sd t6, 15*8(sp)
-        sd zero, 16*8(sp)
-        sd gp, 17*8(sp)
-        sd tp, 18*8(sp)
-        sd s0, 19*8(sp)
-        sd s1, 20*8(sp)
-        sd s2, 21*8(sp)
-        sd s3, 22*8(sp)
-        sd s4, 23*8(sp)
-        sd s5, 24*8(sp)
-        sd s6, 25*8(sp)
-        sd s7, 26*8(sp)
-        sd s8, 27*8(sp)
-        sd s9, 28*8(sp)
-        sd s10, 29*8(sp)
-        sd s11, 30*8(sp)
-        //csrr t1, mepc 
-        //sd t1, 31*8(sp)
-        //csrr t1, mstatus
-        //sd t1, 32*8(sp)
+        sd zero, 0*8(sp)
+        sd ra, 1*8(sp)
+        sd zero, 2*8(sp)    //uninitialised sp 
+        sd gp, 3*8(sp)
+        sd tp, 4*8(sp)
+        sd t0, 5*8(sp)
+        sd t1, 6*8(sp)
+        sd t2, 7*8(sp)
+        sd s0, 8*8(sp)
+        sd s1, 9*8(sp)
+        sd a0, 10*8(sp)
+        sd a1, 11*8(sp)
+        sd a2, 12*8(sp)
+        sd a3, 13*8(sp)
+        sd a4, 14*8(sp)
+        sd a5, 15*8(sp)
+        sd a6, 16*8(sp)
+        sd a7, 17*8(sp)
+        sd s2, 18*8(sp)
+        sd s3, 19*8(sp)
+        sd s4, 20*8(sp)
+        sd s5, 21*8(sp)
+        sd s6, 22*8(sp)
+        sd s7, 23*8(sp)
+        sd s8, 24*8(sp)
+        sd s9, 25*8(sp)
+        sd s10, 26*8(sp)
+        sd s11, 27*8(sp)
+        sd t3, 28*8(sp)
+        sd t4, 29*8(sp)
+        sd t5, 30*8(sp)
+        sd t6, 31*8(sp)
         mv a0, sp      //arg to trap_handler
         auipc x1, 0x0
         addi x1, x1, 10
         j {trap_handler}
-        //ld t1, 31*8(sp)
-        //csrw mepc, t1
-        ld ra, 0*8(sp)
-        ld a0, 1*8(sp)
-        ld a1, 2*8(sp)
-        ld a2, 3*8(sp)
-        ld a3, 4*8(sp)
-        ld a4, 5*8(sp)
-        ld a5, 6*8(sp)
-        ld a6, 7*8(sp)
-        ld a7, 8*8(sp)
-        ld t0, 9*8(sp)
-        ld t1, 10*8(sp)
-        ld t2, 11*8(sp)
-        ld t3, 12*8(sp)
-        ld t4, 13*8(sp)
-        ld t5, 14*8(sp)
-        ld t6, 15*8(sp)
-        ld zero, 16*8(sp)
-        ld gp, 17*8(sp)
-        ld tp, 18*8(sp)
-        ld s0, 19*8(sp)
-        ld s1, 20*8(sp)
-        ld s2, 21*8(sp)
-        ld s3, 22*8(sp)
-        ld s4, 23*8(sp)
-        ld s5, 24*8(sp)
-        ld s6, 25*8(sp)
-        ld s7, 26*8(sp)
-        ld s8, 27*8(sp)
-        ld s9, 28*8(sp)
-        ld s10, 29*8(sp)
-        ld s11, 30*8(sp)
+        ld zero, 0*8(sp)
+        ld ra, 1*8(sp)
+        ld gp, 3*8(sp)
+        ld tp, 4*8(sp)
+        ld t0, 5*8(sp)
+        ld t1, 6*8(sp)
+        ld t2, 7*8(sp)
+        ld s0, 8*8(sp)
+        ld s1, 9*8(sp)
+        ld a0, 10*8(sp)
+        ld a1, 11*8(sp)
+        ld a2, 12*8(sp)
+        ld a3, 13*8(sp)
+        ld a4, 14*8(sp)
+        ld a5, 15*8(sp)
+        ld a6, 16*8(sp)
+        ld a7, 17*8(sp)
+        ld s2, 18*8(sp)
+        ld s3, 19*8(sp)
+        ld s4, 20*8(sp)
+        ld s5, 21*8(sp)
+        ld s6, 22*8(sp)
+        ld s7, 23*8(sp)
+        ld s8, 24*8(sp)
+        ld s9, 25*8(sp)
+        ld s10, 26*8(sp)
+        ld s11, 27*8(sp)
+        ld t3, 28*8(sp)
+        ld t4, 29*8(sp)
+        ld t5, 30*8(sp)
+        ld t6, 31*8(sp)
         addi sp, sp, 34*8
         csrrw sp, mscratch, sp
         mret",
@@ -985,6 +980,7 @@ impl MonitorRiscv {
                     //MPP check for U-mode.
                     assert!((mstatus & (3 << 11)) == 0);
                     //tyche_call_handler(reg_state);
+                    log::debug!("Calling wrappper monitor call");
                     Self::wrapper_monitor_call();
                     reg_state.a7 = 0;
                 } else {
@@ -1000,6 +996,7 @@ impl MonitorRiscv {
                     } else if reg_state.a7 == 0x5479636865 {
                         //TODO(aghosn): commented this.
                         //misaligned_load_handler(/*reg_state*/);
+                        log::debug!("Calling wrappper monitor call");
                         Self::wrapper_monitor_call();
                     }
                 } else {
@@ -1082,6 +1079,7 @@ impl MonitorRiscv {
         let mut ctx = StateRiscv::get_context(active_dom, hartid);
         match success {
             Ok(true) => {
+                log::debug!("Monitor call success");
                 ctx.reg_state.a0 = 0;
                 ctx.reg_state.a1 = res[0] as isize;
                 ctx.reg_state.a2 = res[1];
@@ -1100,6 +1098,6 @@ impl MonitorRiscv {
         // !!! IMPORTANT !!! Neelu: Should I uncomment because *current_domain is updated by
         // switch! 
         // TODO(aghosn): I commented that out because what about switch? 
-        // set_active_dom(hartid active_dom);
+        Self::set_active_dom(hartid, active_dom);
     }
 }

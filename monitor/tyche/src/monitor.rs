@@ -684,7 +684,7 @@ pub trait Monitor<T: PlatformState + 'static> {
                 return Ok(true);
             }
             calls::SWITCH => {
-                log::trace!("Switch on core {} from {}", cpuid(), domain.idx());
+                log::trace!("Switch on core {} from {} with capa {}", cpuid(), domain.idx(), args[0]);
                 Self::do_switch(state, domain, LocalCapa::new(args[0]), cpuid())?;
                 return Ok(false);
             }
