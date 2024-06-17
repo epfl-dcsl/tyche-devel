@@ -859,7 +859,7 @@ pub trait Monitor<T: PlatformState + 'static> {
                             }
                             let mut core_updates = CORE_UPDATES[core as usize].lock();
                             core_updates
-                                .push(CoreUpdate::TlbShootdown { src_core: core })
+                                .push(CoreUpdate::TlbShootdown { src_core: core_id })
                                 .unwrap();
                         }
                         T::notify_cores(&domain, core_id, core_map as usize);
