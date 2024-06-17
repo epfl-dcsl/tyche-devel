@@ -649,8 +649,8 @@ impl PlatformState for StateRiscv {
                     domain,
                 );
 
-                current_ctx.reg_state.a0 = 0x0;
-                current_ctx.reg_state.a1 = return_capa.as_usize() as isize;
+                next_ctx.reg_state.a0 = 0x0;
+                next_ctx.reg_state.a1 = return_capa.as_usize() as isize;
                 *current_domain = domain;
             }
             CoreUpdate::Trap {
