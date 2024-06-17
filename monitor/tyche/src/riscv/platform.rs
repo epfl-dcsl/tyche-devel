@@ -1000,9 +1000,13 @@ impl MonitorRiscv {
                         Self::wrapper_monitor_call();
                     }
                 } else {
-                    ecall_handler(&mut ret, &mut err, &mut out_val, *reg_state);
-                    reg_state.a0 = ret;
-                    reg_state.a1 = out_val as isize;
+
+                    if let Some(active_dom) = Self::get_active_dom(hartid) {
+                        ecall_handler(&mut ret, &mut err, &mut out_val, *reg_state);
+                        let dom_ctx = &mut StateRiscv::get_context(active_dom, hartid);
+                        dom_ctx.reg_state.a0 = ret;
+                        dom_ctx.reg_state.a1 = out_val as isize;
+                    }
                 }
             }
             mcause::LOAD_ADDRESS_MISALIGNED => {
