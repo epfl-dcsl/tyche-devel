@@ -324,8 +324,12 @@ pub fn sbi_ext_rfence_handler(
     }
 
     // SYNC:
-
+    let mut wait_count = 0;
     while HART_IPI_SYNC[src_hartid].load(Ordering::SeqCst) > 0 {
+        wait_count = wait_count + 1;
+        if wait_count > 5000000 {
+            log::info!("Hart {} Help! I am stuck waiting!", src_hartid);
+        }
         // Try to process local hart ipis instead of defaulting to busy wait so as to prevent deadlocks, or else just spin loop
         log::trace!("Waiting in hart {}", src_hartid);
         let mut ipi_requests = HART_IPI_BUFFER[src_hartid].lock();

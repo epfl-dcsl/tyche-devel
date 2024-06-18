@@ -11,7 +11,7 @@ use riscv_pmp::{
     FROZEN_PMP_ENTRIES, PMP_CFG_ENTRIES, PMP_ENTRIES,
 };
 use riscv_sbi::ecall::ecall_handler;
-use riscv_sbi::ipi::{aclint_mswi_send_ipi, process_ipi};
+use riscv_sbi::ipi::{aclint_mswi_send_ipi, process_ipi, process_tlb_ipis};
 use riscv_sbi::sbi::EXT_IPI;
 use riscv_utils::*;
 use spin::{Mutex, MutexGuard};
@@ -163,7 +163,7 @@ pub fn misaligned_load_handler(mtval: usize, mepc: usize, reg_state: &mut Regist
     //Assumption: No H-mode extension. MTVAL2 and MTINST are zero.
     //Implies: trapped instr value is zero or special value.
 
-    //println!("Misaligned load handler: mtval {:x} mepc: {:x}", mtval, mepc);
+    log::debug!("Misaligned load handler: mtval {:x} mepc: {:x}", mtval, mepc);
 
     //get insn....
     let mut trap_state: TrapState = TrapState {
@@ -295,7 +295,7 @@ pub fn misaligned_load_handler(mtval: usize, mepc: usize, reg_state: &mut Regist
 
 //Todo: There is a lot of repeated code between misaligned load/store handlers. Make it common.
 pub fn misaligned_store_handler(mtval: usize, mepc: usize, reg_state: &mut RegisterState) {
-    //println!("Misaligned store handler: mtval {:x} mepc: {:x}", mtval, mepc);
+    log::debug!("Misaligned store handler: mtval {:x} mepc: {:x}", mtval, mepc);
 
     //get insn....
     let mut trap_state: TrapState = TrapState {
@@ -786,6 +786,7 @@ impl PlatformState for StateRiscv {
         let src_hartid = cpuid();
         for hart in BitmapIterator::new(core_map as u64) {
             if hart != src_hartid {
+                log::debug!("Sending IPI from hart {} to hart {}",src_hartid,hart);
                 aclint_mswi_send_ipi(hart);
             }
         }
@@ -799,6 +800,7 @@ impl PlatformState for StateRiscv {
         let src_hartid = cpuid();
         while MONITOR_IPI_SYNC[src_hartid].load(Ordering::SeqCst) > 0 {
             core::hint::spin_loop();
+            process_tlb_ipis(src_hartid);
         }
     }
 
@@ -984,7 +986,7 @@ impl MonitorRiscv {
                     Self::wrapper_monitor_call();
                     reg_state.a7 = 0;
                 } else {
-                    illegal_instruction_handler(mepc, mtval, mstatus, reg_state);
+                    //illegal_instruction_handler(mepc, mtval, mstatus, reg_state);
                 }
             }
             mcause::ECALL_FROM_SMODE => {
@@ -1022,7 +1024,7 @@ impl MonitorRiscv {
             | mcause::LOAD_ACCESS_FAULT
             | mcause::INSTRUCTION_ACCESS_FAULT => {
                 panic!(
-                "PMP Access Fault! mcause: {:x} mepc: {:x} mtval: {:x} satp: {:x} mstatus: {:x}",
+                "Hart {} PMP Access Fault! mcause: {:x} mepc: {:x} mtval: {:x} satp: {:x} mstatus: {:x}", hartid,
                 mcause, mepc, mtval, satp, mstatus
             );
             }
