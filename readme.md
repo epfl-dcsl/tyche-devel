@@ -107,3 +107,16 @@ cargo krun-linux
 Ubuntu images are supported, to use one simple create a `.qcow2` image (follow a
 tutorial for that), and add it at the root of this folder with the name
 `ubuntu.qcow2`.
+
+We also provide some scripts to quickly setup a new VM in the `new-vm-scripts` folder.
+To use them, execute the following commands
+```bash
+cd ./new-vm-scripts
+#Create VM image based on ubuntu cloud image
+./tyche-create-new-vm.sh -image-name tyche-base.qcow2
+#We need to start the VM once, to apply the cloud-init config. Terminate the VM after you reach the login prompt
+./tyche-run-setup.sh -vm-image ./tyche-base.qcow2 -config-blob ./config-blob.img
+#Finally, we need to adjust he partition layout, because tyche's init script is currently quite limited and expects things in a certain order. On the Prompt, double check that the selected filesytem is the "main" partition
+./tyche-convert-image.sh -in tyche-base.qcow2 -out ../ubuntu.qcow2
+```
+The final image is now ready to use and placed in `../ubuntu.qcow` where it gets picked up by the regular `just linux` command.
