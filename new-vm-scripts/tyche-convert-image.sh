@@ -71,8 +71,9 @@ echo "Rootfs device selected: $SRC_ROOT_FS_DEVICE"
 # Create the GPT partition table and partitions
 echo "Creation partions on $DST_DEVICE"
 sudo parted --script "$DST_DEVICE" mklabel gpt \
-    mkpart primary 1MiB 100MB \
-    mkpart primary 100MB 100%
+    mkpart dummy 1MiB 100MB \
+    mkpart root 100MB 100% \
+    toggle 1 bios_grub
 
 DST_ROOT_PARTITION="${DST_DEVICE}p2"
 
