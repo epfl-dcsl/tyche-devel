@@ -127,6 +127,28 @@ pub extern "C" fn exit_handler_failed(mcause: usize) {
     );
 }
 
+#[cfg(not(feature = "visionfive2"))]
+pub fn illegal_instruction_handler(
+    mepc: usize,
+    mtval: usize,
+    mstatus: usize,
+    reg_state: &mut RegisterState,
+) {
+    //do nothing.
+}
+
+#[cfg(not(feature = "visionfive2"))]
+pub fn misaligned_store_handler(mtval: usize, mepc: usize, reg_state: &mut RegisterState) {
+    //do nothing.
+}
+
+#[cfg(not(feature = "visionfive2"))]
+pub fn misaligned_load_handler(mtval: usize, mepc: usize, reg_state: &mut RegisterState) {
+    //do nothing.
+}
+
+
+#[cfg(feature = "visionfive2")]
 pub fn illegal_instruction_handler(
     mepc: usize,
     mtval: usize,
@@ -159,6 +181,7 @@ pub fn illegal_instruction_handler(
 
 //Todo: Move this to riscv-utils crate -- this is a quite low-level impl. so it's better to
 //modularise it appropriately.
+#[cfg(feature = "visionfive2")]
 pub fn misaligned_load_handler(mtval: usize, mepc: usize, reg_state: &mut RegisterState) {
     //Assumption: No H-mode extension. MTVAL2 and MTINST are zero.
     //Implies: trapped instr value is zero or special value.
@@ -294,6 +317,7 @@ pub fn misaligned_load_handler(mtval: usize, mepc: usize, reg_state: &mut Regist
 }
 
 //Todo: There is a lot of repeated code between misaligned load/store handlers. Make it common.
+#[cfg(feature = "visionfive2")]
 pub fn misaligned_store_handler(mtval: usize, mepc: usize, reg_state: &mut RegisterState) {
     log::debug!("Misaligned store handler: mtval {:x} mepc: {:x}", mtval, mepc);
 
@@ -986,7 +1010,7 @@ impl MonitorRiscv {
                     Self::wrapper_monitor_call();
                     reg_state.a7 = 0;
                 } else {
-                    //illegal_instruction_handler(mepc, mtval, mstatus, reg_state);
+                    illegal_instruction_handler(mepc, mtval, mstatus, reg_state);
                 }
             }
             mcause::ECALL_FROM_SMODE => {
@@ -997,7 +1021,6 @@ impl MonitorRiscv {
                         clear_mip_seip();
                     } else if reg_state.a7 == 0x5479636865 {
                         //TODO(aghosn): commented this.
-                        //misaligned_load_handler(/*reg_state*/);
                         log::debug!("Calling wrappper monitor call");
                         Self::wrapper_monitor_call();
                     }
