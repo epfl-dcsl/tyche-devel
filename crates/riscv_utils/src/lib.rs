@@ -450,7 +450,7 @@ pub fn system_opcode_instr(mtval: usize, mstatus: usize, reg_state: &mut Registe
         set_rd(mtval, reg_state, csr_val);
     } else {
         //Truly Illegal.
-        println!("Truly illegal instr or Unsupported CSR emulation request");
+        log::debug!("Truly illegal instr or Unsupported CSR emulation request");
         reg_state.a0 = -2;
     }
 }

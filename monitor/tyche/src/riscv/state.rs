@@ -73,7 +73,7 @@ impl StateRiscv {
     }
 
     pub fn update_pmps(domain: MutexGuard<DataRiscv>) {
-        log::info!("Updating PMPs FOR REAL!");
+        log::debug!("Updating PMPs FOR REAL!");
         clear_pmp();
         for i in FROZEN_PMP_ENTRIES..PMP_ENTRIES {
             pmpaddr_csr_write(i, domain.pmpaddr[i]);

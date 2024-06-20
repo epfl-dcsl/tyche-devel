@@ -587,11 +587,12 @@ pub trait Monitor<T: PlatformState + 'static> {
         let mut engine = Self::lock_engine(state, current);
         let domain = engine.get_domain_capa(*current, domain)?;
         let cores = engine.get_domain_permission(domain, permission::PermissionIndex::AllowedCores);
-        if core > T::max_cpus() || (1 << core) & cores == 0 {
-            log::error!("Attempt to set context on unallowed core");
+        let remapped_core = T::remap_core(core);
+        if remapped_core > T::max_cpus() || (1 << remapped_core) & cores == 0 {
+            log::error!("Attempt to set context on unallowed core {} max_cpus {} cores: 0x{:x}", remapped_core, T::max_cpus(), cores);
             return Err(CapaError::InvalidCore);
         }
-        T::create_context(state, engine, *current, domain, core)?;
+        T::create_context(state, engine, *current, domain, remapped_core)?;
         return Ok(());
     }
 
@@ -773,28 +774,6 @@ pub trait Monitor<T: PlatformState + 'static> {
             }
             calls::SELF_CONFIG => {
                 todo!("Implement!!!");
-                // !!! IMPORTANT !!! Neelu: This needs to be platform-specific! 
-                //This part will not change the context of the domain - it's essentially only being
-                //used to deleg/undeleg ecalls from u-mode at the moment.
-                /* log::debug!("Self config for hart {} ", hartid);
-                let context = monitor::get_context(active_dom, hartid);
-                let field = RiscVField::from_usize(arg_1).unwrap();
-                if field == RiscVField::Medeleg {
-                    let updated_medeleg;
-                    if arg_2 == !(1 << 8) {
-                        updated_medeleg = (context.medeleg & arg_2);
-                    } else if arg_2 == (1 << 8) {
-                        updated_medeleg = (context.medeleg | arg_2);
-                    } else {
-                        panic!("Unexpected changes to medeleg!");
-                    }
-                    write_medeleg(updated_medeleg);
-                    log::debug!("Done setting medeleg to 0x{:x}.", updated_medeleg);
-                    reg_state.a0 = 0;
-                } else {
-                    log::debug!("Self config does not support setting this field!");
-                    reg_state.a0 = 1;
-                } */
             }
             // !!! IMPORTANT !!! Neelu: Do we keep this one or just use revoked? 
             /* calls::REVOKE_ALIASED_REGION => {
