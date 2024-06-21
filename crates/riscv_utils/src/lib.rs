@@ -4,7 +4,6 @@ use core::arch::asm;
 use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 pub const NUM_HARTS: usize = 4; //This is supposed to be maximum supported harts.
-use qemu::println;
 use riscv_csrs::mstatus;
 
 //uart base address
