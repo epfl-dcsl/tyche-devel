@@ -36,7 +36,6 @@ pub fn aclint_mswi_clear_ipi(target_hartid: usize) {
         panic!("Clearing IPI of another!");
     }
 
-
     let target_addr: usize = ACLINT_MSWI_BASE_ADDR + target_hartid * ACLINT_MSWI_WORD_SIZE;
     unsafe {
         asm!("sw {}, 0({})", in(reg) 0, in(reg) target_addr);

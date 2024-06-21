@@ -589,7 +589,12 @@ pub trait Monitor<T: PlatformState + 'static> {
         let cores = engine.get_domain_permission(domain, permission::PermissionIndex::AllowedCores);
         let remapped_core = T::remap_core(core);
         if remapped_core > T::max_cpus() || (1 << remapped_core) & cores == 0 {
-            log::error!("Attempt to set context on unallowed core {} max_cpus {} cores: 0x{:x}", remapped_core, T::max_cpus(), cores);
+            log::error!(
+                "Attempt to set context on unallowed core {} max_cpus {} cores: 0x{:x}",
+                remapped_core,
+                T::max_cpus(),
+                cores
+            );
             return Err(CapaError::InvalidCore);
         }
         T::create_context(state, engine, *current, domain, remapped_core)?;
@@ -685,7 +690,12 @@ pub trait Monitor<T: PlatformState + 'static> {
                 return Ok(true);
             }
             calls::SWITCH => {
-                log::trace!("Switch on core {} from {} with capa {}", cpuid(), domain.idx(), args[0]);
+                log::trace!(
+                    "Switch on core {} from {} with capa {}",
+                    cpuid(),
+                    domain.idx(),
+                    args[0]
+                );
                 Self::do_switch(state, domain, LocalCapa::new(args[0]), cpuid())?;
                 return Ok(false);
             }
@@ -775,7 +785,6 @@ pub trait Monitor<T: PlatformState + 'static> {
             calls::SELF_CONFIG => {
                 todo!("Implement!!!");
             }
-            // !!! IMPORTANT !!! Neelu: Do we keep this one or just use revoked? 
             /* calls::REVOKE_ALIASED_REGION => {
                 log::trace!("Revoke aliased region on core {}", cpuid());
                 Self::do_revoke_region(
@@ -788,7 +797,7 @@ pub trait Monitor<T: PlatformState + 'static> {
                 )
                 .unwrap();
                 return Ok(true);
-            } */ 
+            } */
             calls::SERIALIZE_ATTESTATION => {
                 let written = Self::do_serialize_attestation(state, domain, args[0], args[1])?;
                 res[0] = written;

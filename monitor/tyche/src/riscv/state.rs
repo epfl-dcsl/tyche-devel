@@ -9,8 +9,8 @@ use riscv_pmp::{
     PMP_CFG_ENTRIES, PMP_ENTRIES,
 };
 use riscv_utils::{
-    read_medeleg, read_mepc, read_mscratch, read_satp, toggle_supervisor_interrupts, write_medeleg,
-    write_mepc, write_mscratch, write_satp, RegisterState, NUM_HARTS, read_mstatus, write_mstatus,
+    read_medeleg, read_mepc, read_mscratch, read_mstatus, read_satp, toggle_supervisor_interrupts,
+    write_medeleg, write_mepc, write_mscratch, write_mstatus, write_satp, RegisterState, NUM_HARTS,
 };
 use spin::{Mutex, MutexGuard};
 
@@ -119,7 +119,7 @@ impl StateRiscv {
         write_mscratch(next_ctx.sp);
         write_mepc(next_ctx.mepc);
         write_medeleg(next_ctx.medeleg); //TODO: This needs to be part of Trap/UpdateTrap.
-        
+
         if next_ctx.mstatus != 0 {
             //So basically if it doesn't explicitly get set by the manager, it
             //will not be changed. And from next time onwards, it will be

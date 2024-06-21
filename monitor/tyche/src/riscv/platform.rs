@@ -13,10 +13,11 @@ use riscv_pmp::{
 use riscv_sbi::ecall::ecall_handler;
 use riscv_sbi::ipi::{aclint_mswi_send_ipi, process_ipi, process_tlb_ipis};
 use riscv_sbi::sbi::EXT_IPI;
+use riscv_tyche::{
+    DOM0_ROOT_REGION_2_END, DOM0_ROOT_REGION_2_START, DOM0_ROOT_REGION_END, DOM0_ROOT_REGION_START,
+};
 use riscv_utils::*;
 use spin::{Mutex, MutexGuard};
-
-use riscv_tyche::{DOM0_ROOT_REGION_START, DOM0_ROOT_REGION_END, DOM0_ROOT_REGION_2_START, DOM0_ROOT_REGION_2_END};
 
 use crate::arch::cpuid;
 use crate::monitor::{CoreUpdate, Monitor, PlatformState, CAPA_ENGINE, INITIAL_DOMAIN};
@@ -147,7 +148,6 @@ pub fn misaligned_load_handler(mtval: usize, mepc: usize, reg_state: &mut Regist
     //do nothing.
 }
 
-
 #[cfg(feature = "visionfive2")]
 pub fn illegal_instruction_handler(
     mepc: usize,
@@ -186,7 +186,11 @@ pub fn misaligned_load_handler(mtval: usize, mepc: usize, reg_state: &mut Regist
     //Assumption: No H-mode extension. MTVAL2 and MTINST are zero.
     //Implies: trapped instr value is zero or special value.
 
-    log::trace!("Misaligned load handler: mtval {:x} mepc: {:x}", mtval, mepc);
+    log::trace!(
+        "Misaligned load handler: mtval {:x} mepc: {:x}",
+        mtval,
+        mepc
+    );
 
     //get insn....
     let mut trap_state: TrapState = TrapState {
@@ -319,7 +323,11 @@ pub fn misaligned_load_handler(mtval: usize, mepc: usize, reg_state: &mut Regist
 //Todo: There is a lot of repeated code between misaligned load/store handlers. Make it common.
 #[cfg(feature = "visionfive2")]
 pub fn misaligned_store_handler(mtval: usize, mepc: usize, reg_state: &mut RegisterState) {
-    log::trace!("Misaligned store handler: mtval {:x} mepc: {:x}", mtval, mepc);
+    log::trace!(
+        "Misaligned store handler: mtval {:x} mepc: {:x}",
+        mtval,
+        mepc
+    );
 
     //get insn....
     let mut trap_state: TrapState = TrapState {
@@ -469,7 +477,6 @@ pub extern "C" fn sbi_expected_trap() {
         );
     }
 }
-
 
 // ———————————————————— Platform implementation of State ———————————————————— //
 
@@ -810,7 +817,7 @@ impl PlatformState for StateRiscv {
         let src_hartid = cpuid();
         for hart in BitmapIterator::new(core_map as u64) {
             if hart != src_hartid {
-                log::debug!("Sending IPI from hart {} to hart {}",src_hartid,hart);
+                log::debug!("Sending IPI from hart {} to hart {}", src_hartid, hart);
                 aclint_mswi_send_ipi(hart);
             }
         }
@@ -944,7 +951,7 @@ impl MonitorRiscv {
             asm!("csrr {}, mip", out(reg) mip);
             asm!("csrr {}, satp", out(reg)satp);
         }
-    
+
         log::trace!("###### TRAP FROM HART {} ######", hartid);
 
         log::trace!(
@@ -1008,7 +1015,7 @@ impl MonitorRiscv {
                     //assert!((mstatus & (3 << 11)) == 0);
                     log::debug!("Calling wrappper monitor call");
                     Self::wrapper_monitor_call();
-                    if let Some(active_dom) = Self::get_active_dom(hartid) { 
+                    if let Some(active_dom) = Self::get_active_dom(hartid) {
                         let dom_ctx = &mut StateRiscv::get_context(active_dom, hartid);
                         dom_ctx.reg_state.a7 = 0;
                     }
@@ -1030,20 +1037,20 @@ impl MonitorRiscv {
                         //TODO(aghosn): commented this.
                         log::debug!("Calling wrappper monitor call");
                         Self::wrapper_monitor_call();
-                        if let Some(active_dom) = Self::get_active_dom(hartid) { 
+                        if let Some(active_dom) = Self::get_active_dom(hartid) {
                             let dom_ctx = &mut StateRiscv::get_context(active_dom, hartid);
                             dom_ctx.reg_state.a7 = 0;
                         }
                     }
                 } else {
-                        ecall_handler(&mut ret, &mut err, &mut out_val, *reg_state);
-                       //Reg state must be updated.
-                        if let Some(active_dom) = Self::get_active_dom(hartid) {
-                            StateRiscv::save_current_regs(&active_dom, hartid, reg_state);
-                            let dom_ctx = &mut StateRiscv::get_context(active_dom, hartid);
-                            dom_ctx.reg_state.a0 = ret;
-                            dom_ctx.reg_state.a1 = out_val as isize;
-                        }
+                    ecall_handler(&mut ret, &mut err, &mut out_val, *reg_state);
+                    //Reg state must be updated.
+                    if let Some(active_dom) = Self::get_active_dom(hartid) {
+                        StateRiscv::save_current_regs(&active_dom, hartid, reg_state);
+                        let dom_ctx = &mut StateRiscv::get_context(active_dom, hartid);
+                        dom_ctx.reg_state.a0 = ret;
+                        dom_ctx.reg_state.a1 = out_val as isize;
+                    }
                 }
             }
             mcause::LOAD_ADDRESS_MISALIGNED => {
@@ -1087,17 +1094,14 @@ impl MonitorRiscv {
         // TODO: This shouldn't happen in case of switch.
         if ((mcause & (1 << 63)) != (1 << 63))
             && mcause != mcause::LOAD_ADDRESS_MISALIGNED
-            && mcause != mcause::STORE_ADDRESS_MISALIGNED {
-            
+            && mcause != mcause::STORE_ADDRESS_MISALIGNED
+        {
             unsafe {
                 asm!("csrr t0, mepc");
                 asm!("addi t0, t0, 0x4");
                 asm!("csrw mepc, t0");
             }
         }
-        // !!! IMPORTANT !!! Neelu: Do this only on Tyche calls? OR go and patch all reg_state uses
-        // to domain ctx -- the latter option is cleaner I think. 
-        // 
         // Load the state from the current domain.
         if let Some(active_domain) = Self::get_active_dom(hartid) {
             StateRiscv::load_current_regs(&active_domain, hartid, reg_state);
@@ -1144,9 +1148,8 @@ impl MonitorRiscv {
         }
         drop(ctx);
         Self::apply_core_updates(&mut state, &mut active_dom, hartid);
-        // !!! IMPORTANT !!! Neelu: Should I uncomment because *current_domain is updated by
-        // switch! 
-        // TODO(aghosn): I commented that out because what about switch? 
+        // Neelu: active_dom is automatically set to the domain to execute on a switch.
+        // Neelu: If a switch doesn't occur, it remains the same.
         Self::set_active_dom(hartid, active_dom);
     }
 }
