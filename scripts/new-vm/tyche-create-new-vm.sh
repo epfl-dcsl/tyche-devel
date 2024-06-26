@@ -29,6 +29,13 @@ usage() {
 }
 
 
+if ! command -v mkpasswd &> /dev/null
+then
+  echo "mkpasswd command not found."
+  echo "You can install it with sudo apt install whois"
+  exit 1
+fi
+
 while [ -n "$1" ]; do
   case "$1" in
     -image-name) NEW_VM="$2"
