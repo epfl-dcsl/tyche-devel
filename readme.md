@@ -112,11 +112,11 @@ We also provide some scripts to quickly setup a new VM in the `scripts/new-vm` f
 To use them, execute the following commands
 ```bash
 cd ./scripts/new-vm
-#Create VM image based on ubuntu cloud image
+# Create VM image based on ubuntu cloud image
 ./tyche-create-new-vm.sh -image-name tyche-base.qcow2
-#We need to start the VM once, to apply the cloud-init config. Terminate the VM after you reach the login prompt
+# We need to start the VM once, to apply the cloud-init config. Terminate the VM after you reach the login prompt
 ./tyche-run-setup.sh -vm-image ./tyche-base.qcow2 -config-blob ./config-blob.img
-#Finally, we need to adjust he partition layout, because tyche's init script is currently quite limited and expects things in a certain order. On the Prompt, double check that the selected filesytem is the "main" partition
+# Finally, we need to adjust he partition layout, because tyche's init script is currently quite limited and expects things in a certain order. On the Prompt, double check that the selected filesytem is the "main" partition
 ./tyche-convert-image.sh -in tyche-base.qcow2 -out ../../ubuntu.qcow2
 ```
 The final image is now ready to use and placed in `tyche-devel/ubuntu.qcow` where it gets picked up by the regular `just linux` command.
