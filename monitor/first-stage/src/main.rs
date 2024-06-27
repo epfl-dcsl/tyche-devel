@@ -17,7 +17,7 @@ use mmu::{PtMapper, RangeAllocator};
 use s1::acpi::AcpiInfo;
 use s1::acpi_handler::TycheACPIHandler;
 use s1::guests::Guest;
-use s1::mmu::frames::ColorMap;
+use s1::mmu::frames::PartitionedMemoryMap;
 use s1::smp::allocate_wakeup_page_tables;
 use s1::{guests, println, second_stage, smp, HostPhysAddr, HostVirtAddr};
 use stage_two_abi::{Smp, VgaInfo};
@@ -193,7 +193,7 @@ fn launch_guest<T: MemoryColoring + Clone>(
     stage2_allocator: &mut impl RangeAllocator,
     guest_allocator: &impl RangeAllocator,
     vga_info: VgaInfo,
-    color_map: ColorMap<T>,
+    color_map: PartitionedMemoryMap<T>,
     mut pt_mapper: PtMapper<HostPhysAddr, HostVirtAddr>,
     rsdp: u64,
     smp: Smp,

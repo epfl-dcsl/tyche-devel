@@ -13,7 +13,7 @@ use x86_64::{align_down, align_up};
 use crate::cpu::MAX_CPU_NUM;
 use crate::elf::{Elf64PhdrType, ElfProgram, NonContigElf64Phdr};
 use crate::guests::ManifestInfo;
-use crate::mmu::frames::ColorMap;
+use crate::mmu::frames::{MemoryPartition, PartitionedMemoryMap};
 use crate::mmu::PAGE_SIZE;
 use crate::{cpu, println, HostPhysAddr, HostVirtAddr};
 
@@ -104,7 +104,7 @@ pub fn load<T: MemoryColoring + Clone>(
     stage2_allocator: &impl RangeAllocator,
     pt_mapper: &mut PtMapper<HostPhysAddr, HostVirtAddr>,
     smp: Smp,
-    color_map: &ColorMap<T>,
+    memory_partitions: &PartitionedMemoryMap<T>,
 ) {
     // Read elf and allocate second stage memory
 
@@ -165,7 +165,8 @@ pub fn load<T: MemoryColoring + Clone>(
             PtFlag::PRESENT | PtFlag::WRITE,
         );
     };
-    color_map.vist_all_ranges_for_color(color_map.guest, map_guest_phys_range_cb);
+    memory_partitions
+        .iterate_over_ranges_for_mem_partition(MemoryPartition::GUEST, map_guest_phys_range_cb);
 
     // map the default APIC page to 2nd stage
     // TODO aghosn: do we need to hide this?

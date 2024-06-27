@@ -3,7 +3,7 @@ use mmu::RangeAllocator;
 use stage_two_abi::{GuestInfo, VgaInfo};
 
 use crate::acpi::AcpiInfo;
-use crate::mmu::frames::ColorMap;
+use crate::mmu::frames::PartitionedMemoryMap;
 
 pub mod boot_params;
 pub mod linux;
@@ -40,7 +40,7 @@ pub trait Guest {
         acpi: &AcpiInfo,
         host_allocator: &impl RangeAllocator,
         guest_allocator: &impl RangeAllocator,
-        color_map: &ColorMap<T>,
+        color_map: &PartitionedMemoryMap<T>,
         rsdp: u64,
     ) -> ManifestInfo;
 }

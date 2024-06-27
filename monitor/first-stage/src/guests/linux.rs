@@ -12,7 +12,7 @@ use crate::guests::boot_params::{
     KERNEL_MIN_ALIGNMENT_BYTES,
 };
 use crate::guests::ManifestInfo;
-use crate::mmu::frames::ColorMap;
+use crate::mmu::frames::PartitionedMemoryMap;
 use crate::vmx::{GuestPhysAddr, GuestVirtAddr};
 
 #[cfg(feature = "guest_linux")]
@@ -45,7 +45,7 @@ impl Guest for Linux {
         acpi: &AcpiInfo,
         host_allocator: &impl RangeAllocator,
         guest_allocator: &impl RangeAllocator,
-        color_map: &ColorMap<T>,
+        color_map: &PartitionedMemoryMap<T>,
         rsdp: u64,
     ) -> ManifestInfo {
         let mut manifest = ManifestInfo::default();
@@ -88,7 +88,7 @@ impl Guest for Linux {
     }
 }
 
-fn build_bootparams<T: MemoryColoring + Clone>(color_map: &ColorMap<T>) -> BootParams {
+fn build_bootparams<T: MemoryColoring + Clone>(color_map: &PartitionedMemoryMap<T>) -> BootParams {
     let mut boot_params = BootParams::default();
     boot_params.hdr.type_of_loader = KERNEL_LOADER_OTHER;
     boot_params.hdr.boot_flag = KERNEL_BOOT_FLAG_MAGIC;
@@ -100,6 +100,11 @@ fn build_bootparams<T: MemoryColoring + Clone>(color_map: &ColorMap<T>) -> BootP
     //boot_params.hdr.ramdisk_size = ramdisk size;
 
     todo!("fix once stage2 transition works. basically need to mark allocated memory as used");
+    /* memory_map.guest contained the  &'static [MemoryRegion], that are used by the guest
+     * With coloring, the guest's memory is described in terms of colors, not in terms of fixed ranges
+     * However, the guest lives in their GPA space to begin with. SO probably we can generate our own
+     * memory map here
+     */
     /*for region in memory_map.guest {
         let addr = GuestPhysAddr::new(region.start as usize);
         let size = region.end - region.start;

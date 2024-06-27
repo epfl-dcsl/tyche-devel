@@ -14,7 +14,9 @@ first-stage         := "--package s1 --features=s1/second-stage"
 tyche               := "--package tyche"
 rawc                := "--features=s1/guest_rawc"
 linux               := "--features=s1/guest_linux"
+linux-cs2           := "--features=s1/guest_linux,s1/color-s2"
 no-guest            := "--features=s1/no_guest"
+no-guest-cs2        := "--features=s1/no_guest,s1/color-s2"
 vga-s1              := "--features=s1/vga"
 vga-s2              := "--features=tyche/vga"
 bare-metal-s1       := "--features=s1/bare_metal"
@@ -106,9 +108,15 @@ _common TARGET SMP ARG1=extra_arg ARG2=extra_arg:
 no-guest SMP=default_smp:
 	@just _common {{no-guest}} {{SMP}}
 
+no-guest-cs2 SMP=default_smp:
+	@just _common {{no-guest-cs2}} {{SMP}}
+
 # Run without guest, stop to wait for GDB session.
 no-guest-dbg SMP=default_smp:
 	@just _common {{no-guest}} {{SMP}} --stop --dbg_path={{default_dbg}}
+
+no-guest-cs2-dbg SMP=default_smp:
+	@just _common {{no-guest-cs2}} {{SMP}} --stop --dbg_path={{default_dbg}}
 
 # Run rawc guest
 rawc SMP=default_smp:
@@ -122,9 +130,15 @@ rawc-dbg SMP=default_smp:
 linux SMP=default_smp:
 	@just _common {{linux}} {{SMP}}
 
+linux-cs2 SMP=default_smp:
+	@just _common {{linux-cs2}} {{SMP}}
+
 # Run linux guest, stop to wait for GDB session.
 linux-dbg SMP=default_smp:
 	@just _common {{linux}} {{SMP}} --stop --dbg_path={{default_dbg}}
+
+linux-cs2-dbg SMP=default_smp:
+	@just _common {{linux-cs2}} {{SMP}} --stop --dbg_path={{default_dbg}}
 
 # Start a GDB session
 gdb DBG=default_dbg:

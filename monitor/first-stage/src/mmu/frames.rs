@@ -67,25 +67,80 @@ pub struct MemoryMap {
     pub host: PhysRange,
 }
 
-/// How the memory is split between host and guest.
-pub struct ColorMap<T: MemoryColoring + Clone> {
-    /// Colors used for Dom0 VM
-    pub guest: ColorRange,
-    /// Colors used for Tyche (stage1, stage2)
-    pub host: ColorRange,
-    /// Unused Colors
-    pub unused: ColorRange,
-    pub coloring: T,
-    ///memory map from early bootloader
-    pub all_regions: &'static [MemoryRegion],
+/// Describes what a certain memory area is reserved/used for
+pub enum MemoryPartition {
+    STAGE1,
+    STAGE2,
+    GUEST,
+    UNUSED,
 }
 
-impl<T: MemoryColoring + Clone> ColorMap<T> {
+/// Wrapper type to dynmaically handle
+/// contiguous pyhs ranges and scattered colored ranges
+pub enum MemoryRange {
+    ColoredRange(ColorRange),
+    PhysContigRange(PhysRange),
+}
+
+/// Describes the memory layout created in stage1
+pub struct PartitionedMemoryMap<T: MemoryColoring + Clone> {
+    /// Memory reserved for root partition/Dom0
+    guest: MemoryRange,
+    /// Memory used for Stage 1
+    stage1: MemoryRange,
+    /// Memory used for Stage 2
+    stage2: MemoryRange,
+    /// Memory that is not allocated to any partition yet. Intended for TDs
+    unused: MemoryRange,
+    /// Memory coloring function
+    coloring: Option<T>,
+    ///memory map from early bootloader
+    all_regions: &'static [MemoryRegion],
+}
+
+impl<T: MemoryColoring + Clone> PartitionedMemoryMap<T> {
+    pub fn new(
+        guest: MemoryRange,
+        stage1: MemoryRange,
+        stage2: MemoryRange,
+        unused: MemoryRange,
+        all_regions: &'static [MemoryRegion],
+        coloring: Option<T>,
+    ) -> Self {
+        Self {
+            guest,
+            stage1,
+            stage2,
+            unused,
+            coloring,
+            all_regions,
+        }
+    }
+
+    /// Calls range_cb for each physical contiguous memory range that belongs to `partition`
+    pub fn iterate_over_ranges_for_mem_partition<F: FnMut(PhysRange)>(
+        &self,
+        partition: MemoryPartition,
+        mut range_cb: F,
+    ) {
+        let memory_range = match partition {
+            MemoryPartition::STAGE1 => &self.stage1,
+            MemoryPartition::STAGE2 => &self.stage2,
+            MemoryPartition::GUEST => &self.guest,
+            MemoryPartition::UNUSED => &self.unused,
+        };
+
+        match &memory_range {
+            MemoryRange::ColoredRange(cr) => self.vist_all_ranges_for_color(cr, range_cb),
+            MemoryRange::PhysContigRange(pr) => range_cb(*pr),
+        }
+    }
+
     /// Iterates over all physical memory that belongs to the specified color_range.
     /// For each contiguous physical memory range the call back function is called
-    pub fn vist_all_ranges_for_color<F: FnMut(PhysRange)>(
+    fn vist_all_ranges_for_color<F: FnMut(PhysRange)>(
         &self,
-        color_range: ColorRange,
+        color_range: &ColorRange,
         range_cb: F,
     ) {
         /* hacky use of allocator. This allocator does not "do anyhting" to the pages,
@@ -93,16 +148,69 @@ impl<T: MemoryColoring + Clone> ColorMap<T> {
          * Here, we just use it to get the count of all frames with this color;
          * The value of the `physical_memory_offset` argument is not important here
          */
+        let coloring = self.coloring.as_ref().expect("PartitionedMemoryMap misconfiguration. Do not have coloring but vist_all_ranges_for_color was requested");
         let allocator = ColoringRangeFrameAllocator::new(
             color_range.first_color,
             color_range.color_count,
             HostVirtAddr::new(0),
             self.all_regions,
-            &self.coloring,
+            coloring,
         );
         allocator
-            .allocate_range(self.guest.mem_bytes, range_cb)
+            .allocate_range(color_range.mem_bytes, range_cb)
             .expect("MemoryColoring::compute_ranges_for_color : alloc range failed");
+    }
+}
+
+/// Uses conditional compilation create either a coloring or a regular
+/// allocator for stage2
+pub unsafe fn create_stage2_allocator<T: MemoryColoring + Clone>(
+    physical_memory_offset: HostVirtAddr,
+    _regions: &'static [MemoryRegion],
+    _mem_painter: &T,
+    stage2_contig_mr: Option<PhysRange>,
+) -> (impl RangeAllocator, u64, MemoryRange) {
+    #[cfg(feature = "color-s2")]
+    {
+        let (first_stage2_color, stage2_color_count, stage2_mem_bytes) = contig_color_range(
+            _regions,
+            _mem_painter,
+            0,
+            DummyMemoryColoring::COLOR_COUNT as u64,
+            SECOND_STAGE_SIZE,
+        )
+        .expect("failed to gather colors for stage2 allocator");
+        let stage2_allocator = ColoringRangeFrameAllocator::new(
+            first_stage2_color,
+            stage2_color_count,
+            physical_memory_offset,
+            _regions,
+            _mem_painter,
+        );
+        let next_free_color = first_stage2_color + stage2_color_count;
+        let stage2_mem_partiton = MemoryRange::ColoredRange(ColorRange {
+            first_color: first_stage2_color,
+            color_count: stage2_color_count,
+            mem_bytes: stage2_mem_bytes,
+        });
+        return (stage2_allocator, next_free_color, stage2_mem_partiton);
+    }
+
+    #[cfg(not(feature = "color-s2"))]
+    {
+        let stage2_contig_mr = stage2_contig_mr.expect("create_stage2_allocator called for uncolored stage 2 but no stage2_contig_mr was provided");
+        println!(
+            "Creating contiguous, uncolored allocator for s2. Using Range {:x?}",
+            stage2_contig_mr
+        );
+        let stage2_allocator = RangeFrameAllocator::new(
+            stage2_contig_mr.start,
+            stage2_contig_mr.end,
+            physical_memory_offset,
+        );
+        let next_free_color = 0;
+        let stage2_mem_partiton = MemoryRange::PhysContigRange(stage2_contig_mr);
+        return (stage2_allocator, next_free_color, stage2_mem_partiton);
     }
 }
 
@@ -127,7 +235,7 @@ pub unsafe fn init(
         impl RangeAllocator,
         impl RangeAllocator,
         impl RangeAllocator,
-        ColorMap<DummyMemoryColoring>,
+        PartitionedMemoryMap<DummyMemoryColoring>,
         PtMapper<HostPhysAddr, HostVirtAddr>,
     ),
     (),
@@ -138,6 +246,17 @@ pub unsafe fn init(
             mr.kind = MemoryRegionKind::Bootloader;
         }
     }
+    let stage2_phys_range = if cfg!(feature = "color-s2") {
+        println!("\nUsing colors for stage2\n");
+        None
+    } else {
+        println!("\nNot using colors for stage2\n");
+        Some(
+            reserve_memory_region(regions, 5 * SECOND_STAGE_RESERVED_MEMORY as usize)
+                .expect("failed to reserve memory for stage2"),
+        )
+    };
+
     // Initialize physical memory offset
     set_physical_memory_offset(physical_memory_offset);
 
@@ -147,6 +266,93 @@ pub unsafe fn init(
      * Thus, it would be bad to "waste" a color here
      */
     let required_bytes_stage1_alloc = SECOND_STAGE_RESERVED_MEMORY as usize - SECOND_STAGE_SIZE;
+    let contig_mr_for_stage1_alloc = reserve_memory_region(regions, required_bytes_stage1_alloc)
+        .expect("failed to reserve memory for stage1");
+    let stage1_allocator = RangeFrameAllocator::new(
+        contig_mr_for_stage1_alloc.start,
+        contig_mr_for_stage1_alloc.end,
+        physical_memory_offset,
+    );
+    let stage1_mem_partition = MemoryRange::PhysContigRange(contig_mr_for_stage1_alloc);
+
+    let mem_painter = DummyMemoryColoring {};
+
+    let (stage2_allocator, next_free_color, stage2_mem_partiton) = create_stage2_allocator(
+        physical_memory_offset,
+        regions,
+        &mem_painter,
+        stage2_phys_range,
+    );
+
+    let (first_guest_color, guest_color_count, guest_mem_bytes) = contig_color_range(
+        regions,
+        &mem_painter,
+        next_free_color,
+        DummyMemoryColoring::COLOR_COUNT as u64,
+        GUEST_RESERVED_MEMORY,
+    )
+    .expect("failed to gather colors for guest memory");
+    let guest_allocator = ColoringRangeFrameAllocator::new(
+        first_guest_color,
+        guest_color_count,
+        physical_memory_offset,
+        regions,
+        &mem_painter,
+    );
+
+    let guest_mem_partition = MemoryRange::ColoredRange(ColorRange {
+        first_color: first_guest_color,
+        color_count: guest_color_count,
+        mem_bytes: guest_mem_bytes,
+    });
+
+    let first_unused_color = first_guest_color + guest_color_count;
+    let mut unused_mem_bytes = 0;
+    for color_id in (first_unused_color as usize)..DummyMemoryColoring::COLOR_COUNT {
+        unused_mem_bytes += compute_color_partition_size(regions, &mem_painter, color_id as u64);
+    }
+    let unused_mem_partiton = MemoryRange::ColoredRange(ColorRange {
+        first_color: first_unused_color,
+        color_count: DummyMemoryColoring::COLOR_COUNT as u64 - first_unused_color,
+        mem_bytes: unused_mem_bytes,
+    });
+
+    let memory_partitions = PartitionedMemoryMap::new(
+        guest_mem_partition,
+        stage1_mem_partition,
+        stage2_mem_partiton,
+        unused_mem_partiton,
+        regions,
+        Some(mem_painter),
+    );
+
+    // Initialize the frame allocator and the memory mapper.
+    let (level_4_table_frame, _) = Cr3::read();
+    let pt_root = HostPhysAddr::new(level_4_table_frame.start_address().as_u64() as usize);
+    println!("About to create pt_mapper");
+    let mut pt_mapper = PtMapper::new(physical_memory_offset.as_usize(), 0, pt_root);
+    println!("created pt_mapper\nAbout to init heap");
+
+    // Initialize the heap.
+    allocator::init_heap(&mut pt_mapper, &stage1_allocator)?;
+    println!("Initialized heap\nAbout to transofmr guest_allocator into shared allocator\n");
+    let guest_allocator = SharedFrameAllocator::new(guest_allocator, physical_memory_offset);
+    println!("init memory done");
+    Ok((
+        stage1_allocator,
+        stage2_allocator,
+        guest_allocator,
+        memory_partitions,
+        pt_mapper,
+    ))
+}
+
+/// Searches and returns a memory region a physically contiguous memory range
+/// of the requested size. `regions` is modified to make the memory unavailable to other parts of the system
+fn reserve_memory_region(
+    regions: &mut [MemoryRegion],
+    required_bytes_stage1_alloc: usize,
+) -> Option<PhysRange> {
     let mut contig_mr_for_stage1_alloc = None;
     for mr in regions.iter_mut() {
         if mr.kind == MemoryRegionKind::Usable
@@ -165,96 +371,7 @@ pub unsafe fn init(
             break;
         }
     }
-    let contig_mr_for_stage1_alloc =
-        contig_mr_for_stage1_alloc.expect("failed to find memory range for stage1 allocator");
-    let stage1_allocator = RangeFrameAllocator::new(
-        contig_mr_for_stage1_alloc.start,
-        contig_mr_for_stage1_alloc.end,
-        physical_memory_offset,
-    );
-
-    let mem_painter = DummyMemoryColoring {};
-    let (first_stage2_color, stage2_color_count, state2_mem_bytes) = contig_color_range(
-        regions,
-        &mem_painter,
-        0,
-        DummyMemoryColoring::COLOR_COUNT as u64,
-        SECOND_STAGE_SIZE,
-    )
-    .expect("failed to gather colors for stage2 allocator");
-    let stage2_allocator = ColoringRangeFrameAllocator::new(
-        first_stage2_color,
-        stage2_color_count,
-        physical_memory_offset,
-        regions,
-        &mem_painter,
-    );
-
-    let (first_guest_color, guest_color_count, guest_mem_bytes) = contig_color_range(
-        regions,
-        &mem_painter,
-        first_stage2_color + stage2_color_count,
-        DummyMemoryColoring::COLOR_COUNT as u64,
-        GUEST_RESERVED_MEMORY,
-    )
-    .expect("failed to gather colors for guest memory");
-    let guest_allocator = ColoringRangeFrameAllocator::new(
-        first_guest_color,
-        guest_color_count,
-        physical_memory_offset,
-        regions,
-        &mem_painter,
-    );
-
-    let first_unused_color = first_guest_color + guest_color_count;
-    let mut unused_mem_bytes = 0;
-    for color_id in (first_unused_color as usize)..DummyMemoryColoring::COLOR_COUNT {
-        unused_mem_bytes += compute_color_partition_size(regions, &mem_painter, color_id as u64);
-    }
-
-    let color_map = ColorMap {
-        guest: ColorRange {
-            first_color: first_guest_color,
-            color_count: guest_color_count,
-            mem_bytes: guest_mem_bytes,
-        },
-        host: ColorRange {
-            // this assumes that stage1 and stage2 use adjacent color ranges
-            first_color: first_stage2_color,
-            color_count: stage2_color_count,
-            mem_bytes: state2_mem_bytes,
-        },
-        unused: ColorRange {
-            first_color: first_guest_color + guest_color_count,
-            color_count: DummyMemoryColoring::COLOR_COUNT as u64
-                - (first_guest_color + guest_color_count),
-            mem_bytes: unused_mem_bytes,
-        },
-        coloring: mem_painter,
-        all_regions: regions,
-    };
-
-    println!("created color map");
-
-    // Initialize the frame allocator and the memory mapper.
-    let (level_4_table_frame, _) = Cr3::read();
-    let pt_root = HostPhysAddr::new(level_4_table_frame.start_address().as_u64() as usize);
-    println!("About to create pt_mapper");
-    let mut pt_mapper = PtMapper::new(physical_memory_offset.as_usize(), 0, pt_root);
-    println!("created pt_mapper\nAbout to init heap");
-
-    // Initialize the heap.
-    allocator::init_heap(&mut pt_mapper, &stage1_allocator)?;
-    println!("Initialized heap\nAbout to transofmr guest_allocator into shared allocator\n");
-    let guest_allocator = SharedFrameAllocator::new(guest_allocator, physical_memory_offset);
-    println!("init memory done");
-    Ok((
-        stage1_allocator,
-        stage2_allocator,
-        guest_allocator,
-        color_map,
-        pt_mapper,
-    ))
+    contig_mr_for_stage1_alloc
 }
 
 // ———————————————————————————— Coloring Range Frame Allocator ————————————————//
@@ -740,6 +857,12 @@ unsafe impl FrameAllocator for RangeFrameAllocator {
                     + self.physical_memory_offset.as_u64() as usize),
             })
         } else {
+            log::error!(
+                "RangeFramgeAllocator ran out of memory. Range [0x{:x},0x{:x}[, current pos 0x{:x}",
+                self.range_start,
+                self.range_end,
+                self.cursor.get()
+            );
             None
         }
     }

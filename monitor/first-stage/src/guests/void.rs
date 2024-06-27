@@ -5,7 +5,7 @@ use mmu::FrameAllocator;
 
 use super::{Guest, ManifestInfo};
 use crate::acpi::AcpiInfo;
-use crate::mmu::frames::ColorMap;
+use crate::mmu::frames::PartitionedMemoryMap;
 
 pub struct VoidGuest {}
 
@@ -17,7 +17,7 @@ impl Guest for VoidGuest {
         _acpi: &AcpiInfo,
         _host_allocator: &impl FrameAllocator,
         _guest_allocator: &impl FrameAllocator,
-        _color_map: &ColorMap<T>,
+        _color_map: &PartitionedMemoryMap<T>,
         _rsdp: u64,
     ) -> ManifestInfo {
         ManifestInfo::default()

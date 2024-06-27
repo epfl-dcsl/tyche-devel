@@ -7,7 +7,7 @@ use super::Guest;
 use crate::acpi::AcpiInfo;
 use crate::elf::ElfProgram;
 use crate::guests::ManifestInfo;
-use crate::mmu::frames::ColorMap;
+use crate::mmu::frames::PartitionedMemoryMap;
 use crate::{GuestPhysAddr, GuestVirtAddr, HostVirtAddr};
 
 #[cfg(feature = "guest_rawc")]
@@ -39,7 +39,7 @@ impl Guest for RawcBytes {
         acpi: &AcpiInfo,
         host_allocator: &impl RangeAllocator,
         guest_allocator: &impl RangeAllocator,
-        color_map: &ColorMap<T>,
+        color_map: &PartitionedMemoryMap<T>,
         _rsdp: u64,
     ) -> ManifestInfo {
         let mut manifest = ManifestInfo::default();

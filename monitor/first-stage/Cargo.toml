@@ -13,6 +13,8 @@ guest_linux = []
 guest_rawc = []
 no_guest = []
 second-stage = []
+#If enabled, we apply memory coloring to stage2
+color-s2 = []
 
 [dependencies]
 # Internal
