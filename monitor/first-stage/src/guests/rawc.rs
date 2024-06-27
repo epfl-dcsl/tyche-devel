@@ -1,13 +1,13 @@
-use mmu::{IoPtFlag, IoPtMapper, RangeAllocator};
+use mmu::memory_coloring::MemoryColoring;
+use mmu::{IoPtMapper, RangeAllocator};
 use stage_two_abi::GuestInfo;
-use vmx::HostPhysAddr;
 use vtd::Iommu;
 
 use super::Guest;
 use crate::acpi::AcpiInfo;
 use crate::elf::ElfProgram;
 use crate::guests::ManifestInfo;
-use crate::mmu::MemoryMap;
+use crate::mmu::frames::ColorMap;
 use crate::{GuestPhysAddr, GuestVirtAddr, HostVirtAddr};
 
 #[cfg(feature = "guest_rawc")]
@@ -34,12 +34,12 @@ impl Guest for RawcBytes {
     /// 2. Copy the program rawc to this memory region.
     /// 3. Generate the EPT mappings with hpa == gpa.
     /// 4. Set the EPT and return the vmcs.
-    unsafe fn instantiate(
+    unsafe fn instantiate<T: MemoryColoring + Clone>(
         &self,
         acpi: &AcpiInfo,
         host_allocator: &impl RangeAllocator,
         guest_allocator: &impl RangeAllocator,
-        memory_map: &MemoryMap,
+        color_map: &ColorMap<T>,
         _rsdp: u64,
     ) -> ManifestInfo {
         let mut manifest = ManifestInfo::default();
@@ -51,14 +51,16 @@ impl Guest for RawcBytes {
             .expect("I/O PT root allocation")
             .zeroed();
         let mut iopt_mapper = IoPtMapper::new(virtoffset.as_usize(), iopt_root.phys_addr);
-        let host_range = memory_map.host;
+        todo!("implement scatter iopt_mapper");
+        /*
+         let host_range = color_map.compute_host_phys_ranges();
         iopt_mapper.map_range(
             host_allocator,
             GuestPhysAddr::new(0),
             HostPhysAddr::new(0),
             host_range.start.as_usize(),
             IoPtFlag::WRITE | IoPtFlag::READ | IoPtFlag::EXECUTE,
-        );
+        );*/
 
         // Load guest into memory.
         let mut loaded_rawc = rawc_prog

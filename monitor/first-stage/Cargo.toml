@@ -25,6 +25,7 @@ debug = { path = "../../crates/debug/" }
 logger = { path = "../../crates/logger/" }
 vga = { path = "../../crates/vga/", optional = true }
 x2apic = { path = "../../crates/x2apic/" }
+utils = { path = "../../crates/utils" }
 
 # External
 bootloader = { workspace = true }

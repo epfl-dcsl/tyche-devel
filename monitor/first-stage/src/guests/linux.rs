@@ -1,6 +1,6 @@
 //! Linux Guest
 
-use bootloader::boot_info::MemoryRegionKind;
+use mmu::memory_coloring::MemoryColoring;
 use mmu::RangeAllocator;
 use stage_two_abi::GuestInfo;
 
@@ -8,11 +8,11 @@ use super::Guest;
 use crate::acpi::AcpiInfo;
 use crate::elf::{ElfMapping, ElfProgram};
 use crate::guests::boot_params::{
-    BootParams, E820Types, KERNEL_BOOT_FLAG_MAGIC, KERNEL_HDR_MAGIC, KERNEL_LOADER_OTHER,
+    BootParams, KERNEL_BOOT_FLAG_MAGIC, KERNEL_HDR_MAGIC, KERNEL_LOADER_OTHER,
     KERNEL_MIN_ALIGNMENT_BYTES,
 };
 use crate::guests::ManifestInfo;
-use crate::mmu::MemoryMap;
+use crate::mmu::frames::ColorMap;
 use crate::vmx::{GuestPhysAddr, GuestVirtAddr};
 
 #[cfg(feature = "guest_linux")]
@@ -40,12 +40,12 @@ pub struct Linux {}
 pub const LINUX: Linux = Linux {};
 
 impl Guest for Linux {
-    unsafe fn instantiate(
+    unsafe fn instantiate<T: MemoryColoring + Clone>(
         &self,
         acpi: &AcpiInfo,
         host_allocator: &impl RangeAllocator,
         guest_allocator: &impl RangeAllocator,
-        memory_map: &MemoryMap,
+        color_map: &ColorMap<T>,
         rsdp: u64,
     ) -> ManifestInfo {
         let mut manifest = ManifestInfo::default();
@@ -64,7 +64,8 @@ impl Guest for Linux {
         }
 
         // Build the boot params
-        let mut boot_params = build_bootparams(&memory_map);
+        // Step1: load values contained in BootParams into memory
+        let mut boot_params = build_bootparams(&color_map);
         let command_line = loaded_linux.add_payload(COMMAND_LINE, guest_allocator);
         let command_line_addr_low = (command_line.as_usize() & 0xFFFF_FFFF) as u32;
         let command_line_addr_high = (command_line.as_usize() >> 32) as u32;
@@ -72,6 +73,7 @@ impl Guest for Linux {
         boot_params.hdr.cmd_line_ptr = command_line_addr_low;
         boot_params.hdr.cmdline_size = COMMAND_LINE.len() as u32;
         boot_params.acpi_rsdp_addr = rsdp;
+        //Step2 load the BootParams "struct" itself into memory
         let boot_params = loaded_linux.add_payload(boot_params.as_bytes(), guest_allocator);
         let entry_point = linux_prog.phys_entry;
         let mut info = GuestInfo::default();
@@ -86,7 +88,7 @@ impl Guest for Linux {
     }
 }
 
-fn build_bootparams(memory_map: &MemoryMap) -> BootParams {
+fn build_bootparams<T: MemoryColoring + Clone>(color_map: &ColorMap<T>) -> BootParams {
     let mut boot_params = BootParams::default();
     boot_params.hdr.type_of_loader = KERNEL_LOADER_OTHER;
     boot_params.hdr.boot_flag = KERNEL_BOOT_FLAG_MAGIC;
@@ -96,7 +98,9 @@ fn build_bootparams(memory_map: &MemoryMap) -> BootParams {
     // The initramfs is embedded so not sure we need to do any of that
     //boot_params.hdr.ramdisk_image = ramdisk addr;
     //boot_params.hdr.ramdisk_size = ramdisk size;
-    for region in memory_map.guest {
+
+    todo!("fix once stage2 transition works. basically need to mark allocated memory as used");
+    /*for region in memory_map.guest {
         let addr = GuestPhysAddr::new(region.start as usize);
         let size = region.end - region.start;
         let kind = match region.kind {
@@ -109,7 +113,7 @@ fn build_bootparams(memory_map: &MemoryMap) -> BootParams {
         boot_params
             .add_e820_entry(addr, size, kind)
             .expect("Failed to add region");
-    }
+    }*/
 
     boot_params
 }

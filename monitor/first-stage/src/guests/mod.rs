@@ -1,8 +1,9 @@
+use mmu::memory_coloring::MemoryColoring;
 use mmu::RangeAllocator;
 use stage_two_abi::{GuestInfo, VgaInfo};
 
 use crate::acpi::AcpiInfo;
-use crate::mmu::MemoryMap;
+use crate::mmu::frames::ColorMap;
 
 pub mod boot_params;
 pub mod linux;
@@ -34,12 +35,12 @@ impl Default for ManifestInfo {
 }
 
 pub trait Guest {
-    unsafe fn instantiate(
+    unsafe fn instantiate<T: MemoryColoring + Clone>(
         &self,
         acpi: &AcpiInfo,
         host_allocator: &impl RangeAllocator,
         guest_allocator: &impl RangeAllocator,
-        memory_map: &MemoryMap,
+        color_map: &ColorMap<T>,
         rsdp: u64,
     ) -> ManifestInfo;
 }

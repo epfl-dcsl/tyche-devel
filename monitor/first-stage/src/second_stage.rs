@@ -5,15 +5,17 @@ use core::arch::asm;
 use core::sync::atomic::{AtomicBool, Ordering};
 
 use mmu::frame_allocator::PhysRange;
+use mmu::memory_coloring::MemoryColoring;
 use mmu::{PtFlag, PtMapper, RangeAllocator};
 use stage_two_abi::{EntryPoint, Manifest, Smp};
+use x86_64::{align_down, align_up};
 
 use crate::cpu::MAX_CPU_NUM;
-use crate::elf::{Elf64PhdrType, ElfProgram};
+use crate::elf::{Elf64PhdrType, ElfProgram, NonContigElf64Phdr};
 use crate::guests::ManifestInfo;
-use crate::mmu::frames::{MemoryMap, RangeFrameAllocator};
+use crate::mmu::frames::ColorMap;
 use crate::mmu::PAGE_SIZE;
-use crate::{cpu, HostPhysAddr, HostVirtAddr};
+use crate::{cpu, println, HostPhysAddr, HostVirtAddr};
 
 #[cfg(feature = "second-stage")]
 const SECOND_STAGE: &'static [u8] =
@@ -22,7 +24,7 @@ const SECOND_STAGE: &'static [u8] =
 const SECOND_STAGE: &'static [u8] = &[0; 10];
 
 /// Size of memory allocated by the second stage.
-const SECOND_STAGE_SIZE: usize = 0x1000 * 2048;
+pub const SECOND_STAGE_SIZE: usize = 0x1000 * 2048;
 /// Virtual address to which the guest is loaded. Defined by our linker script.
 const LOAD_VIRT_ADDR: HostVirtAddr = HostVirtAddr::new(0x80000000000);
 //  Stack definitions
@@ -96,32 +98,26 @@ fn _enter_inner() {
     }
 }
 
-pub fn second_stage_allocator(stage1_allocator: &impl RangeAllocator) -> RangeFrameAllocator {
-    let second_stage_range = stage1_allocator
-        .allocate_range(SECOND_STAGE_SIZE)
-        .expect("Failed to allocate second stage range");
-    unsafe {
-        RangeFrameAllocator::new(
-            second_stage_range.start,
-            second_stage_range.end,
-            stage1_allocator.get_physical_offset(),
-        )
-    }
-}
-
-pub fn load(
+pub fn load<T: MemoryColoring + Clone>(
     info: &ManifestInfo,
     stage1_allocator: &impl RangeAllocator,
     stage2_allocator: &impl RangeAllocator,
     pt_mapper: &mut PtMapper<HostPhysAddr, HostVirtAddr>,
     smp: Smp,
-    memory_map: MemoryMap,
+    color_map: &ColorMap<T>,
 ) {
     // Read elf and allocate second stage memory
-    let mut second_stage = ElfProgram::new(SECOND_STAGE);
 
-    let elf_range = relocate_elf(&mut second_stage, stage2_allocator);
-    let mut loaded_elf = second_stage
+    //parse elf binary
+    let mut second_stage = ElfProgram::new(SECOND_STAGE);
+    //TODO: luca: make configurable
+    second_stage.set_mapping(crate::elf::ElfMapping::Scattered);
+
+    //this allocates memory for every elf segment. Currently it allocates one physical contiguous chunk
+    //the elf headers are updated to point to these memory addresses (in contrast to the default addresses, this is the "relocate" part)
+    relocate_elf(&mut second_stage, stage2_allocator);
+    //load parsed elf binary into memory
+    let mut stage2_loaded_elf = second_stage
         .load::<HostPhysAddr, HostVirtAddr>(
             stage2_allocator,
             stage1_allocator.get_physical_offset(),
@@ -133,7 +129,7 @@ pub fn load(
         .map(|cpuid| {
             let stack_virt_addr = STACK_VIRT_ADDR + STACK_SIZE * cpuid;
             let (rsp, stack_phys_addr) =
-                loaded_elf.add_stack(stack_virt_addr, STACK_SIZE, stage2_allocator);
+                stage2_loaded_elf.add_stack(stack_virt_addr, STACK_SIZE, stage2_allocator);
             (stack_virt_addr, rsp, stack_phys_addr)
         })
         .collect();
@@ -146,7 +142,7 @@ pub fn load(
         let virt_addr = HostVirtAddr::new(info.iommu as usize);
         let phys_addr = HostPhysAddr::new(info.iommu as usize);
         let size = 0x1000;
-        loaded_elf.pt_mapper.map_range(
+        stage2_loaded_elf.pt_mapper.map_range(
             stage2_allocator,
             virt_addr,
             phys_addr,
@@ -158,23 +154,24 @@ pub fn load(
     // Map the guest (e.g. linux) memory into Tyche.
     // This is required for hashing content and writing back attestation into Linux-controlled
     // buffers.
-    let guest_regions = memory_map.guest;
-    for mem_region in guest_regions {
-        let region_size = mem_region.end - mem_region.start;
-        loaded_elf.pt_mapper.map_range(
+    // The amount of ranges required for the guest might be quite large. Thus, storing
+    // them in a vec often depletes our heap. Instead, we directly process them in the callback
+    let map_guest_phys_range_cb = |pr: PhysRange| {
+        stage2_loaded_elf.pt_mapper.map_range(
             stage2_allocator,
-            HostVirtAddr::new(mem_region.start as usize),
-            HostPhysAddr::new(mem_region.start as usize),
-            region_size as usize,
+            HostVirtAddr::new(pr.start.as_usize()),
+            pr.start,
+            pr.size(),
             PtFlag::PRESENT | PtFlag::WRITE,
         );
-    }
+    };
+    color_map.vist_all_ranges_for_color(color_map.guest, map_guest_phys_range_cb);
 
     // map the default APIC page to 2nd stage
     // TODO aghosn: do we need to hide this?
 
     let lapic_phys_address: usize = 0xfee00000;
-    loaded_elf.pt_mapper.map_range(
+    stage2_loaded_elf.pt_mapper.map_range(
         stage2_allocator,
         HostVirtAddr::new(lapic_phys_address),
         HostPhysAddr::new(lapic_phys_address),
@@ -193,7 +190,7 @@ pub fn load(
             vga_virt.as_usize(),
             vga_phys.as_usize()
         );
-        loaded_elf.pt_mapper.map_range(
+        stage2_loaded_elf.pt_mapper.map_range(
             stage2_allocator,
             vga_virt,
             vga_phys,
@@ -203,16 +200,22 @@ pub fn load(
     }
 
     // Map stage 2 into stage 1 page tables
-    pt_mapper.map_range(
-        stage1_allocator,
-        LOAD_VIRT_ADDR,
-        elf_range.start,
-        elf_range.size(),
-        PtFlag::PRESENT | PtFlag::WRITE,
-    );
+    let stage1_vaddr_for_stage2 = LOAD_VIRT_ADDR.as_usize();
+    assert_eq!(stage1_vaddr_for_stage2 % PAGE_SIZE, 0);
+    let mut first_stage2_load_paddr = None;
+    for seg in &second_stage.segments {
+        if seg.phdr.p_type != Elf64PhdrType::PT_LOAD.bits() {
+            // Skip non-load segments.
+            continue;
+        }
+        unsafe { second_stage.map_segment(seg, pt_mapper, stage1_allocator) };
+        if first_stage2_load_paddr.is_none() {
+            first_stage2_load_paddr = Some(seg.phys_mem[0].start)
+        }
+    }
 
     // Map the MP wakeup mailbox page into stage 2
-    loaded_elf.pt_mapper.map_range(
+    stage2_loaded_elf.pt_mapper.map_range(
         stage2_allocator,
         HostVirtAddr::new(smp.mailbox as usize),
         HostPhysAddr::new(smp.mailbox as usize),
@@ -247,16 +250,22 @@ pub fn load(
             .find_symbol(symbol)
             .map(|symbol| symbol.st_value as usize)
     };
+
+    //this is picked up by stage2 in monitor/tyche/src/x86_64/init.rs
     let manifest =
         unsafe { Manifest::from_symbol_finder(find_symbol).expect("Missing symbol in stage 2") };
     let entry_barrier = {
         let ptr = find_symbol("__entry_barrier").expect("Could not find symbol __entry_barrier");
         ptr as *mut bool
     };
-    manifest.cr3 = loaded_elf.pt_root.as_u64();
+
+    manifest.cr3 = stage2_loaded_elf.pt_root.as_u64();
+    println!("setting manifset.cr3 to 0x{:x}", manifest.cr3);
     manifest.info = info.guest_info.clone();
     manifest.iommu = info.iommu;
-    manifest.poffset = elf_range.start.as_u64();
+    manifest.poffset = first_stage2_load_paddr
+        .expect("first_stage2_load_paddr is uninitialized")
+        .as_u64();
     manifest.voffset = LOAD_VIRT_ADDR.as_u64();
     manifest.vga = info.vga_info.clone();
     manifest.smp = smp;
@@ -284,46 +293,70 @@ pub fn load(
 }
 
 /// Relocates the physical addresses of an elf program.
-///
-/// This will reserve a range of memory and tell our elf loader where to load the binary into
-/// memory.
-///
-/// Returns the host physical range where the second stage will be loaded.
-fn relocate_elf(elf: &mut ElfProgram, allocator: &impl RangeAllocator) -> PhysRange {
-    let mut start = u64::MAX;
-    let mut end = 0;
-    for segment in &elf.segments {
-        // Skip non loaded segments
-        if segment.p_type != Elf64PhdrType::PT_LOAD.bits() {
+fn relocate_elf(elf: &mut ElfProgram, allocator: &impl RangeAllocator) {
+    let mut all_allocated_mem = Vec::new();
+
+    let mut prev_segment: Option<&NonContigElf64Phdr> = None;
+    for segment in &mut elf.segments {
+        if segment.phdr.p_type != Elf64PhdrType::PT_LOAD.bits() {
             continue;
         }
+        let aligned_size = align_up(segment.phdr.p_memsz, PAGE_SIZE as u64) as usize;
 
-        let segment_start = segment.p_paddr;
-        let segment_end = segment_start + segment.p_memsz;
-        if segment_start < start {
-            start = segment_start;
+        let mut ranges: Vec<PhysRange> = Vec::new();
+
+        /*
+           Luca Wilke:
+           For some reason, LOAD segments often share a common page with their preceeding segment.
+           At least the tyche binary is missing reloaction information, so we cannot easily move the segments apart
+           without breaking memory references from .text to .rodata, .got, .data etc.
+           For now, we simply make sure that if there is an overlap, we use the same physical page in the current segment
+           than in the prev segment
+           This might lead to a clash with the requested page permissions but so far we have been lucky
+        */
+        //
+        if let Some(prev_segment) = prev_segment {
+            let cur_aligned_start = align_down(segment.phdr.p_vaddr, PAGE_SIZE as u64);
+            let prev_aligned_end = align_down(
+                prev_segment.phdr.p_vaddr + prev_segment.phdr.p_memsz,
+                PAGE_SIZE as u64,
+            );
+            //in case of overlap, we need to allocate less memory later on, due to the shared page
+            let size_adjust;
+            if cur_aligned_start == prev_aligned_end {
+                //reuse last page from prev segment as first page for this segment
+                let prev_last_range = prev_segment
+                    .phys_mem
+                    .last()
+                    .expect("prev segment has empty phys_mem");
+                let pr = PhysRange {
+                    start: HostPhysAddr::new(prev_last_range.end.as_usize() - PAGE_SIZE),
+                    end: prev_last_range.end,
+                };
+                size_adjust = PAGE_SIZE;
+                ranges.push(pr);
+            } else {
+                size_adjust = 0;
+            }
+            //allocate remaining memory
+            let store_cb = |pr: PhysRange| {
+                ranges.push(pr);
+            };
+            allocator
+                .allocate_range(aligned_size - size_adjust, store_cb)
+                .expect("failed to alloc mem for segment");
+        } else {
+            //not prev segment, just allocate memory
+            let store_cb = |pr: PhysRange| {
+                ranges.push(pr);
+            };
+            allocator
+                .allocate_range(aligned_size, store_cb)
+                .expect("failed to alloc mem for segment");
         }
-        if segment_end > end {
-            end = segment_end;
-        }
+        segment.phys_mem = ranges;
+
+        all_allocated_mem.push(segment.phys_mem.clone());
+        prev_segment = Some(segment);
     }
-    assert!(
-        start < end,
-        "The segment start must be smaller than the segment end"
-    );
-
-    // Reserve memory and compute offset
-    let size = (end - start) as usize;
-    let range = allocator
-        .allocate_range(size)
-        .expect("Failled to allocate stage 1 region");
-    let offset = range.start.as_u64() as i64 - start as i64;
-
-    // Relocate all segments
-    for segment in &mut elf.segments {
-        let new_padddr = (segment.p_paddr as i64 + offset) as u64;
-        segment.p_paddr = new_padddr;
-    }
-
-    range
 }

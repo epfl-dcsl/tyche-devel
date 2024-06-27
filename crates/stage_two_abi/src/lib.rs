@@ -72,6 +72,7 @@ macro_rules! entry_point {
 /// The second stage manifest, describing the state of the system at the time the second stage is
 /// entered.
 #[repr(C)]
+#[derive(Debug)]
 pub struct Manifest {
     /// The root of the page tables for stage 2.
     pub cr3: u64,
@@ -91,6 +92,7 @@ pub struct Manifest {
 
 /// Suport for x86_64 SMP
 #[repr(C)]
+#[derive(Debug)]
 pub struct Smp {
     /// SMP info: number of available cores
     pub smp: usize,

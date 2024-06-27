@@ -6,6 +6,7 @@ pub mod ioptmapper;
 pub mod ptmapper;
 pub mod riscv_ptmapper;
 pub mod walker;
+pub mod memory_coloring;
 
 pub use frame_allocator::{FrameAllocator, RangeAllocator};
 pub use ioptmapper::{IoPtFlag, IoPtMapper};

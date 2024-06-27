@@ -36,6 +36,8 @@ pub fn arch_entry_point(log_level: log::LevelFilter) -> ! {
         #[cfg(feature = "bare_metal")]
         log::info!("Running on bare metal");
 
+        //the elf binary of stage2 contains this as a symbol.
+        //Stage1 initializes this when loading stage2
         // SAFETY: The BSP is responsible for retrieving the manifest
         let manifest = unsafe {
             MANIFEST = Some(get_manifest());

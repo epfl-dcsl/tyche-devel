@@ -1,7 +1,7 @@
 //! The trait for the FrameAllocator used in both stage 1 and 2.
 
 use utils::{Frame, HostPhysAddr, HostVirtAddr};
-
+use vmx::GuestPhysAddr;
 /// A frame allocator.
 pub unsafe trait FrameAllocator {
     /// Allocates a frame.
@@ -26,8 +26,29 @@ pub unsafe trait FrameAllocator {
 
 /// A frame allocator that can allocate contiguous ranges.
 pub unsafe trait RangeAllocator: FrameAllocator {
-    /// Allocates a range of physical memory.
-    fn allocate_range(&self, size: usize) -> Option<PhysRange>;
+    /// Allocates  ranges of physical memory. Uses a callback to return allocated ranges
+    /// to accomodate call sites that don't have the global allocator initialized yet.
+    /// The amount of ranges depends on the underlying allocator, i.e. if it uses memory coloring or not.
+    ///
+    /// # Arguments
+    /// `size` : amount of bytes to allocate
+    /// `store_cb` : Callback function that gets passed each contiguous phyiscal arange allocated by this allocator
+    ///
+    /// # Examples
+    /// ```
+    /// let mut ranges = Vec::new();
+    /// let store_cb = |pr : PhysRange| {
+    ///     ranges.push(pr)
+    /// }
+    /// allocator.allocate_range(5* 0x1000, ranges)
+    /// ```
+    fn allocate_range<F: FnMut(PhysRange)>(&self, size: usize, store_cb: F) -> Result<(), ()>;
+
+    /// Returns the guest physical address where the memory from the next call to `allocate_range`
+    /// would be mapped if this allocator would be "consumed/converted" to create EPT tables.
+    /// Even if `allocate_range` returns scattered physical memory, they will be mapped to contiguous
+    /// addresses in the guest physical address space
+    fn gpa_of_next_allocation(&self) -> GuestPhysAddr;
 }
 
 #[derive(Debug, Clone, Copy)]

@@ -45,7 +45,7 @@ impl Logger {
 pub fn init(level: LevelFilter) {
     match IS_INITIALIZED.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst) {
         Ok(_) => {
-            log::set_logger(&LOGGER).unwrap();
+            log::set_logger(&LOGGER).expect("logger::init set_logger failed");
             log::set_max_level(level);
         }
         Err(_) => {

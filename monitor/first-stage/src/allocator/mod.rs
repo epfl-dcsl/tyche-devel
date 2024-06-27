@@ -3,6 +3,8 @@
 use alloc::alloc::GlobalAlloc;
 use core::sync::atomic::{AtomicBool, Ordering};
 
+use mmu::frame_allocator::PhysRange;
+use mmu::ioptmapper::PAGE_SIZE;
 use mmu::{PtFlag, PtMapper, RangeAllocator};
 use x86_64::instructions::tlb;
 
@@ -29,17 +31,38 @@ pub fn init_heap(
         return Ok(());
     }
 
+    /* as heap is not yet initialized, we cannot do dynamic allocation
+     * to store the ranges. However, as the heap has a fixed size and each
+     * phys range will contain at least on page, have an static sized upper boundary
+     */
+    let mut ranges = [PhysRange {
+        start: HostPhysAddr::new(0),
+        end: HostPhysAddr::new(0),
+    }; HEAP_SIZE / PAGE_SIZE];
+    //track the elements in `ranges` that contain valid data after allocation
+    let mut ranges_next_idx = 0;
+    let store_cb = |pr: PhysRange| {
+        assert!(ranges_next_idx < ranges.len());
+        ranges[ranges_next_idx] = pr;
+        ranges_next_idx += 1;
+    };
     // Find space for the heap and create the mappings
-    let heap_range = frame_allocator
-        .allocate_range(HEAP_SIZE)
-        .expect("Could not allocate kernel heap");
-    mapper.map_range(
-        frame_allocator,
-        HostVirtAddr::new(HEAP_START),
-        heap_range.start,
-        HEAP_SIZE,
-        PtFlag::PRESENT | PtFlag::WRITE | PtFlag::EXEC_DISABLE,
-    );
+    frame_allocator
+        .allocate_range(HEAP_SIZE, store_cb)
+        .expect("could not allocate kernel heap");
+    let mut heap_vaddr = HostVirtAddr::new(HEAP_START);
+    let heap_prot = PtFlag::PRESENT | PtFlag::WRITE | PtFlag::EXEC_DISABLE;
+
+    for range in &ranges {
+        mapper.map_range(
+            frame_allocator,
+            heap_vaddr,
+            range.start,
+            range.size(),
+            heap_prot,
+        );
+        heap_vaddr = heap_vaddr + range.size();
+    }
 
     // SAFETY: We check that the method is called only once and the heap is valid (mappings are
     // created just above).

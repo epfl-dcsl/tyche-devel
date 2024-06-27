@@ -3,11 +3,15 @@
 mod tables;
 
 use alloc::vec::Vec;
-use core::{mem, ptr};
+use core::{mem, ptr, slice};
 
+use mmu::frame_allocator::PhysRange;
+use mmu::ioptmapper::{PAGE_MASK, PAGE_SIZE};
 use mmu::{PtFlag, PtMapper, RangeAllocator};
+use qemu::println;
 use tables::{dmar, McfgItem, Rsdp, SdtHeader};
 
+use crate::mmu::scattered_writer::ScatteredIdMappedBuf;
 use crate::vmx::{HostPhysAddr, HostVirtAddr};
 
 /// Hardware configuration info collected from ACPI tables.
@@ -234,7 +238,7 @@ impl AcpiInfo {
                     log::info!("MP Wakeup Mailbox Address: {:#x}", mailbox);
                     let entry =
                         self.add_madt_mp_wakeup_entry(header, mailbox, allocator, pt_mapper);
-                    (table_ptr as *mut u64).write_unaligned(entry);
+                    (table_ptr as *mut u64).write_unaligned(entry.as_u64());
                     break;
                 }
                 _ => (),
@@ -259,7 +263,7 @@ impl AcpiInfo {
         mailbox: u64,
         allocator: &impl RangeAllocator,
         mapper: &mut PtMapper<HostPhysAddr, HostVirtAddr>,
-    ) -> u64 {
+    ) -> HostVirtAddr {
         log::info!("Adding the MP Wakeup Entry to MADT Table");
 
         let table_ptr = (header as *const _) as *const u8;
@@ -272,23 +276,31 @@ impl AcpiInfo {
             table_end,
             old_table_len
         );
+        let mut madt_ranges: Vec<PhysRange> = Vec::new();
+        let store_cb = |pr: PhysRange| {
+            madt_ranges.push(pr);
+        };
         // Allocate a new memory range for MADT Table
-        let madt_range = allocator
-            .allocate_range(old_table_len * 2)
+        allocator
+            .allocate_range(old_table_len * 2, store_cb)
             .expect("New MADT Allocation");
-        mapper.map_range(
-            allocator,
-            HostVirtAddr::new(madt_range.start.as_usize()),
-            madt_range.start,
-            old_table_len,
-            PtFlag::WRITE | PtFlag::PRESENT | PtFlag::USER,
-        );
+        let madt_vaddr = HostVirtAddr::new(madt_ranges[0].start.as_usize());
+        mapper
+            .map_range_scattered(
+                allocator,
+                madt_vaddr,
+                &madt_ranges,
+                old_table_len,
+                PtFlag::WRITE | PtFlag::PRESENT | PtFlag::USER,
+            )
+            .expect("error mapping madt");
+
+        let mut new_madt_location =
+            ScatteredIdMappedBuf::new(madt_ranges, allocator.get_physical_offset().as_usize(), 0);
         // Copy MADT Table to the newly allocated range
-        core::ptr::copy_nonoverlapping(
-            table_ptr as *const u8,
-            madt_range.start.as_usize() as _,
-            old_table_len,
-        );
+        new_madt_location
+            .write(slice::from_raw_parts(table_ptr as *const u8, old_table_len))
+            .expect("failed to copy madt table to new location");
 
         // Create the new AP Wakeup Entry
         let wakeup = MultiprocessorWakeupEntry {
@@ -302,22 +314,20 @@ impl AcpiInfo {
         let wakeup_bytes: &[u8] = unsafe { as_u8_slice(&wakeup) };
 
         // Copy the new entry to the new MADT table
-        core::ptr::copy_nonoverlapping(
-            wakeup_bytes.as_ptr(),
-            (madt_range.start + old_table_len).as_u64() as *mut u8,
-            wakeup.entry_length as usize,
-        );
+        new_madt_location
+            .write(&wakeup_bytes[..wakeup.entry_length as usize])
+            .expect("failed to copy new entry to madt table");
 
         // Modify the length
-        ((madt_range.start + mem::size_of::<u32>()).as_usize() as *mut u32)
+        ((madt_vaddr + mem::size_of::<u32>()).as_usize() as *mut u32)
             .write_unaligned(header.length + wakeup.entry_length as u32);
-        let header = &*(madt_range.start.as_usize() as *const SdtHeader);
+        let header = &*(madt_vaddr.as_usize() as *const SdtHeader);
         let checksum = header.compute_checksum();
         let offset: usize = mem::size_of::<u32>() + mem::size_of::<u32>() + mem::size_of::<u8>();
-        ((madt_range.start + offset).as_usize() as *mut u8).write_unaligned(checksum as u8);
+        ((madt_vaddr + offset).as_usize() as *mut u8).write_unaligned(checksum as u8);
         header
             .verify_checksum()
             .expect("New MADT Entry Checksum Error");
-        madt_range.start.as_u64()
+        madt_vaddr
     }
 }

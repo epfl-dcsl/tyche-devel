@@ -12,11 +12,12 @@ use core::sync::atomic::Ordering;
 use acpi::AcpiTables;
 use bootloader::{entry_point, BootInfo};
 use log::LevelFilter;
+use mmu::memory_coloring::MemoryColoring;
 use mmu::{PtMapper, RangeAllocator};
 use s1::acpi::AcpiInfo;
 use s1::acpi_handler::TycheACPIHandler;
 use s1::guests::Guest;
-use s1::mmu::MemoryMap;
+use s1::mmu::frames::ColorMap;
 use s1::smp::allocate_wakeup_page_tables;
 use s1::{guests, println, second_stage, smp, HostPhysAddr, HostVirtAddr};
 use stage_two_abi::{Smp, VgaInfo};
@@ -43,7 +44,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             .expect("The bootloader must be configured with 'map-physical-memory'")
             as usize,
     );
-    let (host_allocator, guest_allocator, memory_map, mut pt_mapper) = unsafe {
+    let (stage1_allocator, mut stage2_allocator, guest_allocator, color_map, mut pt_mapper) = unsafe {
         s1::init_memory(physical_memory_offset, &mut boot_info.memory_regions)
             .expect("Failed to initialize memory")
     };
@@ -109,11 +110,11 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         acpi_info.add_mp_wakeup_entry(
             rsdp,
             physical_memory_offset,
-            &host_allocator,
+            &stage1_allocator,
             &mut pt_mapper,
         )
     };
-    let wakeup_cr3 = allocate_wakeup_page_tables(&host_allocator);
+    let wakeup_cr3 = allocate_wakeup_page_tables(&stage1_allocator);
 
     // Check I/O MMU support
     if let Some(iommus) = &acpi_info.iommu {
@@ -129,7 +130,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
 
     // Initiates the SMP boot process
     unsafe {
-        smp::boot(acpi_platform_info, &host_allocator, &mut pt_mapper);
+        smp::boot(acpi_platform_info, &stage1_allocator, &mut pt_mapper);
     }
     let smp_info = Smp {
         smp: s1::cpu::cores(),
@@ -145,10 +146,11 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         launch_guest(
             &guests::linux::LINUX,
             &acpi_info,
-            &host_allocator,
+            &stage1_allocator,
+            &mut stage2_allocator,
             &guest_allocator,
             vga_info,
-            memory_map,
+            color_map,
             pt_mapper,
             rsdp as u64,
             smp_info,
@@ -157,10 +159,11 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         launch_guest(
             &guests::rawc::RAWC,
             &acpi_info,
-            &host_allocator,
+            &stage1_allocator,
+            &mut stage2_allocator,
             &guest_allocator,
             vga_info,
-            memory_map,
+            color_map,
             pt_mapper,
             rsdp as u64,
             smp_info,
@@ -169,10 +172,11 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         launch_guest(
             &guests::void::VOID_GUEST,
             &acpi_info,
-            &host_allocator,
+            &stage1_allocator,
+            &mut stage2_allocator,
             &guest_allocator,
             vga_info,
-            memory_map,
+            color_map,
             pt_mapper,
             rsdp as u64,
             smp_info,
@@ -182,27 +186,21 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     }
 }
 
-fn launch_guest(
+fn launch_guest<T: MemoryColoring + Clone>(
     guest: &impl Guest,
     acpi: &AcpiInfo,
     stage1_allocator: &impl RangeAllocator,
+    stage2_allocator: &mut impl RangeAllocator,
     guest_allocator: &impl RangeAllocator,
     vga_info: VgaInfo,
-    memory_map: MemoryMap,
+    color_map: ColorMap<T>,
     mut pt_mapper: PtMapper<HostPhysAddr, HostVirtAddr>,
     rsdp: u64,
     smp: Smp,
 ) -> ! {
-    let mut stage2_allocator = second_stage::second_stage_allocator(stage1_allocator);
     unsafe {
         log::info!("Loading guest");
-        let mut info = guest.instantiate(
-            acpi,
-            &mut stage2_allocator,
-            guest_allocator,
-            &memory_map,
-            rsdp,
-        );
+        let mut info = guest.instantiate(acpi, stage2_allocator, guest_allocator, &color_map, rsdp);
         info.vga_info = vga_info;
         log::info!("Saving host state");
         guests::vmx::save_host_info(&mut info.guest_info);
@@ -210,12 +208,13 @@ fn launch_guest(
         second_stage::load(
             &info,
             stage1_allocator,
-            &mut stage2_allocator,
+            stage2_allocator,
             &mut pt_mapper,
             smp,
-            memory_map,
+            &color_map,
         );
         smp::BSP_READY.store(true, Ordering::SeqCst);
+        log::info!("stage1::launch_guest : Calling second_stage::enter()");
         second_stage::enter();
     }
 

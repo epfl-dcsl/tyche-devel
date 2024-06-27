@@ -24,7 +24,9 @@ bitflags! {
 }
 
 pub const HUGE_PAGE_SIZE: usize = 1 << 21;
-pub const PAGE_SIZE: usize = 1 << 12;
+pub const PAGE_SHIFT: usize = 12;
+pub const PAGE_SIZE: usize = 1 << PAGE_SHIFT;
+pub const PAGE_MASK: usize = PAGE_SIZE - 1;
 
 pub const DEFAULT_PROTS: IoPtFlag = IoPtFlag::READ
     .union(IoPtFlag::WRITE)
