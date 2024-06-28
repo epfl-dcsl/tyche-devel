@@ -323,28 +323,27 @@ fn relocate_elf(elf: &mut ElfProgram, allocator: &impl RangeAllocator) {
                 PAGE_SIZE as u64,
             );
             //in case of overlap, we need to allocate less memory later on, due to the shared page
-            let size_adjust;
             if cur_aligned_start == prev_aligned_end {
                 //reuse last page from prev segment as first page for this segment
                 let prev_last_range = prev_segment
                     .phys_mem
                     .last()
                     .expect("prev segment has empty phys_mem");
-                let pr = PhysRange {
-                    start: HostPhysAddr::new(prev_last_range.end.as_usize() - PAGE_SIZE),
-                    end: prev_last_range.end,
+                let overlapping_page =
+                    HostPhysAddr::new(prev_last_range.end.as_usize() - PAGE_SIZE);
+                let overlapping_pr = PhysRange {
+                    start: overlapping_page,
+                    end: overlapping_page + PAGE_SIZE,
                 };
-                size_adjust = PAGE_SIZE;
-                ranges.push(pr);
-            } else {
-                size_adjust = 0;
+                assert!(overlapping_pr.start < overlapping_pr.end);
+                ranges.push(overlapping_pr);
             }
             //allocate remaining memory
             let store_cb = |pr: PhysRange| {
                 ranges.push(pr);
             };
             allocator
-                .allocate_range(aligned_size - size_adjust, store_cb)
+                .allocate_range(aligned_size, store_cb)
                 .expect("failed to alloc mem for segment");
         } else {
             //not prev segment, just allocate memory
