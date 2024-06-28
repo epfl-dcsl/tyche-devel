@@ -7,7 +7,7 @@ pub use address::{GuestPhysAddr, GuestVirtAddr, HostPhysAddr, HostVirtAddr};
 // ——————————————————————————— Frame Abstraction ———————————————————————————— //
 
 /// Representation of a physical frame.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct Frame {
     /// The physical address of the frame.
     pub phys_addr: HostPhysAddr,

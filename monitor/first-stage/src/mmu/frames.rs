@@ -1,4 +1,5 @@
 use alloc::sync::Arc;
+use alloc::vec::Vec;
 use core::cell::Cell;
 use core::sync::atomic::{AtomicUsize, Ordering};
 
@@ -13,6 +14,7 @@ use x86_64::registers::control::Cr3;
 use x86_64::structures::paging::frame::PhysFrame;
 use x86_64::PhysAddr;
 
+use crate::guests::boot_params::{E820Entry, E820Types};
 use crate::second_stage::SECOND_STAGE_SIZE;
 use crate::{allocator, println, vmx, HostPhysAddr, HostVirtAddr};
 
@@ -77,6 +79,7 @@ pub enum MemoryPartition {
 
 /// Wrapper type to dynmaically handle
 /// contiguous pyhs ranges and scattered colored ranges
+#[derive(Debug)]
 pub enum MemoryRange {
     ColoredRange(ColorRange),
     PhysContigRange(PhysRange),
@@ -99,6 +102,19 @@ pub struct PartitionedMemoryMap<T: MemoryColoring + Clone> {
 }
 
 impl<T: MemoryColoring + Clone> PartitionedMemoryMap<T> {
+    pub fn print_layout(&self) {
+        log::info!("guest memory range  : {:x?}", self.guest);
+        log::info!("stage1 memory range : {:x?}", self.stage1);
+        log::info!("stage2 memory range : {:x?}", self.stage2);
+        log::info!("unused memory       : {:x?}", self.unused);
+    }
+
+    pub fn print_mem_regions(&self) {
+        for (mr_idx, mr) in self.all_regions.iter().enumerate() {
+            println!("idx {:02} {:x?}", mr_idx, mr);
+        }
+    }
+
     pub fn new(
         guest: MemoryRange,
         stage1: MemoryRange,
@@ -115,6 +131,82 @@ impl<T: MemoryColoring + Clone> PartitionedMemoryMap<T> {
             coloring,
             all_regions,
         }
+    }
+
+    /// Build memory regions for the GPA space that we will construct for the guest in stage2
+    /// We need to construct them here, because we have to load them into memory and we want to avoid
+    /// doing that from stage2
+    pub fn build_guest_memory_regions(&self) -> Vec<E820Entry> {
+        /* 1) Keep Memory holes where they are (gaps between entry)
+           2) Keep everything that is marked as reserved where it is (UnknownUefi(_) and UnknownBios(_))
+           3) Out of caution, also Keep "Bootloader" where it is
+           4) For remaining usable Regions: Mark as reserved at free will to fit the actually
+           available memory
+        */
+        let mut result = Vec::new();
+        let guest_mem_bytes = match self.guest {
+            MemoryRange::ColoredRange(cr) => cr.mem_bytes,
+            MemoryRange::PhysContigRange(pr) => pr.size(),
+        };
+        let mut remaining_guest_mem_bytes = guest_mem_bytes as u64;
+
+        for bl_mr in self.all_regions {
+            let bl_mr_bytes = bl_mr.end - bl_mr.start;
+            assert_eq!(remaining_guest_mem_bytes % PAGE_SIZE as u64, 0);
+            match bl_mr.kind {
+                MemoryRegionKind::Usable => {
+                    //No more guest memory,
+                    if remaining_guest_mem_bytes <= 0 {
+                        result.push(E820Entry {
+                            addr: GuestPhysAddr::new(bl_mr.start as usize),
+                            size: bl_mr_bytes,
+                            mem_type: E820Types::Reserved,
+                        });
+                    //remaining guest memory is >=  bl_mr -> use whole region
+                    } else if remaining_guest_mem_bytes >= bl_mr_bytes {
+                        result.push(E820Entry {
+                            addr: GuestPhysAddr::new(bl_mr.start as usize),
+                            size: bl_mr_bytes,
+                            mem_type: E820Types::Ram,
+                        });
+                        remaining_guest_mem_bytes -= bl_mr_bytes;
+                    // remaining guest memory > 0 but smaller than region -> split region
+                    } else {
+                        result.push(E820Entry {
+                            addr: GuestPhysAddr::new(bl_mr.start as usize),
+                            size: remaining_guest_mem_bytes,
+                            mem_type: E820Types::Ram,
+                        });
+                        result.push(E820Entry {
+                            addr: GuestPhysAddr::new(
+                                (bl_mr.start + remaining_guest_mem_bytes) as usize,
+                            ),
+                            size: bl_mr_bytes - remaining_guest_mem_bytes,
+                            mem_type: E820Types::Reserved,
+                        });
+                    }
+                }
+                //TODO: If we pass this pass this through
+                //This would enable color interference
+                //Could be a case for a crash, since orig code seems to pass it through
+                MemoryRegionKind::Bootloader => {
+                    result.push(E820Entry {
+                        addr: GuestPhysAddr::new(bl_mr.start as usize),
+                        size: bl_mr_bytes,
+                        mem_type: E820Types::Reserved,
+                    });
+                }
+                MemoryRegionKind::UnknownUefi(_) | MemoryRegionKind::UnknownBios(_) => {
+                    result.push(E820Entry {
+                        addr: GuestPhysAddr::new(bl_mr.start as usize),
+                        size: bl_mr_bytes,
+                        mem_type: E820Types::Reserved,
+                    });
+                }
+                _ => todo!("Unknown boot loader memory type when building guest memory regions"),
+            }
+        }
+        result
     }
 
     /// Calls range_cb for each physical contiguous memory range that belongs to `partition`
@@ -243,7 +335,7 @@ pub unsafe fn init(
     //just out of caution that using these low regions might lead to trouble
     for mr in regions.iter_mut() {
         if mr.start < 0xa0000 && mr.kind == MemoryRegionKind::Usable {
-            mr.kind = MemoryRegionKind::Bootloader;
+            mr.kind = MemoryRegionKind::UnknownBios(1);
         }
     }
     let stage2_phys_range = if cfg!(feature = "color-s2") {
@@ -336,7 +428,7 @@ pub unsafe fn init(
     // Initialize the heap.
     allocator::init_heap(&mut pt_mapper, &stage1_allocator)?;
     println!("Initialized heap\nAbout to transofmr guest_allocator into shared allocator\n");
-    let guest_allocator = SharedFrameAllocator::new(guest_allocator, physical_memory_offset);
+    let guest_allocator = SharedFrameAllocator::new(guest_allocator);
     println!("init memory done");
     Ok((
         stage1_allocator,
@@ -353,25 +445,27 @@ fn reserve_memory_region(
     regions: &mut [MemoryRegion],
     required_bytes_stage1_alloc: usize,
 ) -> Option<PhysRange> {
-    let mut contig_mr_for_stage1_alloc = None;
-    for mr in regions.iter_mut() {
+    let mut matching_mr = None;
+    //TODO: search for smallest matching region
+    for (mr_idx, mr) in regions.iter_mut().enumerate() {
         if mr.kind == MemoryRegionKind::Usable
             && ((mr.end - mr.start) as usize > required_bytes_stage1_alloc)
         {
             let pr = PhysRange {
                 start: HostPhysAddr::new(mr.start as usize),
-                end: HostPhysAddr::new(mr.start as usize + required_bytes_stage1_alloc),
+                end: HostPhysAddr::new(mr.end as usize),
             };
 
-            mr.start = pr.end.as_u64();
-            assert!((mr.end - mr.start) % PAGE_SIZE as u64 == 0);
-            assert!((mr.end - mr.start) >= PAGE_SIZE as u64);
-
-            contig_mr_for_stage1_alloc = Some(pr);
+            mr.kind = MemoryRegionKind::UnknownBios(1);
+            matching_mr = Some(pr);
+            println!(
+                "Using mr at idx {:02} {:x?} for contig range allocator",
+                mr_idx, mr
+            );
             break;
         }
     }
-    contig_mr_for_stage1_alloc
+    matching_mr
 }
 
 // ———————————————————————————— Coloring Range Frame Allocator ————————————————//
@@ -519,6 +613,7 @@ unsafe impl<T: MemoryColoring + Clone> FrameAllocator for ColoringRangeFrameAllo
     }
 
     fn get_boundaries(&self) -> (usize, usize) {
+        log::error!("get_boundaries called");
         panic!("TODO: remove this function from trait. It is not used and does not align with the painted memory world view");
     }
 
@@ -617,6 +712,13 @@ fn contig_color_range<T: MemoryColoring + Clone>(
         color_count += 1;
     }
     if mem_bytes < required_bytes {
+        log::error!(
+            "Depleted all {} colors but only got {} GiB ! Need {} GiB",
+            total_color_count,
+            mem_bytes / (1 << 30),
+            required_bytes / (1 << 30)
+        );
+
         return Err(());
     }
     return Ok((first_used_color, color_count, mem_bytes));
@@ -764,17 +866,12 @@ impl BootInfoFrameAllocator {
 #[derive(Clone)]
 pub struct SharedFrameAllocator<T: MemoryColoring + Clone> {
     alloc: Arc<Mutex<ColoringRangeFrameAllocator<T>>>,
-    physical_memory_offset: HostVirtAddr,
 }
 
 impl<T: MemoryColoring + Clone> SharedFrameAllocator<T> {
-    pub fn new(
-        alloc: ColoringRangeFrameAllocator<T>,
-        physical_memory_offset: HostVirtAddr,
-    ) -> Self {
+    pub fn new(alloc: ColoringRangeFrameAllocator<T>) -> Self {
         Self {
             alloc: Arc::new(Mutex::new(alloc)),
-            physical_memory_offset,
         }
     }
 }
@@ -794,12 +891,12 @@ unsafe impl<T: MemoryColoring + Clone> FrameAllocator for SharedFrameAllocator<T
     }
 
     fn get_physical_offset(&self) -> HostVirtAddr {
-        self.physical_memory_offset
+        self.alloc.lock().get_physical_offset()
     }
 }
 
 unsafe impl<T: MemoryColoring + Clone> RangeAllocator for SharedFrameAllocator<T> {
-    fn allocate_range<F: FnMut(PhysRange)>(&self, size: usize, mut store_cb: F) -> Result<(), ()> {
+    fn allocate_range<F: FnMut(PhysRange)>(&self, size: usize, store_cb: F) -> Result<(), ()> {
         let inner = self.alloc.lock();
         inner.allocate_range(size, store_cb)
     }

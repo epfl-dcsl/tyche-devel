@@ -13,7 +13,6 @@ use mmu::frame_allocator::PhysRange;
 use mmu::ioptmapper::{PAGE_MASK, PAGE_SIZE};
 use mmu::walker::Address;
 use mmu::{PtFlag, PtMapper, RangeAllocator};
-use qemu::println;
 use vmx::HostPhysAddr;
 
 use crate::mmu::scattered_writer::ScatteredIdMappedBuf;
@@ -154,7 +153,7 @@ impl ElfProgram {
             PtMapper::new(host_physical_offset.as_usize(), 0, pt_root_guest_phys_addr);
 
         // Load and map segments
-        for (seg_idx, seg) in self.segments.iter().enumerate() {
+        for seg in self.segments.iter() {
             if seg.phdr.p_type != Elf64PhdrType::PT_LOAD.bits() {
                 // Skip non-load segments.
                 continue;

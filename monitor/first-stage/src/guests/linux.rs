@@ -45,19 +45,18 @@ impl Guest for Linux {
         acpi: &AcpiInfo,
         host_allocator: &impl RangeAllocator,
         guest_allocator: &impl RangeAllocator,
-        color_map: &PartitionedMemoryMap<T>,
+        memory_map: &PartitionedMemoryMap<T>,
         rsdp: u64,
     ) -> ManifestInfo {
         let mut manifest = ManifestInfo::default();
         let mut linux_prog = ElfProgram::new(LINUXBYTES);
-        linux_prog.set_mapping(ElfMapping::Identity);
+        linux_prog.set_mapping(ElfMapping::Scattered);
         let virtoffset = host_allocator.get_physical_offset();
 
         // Load guest into memory.
         let mut loaded_linux = linux_prog
             .load::<GuestPhysAddr, GuestVirtAddr>(guest_allocator, virtoffset)
             .expect("Failed to load guest");
-
         // Setup I/O MMU
         if let Some(_) = &acpi.iommu {
             manifest.iommu = 0;
@@ -65,7 +64,7 @@ impl Guest for Linux {
 
         // Build the boot params
         // Step1: load values contained in BootParams into memory
-        let mut boot_params = build_bootparams(&color_map);
+        let mut boot_params = build_bootparams(&memory_map);
         let command_line = loaded_linux.add_payload(COMMAND_LINE, guest_allocator);
         let command_line_addr_low = (command_line.as_usize() & 0xFFFF_FFFF) as u32;
         let command_line_addr_high = (command_line.as_usize() >> 32) as u32;
@@ -88,7 +87,7 @@ impl Guest for Linux {
     }
 }
 
-fn build_bootparams<T: MemoryColoring + Clone>(color_map: &PartitionedMemoryMap<T>) -> BootParams {
+fn build_bootparams<T: MemoryColoring + Clone>(memory_map: &PartitionedMemoryMap<T>) -> BootParams {
     let mut boot_params = BootParams::default();
     boot_params.hdr.type_of_loader = KERNEL_LOADER_OTHER;
     boot_params.hdr.boot_flag = KERNEL_BOOT_FLAG_MAGIC;
@@ -99,26 +98,12 @@ fn build_bootparams<T: MemoryColoring + Clone>(color_map: &PartitionedMemoryMap<
     //boot_params.hdr.ramdisk_image = ramdisk addr;
     //boot_params.hdr.ramdisk_size = ramdisk size;
 
-    todo!("fix once stage2 transition works. basically need to mark allocated memory as used");
-    /* memory_map.guest contained the  &'static [MemoryRegion], that are used by the guest
-     * With coloring, the guest's memory is described in terms of colors, not in terms of fixed ranges
-     * However, the guest lives in their GPA space to begin with. SO probably we can generate our own
-     * memory map here
-     */
-    /*for region in memory_map.guest {
-        let addr = GuestPhysAddr::new(region.start as usize);
-        let size = region.end - region.start;
-        let kind = match region.kind {
-            MemoryRegionKind::Usable => E820Types::Ram,
-            MemoryRegionKind::Bootloader => E820Types::Ram,
-            MemoryRegionKind::UnknownUefi(_) => E820Types::Reserved,
-            MemoryRegionKind::UnknownBios(_) => E820Types::Reserved,
-            _ => todo!("Add missing kind when updating bootloader crate"),
-        };
+    let guest_memory_regions = memory_map.build_guest_memory_regions();
+    for mr in guest_memory_regions {
         boot_params
-            .add_e820_entry(addr, size, kind)
-            .expect("Failed to add region");
-    }*/
+            .add_e820_entry(mr)
+            .expect("error adding e820 entry");
+    }
 
     boot_params
 }

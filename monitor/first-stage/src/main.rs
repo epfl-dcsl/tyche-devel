@@ -10,6 +10,7 @@ use core::panic::PanicInfo;
 use core::sync::atomic::Ordering;
 
 use acpi::AcpiTables;
+use bootloader::boot_info::MemoryRegionKind;
 use bootloader::{entry_point, BootInfo};
 use log::LevelFilter;
 use mmu::memory_coloring::MemoryColoring;
@@ -44,11 +45,18 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             .expect("The bootloader must be configured with 'map-physical-memory'")
             as usize,
     );
-    let (stage1_allocator, mut stage2_allocator, guest_allocator, color_map, mut pt_mapper) = unsafe {
+    let memsize: u64 = boot_info
+        .memory_regions
+        .iter()
+        .filter(|mr| mr.kind == MemoryRegionKind::Usable)
+        .map(|mr| mr.end - mr.start)
+        .sum();
+    println!("Total Usable Memsize: {} GiB", memsize / (1 << 30));
+    let (stage1_allocator, mut stage2_allocator, guest_allocator, memory_map, mut pt_mapper) = unsafe {
         s1::init_memory(physical_memory_offset, &mut boot_info.memory_regions)
             .expect("Failed to initialize memory")
     };
-
+    memory_map.print_layout();
     // Initialize kernel structures
     s1::init();
 
@@ -141,6 +149,8 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     // Enable interrupts
     x86_64::instructions::interrupts::enable();
 
+    log::info!("calling launch_guest");
+
     // Select appropriate guest depending on selected features
     if cfg!(feature = "guest_linux") {
         launch_guest(
@@ -150,7 +160,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             &mut stage2_allocator,
             &guest_allocator,
             vga_info,
-            color_map,
+            memory_map,
             pt_mapper,
             rsdp as u64,
             smp_info,
@@ -163,7 +173,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             &mut stage2_allocator,
             &guest_allocator,
             vga_info,
-            color_map,
+            memory_map,
             pt_mapper,
             rsdp as u64,
             smp_info,
@@ -176,7 +186,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             &mut stage2_allocator,
             &guest_allocator,
             vga_info,
-            color_map,
+            memory_map,
             pt_mapper,
             rsdp as u64,
             smp_info,
