@@ -782,12 +782,7 @@ impl<T: MemoryColoring + Clone> SharedFrameAllocator<T> {
 unsafe impl<T: MemoryColoring + Clone> FrameAllocator for SharedFrameAllocator<T> {
     fn allocate_frame(&self) -> Option<vmx::Frame> {
         let inner = self.alloc.lock();
-        let frame = inner.allocate_frame()?;
-
-        Some(vmx::Frame {
-            phys_addr: vmx::HostPhysAddr::new(frame.phys_addr.as_usize()),
-            virt_addr: (frame.virt_addr + self.physical_memory_offset.as_usize() as usize),
-        })
+        inner.allocate_frame()
     }
 
     fn get_boundaries(&self) -> (usize, usize) {
