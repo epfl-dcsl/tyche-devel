@@ -3,11 +3,14 @@
 use alloc::vec::Vec;
 use core::arch::asm;
 use core::sync::atomic::{AtomicBool, Ordering};
+use core::{mem, slice};
 
+use bootloader::boot_info::MemoryRegionKind;
 use mmu::frame_allocator::PhysRange;
+use mmu::ioptmapper::PAGE_MASK;
 use mmu::memory_coloring::MemoryColoring;
 use mmu::{PtFlag, PtMapper, RangeAllocator};
-use stage_two_abi::{EntryPoint, Manifest, Smp};
+use stage_two_abi::{EntryPoint, Manifest, MemoryRegion as S2MemRegion, Smp};
 use x86_64::{align_down, align_up};
 
 use crate::cpu::MAX_CPU_NUM;
@@ -270,6 +273,34 @@ pub fn load<T: MemoryColoring + Clone>(
     manifest.voffset = LOAD_VIRT_ADDR.as_u64();
     manifest.vga = info.vga_info.clone();
     manifest.smp = smp;
+
+    manifest.dom0_memory = memory_partitions.guest;
+    manifest.remaining_dom_memory = memory_partitions.unused;
+
+    //Copy Memory region to stage2 representation in manifset
+    let manifest_s2_mem_regions: &mut [S2MemRegion] = unsafe {
+        let len = manifest.raw_mem_regions_slice.len() / mem::size_of::<S2MemRegion>();
+        slice::from_raw_parts_mut(
+            manifest.raw_mem_regions_slice.as_mut_ptr() as *mut S2MemRegion,
+            len,
+        )
+    };
+    //manifest_s2 len is the capacity, i.e. the max amount of entries that this slice can store
+    // `raw_mem_regions_slice_valid_entries` tracks the number of valid entries
+    assert!(memory_partitions.get_boot_memory_regions().len() <= manifest_s2_mem_regions.len());
+    for (idx, boot_mr) in memory_partitions
+        .get_boot_memory_regions()
+        .iter()
+        .enumerate()
+    {
+        manifest_s2_mem_regions[idx] = S2MemRegion {
+            start: boot_mr.start,
+            end: boot_mr.end,
+            is_useable: boot_mr.kind == MemoryRegionKind::Usable,
+        }
+    }
+    manifest.raw_mem_regions_slice_valid_entries =
+        memory_partitions.get_boot_memory_regions().len();
 
     debug::hook_stage2_offsets(manifest.poffset, manifest.voffset);
     debug::tyche_hook_stage1(1);

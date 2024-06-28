@@ -52,6 +52,7 @@ pub unsafe trait RangeAllocator: FrameAllocator {
 }
 
 #[derive(Debug, Clone, Copy)]
+#[repr(C)]
 /// A range of physical memory.
 pub struct PhysRange {
     /// Start of the physical range (inclusive).

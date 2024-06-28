@@ -5,6 +5,9 @@
 
 #![no_std]
 
+use core::slice;
+
+use mmu::memory_coloring::MemoryRange;
 #[cfg(target_arch = "riscv64")]
 use riscv_tyche::RVManifest;
 
@@ -68,6 +71,18 @@ macro_rules! entry_point {
 } */
 
 // ———————————————————————————————— Manifest ———————————————————————————————— //
+/// Represent a physical memory region.
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+#[repr(C)]
+pub struct MemoryRegion {
+    /// The physical start address of the region.
+    pub start: u64,
+    /// The physical end address (exclusive) of the region.
+    pub end: u64,
+    /// If false, memory region refers to some kind of reserved range
+    /// Otherwise, it is useable
+    pub is_useable: bool,
+}
 
 /// The second stage manifest, describing the state of the system at the time the second stage is
 /// entered.
@@ -88,6 +103,14 @@ pub struct Manifest {
     pub iommu: u64,
     /// SMP info:
     pub smp: Smp,
+    /// Used to transfer memory regions from stage1 to stage2
+    pub raw_mem_regions_slice: [u8; 4096],
+    /// Number of entries in `raw_mem_regions_slice` that contains valid data
+    pub raw_mem_regions_slice_valid_entries: usize,
+    /// Memory exclusive to dom0
+    pub dom0_memory: MemoryRange,
+    /// Memory to use for other domains
+    pub remaining_dom_memory: MemoryRange,
 }
 
 /// Suport for x86_64 SMP
@@ -118,6 +141,16 @@ impl Manifest {
 
         Some(manifest)
     }
+
+    /// Return parsed slice for the raw u8 memory regions stored in the Manifset
+    pub fn get_boot_mem_regions(&self) -> &[MemoryRegion] {
+        unsafe {
+            slice::from_raw_parts(
+                self.raw_mem_regions_slice.as_ptr() as *const MemoryRegion,
+                self.raw_mem_regions_slice_valid_entries,
+            )
+        }
+    }
 }
 
 // ———————————————————————————————— Statics ————————————————————————————————— //
@@ -131,6 +164,9 @@ macro_rules! make_manifest {
     () => {
         pub fn get_manifest() -> &'static mut $crate::Manifest {
             use core::sync::atomic::{AtomicBool, Ordering};
+
+            use mmu::memory_coloring::MemoryRange::ColoredRange;
+            use mmu::memory_coloring::{ColorRange, MemoryRange};
 
             // Crearte the manifest
             #[used]
@@ -147,6 +183,20 @@ macro_rules! make_manifest {
                     mailbox: 0,
                     wakeup_cr3: 0,
                 },
+                raw_mem_regions_slice: [0_u8; 4096],
+                raw_mem_regions_slice_valid_entries: 0,
+                /// Memory exclusive to dom0
+                dom0_memory: MemoryRange::ColoredRange(ColorRange {
+                    first_color: 0,
+                    color_count: 0,
+                    mem_bytes: 0,
+                }),
+                /// Memory to use for other domains
+                remaining_dom_memory: MemoryRange::ColoredRange(ColorRange {
+                    first_color: 0,
+                    color_count: 0,
+                    mem_bytes: 0,
+                }),
             };
             static TAKEN: AtomicBool = AtomicBool::new(false);
 

@@ -5,7 +5,7 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 
 use bootloader::boot_info::{MemoryRegion, MemoryRegionKind};
 use mmu::frame_allocator::PhysRange;
-use mmu::memory_coloring::{ColorRange, DummyMemoryColoring, MemoryColoring};
+use mmu::memory_coloring::{ColorRange, MemoryColoring, MemoryColoringType, MemoryRange};
 use mmu::ptmapper::PtMapper;
 use mmu::{FrameAllocator, RangeAllocator};
 use spin::Mutex;
@@ -21,10 +21,11 @@ use crate::{allocator, println, vmx, HostPhysAddr, HostVirtAddr};
 pub const PAGE_SIZE: usize = 0x1000;
 
 /// How much memory to reserve for the second stage
-const SECOND_STAGE_RESERVED_MEMORY: u64 = 0x1000000;
 /// Gibibyte as bytes
 const GIB: usize = 1 << 30;
+const MIB: usize = 1 << 20;
 const GUEST_RESERVED_MEMORY: usize = 2 * GIB;
+const SECOND_STAGE_RESERVED_MEMORY: u64 = 200 * MIB as u64;
 
 // ————————————————————————— Physical Memory Offset ————————————————————————— //
 
@@ -77,24 +78,16 @@ pub enum MemoryPartition {
     UNUSED,
 }
 
-/// Wrapper type to dynmaically handle
-/// contiguous pyhs ranges and scattered colored ranges
-#[derive(Debug)]
-pub enum MemoryRange {
-    ColoredRange(ColorRange),
-    PhysContigRange(PhysRange),
-}
-
 /// Describes the memory layout created in stage1
 pub struct PartitionedMemoryMap<T: MemoryColoring + Clone> {
     /// Memory reserved for root partition/Dom0
-    guest: MemoryRange,
+    pub guest: MemoryRange,
     /// Memory used for Stage 1
-    stage1: MemoryRange,
+    pub stage1: MemoryRange,
     /// Memory used for Stage 2
-    stage2: MemoryRange,
+    pub stage2: MemoryRange,
     /// Memory that is not allocated to any partition yet. Intended for TDs
-    unused: MemoryRange,
+    pub unused: MemoryRange,
     /// Memory coloring function
     coloring: Option<T>,
     ///memory map from early bootloader
@@ -113,6 +106,10 @@ impl<T: MemoryColoring + Clone> PartitionedMemoryMap<T> {
         for (mr_idx, mr) in self.all_regions.iter().enumerate() {
             println!("idx {:02} {:x?}", mr_idx, mr);
         }
+    }
+
+    pub fn get_boot_memory_regions(&self) -> &[MemoryRegion] {
+        &self.all_regions
     }
 
     pub fn new(
@@ -268,7 +265,7 @@ pub unsafe fn create_stage2_allocator<T: MemoryColoring + Clone>(
             _regions,
             _mem_painter,
             0,
-            DummyMemoryColoring::COLOR_COUNT as u64,
+            MemoryColoringType::COLOR_COUNT as u64,
             SECOND_STAGE_SIZE,
         )
         .expect("failed to gather colors for stage2 allocator");
@@ -327,7 +324,7 @@ pub unsafe fn init(
         impl RangeAllocator,
         impl RangeAllocator,
         impl RangeAllocator,
-        PartitionedMemoryMap<DummyMemoryColoring>,
+        PartitionedMemoryMap<MemoryColoringType>,
         PtMapper<HostPhysAddr, HostVirtAddr>,
     ),
     (),
@@ -344,7 +341,7 @@ pub unsafe fn init(
     } else {
         println!("\nNot using colors for stage2\n");
         Some(
-            reserve_memory_region(regions, 5 * SECOND_STAGE_RESERVED_MEMORY as usize)
+            reserve_memory_region(regions, SECOND_STAGE_RESERVED_MEMORY as usize)
                 .expect("failed to reserve memory for stage2"),
         )
     };
@@ -367,7 +364,7 @@ pub unsafe fn init(
     );
     let stage1_mem_partition = MemoryRange::PhysContigRange(contig_mr_for_stage1_alloc);
 
-    let mem_painter = DummyMemoryColoring {};
+    let mem_painter = MemoryColoringType {};
 
     let (stage2_allocator, next_free_color, stage2_mem_partiton) = create_stage2_allocator(
         physical_memory_offset,
@@ -380,7 +377,7 @@ pub unsafe fn init(
         regions,
         &mem_painter,
         next_free_color,
-        DummyMemoryColoring::COLOR_COUNT as u64,
+        MemoryColoringType::COLOR_COUNT as u64,
         GUEST_RESERVED_MEMORY,
     )
     .expect("failed to gather colors for guest memory");
@@ -400,12 +397,12 @@ pub unsafe fn init(
 
     let first_unused_color = first_guest_color + guest_color_count;
     let mut unused_mem_bytes = 0;
-    for color_id in (first_unused_color as usize)..DummyMemoryColoring::COLOR_COUNT {
+    for color_id in (first_unused_color as usize)..MemoryColoringType::COLOR_COUNT {
         unused_mem_bytes += compute_color_partition_size(regions, &mem_painter, color_id as u64);
     }
     let unused_mem_partiton = MemoryRange::ColoredRange(ColorRange {
         first_color: first_unused_color,
-        color_count: DummyMemoryColoring::COLOR_COUNT as u64 - first_unused_color,
+        color_count: MemoryColoringType::COLOR_COUNT as u64 - first_unused_color,
         mem_bytes: unused_mem_bytes,
     });
 

@@ -1,5 +1,6 @@
 use utils::HostPhysAddr;
 
+use crate::frame_allocator::PhysRange;
 use crate::ioptmapper::PAGE_SHIFT;
 
 ///Memory colorings as described by the Magheira paper
@@ -25,7 +26,13 @@ impl MemoryColoring for DummyMemoryColoring {
     const COLOR_COUNT: usize = 1 << 3;
 }
 
+//TODO: add feature flags to switch this
+/// Alias type for the  the currently active memory coloring
+pub type MemoryColoringType = DummyMemoryColoring;
+
 #[derive(Debug, Clone, Copy)]
+#[repr(C)]
+
 /// Represents a contiguous range of memory colors
 pub struct ColorRange {
     /// First color in this range
@@ -35,4 +42,13 @@ pub struct ColorRange {
     pub color_count: u64,
     /// Number of bytes that this color range provides
     pub mem_bytes: usize,
+}
+
+/// Wrapper type to dynmaically handle
+/// contiguous pyhs ranges and scattered colored ranges
+#[derive(Debug, Copy, Clone)]
+#[repr(C)]
+pub enum MemoryRange {
+    ColoredRange(ColorRange),
+    PhysContigRange(PhysRange),
 }
