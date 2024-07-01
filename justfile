@@ -199,6 +199,7 @@ _build-busybox-common ARCH CROSS_COMPILE=extra_arg:
 	make -C ./busybox ARCH={{ARCH}} CFLAGS="-I{{build_path}}/linux-headers-{{ARCH}}/include" O=../builds/busybox-{{ARCH}}/ {{CROSS_COMPILE}} -j `nproc`
 	make -C ./busybox ARCH={{ARCH}} O=../builds/busybox-{{ARCH}}/ {{CROSS_COMPILE}} PREFIX=../builds/ramfs-{{ARCH}} install
 	cp ./configs/{{ARCH}}_init.sh ./builds/ramfs-{{ARCH}}/init
+	chmod a+x  ./builds/ramfs-{{ARCH}}/init
 
 init-ramfs-x86:
 	@just _init-ramfs-common x86
