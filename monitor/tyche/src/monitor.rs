@@ -662,8 +662,7 @@ pub trait Monitor<T: PlatformState + 'static> {
                 res[1] = to_revoke.as_usize();
                 return Ok(true);
             }
-            // There are no aliases on riscv so we just ignore the alias info.
-            calls::REVOKE | calls::REVOKE_ALIASED_REGION => {
+            calls::REVOKE => {
                 log::trace!("Revoke on core {}", cpuid());
                 Self::do_revoke(state, domain, LocalCapa::new(args[0]))?;
                 return Ok(true);
@@ -785,7 +784,7 @@ pub trait Monitor<T: PlatformState + 'static> {
             calls::SELF_CONFIG => {
                 todo!("Implement!!!");
             }
-            /* calls::REVOKE_ALIASED_REGION => {
+            calls::REVOKE_ALIASED_REGION => {
                 log::trace!("Revoke aliased region on core {}", cpuid());
                 Self::do_revoke_region(
                     state,
@@ -797,7 +796,7 @@ pub trait Monitor<T: PlatformState + 'static> {
                 )
                 .unwrap();
                 return Ok(true);
-            } */
+            }
             calls::SERIALIZE_ATTESTATION => {
                 let written = Self::do_serialize_attestation(state, domain, args[0], args[1])?;
                 res[0] = written;
