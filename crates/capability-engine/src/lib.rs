@@ -25,19 +25,19 @@ use cores::{Core, CoreList};
 use domain::{insert_capa, remove_capa, DomainHandle, DomainPool};
 pub use domain::{Domain, LocalCapa, NextCapaToken};
 pub use gen_arena::{GenArena, Handle};
+pub use region::ResourceKind::*;
 pub use region::{
-    AccessRights, MemOps, MemoryPermission, Region, RegionIterator, RegionTracker, MEMOPS_ALL,
-    MEMOPS_EXTRAS,
+    AccessRights, MemOps, MemoryPermission, Region, RegionIterator, RegionTracker, ResourceKind,
+    MEMOPS_ALL, MEMOPS_EXTRAS,
 };
 use region::{PermissionIterator, TrackerPool, EMPTY_REGION};
 pub use remapper::Remapper;
 pub use segment::EffectiveRegionIterator;
-use segment::{RegionCapa, RegionHash, RegionPool};
+use segment::{RegionCapa, RegionHash, RegionPool, EMPTY_REGION_CAPA};
 use update::UpdateBuffer;
 pub use update::{Buffer, Update};
 
 use crate::permission::{core_bits, trap_bits};
-use crate::segment::EMPTY_REGION_CAPA;
 
 /// Configuration for the static Capa Engine size.
 pub mod config {
@@ -75,6 +75,7 @@ pub enum CapaError {
     InvalidMemOps,
     AlreadyAliased,
     PlatformError,
+    CapaOperationOnDifferentResourceKinds,
 }
 
 pub struct CapaEngine {

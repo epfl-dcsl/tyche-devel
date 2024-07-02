@@ -143,7 +143,7 @@ where
         //number of bytes that still need to be mapped
         let mut remaining_bytes = size;
         let mut next_virt_addr = virt_addr;
-        for (pyhs_range_idx, phys_range) in phys_ranges.iter().enumerate() {
+        for (phys_range_idx, phys_range) in phys_ranges.iter().enumerate() {
             assert_eq!(phys_range.start.as_usize() % PAGE_SIZE, 0);
             let phys_addr = PhysAddr::from_usize(phys_range.start.as_usize());
 

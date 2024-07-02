@@ -3,8 +3,9 @@ use capa_engine::config::NB_CORES;
 use capa_engine::utils::BitmapIterator;
 use capa_engine::{
     permission, AccessRights, Buffer, CapaEngine, CapaError, CapaInfo, Domain, Handle, LocalCapa,
-    MemOps, NextCapaToken, MEMOPS_ALL, MEMOPS_EXTRAS,
+    MemOps, NextCapaToken, ResourceKind, MEMOPS_ALL, MEMOPS_EXTRAS,
 };
+use mmu::memory_coloring::{ActiveMemoryColoring, PartitionBitmap};
 use spin::{Mutex, MutexGuard};
 use stage_two_abi::Manifest;
 
@@ -173,6 +174,13 @@ pub trait Monitor<T: PlatformState + 'static> {
         locked.unwrap()
     }
 
+    //luca: central capa engine initialization
+    //TODO: continue here
+    /*
+    1) create one root region for each physical contiguous range of memory that should initially be available to dom0
+    2) create one root region for each device memory
+    3) delay creation of remaining memory, as creating a root region will also always give dom0 access to it (regions are sth. that is allowed by capabilities and cannot really exist on their own to my understanding)
+     */
     fn do_init(state: &mut T, manifest: &'static Manifest) -> Handle<Domain> {
         // No one else is running yet
         let mut engine = CAPA_ENGINE.lock();
@@ -180,16 +188,61 @@ pub trait Monitor<T: PlatformState + 'static> {
             .create_manager_domain(permission::monitor_inter_perm::ALL)
             .unwrap();
         Self::apply_updates(state, &mut engine);
-        engine
-            .create_root_region(
-                domain,
-                AccessRights {
-                    start: 0,
-                    end: manifest.poffset as usize,
-                    ops: MEMOPS_ALL,
-                },
-            )
-            .unwrap();
+        let mut dom0_partititons = PartitionBitmap::new();
+        match manifest.dom0_memory {
+            mmu::memory_coloring::MemoryRange::ColoredRange(cr) => {
+                for v in cr.first_color..(cr.first_color + cr.color_count) {
+                    dom0_partititons.set(v as usize, true);
+                }
+            }
+            mmu::memory_coloring::MemoryRange::PhysContigRange(_) => {
+                //initially bitmap is all zero, thus now it is all ones
+                dom0_partititons.set_all();
+                todo!("pyhs contig init does not yet capture the phys range stuff");
+            }
+        }
+        //give dom0 access to each dom0 component that belongs to its partitions/colors
+        //TODO: how do we restrict memory in one partition case? Or does it not matter becase
+        //there driver has more freedom regarding memory managementin this case???
+        for mr in manifest.get_boot_mem_regions() {
+            if !mr.is_useable {
+                continue;
+            }
+            engine
+                .create_root_region(
+                    domain,
+                    AccessRights {
+                        start: mr.start as usize,
+                        end: mr.end as usize,
+                        resource: ResourceKind::RAM(dom0_partititons),
+                        ops: MEMOPS_ALL,
+                    },
+                )
+                .unwrap();
+        }
+
+        //give dom0 access to all device ranges : devices are in gaps of boot mem map
+        let mut prev = &manifest.get_boot_mem_regions()[0];
+        for cur in manifest.get_boot_mem_regions().iter().skip(1) {
+            //no gap -> continue
+            if prev.end == cur.start {
+                continue;
+            }
+            engine
+                .create_root_region(
+                    domain,
+                    AccessRights {
+                        start: prev.end as usize,
+                        end: cur.start as usize,
+                        resource: ResourceKind::Device,
+                        ops: MEMOPS_ALL,
+                    },
+                )
+                .unwrap();
+
+            prev = cur;
+        }
+
         //TODO: call the platform?
         Self::apply_updates(state, &mut engine);
         // Save the initial domain.
@@ -403,6 +456,8 @@ pub trait Monitor<T: PlatformState + 'static> {
         let access = AccessRights {
             start,
             end,
+            //TODO: luca: use new arguments to determine this
+            resource: ResourceKind::ram_with_all_partitions(),
             ops: prot,
         };
         let to_send = if is_shared {

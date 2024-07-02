@@ -155,6 +155,8 @@ impl StateX86 {
             ept_root.phys_addr,
         );
         let permission_iter = engine.get_domain_permissions(domain_handle).unwrap();
+
+        //luca: adjust to our two new memory types
         for range in domain.remapper.remap(permission_iter) {
             if !range.ops.contains(MemOps::READ) {
                 log::error!("there is a region without read permission: {}", range);

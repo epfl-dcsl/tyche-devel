@@ -3,7 +3,7 @@ use std::fmt::Write;
 use capa_engine::config::NB_UPDATES;
 use capa_engine::{
     permission, AccessRights, Buffer, CapaEngine, CapaError, Domain, Handle, LocalCapa, MemOps,
-    NextCapaToken, RegionIterator, MEMOPS_ALL,
+    NextCapaToken, RegionIterator, ResourceKind, MEMOPS_ALL,
 };
 
 /// Snapshot testing
@@ -142,6 +142,7 @@ fn no_children_eri_direct() {
             AccessRights {
                 start: 0,
                 end: 0x1000,
+                resource: ResourceKind::ram_with_all_partitions(),
                 ops: MEMOPS_ALL,
             },
         )
@@ -172,6 +173,8 @@ fn start_carve_eri_direct() {
             AccessRights {
                 start: 0,
                 end: 0x1000,
+                resource: ResourceKind::ram_with_all_partitions(),
+
                 ops: MEMOPS_ALL,
             },
         )
@@ -184,6 +187,8 @@ fn start_carve_eri_direct() {
             AccessRights {
                 start: 0,
                 end: 0x500,
+                resource: ResourceKind::ram_with_all_partitions(),
+
                 ops: MEMOPS_ALL,
             },
         )
@@ -219,6 +224,8 @@ fn middle_carve_eri_direct() {
             AccessRights {
                 start: 0,
                 end: 0x1000,
+                resource: ResourceKind::ram_with_all_partitions(),
+
                 ops: MEMOPS_ALL,
             },
         )
@@ -231,6 +238,8 @@ fn middle_carve_eri_direct() {
             AccessRights {
                 start: 0x200,
                 end: 0x300,
+                resource: ResourceKind::ram_with_all_partitions(),
+
                 ops: MEMOPS_ALL,
             },
         )
@@ -267,6 +276,8 @@ fn end_carve_eri_direct() {
             AccessRights {
                 start: 0,
                 end: 0x1000,
+                resource: ResourceKind::ram_with_all_partitions(),
+
                 ops: MEMOPS_ALL,
             },
         )
@@ -279,6 +290,8 @@ fn end_carve_eri_direct() {
             AccessRights {
                 start: 0x500,
                 end: 0x1000,
+                resource: ResourceKind::ram_with_all_partitions(),
+
                 ops: MEMOPS_ALL,
             },
         )
@@ -313,6 +326,8 @@ fn chop_chop_eri_direct() {
             AccessRights {
                 start: 0,
                 end: 0x1000,
+                resource: ResourceKind::ram_with_all_partitions(),
+
                 ops: MEMOPS_ALL,
             },
         )
@@ -325,6 +340,8 @@ fn chop_chop_eri_direct() {
             AccessRights {
                 start: 0x0,
                 end: 0x100,
+                resource: ResourceKind::ram_with_all_partitions(),
+
                 ops: MEMOPS_ALL,
             },
         )
@@ -336,6 +353,8 @@ fn chop_chop_eri_direct() {
             AccessRights {
                 start: 0x200,
                 end: 0x300,
+                resource: ResourceKind::ram_with_all_partitions(),
+
                 ops: MEMOPS_ALL,
             },
         )
@@ -347,6 +366,8 @@ fn chop_chop_eri_direct() {
             AccessRights {
                 start: 0x400,
                 end: 0x500,
+                resource: ResourceKind::ram_with_all_partitions(),
+
                 ops: MEMOPS_ALL,
             },
         )
@@ -358,6 +379,8 @@ fn chop_chop_eri_direct() {
             AccessRights {
                 start: 0x900,
                 end: 0x1000,
+                resource: ResourceKind::ram_with_all_partitions(),
+
                 ops: MEMOPS_ALL,
             },
         )
@@ -390,6 +413,8 @@ fn no_children_eri() {
             AccessRights {
                 start: 0,
                 end: 0x1000,
+                resource: ResourceKind::ram_with_all_partitions(),
+
                 ops: MEMOPS_ALL,
             },
         )
@@ -420,6 +445,8 @@ fn one_carve_eri() {
             AccessRights {
                 start: 0,
                 end: 0x1000,
+                resource: ResourceKind::ram_with_all_partitions(),
+
                 ops: MEMOPS_ALL,
             },
         )
@@ -433,6 +460,8 @@ fn one_carve_eri() {
             AccessRights {
                 start: 0,
                 end: 0x500,
+                resource: ResourceKind::ram_with_all_partitions(),
+
                 ops: MEMOPS_ALL,
             },
         )
@@ -465,6 +494,8 @@ fn updates_order() {
             AccessRights {
                 start: 0,
                 end: 0x1000,
+                resource: ResourceKind::ram_with_all_partitions(),
+
                 ops: MEMOPS_ALL,
             },
         )
@@ -501,6 +532,8 @@ fn simple_carve() {
             AccessRights {
                 start: 0,
                 end: 0x1000,
+                resource: ResourceKind::ram_with_all_partitions(),
+
                 ops: MEMOPS_ALL,
             },
         )
@@ -515,6 +548,8 @@ fn simple_carve() {
             AccessRights {
                 start: 0,
                 end: 0x500,
+                resource: ResourceKind::ram_with_all_partitions(),
+
                 ops: MEMOPS_ALL,
             },
         )
@@ -553,6 +588,8 @@ fn carve_lose_permissions() {
             AccessRights {
                 start: 0,
                 end: 0x1000,
+                resource: ResourceKind::ram_with_all_partitions(),
+
                 ops: MEMOPS_ALL,
             },
         )
@@ -567,6 +604,8 @@ fn carve_lose_permissions() {
             AccessRights {
                 start: 0,
                 end: 0x500,
+                resource: ResourceKind::ram_with_all_partitions(),
+
                 ops: MemOps::READ,
             },
         )
@@ -606,6 +645,8 @@ fn double_carve() {
             AccessRights {
                 start: 0,
                 end: 0x1000,
+                resource: ResourceKind::ram_with_all_partitions(),
+
                 ops: MEMOPS_ALL,
             },
         )
@@ -619,6 +660,8 @@ fn double_carve() {
             AccessRights {
                 start: 0x0,
                 end: 0x500,
+                resource: ResourceKind::ram_with_all_partitions(),
+
                 ops: MEMOPS_ALL,
             },
         )
@@ -631,6 +674,8 @@ fn double_carve() {
         AccessRights {
             start: 0x0,
             end: 0x500,
+            resource: ResourceKind::ram_with_all_partitions(),
+
             ops: MEMOPS_ALL,
         },
     );
@@ -655,6 +700,8 @@ fn carve_send() {
             AccessRights {
                 start: 0,
                 end: 0x1000,
+                resource: ResourceKind::ram_with_all_partitions(),
+
                 ops: MEMOPS_ALL,
             },
         )
@@ -672,6 +719,8 @@ fn carve_send() {
             AccessRights {
                 start: 0,
                 end: 0x500,
+                resource: ResourceKind::ram_with_all_partitions(),
+
                 ops: MEMOPS_ALL,
             },
         )
@@ -712,6 +761,8 @@ fn carve_chop_chop() {
             AccessRights {
                 start: 0,
                 end: 5,
+                resource: ResourceKind::ram_with_all_partitions(),
+
                 ops: MEMOPS_ALL,
             },
         )
@@ -725,6 +776,8 @@ fn carve_chop_chop() {
                 AccessRights {
                     start: i,
                     end: 1 + i,
+                    resource: ResourceKind::ram_with_all_partitions(),
+
                     ops: MEMOPS_ALL,
                 },
             )
@@ -751,6 +804,8 @@ fn carve_recursive_chop() {
             AccessRights {
                 start: 0,
                 end: 5,
+                resource: ResourceKind::ram_with_all_partitions(),
+
                 ops: MEMOPS_ALL,
             },
         )
@@ -764,6 +819,8 @@ fn carve_recursive_chop() {
                 AccessRights {
                     start: 0,
                     end: (4 - i),
+                    resource: ResourceKind::ram_with_all_partitions(),
+
                     ops: MEMOPS_ALL,
                 },
             )
@@ -791,6 +848,8 @@ fn carve_access_rights() {
             AccessRights {
                 start: 0,
                 end: 5,
+                resource: ResourceKind::ram_with_all_partitions(),
+
                 ops: MEMOPS_ALL,
             },
         )
@@ -804,6 +863,8 @@ fn carve_access_rights() {
             AccessRights {
                 start: 0,
                 end: 1,
+                resource: ResourceKind::ram_with_all_partitions(),
+
                 ops: MemOps::READ | MemOps::WRITE,
             },
         )
@@ -823,6 +884,8 @@ fn carve_access_rights() {
         AccessRights {
             start: 0,
             end: 2,
+            resource: ResourceKind::ram_with_all_partitions(),
+
             ops: MemOps::READ | MemOps::WRITE,
         },
     );
@@ -836,6 +899,8 @@ fn carve_access_rights() {
         AccessRights {
             start: 0,
             end: 1,
+            resource: ResourceKind::ram_with_all_partitions(),
+
             ops: MEMOPS_ALL,
         },
     );
@@ -864,6 +929,8 @@ fn simple_alias() {
             AccessRights {
                 start: 0,
                 end: 0x1000,
+                resource: ResourceKind::ram_with_all_partitions(),
+
                 ops: MEMOPS_ALL,
             },
         )
@@ -878,6 +945,8 @@ fn simple_alias() {
             AccessRights {
                 start: 0,
                 end: 0x500,
+                resource: ResourceKind::ram_with_all_partitions(),
+
                 ops: MEMOPS_ALL,
             },
         )
@@ -918,6 +987,8 @@ fn double_alias() {
             AccessRights {
                 start: 0,
                 end: 0x1000,
+                resource: ResourceKind::ram_with_all_partitions(),
+
                 ops: MEMOPS_ALL,
             },
         )
@@ -931,6 +1002,8 @@ fn double_alias() {
             AccessRights {
                 start: 0x0,
                 end: 0x500,
+                resource: ResourceKind::ram_with_all_partitions(),
+
                 ops: MEMOPS_ALL,
             },
         )
@@ -944,6 +1017,8 @@ fn double_alias() {
             AccessRights {
                 start: 0x0,
                 end: 0x500,
+                resource: ResourceKind::ram_with_all_partitions(),
+
                 ops: MEMOPS_ALL,
             },
         )
@@ -972,6 +1047,8 @@ fn alias_send() {
             AccessRights {
                 start: 0,
                 end: 0x1000,
+                resource: ResourceKind::ram_with_all_partitions(),
+
                 ops: MEMOPS_ALL,
             },
         )
@@ -989,6 +1066,8 @@ fn alias_send() {
             AccessRights {
                 start: 0,
                 end: 0x500,
+                resource: ResourceKind::ram_with_all_partitions(),
+
                 ops: MEMOPS_ALL,
             },
         )
@@ -1029,6 +1108,8 @@ fn alias_chop_chop() {
             AccessRights {
                 start: 0,
                 end: 5,
+                resource: ResourceKind::ram_with_all_partitions(),
+
                 ops: MEMOPS_ALL,
             },
         )
@@ -1042,6 +1123,8 @@ fn alias_chop_chop() {
                 AccessRights {
                     start: i,
                     end: 1 + i,
+                    resource: ResourceKind::ram_with_all_partitions(),
+
                     ops: MEMOPS_ALL,
                 },
             )
@@ -1068,6 +1151,8 @@ fn alias_recursive_chop() {
             AccessRights {
                 start: 0,
                 end: 5,
+                resource: ResourceKind::ram_with_all_partitions(),
+
                 ops: MEMOPS_ALL,
             },
         )
@@ -1081,6 +1166,8 @@ fn alias_recursive_chop() {
                 AccessRights {
                     start: 0,
                     end: (4 - i),
+                    resource: ResourceKind::ram_with_all_partitions(),
+
                     ops: MEMOPS_ALL,
                 },
             )
@@ -1108,6 +1195,8 @@ fn alias_access_rights() {
             AccessRights {
                 start: 0,
                 end: 5,
+                resource: ResourceKind::ram_with_all_partitions(),
+
                 ops: MEMOPS_ALL,
             },
         )
@@ -1121,6 +1210,8 @@ fn alias_access_rights() {
             AccessRights {
                 start: 0,
                 end: 1,
+                resource: ResourceKind::ram_with_all_partitions(),
+
                 ops: MemOps::READ | MemOps::WRITE,
             },
         )
@@ -1140,6 +1231,8 @@ fn alias_access_rights() {
         AccessRights {
             start: 0,
             end: 2,
+            resource: ResourceKind::ram_with_all_partitions(),
+
             ops: MemOps::READ | MemOps::WRITE,
         },
     );
@@ -1153,6 +1246,8 @@ fn alias_access_rights() {
         AccessRights {
             start: 0,
             end: 1,
+            resource: ResourceKind::ram_with_all_partitions(),
+
             ops: MEMOPS_ALL,
         },
     );
@@ -1179,6 +1274,8 @@ fn counter_alias_carve_bug() {
             AccessRights {
                 start: 0,
                 end: 10,
+                resource: ResourceKind::ram_with_all_partitions(),
+
                 ops: MEMOPS_ALL,
             },
         )
@@ -1191,6 +1288,8 @@ fn counter_alias_carve_bug() {
             AccessRights {
                 start: 0,
                 end: 5,
+                resource: ResourceKind::ram_with_all_partitions(),
+
                 ops: MEMOPS_ALL,
             },
         )
@@ -1202,6 +1301,8 @@ fn counter_alias_carve_bug() {
             AccessRights {
                 start: 0,
                 end: 5,
+                resource: ResourceKind::ram_with_all_partitions(),
+
                 ops: MEMOPS_ALL,
             },
         )
@@ -1245,6 +1346,8 @@ fn alias_then_carve() {
             AccessRights {
                 start: 0,
                 end: 10,
+                resource: ResourceKind::ram_with_all_partitions(),
+
                 ops: MEMOPS_ALL,
             },
         )
@@ -1258,6 +1361,8 @@ fn alias_then_carve() {
             AccessRights {
                 start: 0,
                 end: 5,
+                resource: ResourceKind::ram_with_all_partitions(),
+
                 ops: MemOps::READ,
             },
         )
@@ -1270,6 +1375,8 @@ fn alias_then_carve() {
         AccessRights {
             start: 0,
             end: 5,
+            resource: ResourceKind::ram_with_all_partitions(),
+
             ops: MemOps::READ,
         },
     );
@@ -1293,6 +1400,8 @@ fn alias_then_carve() {
         AccessRights {
             start: 4,
             end: 6,
+            resource: ResourceKind::ram_with_all_partitions(),
+
             ops: MemOps::READ,
         },
     );
@@ -1306,6 +1415,8 @@ fn alias_then_carve() {
         AccessRights {
             start: 4,
             end: 6,
+            resource: ResourceKind::ram_with_all_partitions(),
+
             ops: MemOps::READ,
         },
     );
@@ -1320,6 +1431,8 @@ fn alias_then_carve() {
             AccessRights {
                 start: 0,
                 end: 5,
+                resource: ResourceKind::ram_with_all_partitions(),
+
                 ops: MemOps::READ,
             },
         )
@@ -1342,6 +1455,8 @@ fn alias_then_carve() {
         AccessRights {
             start: 1,
             end: 2,
+            resource: ResourceKind::ram_with_all_partitions(),
+
             ops: MemOps::READ,
         },
     );
@@ -1356,6 +1471,8 @@ fn alias_then_carve() {
         AccessRights {
             start: 1,
             end: 2,
+            resource: ResourceKind::ram_with_all_partitions(),
+
             ops: MemOps::READ,
         },
     );
@@ -1409,6 +1526,8 @@ fn cleanup() {
             AccessRights {
                 start: 0,
                 end: 0x1000,
+                resource: ResourceKind::ram_with_all_partitions(),
+
                 ops: MEMOPS_ALL,
             },
         )
@@ -1420,6 +1539,8 @@ fn cleanup() {
             AccessRights {
                 start: 0x200,
                 end: 0x300,
+                resource: ResourceKind::ram_with_all_partitions(),
+
                 ops: MEMOPS_ALL | MemOps::CLEANUP,
             },
         )
@@ -1459,6 +1580,7 @@ fn vital_regions() {
             AccessRights {
                 start: 0,
                 end: 0x1000,
+                resource: ResourceKind::ram_with_all_partitions(),
                 ops: MEMOPS_ALL,
             },
         )
@@ -1470,6 +1592,7 @@ fn vital_regions() {
             AccessRights {
                 start: 0x200,
                 end: 0x300,
+                resource: ResourceKind::ram_with_all_partitions(),
                 ops: MEMOPS_ALL | MemOps::VITAL,
             },
         )
@@ -1518,6 +1641,7 @@ fn free_resources() {
             AccessRights {
                 start: 0,
                 end: 0x1000,
+                resource: ResourceKind::ram_with_all_partitions(),
                 ops: MEMOPS_ALL,
             },
         )
@@ -1545,6 +1669,7 @@ fn free_resources() {
                     AccessRights {
                         start: 0x200,
                         end: 0x300,
+                        resource: ResourceKind::ram_with_all_partitions(),
                         ops: MEMOPS_ALL | MemOps::CLEANUP,
                     },
                 )
@@ -1604,6 +1729,7 @@ fn enclave_steal_via_alias() {
             AccessRights {
                 start: 0,
                 end: 10,
+                resource: ResourceKind::ram_with_all_partitions(),
                 ops: MEMOPS_ALL,
             },
         )
@@ -1616,6 +1742,7 @@ fn enclave_steal_via_alias() {
             AccessRights {
                 start: 0,
                 end: 5,
+                resource: ResourceKind::ram_with_all_partitions(),
                 ops: MEMOPS_ALL,
             },
         )
@@ -1653,6 +1780,7 @@ fn enclave_steal_via_alias() {
             AccessRights {
                 start: 1,
                 end: 2,
+                resource: ResourceKind::ram_with_all_partitions(),
                 ops: MEMOPS_ALL,
             },
         )
@@ -1702,6 +1830,7 @@ fn enclave_steal_via_carve() {
             AccessRights {
                 start: 0,
                 end: 10,
+                resource: ResourceKind::ram_with_all_partitions(),
                 ops: MEMOPS_ALL,
             },
         )
@@ -1714,6 +1843,7 @@ fn enclave_steal_via_carve() {
             AccessRights {
                 start: 0,
                 end: 5,
+                resource: ResourceKind::ram_with_all_partitions(),
                 ops: MEMOPS_ALL,
             },
         )
@@ -1751,6 +1881,7 @@ fn enclave_steal_via_carve() {
             AccessRights {
                 start: 1,
                 end: 2,
+                resource: ResourceKind::ram_with_all_partitions(),
                 ops: MemOps::READ,
             },
         )
@@ -1800,6 +1931,7 @@ fn enclave_enclave_steal() {
             AccessRights {
                 start: 0,
                 end: 10,
+                resource: ResourceKind::ram_with_all_partitions(),
                 ops: MEMOPS_ALL,
             },
         )
@@ -1812,6 +1944,7 @@ fn enclave_enclave_steal() {
             AccessRights {
                 start: 0,
                 end: 5,
+                resource: ResourceKind::ram_with_all_partitions(),
                 ops: MEMOPS_ALL,
             },
         )
@@ -1852,6 +1985,7 @@ fn enclave_enclave_steal() {
             AccessRights {
                 start: 1,
                 end: 2,
+                resource: ResourceKind::ram_with_all_partitions(),
                 ops: MemOps::READ,
             },
         )
@@ -1921,6 +2055,8 @@ fn test_domain_capabilities() {
             AccessRights {
                 start: 0,
                 end: 0x100,
+                resource: ResourceKind::ram_with_all_partitions(),
+
                 ops: MEMOPS_ALL,
             },
         )
@@ -2006,6 +2142,7 @@ fn new_capa() {
             AccessRights {
                 start: 0,
                 end: 0x100,
+                resource: ResourceKind::ram_with_all_partitions(),
                 ops: MEMOPS_ALL,
             },
         )
@@ -2194,6 +2331,7 @@ fn dummy_access(start: usize, end: usize) -> AccessRights {
     AccessRights {
         start,
         end,
+        resource: ResourceKind::ram_with_all_partitions(),
         ops: MEMOPS_ALL,
     }
 }

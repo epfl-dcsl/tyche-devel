@@ -23,6 +23,7 @@ attestation = { path = "../../crates/attestation/" }
 qemu = { path = "../../crates/qemu/" }
 utils = { path = "../../crates/utils" }
 
+
 [target.'cfg(target_arch = "x86_64")'.dependencies]
 vtd = { path = "../../crates/vtd" }
 vmx = { version = "0.1.0", path = "../../crates/vmx" }

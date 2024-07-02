@@ -534,7 +534,7 @@ mod tests {
     use crate::config::NB_TRACKER;
     use crate::debug::snap;
     use crate::region::{TrackerPool, EMPTY_REGION};
-    use crate::{RegionTracker, MEMOPS_ALL};
+    use crate::{RegionTracker, ResourceKind, MEMOPS_ALL};
 
     fn dummy_segment(hpa: usize, gpa: usize, size: usize, repeat: usize) -> Segment {
         Segment {
@@ -570,7 +570,13 @@ mod tests {
 
         // Add a first region
         tracker
-            .add_region(0x10, 0x20, MEMOPS_ALL, &mut pool)
+            .add_region(
+                0x10,
+                0x20,
+                MEMOPS_ALL,
+                ResourceKind::ram_with_all_partitions(),
+                &mut pool,
+            )
             .unwrap();
         snap("{[0x10, 0x20 | 1 (1 - 1 - 1 - 1)]}", &tracker.iter(&pool));
         snap(
@@ -587,10 +593,22 @@ mod tests {
 
         // Let's add a few more!
         tracker
-            .add_region(0x30, 0x40, MEMOPS_ALL, &mut pool)
+            .add_region(
+                0x30,
+                0x40,
+                MEMOPS_ALL,
+                ResourceKind::ram_with_all_partitions(),
+                &mut pool,
+            )
             .unwrap();
         tracker
-            .add_region(0x40, 0x50, MemOps::READ, &mut pool)
+            .add_region(
+                0x40,
+                0x50,
+                MemOps::READ,
+                ResourceKind::ram_with_all_partitions(),
+                &mut pool,
+            )
             .unwrap();
         snap("{[0x10, 0x20 | 1 (1 - 1 - 1 - 1)] -> [0x30, 0x40 | 1 (1 - 1 - 1 - 1)] -> [0x40, 0x50 | 1 (1 - 0 - 0 - 0)]}", &tracker.iter(&pool));
         snap(
@@ -629,7 +647,13 @@ mod tests {
 
         // Delete regions but not the segments yet
         tracker
-            .remove_region(0x40, 0x50, MemOps::READ, &mut pool)
+            .remove_region(
+                0x40,
+                0x50,
+                MemOps::READ,
+                ResourceKind::ram_with_all_partitions(),
+                &mut pool,
+            )
             .unwrap();
         snap(
             "{[0x10, 0x20 | 1 (1 - 1 - 1 - 1)] -> [0x30, 0x40 | 1 (1 - 1 - 1 - 1)]}",
@@ -661,10 +685,22 @@ mod tests {
 
         // Add two regions with hole
         tracker
-            .add_region(0x10, 0x30, MEMOPS_ALL, &mut pool)
+            .add_region(
+                0x10,
+                0x30,
+                MEMOPS_ALL,
+                ResourceKind::ram_with_all_partitions(),
+                &mut pool,
+            )
             .unwrap();
         tracker
-            .add_region(0x40, 0x60, MEMOPS_ALL, &mut pool)
+            .add_region(
+                0x40,
+                0x60,
+                MEMOPS_ALL,
+                ResourceKind::ram_with_all_partitions(),
+                &mut pool,
+            )
             .unwrap();
         snap(
             "{[0x10, 0x30 | 1 (1 - 1 - 1 - 1)] -> [0x40, 0x60 | 1 (1 - 1 - 1 - 1)]}",
@@ -690,10 +726,22 @@ mod tests {
         let mut remapper: Remapper<32> = Remapper::new();
 
         tracker
-            .add_region(0x10, 0x40, MEMOPS_ALL, &mut pool)
+            .add_region(
+                0x10,
+                0x40,
+                MEMOPS_ALL,
+                ResourceKind::ram_with_all_partitions(),
+                &mut pool,
+            )
             .unwrap();
         tracker
-            .add_region(0x30, 0x40, MEMOPS_ALL, &mut pool)
+            .add_region(
+                0x30,
+                0x40,
+                MEMOPS_ALL,
+                ResourceKind::ram_with_all_partitions(),
+                &mut pool,
+            )
             .unwrap();
         snap(
             "{[0x10, 0x30 | 1 (1 - 1 - 1 - 1)] -> [0x30, 0x40 | 2 (2 - 2 - 2 - 2)]}",
@@ -721,7 +769,13 @@ mod tests {
         let mut remapper: Remapper<32> = Remapper::new();
 
         tracker
-            .add_region(0x10, 0x40, MEMOPS_ALL, &mut pool)
+            .add_region(
+                0x10,
+                0x40,
+                MEMOPS_ALL,
+                ResourceKind::ram_with_all_partitions(),
+                &mut pool,
+            )
             .unwrap();
         snap("{[0x10, 0x40 | 1 (1 - 1 - 1 - 1)]}", &tracker.iter(&pool));
 
@@ -747,7 +801,13 @@ mod tests {
 
         // Add one region
         tracker
-            .add_region(0x10, 0x60, MEMOPS_ALL, &mut pool)
+            .add_region(
+                0x10,
+                0x60,
+                MEMOPS_ALL,
+                ResourceKind::ram_with_all_partitions(),
+                &mut pool,
+            )
             .unwrap();
         snap("{[0x10, 0x60 | 1 (1 - 1 - 1 - 1)]}", &tracker.iter(&pool));
         snap(
@@ -764,16 +824,40 @@ mod tests {
 
         // Split the region in two
         tracker
-            .remove_region(0x10, 0x60, MEMOPS_ALL, &mut pool)
+            .remove_region(
+                0x10,
+                0x60,
+                MEMOPS_ALL,
+                ResourceKind::ram_with_all_partitions(),
+                &mut pool,
+            )
             .unwrap();
         tracker
-            .add_region(0x10, 0x20, MEMOPS_ALL, &mut pool)
+            .add_region(
+                0x10,
+                0x20,
+                MEMOPS_ALL,
+                ResourceKind::ram_with_all_partitions(),
+                &mut pool,
+            )
             .unwrap();
         tracker
-            .add_region(0x20, 0x40, MEMOPS_ALL, &mut pool)
+            .add_region(
+                0x20,
+                0x40,
+                MEMOPS_ALL,
+                ResourceKind::ram_with_all_partitions(),
+                &mut pool,
+            )
             .unwrap();
         tracker
-            .add_region(0x40, 0x60, MEMOPS_ALL, &mut pool)
+            .add_region(
+                0x40,
+                0x60,
+                MEMOPS_ALL,
+                ResourceKind::ram_with_all_partitions(),
+                &mut pool,
+            )
             .unwrap();
         snap("{[0x10, 0x60 | 1 (1 - 1 - 1 - 1)]}", &tracker.iter(&pool));
         snap(
@@ -789,13 +873,25 @@ mod tests {
         let mut remapper: Remapper<32> = Remapper::new();
 
         tracker
-            .add_region(0x12fcb6000, 0x12fcf6000, MEMOPS_ALL, &mut pool)
+            .add_region(
+                0x12fcb6000,
+                0x12fcf6000,
+                MEMOPS_ALL,
+                ResourceKind::ram_with_all_partitions(),
+                &mut pool,
+            )
             .unwrap();
         remapper
             .map_range(0x12fcb6000, 0xfffc0000, 0x40000, 1)
             .unwrap();
         tracker
-            .add_region(0x12fcd6000, 0x12fcf6000, MEMOPS_ALL, &mut pool)
+            .add_region(
+                0x12fcd6000,
+                0x12fcf6000,
+                MEMOPS_ALL,
+                ResourceKind::ram_with_all_partitions(),
+                &mut pool,
+            )
             .unwrap();
         remapper
             .map_range(0x12fcd6000, 0xe0000, 0x20000, 1)
@@ -811,7 +907,13 @@ mod tests {
         let mut remapper: Remapper<32> = Remapper::new();
 
         tracker
-            .add_region(0x20, 0x80, MEMOPS_ALL, &mut pool)
+            .add_region(
+                0x20,
+                0x80,
+                MEMOPS_ALL,
+                ResourceKind::ram_with_all_partitions(),
+                &mut pool,
+            )
             .unwrap();
         snap("{[0x20, 0x80 | 1 (1 - 1 - 1 - 1)]}", &tracker.iter(&pool));
         remapper.map_range(0x20, 0x200, 0x60, 1).unwrap();
@@ -822,7 +924,13 @@ mod tests {
         );
 
         tracker
-            .add_region(0x80, 0xa0, MEMOPS_ALL, &mut pool)
+            .add_region(
+                0x80,
+                0xa0,
+                MEMOPS_ALL,
+                ResourceKind::ram_with_all_partitions(),
+                &mut pool,
+            )
             .unwrap();
         snap("{[0x20, 0xa0 | 1 (1 - 1 - 1 - 1)]}", &tracker.iter(&pool));
         let err = remapper.map_range(0x80, 0x220, 0x20, 1);
@@ -852,7 +960,13 @@ mod tests {
 
         // Create a single region
         tracker
-            .add_region(0x30, 0x60, MEMOPS_ALL, &mut pool)
+            .add_region(
+                0x30,
+                0x60,
+                MEMOPS_ALL,
+                ResourceKind::ram_with_all_partitions(),
+                &mut pool,
+            )
             .unwrap();
         snap("{[0x30, 0x60 | 1 (1 - 1 - 1 - 1)]}", &tracker.iter(&pool));
 
@@ -906,7 +1020,13 @@ mod tests {
 
         // Let's experiment with multiple regions now
         tracker
-            .add_region(0x70, 0x80, MEMOPS_ALL, &mut pool)
+            .add_region(
+                0x70,
+                0x80,
+                MEMOPS_ALL,
+                ResourceKind::ram_with_all_partitions(),
+                &mut pool,
+            )
             .unwrap();
         snap(
             "{[0x30, 0x60 | 1 (1 - 1 - 1 - 1)] -> [0x70, 0x80 | 1 (1 - 1 - 1 - 1)]}",

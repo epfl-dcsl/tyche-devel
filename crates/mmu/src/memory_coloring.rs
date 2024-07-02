@@ -1,3 +1,5 @@
+use core::ops::BitOrAssign;
+
 use utils::HostPhysAddr;
 
 use crate::frame_allocator::PhysRange;
@@ -7,10 +9,158 @@ use crate::ioptmapper::PAGE_SHIFT;
 pub trait MemoryColoring {
     /// Amount of different colors
     const COLOR_COUNT: usize;
+    ///Number of bytes required for the color bitmap to represent the COLOR_COUNT many colors
+    const BYTES_FOR_COLOR_BITMAP: usize;
 
     /// Computes the memory color for the given address
     fn compute_color(&self, frame: HostPhysAddr) -> u64;
 }
+
+pub type ActiveMemoryColoring = DummyMemoryColoring;
+
+//TODO: add unit tests
+#[derive(Debug, Clone, Copy)]
+/// Bitmap to represent `K`  different things. `N`` represents the number
+/// of bytes required for the bit map (i.e. align_up(K,8)). The is an extra
+/// param, so that we can keep everything const as const prevserving computations are not yet
+/// stable
+// Implementation note: we index the individual bytes from right to left to work more
+// naturally with shift operations. Example bit idx 8 would be in the second byte and selected by
+// mask 0b0000_0001 NOT 0b1000_0000
+pub struct MyBitmap<const N: usize, const K: usize> {
+    //number of "payload" bits in `data`. The remaining bits are overhang/unused
+    bits_count: usize,
+    data: [u8; N],
+}
+impl<const N: usize, const K: usize> MyBitmap<N, K> {
+    /// Creates a new bitmap with all bits set to false
+    pub const fn new() -> Self {
+        Self {
+            data: [0_u8; N],
+            bits_count: K,
+        }
+    }
+
+    /// Length of "virtual" array that covers only the payload bits
+    /// Use this if you wan to iterate over all bits via `set` or `get`
+    pub fn get_payload_bits_len(&self) -> usize {
+        self.bits_count
+    }
+
+    pub fn new_with_value(value: bool) -> Self {
+        let init_value = match value {
+            true => 0xff,
+            false => 0x0,
+        };
+        Self {
+            data: [init_value; N],
+            bits_count: K,
+        }
+    }
+
+    /// Set the bit at `bit_idx` to `value`
+    pub fn set(&mut self, bit_idx: usize, value: bool) {
+        if bit_idx >= self.bits_count {
+            panic!("Out of bound bit idx");
+        }
+        //idx of the byte in `data` that stores the targeted bit
+        let byte_idx = bit_idx / 8;
+        //offset inside the targeted byte that stores the bit
+        let byte_offset = bit_idx % 8;
+
+        match value {
+            false => {
+                let mask = !(0x1_u8 << byte_offset);
+                self.data[byte_idx] &= mask;
+            }
+            true => {
+                let mask = 0x1_u8 << byte_offset;
+                self.data[byte_idx] |= mask;
+            }
+        };
+    }
+
+    /// Return the value of bit at `bit_idx`
+    pub fn get(&self, bit_idx: usize) -> bool {
+        if bit_idx >= self.bits_count {
+            panic!("Out of bound bit idx");
+        }
+        //idx of the byte in `data` that stores the targeted bit
+        let byte_idx = bit_idx / 8;
+        //offset inside the targeted byte that stores the bit
+        let byte_offset = bit_idx % 8;
+
+        let selection_mask = (0x1_u8) << byte_offset;
+        (self.data[byte_idx] & selection_mask) != 0
+    }
+
+    /// Set all bits to `value`
+    pub fn set_all(&mut self, value: bool) {
+        let value = match value {
+            true => 0xff_u8,
+            false => 0x0_u8,
+        };
+        for v in self.data.iter_mut() {
+            *v = value;
+        }
+    }
+
+    /// Return true if all bits are set to zero
+    pub fn all_bits_unset(&self) -> bool {
+        for v in self.data {
+            if v != 0 {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /// Return true if the set bits in `self` are a subset of the bits set in `&other`
+    pub fn is_subset_of(&self, other: &MyBitmap<N, K>) -> bool {
+        //as data is of byte granularity there might be a few trailing bytes at the end
+        //this is the index of the last byte in data where all bits are used
+        let idx_last_full_byte = if self.bits_count % 8 == 0 {
+            self.data.len() - 1
+        } else {
+            self.data.len() - 2
+        };
+
+        //check "full bytes"
+        for idx in 0..idx_last_full_byte + 1 {
+            if (self.data[idx] | other.data[idx]) != other.data[idx] {
+                return false;
+            }
+        }
+
+        //if last byte has some trailing bits, discard them before comparing
+        if idx_last_full_byte != self.data.len() - 1 {
+            let payload_bit_count = self.bits_count % 8;
+            assert!(payload_bit_count >= 1);
+            //left shift will set low bits to zero, invert will set allt
+            let mask = !(0xff_u8 << payload_bit_count);
+            let self_payload = self.data[idx_last_full_byte + 1] & mask;
+            let other_payload = other.data[idx_last_full_byte + 1] & mask;
+            if (self_payload | other_payload) != other_payload {
+                return false;
+            }
+        }
+
+        return true;
+    }
+}
+
+impl<const N: usize, const K: usize> BitOrAssign for MyBitmap<N, K> {
+    fn bitor_assign(&mut self, rhs: Self) {
+        for idx in 0..N {
+            self.data[idx] |= rhs.data[idx]
+        }
+    }
+}
+
+pub type PartitionBitmap = MyBitmap<
+    { ActiveMemoryColoring::BYTES_FOR_COLOR_BITMAP },
+    { ActiveMemoryColoring::COLOR_COUNT },
+>; //Bitmap<{ ActiveMemoryColoring::COLOR_COUNT }>;
 
 /// This memory coloring is only intended as an example and does not give
 /// You any isolation guarantees
@@ -24,6 +174,8 @@ impl MemoryColoring for DummyMemoryColoring {
     }
 
     const COLOR_COUNT: usize = 1 << 3;
+
+    const BYTES_FOR_COLOR_BITMAP: usize = 1;
 }
 
 //TODO: add feature flags to switch this
@@ -51,4 +203,73 @@ pub struct ColorRange {
 pub enum MemoryRange {
     ColoredRange(ColorRange),
     PhysContigRange(PhysRange),
+}
+
+mod test {
+    use super::MyBitmap;
+
+    #[test]
+    fn test_payload_bits_len() {
+        const N: usize = 2;
+        const K: usize = 9;
+        let mbm = MyBitmap::<N, K>::new();
+        assert_eq!(mbm.get_payload_bits_len(), K);
+    }
+
+    #[test]
+    fn test_get_set() {
+        const N: usize = 2;
+        const K: usize = 12;
+        let mut mbm = MyBitmap::<N, K>::new();
+
+        //initially all bits should be zero
+        for idx in 0..mbm.get_payload_bits_len() {
+            assert_eq!(mbm.get(idx), false);
+        }
+
+        //set some values
+        let idx_should_be_high = |idx| match idx {
+            0 | 3 | 7 | 11 => true,
+            _ => false,
+        };
+        for idx in 0..mbm.get_payload_bits_len() {
+            if idx_should_be_high(idx) {
+                mbm.set(idx, true);
+            }
+        }
+
+        //check that only the requested values have been set
+        for idx in 0..mbm.get_payload_bits_len() {
+            if idx_should_be_high(idx) {
+                assert_eq!(mbm.get(idx), true, "Idx {}, Expected high, got low", idx);
+            } else {
+                assert_eq!(mbm.get(idx), false, "Idx {}, Expected low, got high", idx);
+            }
+        }
+    }
+
+    #[test]
+    fn test_is_subset_of_1() {
+        const N: usize = 2;
+        const K: usize = 9;
+        let mut superset = MyBitmap::<N, K>::new();
+        let mut subset = MyBitmap::<N, K>::new();
+
+        let superset_high_indices: &[usize] = &[0, 6, 8];
+        let subset_high_indices: &[usize] = &[0, 8];
+
+        for idx in superset_high_indices {
+            superset.set(*idx, true);
+        }
+
+        for idx in subset_high_indices {
+            subset.set(*idx, true);
+        }
+
+        assert!(subset.is_subset_of(&superset), "Expected to be subset");
+        assert!(
+            !superset.is_subset_of(&subset),
+            "Expected NOT to bet subset"
+        );
+    }
 }

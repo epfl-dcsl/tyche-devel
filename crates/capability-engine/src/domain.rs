@@ -478,9 +478,13 @@ pub(crate) fn activate_region(
     if dom.is_being_revoked {
         return Ok(());
     }
-    let change = dom
-        .regions
-        .add_region(access.start, access.end, access.ops, tracker)?;
+    let change = dom.regions.add_region(
+        access.start,
+        access.end,
+        access.ops,
+        access.resource,
+        tracker,
+    )?;
 
     let filter = |up: Update| match up {
         Update::PermissionUpdate {
@@ -514,9 +518,13 @@ pub(crate) fn deactivate_region(
 ) -> Result<(), CapaError> {
     let dom = &mut domains[domain];
 
-    let change = dom
-        .regions
-        .remove_region(access.start, access.end, access.ops, tracker)?;
+    let change = dom.regions.remove_region(
+        access.start,
+        access.end,
+        access.ops,
+        access.resource,
+        tracker,
+    )?;
 
     // Drop updates on domain in the process of being revoked
     if dom.is_being_revoked {

@@ -5,7 +5,7 @@ use core::cell::Cell;
 use crate::config::NB_REGIONS;
 use crate::debug::debug_check;
 use crate::domain::{activate_region, deactivate_region, insert_capa, DomainPool};
-use crate::region::TrackerPool;
+use crate::region::{ResourceKind, TrackerPool};
 use crate::update::{Update, UpdateBuffer};
 use crate::{
     domain, AccessRights, CapaError, Domain, GenArena, Handle, LocalCapa, MemOps, MEMOPS_ALL,
@@ -13,7 +13,7 @@ use crate::{
 
 pub type RegionHash = [u8; 32];
 pub(crate) type RegionPool = GenArena<RegionCapa, NB_REGIONS>;
-pub const EMPTY_REGION_CAPA: RegionCapa = RegionCapa::new_invalid();
+pub const EMPTY_REGION_CAPA: RegionCapa = RegionCapa::new_invalid_device();
 
 pub enum RegionKind {
     Root,
@@ -34,14 +34,27 @@ pub struct RegionCapa {
 }
 
 impl RegionCapa {
-    pub const fn new_invalid() -> Self {
+    pub fn new_invalid_ram() -> Self {
         Self {
             domain: Handle::new_invalid(),
             kind: RegionKind::Root,
             child_list_head: None,
             next_sibling: None,
             is_confidential: false,
-            access: AccessRights::none(),
+            access: AccessRights::none(ResourceKind::ram_with_all_partitions()),
+            temporary_id: Cell::new(0),
+            hash: None,
+        }
+    }
+
+    pub const fn new_invalid_device() -> Self {
+        Self {
+            domain: Handle::new_invalid(),
+            kind: RegionKind::Root,
+            child_list_head: None,
+            next_sibling: None,
+            is_confidential: false,
+            access: AccessRights::none(ResourceKind::Device),
             temporary_id: Cell::new(0),
             hash: None,
         }
@@ -226,6 +239,7 @@ pub(crate) fn carve(
         let to_remove = AccessRights {
             start: access.start,
             end: access.end,
+            resource: access.resource,
             ops: region_access.ops,
         };
         deactivate_region(domain, to_remove, domains, updates, tracker)?;
@@ -244,6 +258,10 @@ fn carve_region(
     let region = regions.get(handle).ok_or(CapaError::InvalidCapa)?;
     let domain_handle = region.domain;
     let is_confidential = region.is_confidential;
+
+    if !ResourceKind::same_kind(&region.access.resource, &access.resource) {
+        return Err(CapaError::CapaOperationOnDifferentResourceKinds);
+    }
 
     if !access.is_valid() || !check_carve(handle, &access, regions) {
         return Err(CapaError::InvalidOperation);
@@ -290,6 +308,7 @@ pub(crate) fn revoke(
         let access = AccessRights {
             start: region.access.start,
             end: region.access.end,
+            resource: region.access.resource,
             ops: parent_region.access.ops,
         };
         activate_region(parent_region.domain, access, domains, updates, tracker)?;
@@ -469,10 +488,24 @@ fn check_alias(parent: Handle<RegionCapa>, access: &AccessRights, regions: &Regi
 /// Checks that a region with the provided access rights can be carved from the parent.
 fn check_carve(parent: Handle<RegionCapa>, access: &AccessRights, regions: &RegionPool) -> bool {
     let region = &regions[parent];
+
+    //new carve must be subset of previous memory range
     if region.access.start > access.start || region.access.end < access.end {
         return false;
     }
 
+    //the same applies to any sub partitions/colors, if applicable
+    match (&region.access.resource, &access.resource) {
+        (ResourceKind::RAM(existing), ResourceKind::RAM(carve_candidate)) => {
+            if !carve_candidate.is_subset_of(&existing) {
+                return false;
+            }
+        }
+        _ => (),
+    }
+
+    //a carve is supposed to remove the region from the parent. Thus we need to check if there are
+    //any other capa's that would allow access
     for child in RegionIterator::child_list(parent, regions) {
         if access.overlap(&child.access) {
             return false;
@@ -591,6 +624,7 @@ impl<'a> Iterator for EffectiveRegionIterator<'a> {
             let result = AccessRights {
                 start: self.access.start,
                 end: carved.access.start,
+                resource: self.access.resource,
                 ops: self.access.ops,
             };
             self.access.start = carved.access.end;
@@ -616,6 +650,7 @@ mod tests {
             AccessRights {
                 start,
                 end,
+                resource: ResourceKind::ram_with_all_partitions(),
                 ops: MEMOPS_ALL,
             },
         )
@@ -625,6 +660,7 @@ mod tests {
         AccessRights {
             start,
             end,
+            resource: ResourceKind::ram_with_all_partitions(),
             ops: MEMOPS_ALL,
         }
     }

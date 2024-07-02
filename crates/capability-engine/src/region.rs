@@ -1,6 +1,7 @@
 use core::fmt;
 
 use bitflags::bitflags;
+use mmu::memory_coloring::{ActiveMemoryColoring, MemoryColoring, MyBitmap, PartitionBitmap};
 
 use crate::config::NB_TRACKER;
 use crate::gen_arena::{GenArena, Handle};
@@ -62,22 +63,56 @@ impl MemOps {
     }
 }
 
+/// Describes the kind of ressource that an access right grants access to
+///
+#[derive(Clone, Copy, Debug)]
+pub enum ResourceKind {
+    /// Access to RAM memory, which may be suspect to further sub partitioning
+    //TODO: currently limited to 1024 as max size
+    RAM(PartitionBitmap),
+    /// Access to device memory
+    Device,
+}
+
+impl ResourceKind {
+    ///Convenience function, that creates a RessourceKind::RAM with all partitions/colors enabled
+    pub fn ram_with_all_partitions() -> ResourceKind {
+        let mut partitions = PartitionBitmap::new();
+        partitions.set_all(true);
+        Self::RAM(partitions)
+    }
+    /// Returns true if a and b are of the same enum variant. Does not compare the associated data
+    pub fn same_kind(a: &ResourceKind, b: &ResourceKind) -> bool {
+        match (a, b) {
+            (ResourceKind::RAM(_), ResourceKind::RAM(_)) => true,
+            (ResourceKind::Device, ResourceKind::Device) => true,
+            _ => false,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct AccessRights {
     pub start: usize,
     pub end: usize,
+    pub resource: ResourceKind,
     pub ops: MemOps,
 }
 
 impl AccessRights {
     pub fn is_valid(&self) -> bool {
         self.start <= self.end
+            && match &self.resource {
+                ResourceKind::RAM(partitions) => !partitions.all_bits_unset(),
+                ResourceKind::Device => true,
+            }
     }
 
-    pub const fn none() -> Self {
+    pub const fn none(resource_kind: ResourceKind) -> Self {
         Self {
             start: 0,
             end: 0,
+            resource: resource_kind,
             ops: MemOps::NONE,
         }
     }
@@ -105,7 +140,95 @@ impl PermissionChange {
     }
 }
 
+///Refcount for access permission to partitions
+///`K` is the partition count
+// be careful to not mix up with type parameters from bitmap
+#[derive(Debug, Clone, Copy)]
+struct PartitionRefCount<const N: usize> {
+    data: [usize; N],
+}
+
+impl<const K: usize> PartitionRefCount<K> {
+    /// Creates new object with all refcounts set to zero
+    const fn new() -> Self {
+        Self { data: [0_usize; K] }
+    }
+
+    /// Increases the refcount for all partitions for which `incoming` contains a 1
+    /// Returns the number of partitions whoose refcount increased from 0 to 1 by this update
+    fn increase_count<const N: usize>(&mut self, incoming: &MyBitmap<N, K>) -> usize {
+        let mut new_nonzero_count = 0;
+        for idx in 0..incoming.get_payload_bits_len() {
+            if incoming.get(idx) {
+                self.data[idx] += 1;
+                if self.data[idx] == 1 {
+                    new_nonzero_count += 1;
+                }
+            }
+        }
+        new_nonzero_count
+    }
+
+    /// Decreases the refcount for all partitions that are set in `leaving`
+    /// If this changes the refcount of any currently nonzero value to zero
+    /// Returns the number of partitions whoose refcount dropped to zero by this update
+    fn decrease_refcount<const N: usize>(&mut self, leaving: &MyBitmap<N, K>) -> usize {
+        let mut dropped_to_zero_count = 0;
+        for idx in 0..leaving.get_payload_bits_len() {
+            if leaving.get(idx) {
+                self.data[idx].checked_sub(1).unwrap();
+                if self.data[idx] == 0 {
+                    dropped_to_zero_count += 1;
+                }
+            }
+        }
+        dropped_to_zero_count
+    }
+}
+
+impl<const N: usize, const K: usize> From<&MyBitmap<N, K>> for PartitionRefCount<K> {
+    fn from(value: &MyBitmap<N, K>) -> Self {
+        let mut refcount: PartitionRefCount<K> = PartitionRefCount::<{ K }>::new();
+        refcount.increase_count(value);
+        refcount
+    }
+}
+
 // ———————————————————————————————— Regions ————————————————————————————————— //
+
+///Like `ResourceKind` but we need a different associated type here, to keep a refcount instead of
+/// just a bitmap. Changing the other type would add some memory overhead, as we only need
+/// the refcount information here
+#[derive(Debug, Clone, Copy)]
+enum RegionResourceKind {
+    RAM(PartitionRefCount<{ ActiveMemoryColoring::COLOR_COUNT }>),
+    Device,
+}
+
+impl RegionResourceKind {
+    /// Convenience function to create a RAM resource with all zero refcount
+    const fn new_ram() -> RegionResourceKind {
+        RegionResourceKind::RAM(PartitionRefCount::<{ ActiveMemoryColoring::COLOR_COUNT }>::new())
+    }
+
+    /// Returns true `other` can be used to update this resource kind
+    fn is_compatible(&self, other: &ResourceKind) -> bool {
+        match (self, other) {
+            (RegionResourceKind::RAM(_), ResourceKind::RAM(_)) => true,
+            (RegionResourceKind::Device, ResourceKind::Device) => true,
+            _ => false,
+        }
+    }
+}
+
+impl From<&ResourceKind> for RegionResourceKind {
+    fn from(value: &ResourceKind) -> Self {
+        match value {
+            ResourceKind::RAM(partition_bitmap) => RegionResourceKind::RAM(partition_bitmap.into()),
+            ResourceKind::Device => RegionResourceKind::Device,
+        }
+    }
+}
 
 pub(crate) type TrackerPool = GenArena<Region, NB_TRACKER>;
 
@@ -118,6 +241,7 @@ pub(crate) const EMPTY_REGION: Region = Region {
     super_count: 0,
     ref_count: 0,
     next: None,
+    resource_kind: RegionResourceKind::Device,
 };
 
 #[derive(Debug)]
@@ -128,12 +252,13 @@ pub struct Region {
     write_count: usize,
     exec_count: usize,
     super_count: usize,
+    resource_kind: RegionResourceKind,
     ref_count: usize,
     next: Option<Handle<Region>>,
 }
 
 impl Region {
-    fn new(start: usize, end: usize, ops: MemOps) -> Self {
+    fn new(start: usize, end: usize, ops: MemOps, resource_kind: &ResourceKind) -> Self {
         if start >= end {
             log::error!(
                 "Region start must be smaller than end, got start = {} and end = {}",
@@ -150,6 +275,7 @@ impl Region {
             write_count: w,
             exec_count: x,
             super_count: s,
+            resource_kind: resource_kind.into(),
             ref_count: 1,
             next: None,
         }
@@ -230,6 +356,7 @@ impl RegionTracker {
         start: usize,
         end: usize,
         ops: MemOps,
+        resource_kind: ResourceKind,
         tracker: &mut TrackerPool,
     ) -> Result<PermissionChange, CapaError> {
         log::trace!("Removing region [0x{:x}, 0x{:x}]", start, end);
@@ -264,7 +391,7 @@ impl RegionTracker {
         let mut next = bound;
         while tracker[next].start < end {
             let mut update = self.decrease_refcount(next, tracker);
-            update.update(self.decrease_ops(next, ops, tracker));
+            update.update(self.decrease_ops(next, ops, resource_kind, tracker)?);
             change.update(update);
 
             // Free regions with ref_count 0.
@@ -316,6 +443,7 @@ impl RegionTracker {
         start: usize,
         end: usize,
         ops: MemOps,
+        resource_kind: ResourceKind,
         tracker: &mut TrackerPool,
     ) -> Result<PermissionChange, CapaError> {
         log::trace!("Adding region [0x{:x}, 0x{:x}]", start, end);
@@ -328,7 +456,7 @@ impl RegionTracker {
 
         // There is no region yet, insert head and exit
         let Some(head) = self.head else {
-            self.insert_head(start, end, ops, tracker)?;
+            self.insert_head(start, end, ops, resource_kind, tracker)?;
             return Ok(PermissionChange::Some);
         };
 
@@ -338,8 +466,14 @@ impl RegionTracker {
                 let region = &tracker[lower_bound];
                 if start == region.start {
                     // Regions have the same start
-                    let (previous, update) =
-                        self.partial_add_region_overlapping(start, end, lower_bound, ops, tracker)?;
+                    let (previous, update) = self.partial_add_region_overlapping(
+                        start,
+                        end,
+                        lower_bound,
+                        ops,
+                        resource_kind,
+                        tracker,
+                    )?;
                     change.update(update);
                     let cursor = tracker[previous].end;
                     (previous, cursor)
@@ -354,7 +488,7 @@ impl RegionTracker {
             } else {
                 let head = &tracker[head];
                 let cursor = core::cmp::min(end, head.start);
-                let previous = self.insert_head(start, cursor, ops, tracker)?;
+                let previous = self.insert_head(start, cursor, ops, resource_kind, tracker)?;
                 change = PermissionChange::Some;
                 (previous, cursor)
             };
@@ -362,7 +496,7 @@ impl RegionTracker {
         // Add the remaining portions of the region
         while cursor < end {
             let (next, update) =
-                self.partial_add_region_after(cursor, end, previous, ops, tracker)?;
+                self.partial_add_region_after(cursor, end, previous, ops, resource_kind, tracker)?;
             previous = next;
             change.update(update);
             cursor = tracker[previous].end;
@@ -379,6 +513,7 @@ impl RegionTracker {
         end: usize,
         after: Handle<Region>,
         ops: MemOps,
+        resource_kind: ResourceKind,
         tracker: &mut TrackerPool,
     ) -> Result<(Handle<Region>, PermissionChange), CapaError> {
         let region = &mut tracker[after];
@@ -392,13 +527,20 @@ impl RegionTracker {
             let next = &mut tracker[next_handle];
             if start == next.start {
                 // Overlapping
-                return self.partial_add_region_overlapping(start, end, next_handle, ops, tracker);
+                return self.partial_add_region_overlapping(
+                    start,
+                    end,
+                    next_handle,
+                    ops,
+                    resource_kind,
+                    tracker,
+                );
             } else if end > next.start {
                 // Fit as much as possible
                 end = next.start;
             }
         }
-        self.insert_after(start, end, ops, after, tracker)
+        self.insert_after(start, end, ops, resource_kind, after, tracker)
     }
 
     fn partial_add_region_overlapping(
@@ -407,6 +549,7 @@ impl RegionTracker {
         end: usize,
         overlapping: Handle<Region>,
         ops: MemOps,
+        resource_kind: ResourceKind,
         tracker: &mut TrackerPool,
     ) -> Result<(Handle<Region>, PermissionChange), CapaError> {
         let region = &tracker[overlapping];
@@ -419,7 +562,7 @@ impl RegionTracker {
             self.split_region_at(overlapping, end, tracker)?;
         }
         let mut change = self.increase_refcount(overlapping, tracker);
-        change.update(self.increase_ops(overlapping, ops, tracker));
+        change.update(self.increase_ops(overlapping, ops, resource_kind, tracker)?);
         Ok((overlapping, change))
     }
 
@@ -477,6 +620,7 @@ impl RegionTracker {
             super_count: region.super_count,
             ref_count: region.ref_count,
             next: region.next,
+            resource_kind: region.resource_kind,
         };
         let second_half_handle = tracker.allocate(second_half).ok_or_else(|| {
             log::error!("Unable to allocate new region!");
@@ -498,6 +642,7 @@ impl RegionTracker {
         start: usize,
         end: usize,
         ops: MemOps,
+        resource_kind: ResourceKind,
         after: Handle<Region>,
         tracker: &mut TrackerPool,
     ) -> Result<(Handle<Region>, PermissionChange), CapaError> {
@@ -511,7 +656,7 @@ impl RegionTracker {
         }
 
         let handle = tracker
-            .allocate(Region::new(start, end, ops).set_next(region.next))
+            .allocate(Region::new(start, end, ops, &resource_kind).set_next(region.next))
             .ok_or_else(|| {
                 log::trace!("Unable to allocate new region!");
                 CapaError::OutOfMemory
@@ -528,6 +673,7 @@ impl RegionTracker {
         start: usize,
         end: usize,
         ops: MemOps,
+        resource_kind: ResourceKind,
         tracker: &mut TrackerPool,
     ) -> Result<Handle<Region>, CapaError> {
         if let Some(head) = self.head {
@@ -537,7 +683,7 @@ impl RegionTracker {
             );
         }
 
-        let region = Region::new(start, end, ops).set_next(self.head);
+        let region = Region::new(start, end, ops, &resource_kind).set_next(self.head);
         let handle = tracker.allocate(region).ok_or_else(|| {
             log::trace!("Unable to allocate new region!");
             CapaError::OutOfMemory
@@ -565,8 +711,9 @@ impl RegionTracker {
         &mut self,
         handle: Handle<Region>,
         ops: MemOps,
+        resource_kind: ResourceKind,
         tracker: &mut TrackerPool,
-    ) -> PermissionChange {
+    ) -> Result<PermissionChange, CapaError> {
         let region = &mut tracker[handle];
         let mut change = PermissionChange::None;
         if ops.contains(MemOps::READ) {
@@ -593,7 +740,21 @@ impl RegionTracker {
                 change = PermissionChange::Some;
             }
         }
-        return change;
+
+        if !region.resource_kind.is_compatible(&resource_kind) {
+            return Err(CapaError::CapaOperationOnDifferentResourceKinds);
+        }
+
+        match (region.resource_kind, resource_kind) {
+            (RegionResourceKind::RAM(mut refcount), ResourceKind::RAM(incoming_partitions)) => {
+                if refcount.increase_count(&incoming_partitions) > 0 {
+                    change = PermissionChange::Some
+                }
+            }
+            _ => (),
+        };
+
+        return Ok(change);
     }
 
     fn decrease_refcount(
@@ -615,8 +776,9 @@ impl RegionTracker {
         &mut self,
         handle: Handle<Region>,
         ops: MemOps,
+        resource_kind: ResourceKind,
         tracker: &mut TrackerPool,
-    ) -> PermissionChange {
+    ) -> Result<PermissionChange, CapaError> {
         let region = &mut tracker[handle];
         let mut change = PermissionChange::None;
         if ops.contains(MemOps::READ) {
@@ -643,7 +805,21 @@ impl RegionTracker {
                 change = PermissionChange::Some;
             }
         }
-        return change;
+
+        if !region.resource_kind.is_compatible(&resource_kind) {
+            return Err(CapaError::CapaOperationOnDifferentResourceKinds);
+        }
+
+        match (region.resource_kind, resource_kind) {
+            (RegionResourceKind::RAM(mut refcount), ResourceKind::RAM(leaving_partitions)) => {
+                if refcount.decrease_refcount(&leaving_partitions) > 0 {
+                    change = PermissionChange::Some;
+                }
+            }
+            _ => (),
+        };
+
+        return Ok(change);
     }
 
     fn coalesce(&mut self, tracker: &mut TrackerPool) {
@@ -745,6 +921,7 @@ impl MemoryPermission {
 impl<'a> Iterator for PermissionIterator<'a> {
     type Item = MemoryPermission;
 
+    //luca: region tracker is a linked list over regions. Regions are the deuplicated view of all resources that are described by the access rights
     fn next(&mut self) -> Option<Self::Item> {
         // Get the first valid region
         let mut handle = None;
@@ -797,6 +974,7 @@ mod tests {
             super_count: 0,
             ref_count: 0,
             next: None,
+            resource_kind: RegionResourceKind::new_ram(),
         };
 
         assert!(region.contains(0x100));
@@ -811,7 +989,13 @@ mod tests {
         let mut tracker = RegionTracker::new();
         let mut pool = TrackerPool::new([EMPTY_REGION; NB_TRACKER]);
         tracker
-            .add_region(0x100, 0x1000, MEMOPS_ALL, &mut pool)
+            .add_region(
+                0x100,
+                0x1000,
+                MEMOPS_ALL,
+                ResourceKind::ram_with_all_partitions(),
+                &mut pool,
+            )
             .unwrap();
 
         // Should return None if there is no lower bound region
@@ -828,11 +1012,23 @@ mod tests {
         let mut tracker = RegionTracker::new();
         let mut pool = TrackerPool::new([EMPTY_REGION; NB_TRACKER]);
         tracker
-            .add_region(0x300, 0x400, MEMOPS_ALL, &mut pool)
+            .add_region(
+                0x300,
+                0x400,
+                MEMOPS_ALL,
+                ResourceKind::ram_with_all_partitions(),
+                &mut pool,
+            )
             .unwrap();
         snap("{[0x300, 0x400 | 1 (1 - 1 - 1 - 1)]}", &tracker.iter(&pool));
         tracker
-            .add_region(0x100, 0x200, MEMOPS_ALL, &mut pool)
+            .add_region(
+                0x100,
+                0x200,
+                MEMOPS_ALL,
+                ResourceKind::ram_with_all_partitions(),
+                &mut pool,
+            )
             .unwrap();
         snap(
             "{[0x100, 0x200 | 1 (1 - 1 - 1 - 1)] -> [0x300, 0x400 | 1 (1 - 1 - 1 - 1)]}",
@@ -842,11 +1038,23 @@ mod tests {
         // Region is added as head, but overlap
         let mut tracker = RegionTracker::new();
         tracker
-            .add_region(0x200, 0x400, MEMOPS_ALL, &mut pool)
+            .add_region(
+                0x200,
+                0x400,
+                MEMOPS_ALL,
+                ResourceKind::ram_with_all_partitions(),
+                &mut pool,
+            )
             .unwrap();
         snap("{[0x200, 0x400 | 1 (1 - 1 - 1 - 1)]}", &tracker.iter(&pool));
         tracker
-            .add_region(0x100, 0x300, MEMOPS_ALL, &mut pool)
+            .add_region(
+                0x100,
+                0x300,
+                MEMOPS_ALL,
+                ResourceKind::ram_with_all_partitions(),
+                &mut pool,
+            )
             .unwrap();
         snap(
             "{[0x100, 0x200 | 1 (1 - 1 - 1 - 1)] -> [0x200, 0x300 | 2 (2 - 2 - 2 - 2)] -> [0x300, 0x400 | 1 (1 - 1 - 1 - 1)]}",
@@ -856,11 +1064,23 @@ mod tests {
         // Region is completely included
         let mut tracker = RegionTracker::new();
         tracker
-            .add_region(0x100, 0x400, MEMOPS_ALL, &mut pool)
+            .add_region(
+                0x100,
+                0x400,
+                MEMOPS_ALL,
+                ResourceKind::ram_with_all_partitions(),
+                &mut pool,
+            )
             .unwrap();
         snap("{[0x100, 0x400 | 1 (1 - 1 - 1 - 1)]}", &tracker.iter(&pool));
         tracker
-            .add_region(0x200, 0x300, MEMOPS_ALL, &mut pool)
+            .add_region(
+                0x200,
+                0x300,
+                MEMOPS_ALL,
+                ResourceKind::ram_with_all_partitions(),
+                &mut pool,
+            )
             .unwrap();
         snap(
             "{[0x100, 0x200 | 1 (1 - 1 - 1 - 1)] -> [0x200, 0x300 | 2 (2 - 2 - 2 - 2)] -> [0x300, 0x400 | 1 (1 - 1 - 1 - 1)]}",
@@ -870,33 +1090,69 @@ mod tests {
         // Region is bridging two existing one
         let mut tracker = RegionTracker::new();
         tracker
-            .add_region(0x100, 0x400, MEMOPS_ALL, &mut pool)
+            .add_region(
+                0x100,
+                0x400,
+                MEMOPS_ALL,
+                ResourceKind::ram_with_all_partitions(),
+                &mut pool,
+            )
             .unwrap();
         snap("{[0x100, 0x400 | 1 (1 - 1 - 1 - 1)]}", &tracker.iter(&pool));
         tracker
-            .add_region(0x500, 0x1000, MEMOPS_ALL, &mut pool)
+            .add_region(
+                0x500,
+                0x1000,
+                MEMOPS_ALL,
+                ResourceKind::ram_with_all_partitions(),
+                &mut pool,
+            )
             .unwrap();
         snap(
             "{[0x100, 0x400 | 1 (1 - 1 - 1 - 1)] -> [0x500, 0x1000 | 1 (1 - 1 - 1 - 1)]}",
             &tracker.iter(&pool),
         );
         tracker
-            .add_region(0x200, 0x600, MEMOPS_ALL, &mut pool)
+            .add_region(
+                0x200,
+                0x600,
+                MEMOPS_ALL,
+                ResourceKind::ram_with_all_partitions(),
+                &mut pool,
+            )
             .unwrap();
         snap("{[0x100, 0x200 | 1 (1 - 1 - 1 - 1)] -> [0x200, 0x400 | 2 (2 - 2 - 2 - 2)] -> [0x400, 0x500 | 1 (1 - 1 - 1 - 1)] -> [0x500, 0x600 | 2 (2 - 2 - 2 - 2)] -> [0x600, 0x1000 | 1 (1 - 1 - 1 - 1)]}", &tracker.iter(&pool));
 
         // Region is overlapping two adjacent regions
         let mut tracker = RegionTracker::new();
         tracker
-            .add_region(0x200, 0x300, MEMOPS_ALL, &mut pool)
+            .add_region(
+                0x200,
+                0x300,
+                MEMOPS_ALL,
+                ResourceKind::ram_with_all_partitions(),
+                &mut pool,
+            )
             .unwrap();
         snap("{[0x200, 0x300 | 1 (1 - 1 - 1 - 1)]}", &tracker.iter(&pool));
         tracker
-            .add_region(0x300, 0x400, MEMOPS_ALL, &mut pool)
+            .add_region(
+                0x300,
+                0x400,
+                MEMOPS_ALL,
+                ResourceKind::ram_with_all_partitions(),
+                &mut pool,
+            )
             .unwrap();
         snap("{[0x200, 0x400 | 1 (1 - 1 - 1 - 1)]}", &tracker.iter(&pool));
         tracker
-            .add_region(0x100, 0x500, MEMOPS_ALL, &mut pool)
+            .add_region(
+                0x100,
+                0x500,
+                MEMOPS_ALL,
+                ResourceKind::ram_with_all_partitions(),
+                &mut pool,
+            )
             .unwrap();
         snap(
             "{[0x100, 0x200 | 1 (1 - 1 - 1 - 1)] -> [0x200, 0x400 | 2 (2 - 2 - 2 - 2)] -> [0x400, 0x500 | 1 (1 - 1 - 1 - 1)]}",
@@ -906,22 +1162,46 @@ mod tests {
         // Region is added twice
         let mut tracker = RegionTracker::new();
         tracker
-            .add_region(0x100, 0x200, MEMOPS_ALL, &mut pool)
+            .add_region(
+                0x100,
+                0x200,
+                MEMOPS_ALL,
+                ResourceKind::ram_with_all_partitions(),
+                &mut pool,
+            )
             .unwrap();
         snap("{[0x100, 0x200 | 1 (1 - 1 - 1 - 1)]}", &tracker.iter(&pool));
         tracker
-            .add_region(0x100, 0x200, MEMOPS_ALL, &mut pool)
+            .add_region(
+                0x100,
+                0x200,
+                MEMOPS_ALL,
+                ResourceKind::ram_with_all_partitions(),
+                &mut pool,
+            )
             .unwrap();
         snap("{[0x100, 0x200 | 2 (2 - 2 - 2 - 2)]}", &tracker.iter(&pool));
 
         // Regions have the same end
         let mut tracker = RegionTracker::new();
         tracker
-            .add_region(0x200, 0x300, MEMOPS_ALL, &mut pool)
+            .add_region(
+                0x200,
+                0x300,
+                MEMOPS_ALL,
+                ResourceKind::ram_with_all_partitions(),
+                &mut pool,
+            )
             .unwrap();
         snap("{[0x200, 0x300 | 1 (1 - 1 - 1 - 1)]}", &tracker.iter(&pool));
         tracker
-            .add_region(0x100, 0x300, MEMOPS_ALL, &mut pool)
+            .add_region(
+                0x100,
+                0x300,
+                MEMOPS_ALL,
+                ResourceKind::ram_with_all_partitions(),
+                &mut pool,
+            )
             .unwrap();
         snap(
             "{[0x100, 0x200 | 1 (1 - 1 - 1 - 1)] -> [0x200, 0x300 | 2 (2 - 2 - 2 - 2)]}",
@@ -934,13 +1214,31 @@ mod tests {
         let mut tracler = RegionTracker::new();
         let mut pool = TrackerPool::new([EMPTY_REGION; NB_TRACKER]);
         tracler
-            .add_region(0x100, 0x300, MEMOPS_ALL, &mut pool)
+            .add_region(
+                0x100,
+                0x300,
+                MEMOPS_ALL,
+                ResourceKind::ram_with_all_partitions(),
+                &mut pool,
+            )
             .unwrap();
         tracler
-            .add_region(0x600, 0x1000, MEMOPS_ALL, &mut pool)
+            .add_region(
+                0x600,
+                0x1000,
+                MEMOPS_ALL,
+                ResourceKind::ram_with_all_partitions(),
+                &mut pool,
+            )
             .unwrap();
         tracler
-            .add_region(0x200, 0x400, MEMOPS_ALL, &mut pool)
+            .add_region(
+                0x200,
+                0x400,
+                MEMOPS_ALL,
+                ResourceKind::ram_with_all_partitions(),
+                &mut pool,
+            )
             .unwrap();
         snap("{[0x100, 0x200 | 1 (1 - 1 - 1 - 1)] -> [0x200, 0x300 | 2 (2 - 2 - 2 - 2)] -> [0x300, 0x400 | 1 (1 - 1 - 1 - 1)] -> [0x600, 0x1000 | 1 (1 - 1 - 1 - 1)]}", &tracler.iter(&pool));
 
@@ -962,6 +1260,7 @@ mod tests {
         AccessRights {
             start,
             end,
+            resource: ResourceKind::ram_with_all_partitions(),
             ops: MEMOPS_ALL,
         }
     }
