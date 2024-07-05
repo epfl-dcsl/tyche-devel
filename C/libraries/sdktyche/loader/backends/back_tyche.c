@@ -291,9 +291,10 @@ failure:
   return FAILURE;
 }
 
-int backend_td_vcpu_run(tyche_domain_t* domain, usize core)
+int backend_td_vcpu_run(tyche_domain_t* domain, usize core, uint32_t delta)
 {
   struct backend_vcpu_info_t *vcpu = NULL;
+  msg_switch_t params = {core, delta, 0};
   if (domain == NULL) {
     ERROR("Nul argument");
     goto failure;
@@ -309,7 +310,7 @@ int backend_td_vcpu_run(tyche_domain_t* domain, usize core)
     goto failure;
   }
 
-  if (ioctl(domain->handle, TYCHE_TRANSITION, core) != SUCCESS) {
+  if (ioctl(domain->handle, TYCHE_TRANSITION, &params) != SUCCESS) {
     ERROR("Failure to run on core %lld", core);
     goto failure;
   }

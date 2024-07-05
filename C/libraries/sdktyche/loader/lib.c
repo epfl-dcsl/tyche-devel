@@ -680,7 +680,7 @@ failure:
   return FAILURE;
 }
 
-int sdk_call_domain_on_core(tyche_domain_t* domain, usize core)
+int sdk_call_domain_on_core(tyche_domain_t* domain, usize core, uint32_t delta)
 {
   int cpu_id = sched_getcpu();
   if (domain == NULL) {
@@ -695,7 +695,7 @@ int sdk_call_domain_on_core(tyche_domain_t* domain, usize core)
     goto failure;
   }
 
-  if (backend_td_vcpu_run(domain, core) != SUCCESS) {
+  if (backend_td_vcpu_run(domain, core, delta) != SUCCESS) {
     ERROR("Unable to switch to the domain %d on core %lld", domain->handle, core);
     goto failure;
   }
@@ -706,7 +706,12 @@ failure:
 
 int sdk_call_domain(tyche_domain_t* domain)
 {
-  return sdk_call_domain_on_core(domain, sched_getcpu());
+  return sdk_call_domain_on_core(domain, sched_getcpu(), 0);
+}
+
+int sdk_call_domain_for(tyche_domain_t* domain, uint32_t delta)
+{
+  return sdk_call_domain_on_core(domain, sched_getcpu(), delta);
 }
 
 int sdk_delete_domain(tyche_domain_t* domain)

@@ -7,12 +7,12 @@ use mmu::eptmapper::EPT_ROOT_FLAGS;
 use mmu::{EptMapper, FrameAllocator, IoPtFlag, IoPtMapper};
 use spin::{Mutex, MutexGuard};
 use utils::{GuestPhysAddr, HostPhysAddr, HostVirtAddr};
-use vmx::bitmaps::EptEntryFlags;
+use vmx::bitmaps::{EptEntryFlags, PinbasedControls};
 use vmx::fields::VmcsField;
-use vmx::{ActiveVmcs, Vmxon};
+use vmx::{ActiveVmcs, VmxExitReason, Vmxon};
 use vtd::Iommu;
 
-use super::context::Contextx86;
+use super::context::{Contextx86, SchedInfo};
 use super::vmx_helper::{dump_host_state, load_host_state};
 use crate::allocator::allocator;
 use crate::monitor::PlatformState;
@@ -51,6 +51,11 @@ const EMPTY_CONTEXT: Mutex<Contextx86> = Mutex::new(Contextx86 {
         state_gp: RegisterState::new(),
     },
     interrupted: false,
+    sched_info: SchedInfo {
+        timed: false,
+        budget: 0,
+        saved_ctrls: 0,
+    },
     vmcs: Handle::<RCFrame>::new_invalid(),
 });
 const EMPTY_DOMAIN: Mutex<DataX86> = Mutex::new(DataX86 {
@@ -207,6 +212,7 @@ impl StateX86 {
         next_ctx: &mut MutexGuard<Contextx86>,
         next_domain: MutexGuard<DataX86>,
         return_capa: LocalCapa,
+        delta: usize,
     ) -> Result<(), CapaError> {
         // Safety check that both contexts have a valid vmcs.
         if current_ctx.vmcs.is_invalid() || next_ctx.vmcs.is_invalid() {
@@ -227,6 +233,23 @@ impl StateX86 {
         }
         // Case 1: copy the interrupted state.
         if current_ctx.interrupted {
+            // If it was a timer, we need to reset the information.
+            if current_ctx
+                .get(VmcsField::VmExitReason, Some(vcpu))
+                .unwrap()
+                == VmxExitReason::VmxPreemptionTimerExpired as usize
+                && current_ctx.sched_info.timed
+            {
+                current_ctx.sched_info.timed = false;
+                current_ctx.sched_info.budget = 0;
+                let saved = current_ctx.sched_info.saved_ctrls;
+                current_ctx.sched_info.saved_ctrls = 0;
+                current_ctx
+                    .set(VmcsField::PinBasedVmExecControl, saved, None)
+                    .unwrap();
+                vcpu.set_pin_based_ctrls(PinbasedControls::from_bits_truncate(saved as u32))
+                    .unwrap();
+            }
             next_ctx.copy_interrupt_frame(current_ctx, vcpu).unwrap();
             // Set the return values.
             next_ctx
@@ -246,6 +269,25 @@ impl StateX86 {
             next_ctx
                 .set(VmcsField::GuestRdi, return_capa.as_usize(), None)
                 .or(Err(CapaError::PlatformError))?;
+            if delta != 0 {
+                // We should do it differently, e.g., put it in the cache.
+                // But the problem is that ctrls fields behave in an odd way (see vmx/src/lib.rs
+                // set_ctrls).
+                next_ctx.sched_info.timed = true;
+                next_ctx.sched_info.saved_ctrls = next_ctx
+                    .get(VmcsField::PinBasedVmExecControl, None)
+                    .unwrap();
+                next_ctx.sched_info.budget = delta;
+                let mut pin =
+                    PinbasedControls::from_bits_truncate(next_ctx.sched_info.saved_ctrls as u32);
+                pin.set(PinbasedControls::VMX_PREEMPTION_TIMER, true);
+                next_ctx
+                    .set(VmcsField::PinBasedVmExecControl, pin.bits() as usize, None)
+                    .unwrap();
+                next_ctx
+                    .set(VmcsField::VmxPreemptionTimerValue, delta, None)
+                    .unwrap();
+            }
         }
 
         // Now the logic for shared vs. private vmcs.

@@ -382,13 +382,16 @@ failure:
   return FAILURE;
 }
 
-int backend_td_vcpu_run(tyche_domain_t* domain, usize core)
+int backend_td_vcpu_run(tyche_domain_t* domain, usize core, uint32_t delta)
 {
   int ret = 0;
   struct backend_vcpu_info_t *vcpu = NULL;
   if (domain == NULL) {
     ERROR("Nul argument");
     goto failure;
+  }
+  if (delta != 0) {
+    ERROR("Warning feature not supported: delta not 0 for vcpu run with kvm.");
   }
   dll_foreach(&(domain->vcpus), vcpu, list) {
     if (vcpu->core_id == core) {

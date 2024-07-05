@@ -22,6 +22,7 @@ pub enum CoreUpdate {
     Switch {
         domain: Handle<Domain>,
         return_capa: LocalCapa,
+        delta: usize,
     },
     Trap {
         manager: Handle<Domain>,
@@ -554,9 +555,10 @@ pub trait Monitor<T: PlatformState + 'static> {
         current: &mut Handle<Domain>,
         capa: LocalCapa,
         cpuid: usize,
+        delta: usize,
     ) -> Result<(), CapaError> {
         let mut engine = Self::lock_engine(state, current);
-        engine.switch(*current, cpuid, capa)?;
+        engine.switch(*current, cpuid, delta, capa)?;
         Self::apply_updates(state, &mut engine);
         Ok(())
     }
@@ -689,12 +691,13 @@ pub trait Monitor<T: PlatformState + 'static> {
             }
             calls::SWITCH => {
                 log::trace!(
-                    "Switch on core {} from {} with capa {}",
+                    "Switch on core {} from {} with capa {} quantum {}",
                     cpuid(),
                     domain.idx(),
-                    args[0]
+                    args[0],
+                    args[1],
                 );
-                Self::do_switch(state, domain, LocalCapa::new(args[0]), cpuid())?;
+                Self::do_switch(state, domain, LocalCapa::new(args[0]), cpuid(), args[1])?;
                 return Ok(false);
             }
             calls::EXIT => {
@@ -870,12 +873,14 @@ pub trait Monitor<T: PlatformState + 'static> {
                     domain,
                     return_capa,
                     core,
+                    delta,
                 } => {
                     let mut core_updates = CORE_UPDATES[core as usize].lock();
                     core_updates
                         .push(CoreUpdate::Switch {
                             domain,
                             return_capa,
+                            delta,
                         })
                         .unwrap();
                 }

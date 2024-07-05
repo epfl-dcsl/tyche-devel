@@ -162,6 +162,16 @@ pub struct RegisterContext<
 impl<const N16: usize, const N32: usize, const N64: usize, const NNAT: usize, const NGP: usize>
     RegisterContext<N16, N32, N64, NNAT, NGP>
 {
+    pub fn reset(&mut self) {
+        *self = RegisterContext {
+            dirty: Cache { bitmap: 0 },
+            state_16: RegisterState::new(),
+            state_32: RegisterState::new(),
+            state_64: RegisterState::new(),
+            state_nat: RegisterState::new(),
+            state_gp: RegisterState::new(),
+        }
+    }
     pub fn set(&mut self, group: RegisterGroup, idx: usize, value: usize) -> Result<(), CapaError> {
         match group {
             RegisterGroup::Reg16 => self.state_16.set(idx, value)?,

@@ -133,6 +133,8 @@ impl PlatformState for StateX86 {
         let allocator = allocator();
         let mut rcvmcs = RC_VMCS.lock();
         let dest = &mut Self::get_context(domain, core);
+        // Reset all the values inside the dest.
+        dest.reset();
         let frame = allocator.allocate_frame().unwrap();
         let rc = RCFrame::new(frame);
         drop_rc(&mut *rcvmcs, dest.vmcs);
@@ -208,8 +210,9 @@ impl PlatformState for StateX86 {
             CoreUpdate::Switch {
                 domain,
                 return_capa,
+                delta,
             } => {
-                log::trace!("Domain Switch on core {}", core);
+                log::trace!("Domain Switch on core {} with delta {}", core, delta);
 
                 let mut current_ctx = Self::get_context(*current_domain, core);
                 let mut next_ctx = Self::get_context(*domain, core);
@@ -220,6 +223,7 @@ impl PlatformState for StateX86 {
                     &mut next_ctx,
                     next_domain,
                     *return_capa,
+                    *delta,
                 )
                 .expect("Failed to perform the switch");
                 // Update the current domain and context handle

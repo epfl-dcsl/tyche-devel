@@ -35,6 +35,7 @@ update_disk:
 	make ARCH=x86 KVM=0 DISK_PATH=/tmp/mount/tyche/programs/sdk_tyche -B -C libraries/sdktyche/example/ping-pong install_disk
 	make ARCH=x86 KVM=0 DISK_PATH=/tmp/mount/tyche/programs/sdk_tyche -B -C libraries/sdktyche/example/encr-redis install_disk
 	make ARCH=x86 KVM=0 DISK_PATH=/tmp/mount/tyche/programs/sdk_tyche -B -C libraries/sdktyche/example/simple-attestation install_disk
+	make ARCH=x86 KVM=0 DISK_PATH=/tmp/mount/tyche/programs/sdk_tyche -B -C libraries/sdktyche/example/timer-expire install_disk
 	#make ARCH=x86 KVM=0 DISK_PATH=/tmp/mount/tyche/programs/sdk_tyche -B -C libraries/sdktyche/example/ssl-redis install_disk
 	make ARCH=x86 KVM=0 DISK_PATH=/tmp/mount/tyche/ubench/sdk_tyche -B -C microbenchmarks/ install_disk
 	make ARCH=x86 KVM=1 DISK_PATH=/tmp/mount/tyche/programs/sdk_kvm -B -C libraries/sdktyche/example/app-selector install_disk

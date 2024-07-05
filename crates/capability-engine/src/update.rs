@@ -23,6 +23,7 @@ pub enum Update {
         domain: Handle<Domain>,
         return_capa: LocalCapa,
         core: usize,
+        delta: usize,
     },
     Trap {
         /// The manager responsible for handling the trap

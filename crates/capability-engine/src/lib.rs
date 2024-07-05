@@ -485,8 +485,10 @@ impl CapaEngine {
         &mut self,
         domain: Handle<Domain>,
         core: usize,
+        delta: usize,
         capa: LocalCapa,
     ) -> Result<(), CapaError> {
+        let mut quantum = delta;
         // Check the domain can be scheduled on the core.
         let (next_dom, _) = self.domains[domain].get(capa)?.as_switch()?;
         if (1 << core) & self.domains[next_dom].core_map() == 0 {
@@ -506,11 +508,19 @@ impl CapaEngine {
         self.domains[domain].remove_from_core(core);
         self.cores[core].set_domain(next_dom);
 
+        // Only allow delta quantums from manager to child.
+        if let Some(m) = self.domains[domain].get_manager() {
+            if m == next_dom {
+                quantum = 0;
+            }
+        }
+
         self.updates
             .push(Update::Switch {
                 domain: next_dom,
                 return_capa,
                 core,
+                delta: quantum,
             })
             .unwrap();
         Ok(())
@@ -561,7 +571,8 @@ impl CapaEngine {
             })
             .ok_or(CapaError::InvalidCore)?;
 
-        self.switch(domain, core_id, capa)
+        // No quantum delta when handling a violation.
+        self.switch(domain, core_id, 0, capa)
     }
 
     pub fn enumerate(

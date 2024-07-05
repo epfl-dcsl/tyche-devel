@@ -1,6 +1,7 @@
 use capa_engine::context::{RegisterContext, RegisterGroup};
 use capa_engine::Handle;
 use spin::Mutex;
+use vmx::bitmaps::{PinbasedControls, PrimaryControls, SecondaryControls};
 use vmx::fields::{VmcsField, VmcsFieldWidth};
 use vmx::{ActiveVmcs, VmxError};
 
@@ -784,6 +785,13 @@ pub const DUMP_FRAME: [(VmcsField, VmcsField); 9] = [
     (VmcsField::GuestR12, VmcsField::VmInstructionError),
 ];
 
+/// Scheduling information.
+pub struct SchedInfo {
+    pub timed: bool,
+    pub budget: usize,
+    pub saved_ctrls: usize,
+}
+
 pub struct Contextx86 {
     pub regs: RegisterContext<
         { Context16x86::size() },
@@ -794,6 +802,7 @@ pub struct Contextx86 {
     >,
     // State.
     pub interrupted: bool,
+    pub sched_info: SchedInfo,
     pub vmcs: Handle<RCFrame>,
 }
 
@@ -865,7 +874,23 @@ impl Contextx86 {
             if field.is_gp_register() {
                 return;
             }
-            vcpu.set(field, value).unwrap();
+            match field {
+                VmcsField::PinBasedVmExecControl => {
+                    vcpu.set_pin_based_ctrls(PinbasedControls::from_bits_truncate(value as u32))
+                        .unwrap();
+                }
+                VmcsField::CpuBasedVmExecControl => {
+                    vcpu.set_primary_ctrls(PrimaryControls::from_bits_truncate(value as u32))
+                        .unwrap();
+                }
+                VmcsField::SecondaryVmExecControl => {
+                    vcpu.set_secondary_ctrls(SecondaryControls::from_bits_truncate(value as u32))
+                        .unwrap();
+                }
+                _ => {
+                    vcpu.set(field, value).unwrap();
+                }
+            }
         };
         self.regs.flush(update);
     }
@@ -924,6 +949,15 @@ impl Contextx86 {
         }
 
         Ok(())
+    }
+
+    pub fn reset(&mut self) {
+        self.regs.reset();
+        self.interrupted = false;
+        self.sched_info.timed = false;
+        self.sched_info.saved_ctrls = 0;
+        self.sched_info.budget = 0;
+        //TODO: the rvmcs is cleaned elsewhere... change this.
     }
 }
 

@@ -656,7 +656,7 @@ impl PlatformState for StateRiscv {
             CoreUpdate::Switch {
                 domain,
                 return_capa,
-                //current_reg_state,
+                delta: _, /*No delta for riscv for now*/
             } => {
                 log::debug!(
                     "Domain Switch on core {} for domain {}, return_capa: {:x}",
