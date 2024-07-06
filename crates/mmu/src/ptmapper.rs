@@ -132,9 +132,9 @@ where
     /// # Return Value
     /// If `phys_ranges` is to small to map `size` bytes, an error is returned, that states the remaining,
     /// unmapped bytes
-    pub fn map_range_scattered(
+    pub fn map_range_scattered<T: FrameAllocator>(
         &mut self,
-        allocator: &impl FrameAllocator,
+        allocator: &T,
         virt_addr: VirtAddr,
         phys_ranges: &[PhysRange],
         size: usize,
@@ -142,8 +142,14 @@ where
     ) -> Result<(), usize> {
         //number of bytes that still need to be mapped
         let mut remaining_bytes = size;
+        //log::info!("initial remaining_bytes: 0x{:x}", remaining_bytes);
         let mut next_virt_addr = virt_addr;
-        for (phys_range_idx, phys_range) in phys_ranges.iter().enumerate() {
+        for (_, phys_range) in phys_ranges.iter().enumerate() {
+            /*log::info!(
+                "{:2} processing phys_range {:x?}",
+                phys_range_idx,
+                phys_range
+            );*/
             assert_eq!(phys_range.start.as_usize() % PAGE_SIZE, 0);
             let phys_addr = PhysAddr::from_usize(phys_range.start.as_usize());
 
@@ -159,11 +165,14 @@ where
              * which might not be the case for our phys range. Could be optimized later on, by adjusting
              * based on phys range size.
              */
+            /*log::info!("map_range_scattered: calling map_range with vaddr 0x{:x}, paddr 0x{:x}, size 0x{:x}",
+            next_virt_addr.as_u64(), phys_addr.as_u64(), mapping_size);*/
             self.enable_pse = false;
             self.map_range(allocator, next_virt_addr, phys_addr, mapping_size, prot);
             self.enable_pse = true;
             remaining_bytes -= mapping_size;
 
+            //log::info!("new remaining_bytes: 0x{:x}", remaining_bytes);
             if remaining_bytes == 0 {
                 return Ok(());
             }
@@ -181,9 +190,9 @@ where
 
     /// Creates mapping from `virt_addr`` to `phys_addr`, assuming physically contiguous memory
     /// See `map_range_scattered` if you want to map scattered physical memory pages
-    pub fn map_range(
+    pub fn map_range<T: FrameAllocator>(
         &mut self,
-        allocator: &impl FrameAllocator,
+        allocator: &T,
         virt_addr: VirtAddr,
         phys_addr: PhysAddr,
         size: usize,

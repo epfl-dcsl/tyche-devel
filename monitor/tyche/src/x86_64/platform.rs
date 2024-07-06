@@ -13,6 +13,7 @@ use stage_two_abi::{GuestInfo, Manifest};
 use utils::HostPhysAddr;
 use vmx::bitmaps::exit_qualification;
 use vmx::fields::VmcsField;
+use vmx::raw::vmread;
 use vmx::VmxExitReason;
 
 use super::context::{ContextGpx86, Contextx86};
@@ -377,6 +378,7 @@ impl PlatformState for StateX86 {
             .overlaps(alias, repeat * (region.end - region.start))
     }
 
+    //luca: this is keeps track of hpa to gpa mapping and will queue and update
     fn map_region(
         &mut self,
         engine: &mut MutexGuard<CapaEngine>,
@@ -452,7 +454,10 @@ impl MonitorX86 {
             .allocate_frame()
             .expect("Failed to allocate VMXON frame")
             .zeroed();
+        log::info!("allocated vmxon_framge");
         let vmxon = unsafe { vmx::vmxon(vmxon_frame).expect("Failed to execute VMXON") };
+        log::info!("after vmxon function");
+
         let vmcs_frame = allocator
             .allocate_frame()
             .expect("Failed to allocate VMCS frame")
@@ -462,8 +467,14 @@ impl MonitorX86 {
                 .create_vm_unsafe(vmcs_frame)
                 .expect("Failed to create VMCS")
         };
+        log::info!("after vmcs function");
+
         let vcpu = vmcs.set_as_active().expect("Failed to set VMCS as active");
-        let mut state = VmxState { vcpu, vmxon };
+        let mut state = VmxState {
+            vcpu,
+            vmxon,
+            manifest,
+        };
         let domain = if bsp {
             Self::do_init(&mut state, manifest)
         } else {
@@ -683,7 +694,7 @@ impl MonitorX86 {
         VmxExitReason::EptViolation if domain.idx() == 0 => {
             let addr = vs.vcpu.guest_phys_addr().or(Err(CapaError::PlatformError))?;
             log::error!(
-                "EPT Violation on dom0 core {}! virt: 0x{:x}, phys: 0x{:x}",
+                "EPT Violation on dom0 core {}! gva: 0x{:x}, gpa: 0x{:x}",
                 cpuid(),
                 vs.vcpu
                     .guest_linear_addr()
@@ -694,7 +705,19 @@ impl MonitorX86 {
             panic!("The vcpu {:x?}", vs.vcpu);
         }
         VmxExitReason::Exception if domain.idx() == 0 => {
-            panic!("Received an exception on dom0?");
+    
+
+            let exception_info = vs.vcpu.get(VmcsField::ExitQualification).unwrap();
+            let exception_vector = vs.vcpu.get(VmcsField::IdtVectoringInfoField).unwrap();
+            let error_code = vs.vcpu.get(VmcsField::VmExitIntrErrorCode).unwrap();
+            log::error!("Exception Vector: {:#x}", exception_vector);
+            log::error!("Error Code: {:#x}", error_code);
+            log::error!("Exception Information: {:#x}", exception_info);
+            log::error!("VCPU Dump  0x{:x?}", vs.vcpu);
+    
+
+            //panic!("Received an exception on dom0?");
+            return Ok(HandlerResult::Crash)
         }
         VmxExitReason::Xsetbv if domain.idx() == 0 => {
             let mut context = StateX86::get_context(*domain, cpuid());

@@ -1,4 +1,3 @@
-use core::cmp::min;
 use core::sync::atomic::{AtomicBool, Ordering};
 
 use capa_engine::config::{NB_CORES, NB_DOMAINS, NB_REMAP_REGIONS};
@@ -8,7 +7,7 @@ use capa_engine::{CapaEngine, CapaError, Domain, GenArena, Handle, LocalCapa, Me
 use mmu::eptmapper::EPT_ROOT_FLAGS;
 use mmu::frame_allocator::PhysRange;
 use mmu::ioptmapper::{PAGE_MASK, PAGE_SIZE};
-use mmu::memory_coloring::color_to_phys::{self, ColorToPhys, MemoryRegion, MemoryRegionKind};
+use mmu::memory_coloring::color_to_phys::{self, ColorToPhys, MemoryRegion};
 use mmu::memory_coloring::ActiveMemoryColoring;
 use mmu::{EptMapper, FrameAllocator, IoPtFlag, IoPtMapper};
 use spin::{Mutex, MutexGuard};
@@ -168,42 +167,29 @@ impl StateX86 {
         //luca: iterator over ranges with same memory access permissions
         let permission_iter = engine.get_domain_permissions(domain_handle).unwrap();
 
-        let mut next_blocked_iter = domain
-            .remapper
-            .remap(permission_iter.clone())
-            .filter(|v| ResourceKind::same_kind(&v.resource_kind, &ResourceKind::Device));
-        let mut next_blocked = next_blocked_iter.next();
-
-        let mut next_ram_gpa = 0;
-        //skip over device regions that have smaller addr than first ram region
-        let first_ram_region = domain
-            .remapper
-            .remap(permission_iter.clone())
-            .filter(|v| {
-                ResourceKind::same_kind(&v.resource_kind, &ResourceKind::ram_with_all_partitions())
-            })
+        let mut next_useable_mr_iter = get_manifest()
+            .get_boot_mem_regions()
+            .iter()
+            .filter(|mr| mr.is_useable);
+        let mut current_boot_mr = next_useable_mr_iter
             .next()
-            .expect("no ram regions");
-        while let Some(nb) = next_blocked.as_ref() {
-            if nb.hpa > first_ram_region.hpa {
-                break;
-            }
-            next_ram_gpa += nb.size;
-            next_blocked = next_blocked_iter.next();
-        }
-        log::info!("First ram region is {:x?}", &first_ram_region);
-        log::info!("First blocking dev region is {:x?}", &next_blocked);
-        log::info!("Initial next_ram_gpa value is 0x{:x}", &next_ram_gpa);
+            .expect("ran out of boot memory regions");
+
+        let mut next_gpa = 0;
 
         let boot_mem_region_gib = get_manifest()
             .get_boot_mem_regions()
             .iter()
-            .filter(|v| v.kind == MemoryRegionKind::UseableRAM)
+            .filter(|v| v.is_useable)
             .map(|v| v.end - v.start)
             .sum::<u64>() as f64
             / ((1 << 30) as f64);
         log::info!("boot mem regions can represent {} GiB", boot_mem_region_gib);
 
+        //offset in `current_boot_mr` we are currently at
+        let mut current_boot_mr_offset = 0;
+
+        //luca: adjust to our two new memory types
         for (_, range) in domain.remapper.remap(permission_iter).enumerate() {
             if !range.ops.contains(MemOps::READ) {
                 log::error!("there is a region without read permission: {}", range);
@@ -213,7 +199,6 @@ impl StateX86 {
             if range.ops.contains(MemOps::WRITE) {
                 flags |= EptEntryFlags::WRITE;
             }
-
             if range.ops.contains(MemOps::EXEC) {
                 if range.ops.contains(MemOps::SUPER) {
                     flags |= EptEntryFlags::SUPERVISOR_EXECUTE;
@@ -221,13 +206,11 @@ impl StateX86 {
                     flags |= EptEntryFlags::USER_EXECUTE;
                 }
             }
-            /*log::info!(
-                "range object: Kind {:x?} start 0x{:x}, end 0x{:x}, size 0x{:x}",
-                range.resource_kind,
-                range.hpa,
-                range.hpa + range.size,
-                range.size
-            );*/
+
+            if range.hpa <= 0x7c1b7000 && (range.hpa + range.size) > 0x7c1b7000 {
+                log::info!("processing linux range: range {:x?}, ", range)
+            }
+
             /* Observations/Assumptions:
              * The results of the iterator are sorted, i.e. we go through the address space "left to right".
              * With partititions, a memory range might be smaller that its actually physical bounds, however
@@ -238,6 +221,8 @@ impl StateX86 {
              * TODO: preserve order when adding new colors later on
              */
             let resource_kind = range.resource_kind;
+            let mut bytes_consumed_mem_regions = 0;
+            let mut total_mapped_bytes = 0;
             match resource_kind {
                 capa_engine::ResourceKind::RAM(partitions_ids) => {
                     let color_to_phys = ColorToPhys::new(
@@ -246,71 +231,96 @@ impl StateX86 {
                         partitions_ids,
                         Some((range.hpa, range.hpa + range.size)),
                     );
+                    let mut sum_sub_partitions = 0;
+                    color_to_phys.visit_all_as_ranges(|v| sum_sub_partitions += v.size());
 
+                    let color_to_phys = ColorToPhys::new(
+                        get_manifest().get_boot_mem_regions(),
+                        ActiveMemoryColoring {},
+                        partitions_ids,
+                        Some((range.hpa, range.hpa + range.size)),
+                    );
                     let mut chunk_idx = 0;
 
-                    //TODO:have not yet implemented support for multiple repeat
-                    assert!(range.repeat == 1);
-
                     /*log::info!(
-                        "processing ram mapping start 0x{:x}, end 0x{:x}, size 0x{:x}",
-                        range.hpa,
-                        range.hpa + range.size,
-                        range.size
+                        "range_idx {:2}, chunk_idx {:2}, boot mr {:x?}, boot mr size 0x{:x}, range {:x?} size of subpartitions in range 0x{:x}",
+                        range_idx,
+                        chunk_idx,
+                        current_boot_mr,
+                        current_boot_mr.end -current_boot_mr.start,
+                        range,
+                        sum_sub_partitions,
                     );*/
                     color_to_phys.visit_all_as_ranges(|partition_chunk| {
                         //figure out amout of bytes we can map before hitting the next range blocked for a device
                         let mut remaining_chunk_bytes = partition_chunk.size();
-                        //log::info!("chunck {:x?}. size 0x{:x}", &partition_chunk, remaining_chunk_bytes);
                         while remaining_chunk_bytes > 0 {
-                            let map_size;
-                            let mut advance_next_blocked = false;
-                            match &next_blocked {
-                                Some(next_blocked) => {
-                                    //for device mem we need to compare gour gpa with hpa, because we will passtrhough/identity map them
-                                    assert!(next_ram_gpa <= next_blocked.hpa);
-                                    let bytes_until_blocked = next_blocked.hpa - next_ram_gpa;
-                                    assert!(bytes_until_blocked > 0, "bytes untill blocked was 0. next_blocked.hpa = 0x{:x}, next_ram_gpa 0x{:x}", next_blocked.hpa, next_ram_gpa);
-                                    if remaining_chunk_bytes < bytes_until_blocked {
-                                        map_size = remaining_chunk_bytes;
-                                        //log::info!("have blocking dev, but not hitting it, mapping 0x{:x}", map_size);
-                                    } else {
-                                        advance_next_blocked = true;
-                                        map_size = bytes_until_blocked;
-                                        //log::info!("hitting blocking dev at 0{:x}, mapping only 0x{:x} out of 0x{:x}", next_blocked.hpa, map_size, remaining_chunk_bytes);
-                                    }
-                                }
-                                None => {
-                                    //No more blocked ranges -> can map everything
-                                    map_size = remaining_chunk_bytes;
-                                    //log::info!("no blocking dev path, mapping whole 0x{:x}", map_size);
-                                }
-                            }
+                            //number of bytes remaining in current_boot_mr
+                            let available_bytes = ((current_boot_mr.end - current_boot_mr.start)
+                                - current_boot_mr_offset)
+                                as usize;
 
-                            assert_eq!(next_ram_gpa % PAGE_SIZE, 0, "next_ram_gpa is not aligned");
-                            assert_eq!(map_size % PAGE_SIZE, 0, "map_size ist not aligned");
-                            assert!(map_size > 0);
+                            //Case 1: remaining bytes of current chunk fit in current memory range
+                            /*log::info!(
+                                "range_idx {:2}, chunk_idx {:2}, chunk {:x?}, reamining_chunk_bytes 0x{:x}, available_bytes 0x{:x}",
+                                range_idx,
+                                chunk_idx,
+                                partition_chunk,
+                                remaining_chunk_bytes,
+                                available_bytes
+                            );*/
+                            let (map_size, _) = if remaining_chunk_bytes <= available_bytes {
+                                let res: (usize, usize) = (
+                                    remaining_chunk_bytes,
+                                    (current_boot_mr.start + current_boot_mr_offset) as usize,
+                                );
+                                current_boot_mr_offset += remaining_chunk_bytes as u64;
+                                res
+                            } else {
+                                //Case 2: remaining chunk bytes don't fit into current memory range
+
+                                let res = (
+                                    available_bytes,
+                                    (current_boot_mr.start + current_boot_mr_offset) as usize,
+                                );
+                                //update tracking stat: we finished this mem region, add it to "consumed" count
+                                bytes_consumed_mem_regions +=
+                                    current_boot_mr.end - current_boot_mr.start;
+
+                                /*log::info!(
+                                    "mapped {:0.2} GiB, consumed mem regions total {:0.2} GiB",
+                                    (total_mapped_bytes + available_bytes) as f64 / ((1 << 30) as f64),
+                                    bytes_consumed_mem_regions as f64 / ((1 << 30) as f64)
+                                );*/
+                                current_boot_mr_offset = 0;
+                                current_boot_mr = next_useable_mr_iter
+                                    .next()
+                                    .expect("ran out of boot memory regions");
+                                //log::info!("next boot_mr is {:x?}", current_boot_mr);
+                                res
+                            };
+
+                            assert_eq!(map_size % PAGE_SIZE, 0);
+
+                            let chunk_offset = partition_chunk.size() - remaining_chunk_bytes;
+                            assert_eq!(chunk_offset % PAGE_SIZE, 0);
+                            /*log::info!(
+                                "range_idx {:2}, chunk_idx {:2}, mapping 0x{:x} bytes at boot mr offset 0x{:x}",
+                                range_idx,
+                                chunk_idx,
+                                map_size,current_boot_mr_offset
+
+                            );*/
                             mapper.map_range(
                                 allocator,
-                                GuestPhysAddr::new(next_ram_gpa),
-                                HostPhysAddr::new(partition_chunk.end - remaining_chunk_bytes),
+                                GuestPhysAddr::new(next_gpa),
+                                HostPhysAddr::new(partition_chunk.start + chunk_offset),
                                 map_size,
                                 flags,
                             );
                             remaining_chunk_bytes -= map_size;
-                            next_ram_gpa += map_size;
-                            if advance_next_blocked {
-                                let dev_region = next_blocked
-                                .as_ref()
-                                .expect("advance_next_blocked true but next block was None");
-
-                                //log::info!("skipping over device region at 0x{:x} to 0x{:x}", dev_region.hpa, dev_region.hpa+dev_region.size);
-
-                                next_ram_gpa += dev_region
-                                    .size;
-
-                                next_blocked = next_blocked_iter.next();
-                            }
+                            total_mapped_bytes += map_size;
+                            next_gpa += map_size;
                         } // end of "while remaining_chunk_bytes > 0"
                         chunk_idx += 1;
                     });
@@ -339,9 +349,6 @@ impl StateX86 {
 
         log::info!("GPA->SPA Linux load segment 03");
         mapper.debug_range(GuestPhysAddr::new(0x3268000), 3 * PAGE_SIZE);
-
-        log::info!("GPA->SPA Linux CR3");
-        mapper.debug_range(GuestPhysAddr::new(0x7f328000), 0x1000);
 
         /*for (mr_idx, mr) in get_manifest().get_boot_mem_regions().iter().enumerate() {
             log::info!("mr_idx {:02} excerpt of PTs for mr {:x?}", mr_idx, mr);

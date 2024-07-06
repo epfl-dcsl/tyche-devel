@@ -32,15 +32,19 @@ pub unsafe fn init_vcpu<'vmx>(
         .initialize_msr_bitmaps(bit_frame)
         .expect("Failed to install MSR bitmaps");
     msr_bitmaps.allow_all();
+    log::info!("Intial VCPU RIP: 0x{:x}", info.rip);
     context
         .set(VmcsField::GuestRip, info.rip, Some(vcpu))
         .unwrap();
+    log::info!("Initial VCPU CR3: 0x{:x}", info.cr3);
     context
         .set(VmcsField::GuestCr3, info.cr3, Some(vcpu))
         .unwrap();
+    log::info!("Initial VCPU RSP: 0x{:x}", info.rsp);
     context
         .set(VmcsField::GuestRsp, info.rsp, Some(vcpu))
         .unwrap();
+    log::info!("Initial VCPU RSI: 0x{:x}", info.rsi);
     context
         .set(VmcsField::GuestRsi, info.rsi, Some(vcpu))
         .unwrap();
@@ -81,6 +85,7 @@ pub fn default_vmcs_config(vmcs: &mut ActiveVmcs, info: &GuestInfo, switching: b
                     | EntryControls::LOAD_IA32_PAT,
             )
         })
+        //luca: tweak this, for exception intercept
         .and_then(|_| vmcs.set_exception_bitmap(ExceptionBitmap::empty()))
         .and_then(|_| save_host_state(vmcs, info))
         .and_then(|_| setup_guest(vmcs, info));

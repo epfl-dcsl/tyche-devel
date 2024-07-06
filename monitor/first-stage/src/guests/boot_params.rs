@@ -481,6 +481,7 @@ pub enum BootParamError {
     E820Configuration,
 }
 
+#[derive(Debug)]
 pub struct E820Entry {
     pub addr: GuestPhysAddr,
     pub size: u64,
@@ -514,6 +515,7 @@ impl BootParams {
     }
 }
 
+#[derive(Debug)]
 #[repr(u32)]
 pub enum E820Types {
     Ram = 1,

@@ -9,6 +9,8 @@ edition = "2021"
 bitflags = "1.3.2"
 log = { workspace = true }
 utils = { version = "0.1.0", path = "../utils" }
+x86_64 = "0.14.9"
+
 
 [target.'cfg(target_arch = "x86_64")'.dependencies]
 vmx = { version = "0.1.0", path = "../vmx" }

@@ -1,3 +1,5 @@
+use core::panic;
+
 use attestation::hashing::hash_region;
 use capa_engine::config::NB_CORES;
 use capa_engine::utils::BitmapIterator;
@@ -5,13 +7,14 @@ use capa_engine::{
     permission, AccessRights, Buffer, CapaEngine, CapaError, CapaInfo, Domain, Handle, LocalCapa,
     MemOps, NextCapaToken, ResourceKind, MEMOPS_ALL, MEMOPS_EXTRAS,
 };
+use mmu::memory_coloring::color_to_phys::MemoryRegionKind;
 use mmu::memory_coloring::{ActiveMemoryColoring, PartitionBitmap};
 use spin::{Mutex, MutexGuard};
 use stage_two_abi::Manifest;
 
 use crate::arch::cpuid;
 use crate::attestation_domain::calculate_attestation_hash;
-use crate::calls;
+use crate::{calls, println};
 
 // ———————————————————————————————— Updates ————————————————————————————————— //
 /// Per-core updates
@@ -182,67 +185,132 @@ pub trait Monitor<T: PlatformState + 'static> {
     3) delay creation of remaining memory, as creating a root region will also always give dom0 access to it (regions are sth. that is allowed by capabilities and cannot really exist on their own to my understanding)
      */
     fn do_init(state: &mut T, manifest: &'static Manifest) -> Handle<Domain> {
+        log::info!("do_init");
         // No one else is running yet
         let mut engine = CAPA_ENGINE.lock();
+        log::info!("calling create_manager_domain");
         let domain = engine
             .create_manager_domain(permission::monitor_inter_perm::ALL)
             .unwrap();
+        log::info!("calling apply_updates");
         Self::apply_updates(state, &mut engine);
         let mut dom0_partititons = PartitionBitmap::new();
+        log::info!("Creating dom0 based on manifest...");
         match manifest.dom0_memory {
             mmu::memory_coloring::MemoryRange::ColoredRange(cr) => {
+                log::info!(
+                    "Using colors [{},{}[ for dom0",
+                    cr.first_color,
+                    cr.first_color + cr.color_count
+                );
                 for v in cr.first_color..(cr.first_color + cr.color_count) {
                     dom0_partititons.set(v as usize, true);
                 }
             }
             mmu::memory_coloring::MemoryRange::PhysContigRange(_) => {
-                //initially bitmap is all zero, thus now it is all ones
-                dom0_partititons.set_all();
+                log::info!("Using phys_contig for dom0, THIS IS NOT YET IMPLEMENTED");
+                dom0_partititons.set_all(true);
                 todo!("pyhs contig init does not yet capture the phys range stuff");
             }
         }
         //give dom0 access to each dom0 component that belongs to its partitions/colors
         //TODO: how do we restrict memory in one partition case? Or does it not matter becase
         //there driver has more freedom regarding memory managementin this case???
+        /*println!("\n\n");
         for mr in manifest.get_boot_mem_regions() {
-            if !mr.is_useable {
-                continue;
+            log::info!("memory region 0x{:x}, end 0x{:x}", mr.start, mr.end);
+        }*/
+        println!("\n\n");
+        for mr in manifest.get_boot_mem_regions() {
+            match mr.kind {
+                MemoryRegionKind::UseableRAM => {
+                    /*log::info!(
+                        "RAM root region start 0x{:x}, end 0x{:x}, size 0x{:x}",
+                        mr.start,
+                        mr.end,
+                        mr.end - mr.start,
+                    );*/
+                    engine
+                        .create_root_region(
+                            domain,
+                            AccessRights {
+                                start: mr.start as usize,
+                                end: mr.end as usize,
+                                resource: ResourceKind::RAM(dom0_partititons),
+                                ops: MEMOPS_ALL,
+                            },
+                        )
+                        .unwrap();
+                }
+                MemoryRegionKind::UsedByStage1Allocator => (), //should not ne mapped anywhere
+                MemoryRegionKind::Reserved => {
+                    /*log::info!(
+                        "Fake device root region, start 0x{:x}, end 0x{:x}, size 0x{:x}",
+                        mr.start,
+                        mr.end,
+                        mr.end - mr.start,
+                    );*/
+                    if let Err(e) = engine.create_root_region(
+                        domain,
+                        AccessRights {
+                            start: mr.start as usize,
+                            end: mr.end as usize,
+                            resource: ResourceKind::Device,
+                            ops: MEMOPS_ALL,
+                        },
+                    ) {
+                        log::error!("create_root_region failed with {:?}", e);
+                        panic!("error creating root region");
+                    }
+                }
             }
-            engine
-                .create_root_region(
-                    domain,
-                    AccessRights {
-                        start: mr.start as usize,
-                        end: mr.end as usize,
-                        resource: ResourceKind::RAM(dom0_partititons),
-                        ops: MEMOPS_ALL,
-                    },
-                )
-                .unwrap();
         }
 
+        log::info!("Creating device ranges");
         //give dom0 access to all device ranges : devices are in gaps of boot mem map
         let mut prev = &manifest.get_boot_mem_regions()[0];
+        assert_ne!(prev.kind, MemoryRegionKind::UsedByStage1Allocator);
         for cur in manifest.get_boot_mem_regions().iter().skip(1) {
-            //no gap -> continue
-            if prev.end == cur.start {
+            if cur.start < prev.end {
+                log::info!(
+                    "ingoring weird, unsorted entry: 0x{:x} to 0x{:x}",
+                    cur.start,
+                    prev.end
+                );
                 continue;
             }
-            engine
-                .create_root_region(
-                    domain,
-                    AccessRights {
-                        start: prev.end as usize,
-                        end: cur.start as usize,
-                        resource: ResourceKind::Device,
-                        ops: MEMOPS_ALL,
-                    },
-                )
-                .unwrap();
+            if cur.kind == MemoryRegionKind::UsedByStage1Allocator {
+                prev = cur;
+                continue;
+            }
+            //no gap -> continue
+            if prev.end == cur.start {
+                prev = cur;
+                continue;
+            }
+            /*log::info!(
+                "Device root region start 0x{:x}, end 0x{:x}. prev {:x?}, cur {:x?}",
+                prev.end,
+                cur.start,
+                prev,
+                cur
+            );*/
+            if let Err(e) = engine.create_root_region(
+                domain,
+                AccessRights {
+                    start: prev.end as usize,
+                    end: cur.start as usize,
+                    resource: ResourceKind::Device,
+                    ops: MEMOPS_ALL,
+                },
+            ) {
+                log::error!("create_root_region failed with {:?}", e);
+                panic!("error creating root region");
+            }
 
             prev = cur;
         }
-
+        log::info!("Created all regions. Calling apply_updates...");
         //TODO: call the platform?
         Self::apply_updates(state, &mut engine);
         // Save the initial domain.
@@ -258,10 +326,12 @@ pub trait Monitor<T: PlatformState + 'static> {
             state.platform_init_io_mmu(manifest.iommu as usize);
         }
 
+        log::info!("Calling start_domain_on_core...");
         // TODO: taken from part of init_vcpu.
         engine
             .start_domain_on_core(domain, cpuid())
             .expect("Failed to start initial domain on core");
+        log::info!("done!");
         domain
     }
 

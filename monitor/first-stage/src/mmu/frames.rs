@@ -27,6 +27,8 @@ const MIB: usize = 1 << 20;
 const GUEST_RESERVED_MEMORY: usize = 2 * GIB;
 const SECOND_STAGE_RESERVED_MEMORY: u64 = 200 * MIB as u64;
 
+pub const MR_USED_BY_OUR_ALLOCATOR: MemoryRegionKind = MemoryRegionKind::UnknownBios(42);
+
 // ————————————————————————— Physical Memory Offset ————————————————————————— //
 
 static PHYSICAL_MEMORY_OFFSET: AtomicUsize = AtomicUsize::new(PHYSICAL_OFFSET_GUARD);
@@ -190,7 +192,7 @@ impl<T: MemoryColoring + Clone> PartitionedMemoryMap<T> {
                     result.push(E820Entry {
                         addr: GuestPhysAddr::new(bl_mr.start as usize),
                         size: bl_mr_bytes,
-                        mem_type: E820Types::Reserved,
+                        mem_type: E820Types::Ram,
                     });
                 }
                 MemoryRegionKind::UnknownUefi(_) | MemoryRegionKind::UnknownBios(_) => {
@@ -453,7 +455,7 @@ fn reserve_memory_region(
                 end: HostPhysAddr::new(mr.end as usize),
             };
 
-            mr.kind = MemoryRegionKind::UnknownBios(1);
+            mr.kind = MR_USED_BY_OUR_ALLOCATOR;
             matching_mr = Some(pr);
             println!(
                 "Using mr at idx {:02} {:x?} for contig range allocator",
@@ -482,8 +484,7 @@ pub struct ColoringRangeFrameAllocator<T: MemoryColoring> {
     first_color: u64,
     //number of contiguous colors, starting at `first_color`, that this allocator may use
     color_count: u64,
-    //number of pages that we have allocated so far
-    allocated_pages_count: Cell<usize>,
+    gpa_of_next_allocation: Cell<usize>,
 }
 
 impl<T: MemoryColoring + Clone> ColoringRangeFrameAllocator<T> {
@@ -494,21 +495,21 @@ impl<T: MemoryColoring + Clone> ColoringRangeFrameAllocator<T> {
         memory_regions: &'static [MemoryRegion],
         memory_coloring: &T,
     ) -> Self {
-        let mut first_usable_region = None;
+        /*let mut first_usable_region = None;
         for (mr_idx, mr) in memory_regions.as_ref().iter().enumerate() {
             if mr.kind == MemoryRegionKind::Usable {
                 first_usable_region = Some(mr_idx);
                 break;
             }
-        }
-        let cur_region_idx = first_usable_region.expect("did not find any usable region");
+        }*/
+        let cur_region_idx = 0;
         let cur_mr = &memory_regions[cur_region_idx];
         let cur_phys_start = HostPhysAddr::new(cur_mr.start as usize);
         let cur_phys_end = HostPhysAddr::new(cur_mr.end as usize);
         let cur_range_start = cur_phys_start.align_up(PAGE_SIZE).as_u64();
         let cur_range_end = cur_phys_end.align_down(PAGE_SIZE).as_u64();
 
-        Self {
+        let res = Self {
             memory_regions,
             cur_region: Cell::new(CurrentRegion {
                 idx: cur_region_idx,
@@ -519,34 +520,95 @@ impl<T: MemoryColoring + Clone> ColoringRangeFrameAllocator<T> {
             memory_coloring: memory_coloring.clone(),
             first_color,
             color_count,
-            allocated_pages_count: Cell::new(0),
+            gpa_of_next_allocation: Cell::new(0),
+        };
+
+        log::info!("initializing new color allocator gpa");
+        if cur_mr.kind != MemoryRegionKind::Usable {
+            res.inside_cur_region_cursor.set(PhysAddr::new(cur_mr.end));
+            res.gpa_of_next_allocation.set(cur_mr.end as usize);
+            res.advance_to_next_region().unwrap();
         }
+        log::info!(
+            "initial next_gpa value is 0x{:x}",
+            res.gpa_of_next_allocation.get()
+        );
+
+        res
     }
 
     //advance internal state to next useable region, returns error if we ran out of regions
+    //this will also update the next_gpa if we skip over regions that will later be pass through mapped to the dom0
     fn advance_to_next_region(&self) -> Result<(), ()> {
+        let mut prev_region = self.memory_regions[self.cur_region.get().idx];
+        assert_eq!(
+            self.inside_cur_region_cursor.get().as_u64(),
+            prev_region.end
+        );
         for (mr_idx, mr) in self
             .memory_regions
             .iter()
             .enumerate()
             .skip(self.cur_region.get().idx + 1)
         {
-            if mr.kind == MemoryRegionKind::Usable {
-                //update reference to current region
-                self.cur_region.set(CurrentRegion {
-                    idx: mr_idx,
-                    aligned_end: HostPhysAddr::new(mr.end as usize)
-                        .align_down(PAGE_SIZE)
-                        .as_u64(),
-                });
-                //update reference to position inside the region to start of the new region
-                let region_start = HostPhysAddr::new(mr.start as usize)
-                    .align_up(PAGE_SIZE)
-                    .as_u64();
-                self.inside_cur_region_cursor
-                    .set(PhysAddr::new(region_start));
-                return Ok(());
+            //GAP -> later we add a device region here
+            if prev_region.end < mr.start {
+                let gap_size = (mr.start - prev_region.end) as usize;
+                assert_eq!(
+                    gap_size % PAGE_SIZE,
+                    0,
+                    "gap between regions is not multiple of page size"
+                );
+                let updated = self.gpa_of_next_allocation.get() + gap_size;
+                log::info!(
+                    "processing gap, old gpa 0x{:x}, new gpa 0x{:x}",
+                    self.gpa_of_next_allocation.get(),
+                    updated
+                );
+                self.gpa_of_next_allocation.set(updated);
+            } else if prev_region.end > mr.start {
+                log::info!("ignoring weird unsorted memory region for gap calculation");
             }
+            //fallthrough is intended, we can have a GAP and then then e.g. the region is also not useable
+            match mr.kind {
+                MemoryRegionKind::Usable => {
+                    //update reference to current region
+                    self.cur_region.set(CurrentRegion {
+                        idx: mr_idx,
+                        aligned_end: HostPhysAddr::new(mr.end as usize)
+                            .align_down(PAGE_SIZE)
+                            .as_u64(),
+                    });
+                    //update reference to position inside the region to start of the new region
+                    let region_start = HostPhysAddr::new(mr.start as usize)
+                        .align_up(PAGE_SIZE)
+                        .as_u64();
+                    self.inside_cur_region_cursor
+                        .set(PhysAddr::new(region_start));
+                    return Ok(());
+                }
+                MemoryRegionKind::UnknownBios(42) => (), //these are used by another low level allocator and will not be mapped to a guest
+                MemoryRegionKind::Bootloader
+                | MemoryRegionKind::UnknownUefi(_)
+                | MemoryRegionKind::UnknownBios(_) => {
+                    let size = (mr.end - mr.start) as usize;
+                    assert_eq!(
+                        size % PAGE_SIZE,
+                        0,
+                        "blocked region has size that is not multiple of page size"
+                    );
+                    let updated: usize = self.gpa_of_next_allocation.get() + size;
+                    log::info!(
+                        "processing blocked region, old gpa 0x{:x}, new gpa 0x{:x}",
+                        self.gpa_of_next_allocation.get(),
+                        updated
+                    );
+                    self.gpa_of_next_allocation.set(updated);
+                }
+                _ => todo!("unknown memory region"),
+            }
+
+            prev_region = *mr;
         }
         return Err(());
     }
@@ -603,8 +665,8 @@ unsafe impl<T: MemoryColoring + Clone> FrameAllocator for ColoringRangeFrameAllo
             next_frame = self.next_frame_in_region_with_color();
         }
         if next_frame.is_some() {
-            let new_allocation_count = self.allocated_pages_count.get() + 1;
-            self.allocated_pages_count.set(new_allocation_count);
+            let tmp = self.gpa_of_next_allocation.get();
+            self.gpa_of_next_allocation.set(tmp + PAGE_SIZE);
         }
         return next_frame;
     }
@@ -620,6 +682,15 @@ unsafe impl<T: MemoryColoring + Clone> FrameAllocator for ColoringRangeFrameAllo
 }
 
 unsafe impl<T: MemoryColoring + Clone> RangeAllocator for ColoringRangeFrameAllocator<T> {
+    fn gpa_of_next_allocation(&self) -> vmx::GuestPhysAddr {
+        let cur_region = self.cur_region.get();
+        if self.inside_cur_region_cursor.get().as_u64() == cur_region.aligned_end {
+            if self.advance_to_next_region().is_err() {
+                panic!("allcator is OOM");
+            }
+        }
+        GuestPhysAddr::new(self.gpa_of_next_allocation.get())
+    }
     fn allocate_range<F: FnMut(PhysRange)>(&self, size: usize, mut store_cb: F) -> Result<(), ()> {
         //edge case: at most one page requested
         if size <= PAGE_SIZE {
@@ -632,6 +703,13 @@ unsafe impl<T: MemoryColoring + Clone> RangeAllocator for ColoringRangeFrameAllo
                 end: frame.phys_addr + PAGE_SIZE,
             });
             return Ok(());
+        }
+
+        if self.gpa_of_next_allocation.get() == 0x1000000 {
+            log::info!(
+                "Allocation for 0x1000000: cur mem region: {:x?}",
+                self.memory_regions[self.cur_region.get().idx]
+            );
         }
 
         //normal case: need at least two pages for request
@@ -671,16 +749,6 @@ unsafe impl<T: MemoryColoring + Clone> RangeAllocator for ColoringRangeFrameAllo
         //store final range before returning
         store_cb(cur_range);
         Ok(())
-    }
-
-    fn gpa_of_next_allocation(&self) -> vmx::GuestPhysAddr {
-        /* When creating a guest physical address space, we simply take
-         * the whole memory range "owned" by an allocator an map it to
-         * contiguous GPAs using the EPT. Thus, to obtain the future GPA
-         * for an allocation, we simply need to count the number of pages we alloacted.
-         * It does not matter that they are scattered in the host physical address space
-         */
-        GuestPhysAddr::new(self.allocated_pages_count.get())
     }
 }
 
@@ -969,6 +1037,10 @@ unsafe impl FrameAllocator for RangeFrameAllocator {
 }
 
 unsafe impl RangeAllocator for RangeFrameAllocator {
+    fn gpa_of_next_allocation(&self) -> GuestPhysAddr {
+        GuestPhysAddr::new((self.cursor.get() - self.range_start) as usize)
+    }
+
     fn allocate_range<F: FnMut(PhysRange)>(&self, size: usize, mut store_cb: F) -> Result<(), ()> {
         let cursor = self.cursor.get();
         if cursor + size < self.range_end {
@@ -987,9 +1059,6 @@ unsafe impl RangeAllocator for RangeFrameAllocator {
         }
     }
 
-    fn gpa_of_next_allocation(&self) -> GuestPhysAddr {
-        GuestPhysAddr::new((self.cursor.get() - self.range_start) as usize)
-    }
     /*fn allocate_range(&self, size: usize) -> Option<StackList<PhysRange>> {
         let cursor = self.cursor.get();
         if cursor + size < self.range_end {

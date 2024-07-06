@@ -5,6 +5,8 @@ use utils::HostPhysAddr;
 use crate::frame_allocator::PhysRange;
 use crate::ioptmapper::PAGE_SHIFT;
 
+pub mod color_to_phys;
+
 ///Memory colorings as described by the Magheira paper
 pub trait MemoryColoring {
     /// Amount of different colors
@@ -169,7 +171,8 @@ pub struct DummyMemoryColoring {}
 
 impl MemoryColoring for DummyMemoryColoring {
     fn compute_color(&self, frame: HostPhysAddr) -> u64 {
-        let color = (frame.as_u64() >> PAGE_SHIFT) & 0x7;
+        //TODO: large color chunks make debugging ept creation easier
+        let color = (frame.as_u64() >> 20) & 0x7;
         color
     }
 

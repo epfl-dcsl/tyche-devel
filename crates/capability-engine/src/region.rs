@@ -75,18 +75,40 @@ pub enum ResourceKind {
 }
 
 impl ResourceKind {
-    ///Convenience function, that creates a RessourceKind::RAM with all partitions/colors enabled
+    ///Convenience function that creates a RessourceKind::RAM with all partitions/colors enabled
     pub fn ram_with_all_partitions() -> ResourceKind {
         let mut partitions = PartitionBitmap::new();
         partitions.set_all(true);
         Self::RAM(partitions)
     }
+
+    /// Convenience function that creates a RessourcKind::RAM for the given partitions
+    pub fn ram_with_partitions(partition_ids: &[usize]) -> ResourceKind {
+        let mut partitions = PartitionBitmap::new();
+        for idx in partition_ids {
+            partitions.set(*idx, true);
+        }
+        Self::RAM(partitions)
+    }
+
     /// Returns true if a and b are of the same enum variant. Does not compare the associated data
     pub fn same_kind(a: &ResourceKind, b: &ResourceKind) -> bool {
         match (a, b) {
             (ResourceKind::RAM(_), ResourceKind::RAM(_)) => true,
             (ResourceKind::Device, ResourceKind::Device) => true,
             _ => false,
+        }
+    }
+}
+
+impl From<&RegionResourceKind> for ResourceKind {
+    fn from(value: &RegionResourceKind) -> Self {
+        match value {
+            RegionResourceKind::RAM(refcount) => {
+                let bm = refcount.as_partition_bitmap();
+                ResourceKind::RAM(bm)
+            }
+            RegionResourceKind::Device => ResourceKind::Device,
         }
     }
 }
@@ -183,6 +205,26 @@ impl<const K: usize> PartitionRefCount<K> {
             }
         }
         dropped_to_zero_count
+    }
+
+    /// Creates a new partition bitmap where an entry is set to true
+    /// if its refcount is > 0
+    pub fn as_partition_bitmap<const N: usize>(&self) -> MyBitmap<N, K> {
+        let mut bm = MyBitmap::new();
+
+        for idx in 0..K {
+            if self.data[idx] > 0 {
+                bm.set(idx, true);
+            }
+        }
+
+        bm
+    }
+}
+
+impl<const K: usize> PartialEq for PartitionRefCount<K> {
+    fn eq(&self, other: &Self) -> bool {
+        self.data == other.data
     }
 }
 
@@ -290,12 +332,18 @@ impl Region {
         self.start <= addr && addr < self.end
     }
 
+    /// Returns true if read,write,exec,super and partition id refcounts are equal
     pub fn same_counts(&self, other: &Self) -> bool {
         self.ref_count == other.ref_count
             && self.read_count == other.read_count
             && self.write_count == other.write_count
             && self.exec_count == other.exec_count
             && self.super_count == other.super_count
+            && match (self.resource_kind, other.resource_kind) {
+                (RegionResourceKind::RAM(ours), RegionResourceKind::RAM(others)) => ours == others,
+                (RegionResourceKind::Device, RegionResourceKind::Device) => true,
+                _ => false,
+            }
     }
 
     pub fn get_ops(&self) -> MemOps {
@@ -822,6 +870,7 @@ impl RegionTracker {
         return Ok(change);
     }
 
+    /// This will try to merge adjacent regions and drop empty regions
     fn coalesce(&mut self, tracker: &mut TrackerPool) {
         if self.head == None {
             // Nothing to do.
@@ -833,12 +882,17 @@ impl RegionTracker {
         // Go through the list.
         while curr != None {
             let current = curr.unwrap();
+            /*
+               Case 1: adjacent regions with same refcounts for permissions + colors
+               Case 2: Current region is empty
+               Case 3: prev region is empty
+            */
             if tracker[prev].end == tracker[current].start
                 && (tracker[prev].same_counts(&tracker[current])
                     || tracker[current].start == tracker[current].end
                     || tracker[prev].start == tracker[prev].end)
             {
-                // Coalesce
+                // Coalesce: Copy "current" into "prev" and free object for current
                 if tracker[prev].start == tracker[prev].end {
                     tracker[prev].ref_count = tracker[current].ref_count;
                 }
@@ -897,7 +951,8 @@ impl<'a> Iterator for RegionIterator<'a> {
     }
 }
 
-/// An iterator over a domain's memory access permissions.
+/// An iterator over a domain's memory access permissions. They are created based
+/// on the domains memory regions
 #[derive(Clone)]
 pub struct PermissionIterator<'a> {
     tracker: &'a RegionTracker,
@@ -909,6 +964,7 @@ pub struct PermissionIterator<'a> {
 pub struct MemoryPermission {
     pub start: usize,
     pub end: usize,
+    pub resource_kind: ResourceKind,
     pub ops: MemOps,
 }
 
@@ -938,9 +994,9 @@ impl<'a> Iterator for PermissionIterator<'a> {
             self.next = None; // makes next iteration faster
             return None;
         };
-        let (end, ops) = {
+        let (end, ops, resource_kind) = {
             let reg = &self.pool[handle.unwrap()];
-            (reg.end, reg.get_ops())
+            (reg.end, reg.get_ops(), (&reg.resource_kind).into())
         };
 
         let mut next = None;
@@ -952,7 +1008,12 @@ impl<'a> Iterator for PermissionIterator<'a> {
         }
 
         self.next = next;
-        Some(MemoryPermission { start, end, ops })
+        Some(MemoryPermission {
+            start,
+            end,
+            ops,
+            resource_kind,
+        })
     }
 }
 
@@ -1007,7 +1068,7 @@ mod tests {
     }
 
     #[test]
-    fn region_add() {
+    fn region_add_no_subpartitions() {
         // Region is added as head
         let mut tracker = RegionTracker::new();
         let mut pool = TrackerPool::new([EMPTY_REGION; NB_TRACKER]);
@@ -1208,6 +1269,37 @@ mod tests {
             &tracker.iter(&pool),
         );
     }
+
+    //TODO: continue here once basic dom0 ept construction works
+    /*#[test]
+    fn region_add_with_subpartitions() {
+        // Region is added as head
+        let mut tracker = RegionTracker::new();
+        let mut pool = TrackerPool::new([EMPTY_REGION; NB_TRACKER]);
+        tracker
+            .add_region(
+                0x300,
+                0x400,
+                MEMOPS_ALL,
+                ResourceKind::ram_with_partitions(&[0, 1]),
+                &mut pool,
+            )
+            .unwrap();
+        snap("{[0x300, 0x400 | 1 (1 - 1 - 1 - 1)]}", &tracker.iter(&pool));
+        tracker
+            .add_region(
+                0x300,
+                0x400,
+                MEMOPS_ALL,
+                ResourceKind::ram_with_partitions(&[2, 3]),
+                &mut pool,
+            )
+            .unwrap();
+        snap(
+            "{[0x300, 0x400 | 1 (1 - 1 - 1 - 1)] -> [0x300, 0x400 | 1 (1 - 1 - 1 - 1)]}",
+            &tracker.iter(&pool),
+        );
+    }*/
 
     #[test]
     fn refcount() {

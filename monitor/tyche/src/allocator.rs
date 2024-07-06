@@ -125,5 +125,11 @@ unsafe impl<const N: usize> FrameAllocator for Allocator<N> {
 
 pub fn init(manifest: &'static Manifest) {
     let mut allocator = ALLOCATOR.inner.lock();
+    log::info!(
+        "stage2 allocator: voffset 0x{:x}, poffset 0x{:x}, resulting virt_offset 0x{:x}",
+        manifest.voffset,
+        manifest.poffset,
+        manifest.voffset - manifest.poffset
+    );
     allocator.initialize((manifest.voffset - manifest.poffset) as usize);
 }

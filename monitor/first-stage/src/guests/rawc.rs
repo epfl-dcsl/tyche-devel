@@ -66,7 +66,7 @@ impl Guest for RawcBytes {
         let mut loaded_rawc = rawc_prog
             .load::<GuestPhysAddr, GuestVirtAddr>(guest_allocator, virtoffset)
             .expect("Failed to load guest");
-        let pt_root = loaded_rawc.pt_root;
+        let pt_root = loaded_rawc.pt_root_spa;
 
         // Setup stack
         let (rsp, _stack_phys) =

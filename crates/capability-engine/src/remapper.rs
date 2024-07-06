@@ -5,8 +5,10 @@
 
 use core::{cmp, fmt};
 
+use mmu::memory_coloring::PartitionBitmap;
+
 use crate::region::{MemoryPermission, PermissionIterator};
-use crate::{CapaError, GenArena, Handle, MemOps};
+use crate::{CapaError, GenArena, Handle, MemOps, ResourceKind};
 
 pub struct Remapper<const N: usize> {
     segments: GenArena<Segment, N>,
@@ -14,6 +16,7 @@ pub struct Remapper<const N: usize> {
 }
 
 /// A mapping from HPA to HPA
+#[derive(Debug)]
 pub struct Mapping {
     /// Host Physical Address
     pub hpa: usize,
@@ -25,8 +28,12 @@ pub struct Mapping {
     pub repeat: usize,
     /// Memory permissions
     pub ops: MemOps,
+    /// Additional dimension of access rights that describe how this should get mapped
+    /// Adds supports for resource exlusivity
+    pub resource_kind: ResourceKind,
 }
 
+///
 #[derive(Clone, Debug)]
 pub struct Segment {
     /// Host Physical Address
@@ -73,6 +80,9 @@ impl<const N: usize> Remapper<N> {
         RemapIterator {
             regions,
             next_region_start: None,
+            /*luca: remapper if probably long lived as it is stored in the domin object.
+            These are simply the segments that have been created by prior runs
+            */
             segments: self.iter_segments(),
             next_segment_start: None,
             cursor: 0,
@@ -304,7 +314,9 @@ impl<const N: usize> Remapper<N> {
 
 #[derive(Clone)]
 pub struct RemapIterator<'a, const N: usize> {
+    //luca: deduplicated view of the memory permissions for our domain
     regions: PermissionIterator<'a>,
+    //luca: just simple iterator over existing segments
     segments: RemapperSegmentIterator<'a, N>,
     cursor: usize,
     next_region_start: Option<usize>,
@@ -316,9 +328,24 @@ pub struct RemapIterator<'a, const N: usize> {
 impl<'a, const N: usize> Iterator for RemapIterator<'a, N> {
     type Item = Mapping;
 
+    /*luca: initial state
+    RemapIterator {
+           regions,
+           next_region_start: None,
+           //luca: from prior runs
+           segments: self.iter_segments(),
+           next_segment_start: None,
+           cursor: 0,
+           ongoing_segment: None,
+           max_segment: None,
+       }
+    */
+    //luca: do not touch. Instead add additional layer at call site
     fn next(&mut self) -> Option<Self::Item> {
         // First, if there is an ongoing segment being remapped, continue
         if let Some(ongoing_segment) = &mut self.ongoing_segment {
+            //luca: this will match the segment to the regions to create a mapping object
+            //The matching to region is required to figure out the permissions
             match ongoing_segment.next() {
                 Some(mapping) => {
                     return Some(mapping);
@@ -349,6 +376,7 @@ impl<'a, const N: usize> Iterator for RemapIterator<'a, N> {
             (None, Some(next_region)) => {
                 // There are only regions left
                 let region = self.regions.next().unwrap();
+                //luca: largest start addr of a segment?
                 let max_segment = self.max_segment.unwrap_or(0);
                 self.next_region_start = None;
 
@@ -374,6 +402,7 @@ impl<'a, const N: usize> Iterator for RemapIterator<'a, N> {
                     size: region.end - start,
                     repeat: 1,
                     ops: region.ops,
+                    resource_kind: region.resource_kind,
                 };
                 return Some(mapping);
             }
@@ -423,6 +452,7 @@ impl<'a, const N: usize> Iterator for RemapIterator<'a, N> {
                             size: mapping_end - cursor,
                             repeat: 1,
                             ops: region.ops,
+                            resource_kind: region.resource_kind,
                         };
 
                         return Some(mapping);
@@ -436,6 +466,8 @@ impl<'a, const N: usize> Iterator for RemapIterator<'a, N> {
     }
 }
 
+/// Creates all mapping objects for the given Segment by matching
+/// the segment to the given regions
 #[derive(Clone)]
 struct SingleSegmentIterator<'a> {
     regions: PermissionIterator<'a>,
@@ -448,11 +480,12 @@ impl<'a> SingleSegmentIterator<'a> {
     fn next(&mut self) -> Option<Mapping> {
         // Retrieve the current region and segment
         let segment = &self.segment;
-        let mut next_region = self.next_region;
+        let mut next_region: Option<MemoryPermission> = self.next_region;
         if next_region.is_none() {
             // Move to the next region
             next_region = self.regions.next();
         }
+        //luca: seek past regions that come "before" our segment in HPA space
         loop {
             match next_region {
                 Some(region) if region.end <= segment.hpa => {
@@ -462,12 +495,22 @@ impl<'a> SingleSegmentIterator<'a> {
                 _ => break,
             }
         }
+        //luca: no regions overlap our segment => done
         let Some(region) = next_region else {
             if self.cursor <= segment.hpa + segment.size {
                 self.cursor = segment.hpa + segment.size;
             }
             return None;
         };
+
+        /*luca: if we are here, we have a region for our segment.
+         * Our segment might spand multiple regions. Thus, we next update
+         * the cursor, to keep track where exactly in memory we are
+         * The purpose of the region, is to give us the permissions for the mapping
+         * that we are about to create.
+         * The logic checks are mostly based on the logic for the mapping creation at the end
+         * of this function
+         */
 
         // Move cursor
         if self.cursor < segment.hpa {
@@ -499,13 +542,14 @@ impl<'a> SingleSegmentIterator<'a> {
             size: next_cusor - self.cursor,
             repeat: segment.repeat,
             ops: region.ops,
+            resource_kind: region.resource_kind,
         };
         self.cursor = next_cusor;
         Some(mapping)
     }
 }
 
-/// An iterator over the remapper segments.
+/// A simple iterator over the remapper segments without any hidden logic
 #[derive(Clone)]
 pub struct RemapperSegmentIterator<'a, const N: usize> {
     remapper: &'a Remapper<N>,

@@ -7,6 +7,7 @@
 
 use core::slice;
 
+use mmu::memory_coloring::color_to_phys::MemoryRegion;
 use mmu::memory_coloring::MemoryRange;
 #[cfg(target_arch = "riscv64")]
 use riscv_tyche::RVManifest;
@@ -71,18 +72,6 @@ macro_rules! entry_point {
 } */
 
 // ———————————————————————————————— Manifest ———————————————————————————————— //
-/// Represent a physical memory region.
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
-#[repr(C)]
-pub struct MemoryRegion {
-    /// The physical start address of the region.
-    pub start: u64,
-    /// The physical end address (exclusive) of the region.
-    pub end: u64,
-    /// If false, memory region refers to some kind of reserved range
-    /// Otherwise, it is useable
-    pub is_useable: bool,
-}
 
 /// The second stage manifest, describing the state of the system at the time the second stage is
 /// entered.
@@ -203,9 +192,10 @@ macro_rules! make_manifest {
             /// SAFETY: We return the manifest only once. This is ensured using an atomic boolean
             /// that we set to true the first time the reference is taken.
             unsafe {
-                TAKEN
-                    .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-                    .expect("The manifest can only be retrieved once");
+                //TODO: put back in after finding a good place to pass the manifset information down to the ept creation
+                /*TAKEN
+                .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+                .expect("The manifest can only be retrieved once");*/
                 &mut __MANIFEST
             }
         }

@@ -601,6 +601,7 @@ dependencies = [
  "log",
  "utils",
  "vmx",
+ "x86_64",
 ]
 
 [[package]]

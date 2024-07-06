@@ -2,18 +2,23 @@
 
 use alloc::vec::Vec;
 use core::arch::asm;
+use core::cmp::min;
 use core::sync::atomic::{AtomicBool, Ordering};
 use core::{mem, slice};
 
 use bootloader::boot_info::MemoryRegionKind;
 use mmu::frame_allocator::PhysRange;
 use mmu::ioptmapper::PAGE_MASK;
+use mmu::memory_coloring::color_to_phys::{
+    MemoryRegion as S2MemRegion, MemoryRegionKind as S2MemoryRegionKind,
+};
 use mmu::memory_coloring::MemoryColoring;
 use mmu::{PtFlag, PtMapper, RangeAllocator};
-use stage_two_abi::{EntryPoint, Manifest, MemoryRegion as S2MemRegion, Smp};
+use stage_two_abi::{EntryPoint, Manifest, Smp};
 use x86_64::{align_down, align_up};
 
 use crate::cpu::MAX_CPU_NUM;
+use crate::elf::relocate::relocate_elf;
 use crate::elf::{Elf64PhdrType, ElfProgram, NonContigElf64Phdr};
 use crate::guests::ManifestInfo;
 use crate::mmu::frames::{MemoryPartition, PartitionedMemoryMap};
@@ -118,7 +123,7 @@ pub fn load<T: MemoryColoring + Clone>(
 
     //this allocates memory for every elf segment. Currently it allocates one physical contiguous chunk
     //the elf headers are updated to point to these memory addresses (in contrast to the default addresses, this is the "relocate" part)
-    relocate_elf(&mut second_stage, stage2_allocator);
+    relocate_elf(&mut second_stage, stage2_allocator, false);
     //load parsed elf binary into memory
     let mut stage2_loaded_elf = second_stage
         .load::<HostPhysAddr, HostVirtAddr>(
@@ -263,7 +268,7 @@ pub fn load<T: MemoryColoring + Clone>(
         ptr as *mut bool
     };
 
-    manifest.cr3 = stage2_loaded_elf.pt_root.as_u64();
+    manifest.cr3 = stage2_loaded_elf.pt_root_spa.as_u64();
     println!("setting manifset.cr3 to 0x{:x}", manifest.cr3);
     manifest.info = info.guest_info.clone();
     manifest.iommu = info.iommu;
@@ -271,6 +276,11 @@ pub fn load<T: MemoryColoring + Clone>(
         .expect("first_stage2_load_paddr is uninitialized")
         .as_u64();
     manifest.voffset = LOAD_VIRT_ADDR.as_u64();
+    log::info!(
+        "manifset.poffset = 0x{:x}, manifset.voffset = 0x{:x}",
+        manifest.poffset,
+        manifest.voffset
+    );
     manifest.vga = info.vga_info.clone();
     manifest.smp = smp;
 
@@ -293,10 +303,22 @@ pub fn load<T: MemoryColoring + Clone>(
         .iter()
         .enumerate()
     {
+        /*log::info!(
+            "handing over memregion start 0x{:x}, end 0x{:x}",
+            boot_mr.start,
+            boot_mr.end
+        );*/
         manifest_s2_mem_regions[idx] = S2MemRegion {
             start: boot_mr.start,
             end: boot_mr.end,
-            is_useable: boot_mr.kind == MemoryRegionKind::Usable,
+            kind: match boot_mr.kind {
+                MemoryRegionKind::Usable => S2MemoryRegionKind::UseableRAM,
+                MemoryRegionKind::UnknownBios(42) => S2MemoryRegionKind::UsedByStage1Allocator,
+                MemoryRegionKind::Bootloader
+                | MemoryRegionKind::UnknownUefi(_)
+                | MemoryRegionKind::UnknownBios(_) => S2MemoryRegionKind::Reserved,
+                _ => todo!(),
+            },
         }
     }
     manifest.raw_mem_regions_slice_valid_entries =
@@ -321,73 +343,5 @@ pub fn load<T: MemoryColoring + Clone>(
                     stack_addr: rsp.as_u64(),
                 });
             });
-    }
-}
-
-/// Relocates the physical addresses of an elf program.
-fn relocate_elf(elf: &mut ElfProgram, allocator: &impl RangeAllocator) {
-    let mut all_allocated_mem = Vec::new();
-
-    let mut prev_segment: Option<&NonContigElf64Phdr> = None;
-    for segment in &mut elf.segments {
-        if segment.phdr.p_type != Elf64PhdrType::PT_LOAD.bits() {
-            continue;
-        }
-        let aligned_size = align_up(segment.phdr.p_memsz, PAGE_SIZE as u64) as usize;
-
-        let mut ranges: Vec<PhysRange> = Vec::new();
-
-        /*
-           Luca Wilke:
-           For some reason, LOAD segments often share a common page with their preceeding segment.
-           At least the tyche binary is missing reloaction information, so we cannot easily move the segments apart
-           without breaking memory references from .text to .rodata, .got, .data etc.
-           For now, we simply make sure that if there is an overlap, we use the same physical page in the current segment
-           than in the prev segment
-           This might lead to a clash with the requested page permissions but so far we have been lucky
-        */
-        //
-        if let Some(prev_segment) = prev_segment {
-            let cur_aligned_start = align_down(segment.phdr.p_vaddr, PAGE_SIZE as u64);
-            let prev_aligned_end = align_down(
-                prev_segment.phdr.p_vaddr + prev_segment.phdr.p_memsz,
-                PAGE_SIZE as u64,
-            );
-            //in case of overlap, we need to allocate less memory later on, due to the shared page
-            if cur_aligned_start == prev_aligned_end {
-                //reuse last page from prev segment as first page for this segment
-                let prev_last_range = prev_segment
-                    .phys_mem
-                    .last()
-                    .expect("prev segment has empty phys_mem");
-                let overlapping_page =
-                    HostPhysAddr::new(prev_last_range.end.as_usize() - PAGE_SIZE);
-                let overlapping_pr = PhysRange {
-                    start: overlapping_page,
-                    end: overlapping_page + PAGE_SIZE,
-                };
-                assert!(overlapping_pr.start < overlapping_pr.end);
-                ranges.push(overlapping_pr);
-            }
-            //allocate remaining memory
-            let store_cb = |pr: PhysRange| {
-                ranges.push(pr);
-            };
-            allocator
-                .allocate_range(aligned_size, store_cb)
-                .expect("failed to alloc mem for segment");
-        } else {
-            //not prev segment, just allocate memory
-            let store_cb = |pr: PhysRange| {
-                ranges.push(pr);
-            };
-            allocator
-                .allocate_range(aligned_size, store_cb)
-                .expect("failed to alloc mem for segment");
-        }
-        segment.phys_mem = ranges;
-
-        all_allocated_mem.push(segment.phys_mem.clone());
-        prev_segment = Some(segment);
     }
 }

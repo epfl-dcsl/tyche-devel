@@ -1,6 +1,7 @@
 //! Executable and Linkable Format - ELF
 
 mod ffi;
+pub mod relocate;
 
 use alloc::vec::Vec;
 use core::str::from_utf8;
@@ -9,10 +10,12 @@ pub use ffi::{
     Elf64Hdr, Elf64Phdr, Elf64PhdrFlags, Elf64PhdrType, Elf64Shdr, Elf64ShdrType, Elf64Sym,
     FromBytes,
 };
+use log::info;
 use mmu::frame_allocator::PhysRange;
 use mmu::ioptmapper::{PAGE_MASK, PAGE_SIZE};
 use mmu::walker::Address;
 use mmu::{PtFlag, PtMapper, RangeAllocator};
+use qemu::println;
 use vmx::HostPhysAddr;
 
 use crate::mmu::scattered_writer::ScatteredIdMappedBuf;
@@ -49,6 +52,8 @@ pub enum ElfMapping {
     Identity,
     ///Map virt to phys using scattered physical memory, as it is the case for coloring
     Scattered,
+    ///Testing possible bug with linux mapping
+    ScatteredPaddr,
 }
 
 /// An ELF program that can be loaded as a guest.
@@ -67,7 +72,7 @@ pub struct ElfProgram {
 
 pub struct LoadedElf<PhysAddr, VirtAddr> {
     /// The root of initial page tables.
-    pub pt_root: PhysAddr,
+    pub pt_root_spa: PhysAddr,
     /// Offset in the host, used to load the guest into memory.
     host_physical_offset: HostVirtAddr,
     /// The page table mapper of the guest.
@@ -166,7 +171,7 @@ impl ElfProgram {
         }
 
         Ok(LoadedElf {
-            pt_root: pt_root_guest_phys_addr,
+            pt_root_spa: pt_root_guest_phys_addr,
             host_physical_offset,
             pt_mapper,
         })
@@ -308,6 +313,11 @@ impl ElfProgram {
                 assert!(p_vaddr % PAGE_SIZE as u64 == 0);
                 assert!(segment.phys_mem[0].start.as_usize() % PAGE_SIZE == 0);
 
+                log::info!(
+                    "ElfProgram calling map_range_scattered for p_vaddr 0x{:x}, ranges {:x?}",
+                    p_vaddr,
+                    segment.phys_mem
+                );
                 mapper
                     .map_range_scattered(
                         allocator,
@@ -317,6 +327,34 @@ impl ElfProgram {
                         flags_to_prot(segment.phdr.p_flags),
                     )
                     .expect("failed to map segment using Scattered mapping");
+                println!("\n\n");
+            }
+            ElfMapping::ScatteredPaddr => {
+                let p_paddr = align_page_down(segment.phdr.p_paddr);
+
+                let mut memsz = segment.phdr.p_memsz;
+                if p_paddr != segment.phdr.p_paddr {
+                    memsz += segment.phdr.p_paddr - p_paddr;
+                }
+
+                assert!(p_paddr % PAGE_SIZE as u64 == 0);
+                assert!(segment.phys_mem[0].start.as_usize() % PAGE_SIZE == 0);
+
+                log::info!(
+                    "ElfProgram calling map_range_scattered for p_paddr 0x{:x}, ranges {:x?}",
+                    p_paddr,
+                    segment.phys_mem
+                );
+                mapper
+                    .map_range_scattered(
+                        allocator,
+                        VirtAddr::from_u64(p_paddr),
+                        &segment.phys_mem,
+                        memsz as usize,
+                        flags_to_prot(segment.phdr.p_flags),
+                    )
+                    .expect("failed to map segment using Scattered mapping");
+                println!("\n\n");
             }
         }
     }

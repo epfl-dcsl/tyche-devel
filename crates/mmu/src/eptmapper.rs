@@ -13,6 +13,9 @@ pub struct EptMapper {
     host_offset: usize,
     root: HostPhysAddr,
     level: Level,
+    //If true, allow use of 1GB, and 2MB mappings. Right now we hardcode this to disabled to support
+    //memory partitions. We will re-enable theese mappings later on
+    allow_large_mappings: bool,
 }
 
 pub const EPT_PRESENT: EptEntryFlags = EptEntryFlags::READ
@@ -51,6 +54,7 @@ impl EptMapper {
             host_offset,
             root,
             level: Level::L4,
+            allow_large_mappings: false,
         }
     }
     /*
@@ -66,9 +70,14 @@ impl EptMapper {
             host_offset,
             root,
             level,
+            allow_large_mappings: false,
         }
     }
 
+    fn get_hpa(entry: u64) -> u64 {
+        let hfn_mask = 0xFFFFFFFFFF000_u64;
+        (entry & hfn_mask)
+    }
     pub fn debug_range(&mut self, gpa: GuestPhysAddr, size: usize) {
         let (phys_addr, _) = self.root();
         log::info!("EPT root: 0x{:x}", phys_addr.as_usize());
@@ -80,7 +89,13 @@ impl EptMapper {
                     if (*entry & EPT_PRESENT.bits()) == 0 {
                         return WalkNext::Leaf;
                     }
-                    log::info!("{:?} -> 0x{:x} | {:x?}", level, addr.as_usize(), entry);
+                    log::info!(
+                        "{:?} -> 0x{:x} | {:x?} , hpa = 0x{:x}",
+                        level,
+                        addr.as_usize(),
+                        entry,
+                        Self::get_hpa(*entry)
+                    );
                     if (*entry & EptEntryFlags::PAGE.bits()) != 0 {
                         return WalkNext::Leaf;
                     }
@@ -89,6 +104,37 @@ impl EptMapper {
             )
             .expect("Failed to print the epts");
         }
+    }
+
+    /// Scan the PT starting at from `gpa` to `gpa+size` and report the first gpa in that
+    /// range that is already mapped to sth. Otherwise return None
+    pub fn get_first_used_in_range(
+        &mut self,
+        gpa: GuestPhysAddr,
+        size: usize,
+    ) -> Option<(GuestPhysAddr, Level)> {
+        let mut found_leaf_in_range = None;
+        unsafe {
+            self.walk_range(
+                gpa,
+                GuestPhysAddr::new(gpa.as_usize() + size),
+                &mut |addr, entry, level| {
+                    if (*entry & EPT_PRESENT.bits()) != 0 {
+                        if (level == Level::L3 || level == Level::L2)
+                            && ((*entry & EptEntryFlags::PAGE.bits()) != 0)
+                        {
+                            found_leaf_in_range = Some((addr, level));
+                            return WalkNext::Abort;
+                        }
+                        found_leaf_in_range = Some((addr, level));
+                        return WalkNext::Abort;
+                    }
+                    WalkNext::Continue
+                },
+            )
+            .expect("failed to scan through ept");
+        }
+        found_leaf_in_range
     }
 
     /// Maps a range of physical memory to the given virtual memory.
@@ -100,6 +146,7 @@ impl EptMapper {
         size: usize,
         prot: EptEntryFlags,
     ) {
+        let allow_large = self.allow_large_mappings;
         unsafe {
             self.walk_range(
                 gpa,
@@ -117,7 +164,8 @@ impl EptMapper {
                     let end = gpa.as_usize() + size;
                     let hphys = hpa.as_usize() + (addr.as_usize() - gpa.as_usize());
                     if level == Level::L3 {
-                        if (addr.as_usize() + GIANT_PAGE_SIZE <= end)
+                        if allow_large
+                            && (addr.as_usize() + GIANT_PAGE_SIZE <= end)
                             && (hphys % GIANT_PAGE_SIZE == 0)
                         {
                             *entry = hphys as u64
@@ -129,7 +177,8 @@ impl EptMapper {
                         }
                     }
                     if level == Level::L2 {
-                        if (addr.as_usize() + HUGE_PAGE_SIZE <= end)
+                        if allow_large
+                            && (addr.as_usize() + HUGE_PAGE_SIZE <= end)
                             && (hphys % HUGE_PAGE_SIZE == 0)
                         {
                             *entry = hphys as u64
@@ -293,3 +342,5 @@ impl EptMapper {
         HostPhysAddr::new(self.root.as_usize() | EPT_ROOT_FLAGS)
     }
 }
+
+//TODO: ideally, write unit test for our new function. Not sure how to mock the allocator
