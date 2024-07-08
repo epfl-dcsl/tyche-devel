@@ -29,19 +29,19 @@ pub const EPT_PRESENT: EptEntryFlags = EptEntryFlags::READ
 pub const EPT_ROOT_FLAGS: usize = (6 << 0) | (3 << 3);
 
 unsafe impl Walker for EptMapper {
-    type PhysAddr = HostPhysAddr;
-    type VirtAddr = GuestPhysAddr;
+    type WalkerPhysAddr = HostPhysAddr;
+    type WalkerVirtAddr = GuestPhysAddr;
 
-    fn translate(&self, phys_addr: Self::PhysAddr) -> HostVirtAddr {
+    fn translate(&self, phys_addr: Self::WalkerPhysAddr) -> HostVirtAddr {
         HostVirtAddr::new(phys_addr.as_usize() + self.host_offset)
     }
 
-    fn root(&mut self) -> (Self::PhysAddr, Level) {
+    fn root(&mut self) -> (Self::WalkerPhysAddr, Level) {
         (self.root, self.level)
     }
 
-    fn get_phys_addr(entry: u64) -> Self::PhysAddr {
-        Self::PhysAddr::from_u64(entry & ADDRESS_MASK)
+    fn get_phys_addr(entry: u64) -> Self::WalkerPhysAddr {
+        Self::WalkerPhysAddr::from_u64(entry & ADDRESS_MASK)
     }
 }
 

@@ -253,17 +253,17 @@ pub struct Dumper<'a> {
 }
 
 unsafe impl Walker for Dumper<'_> {
-    type PhysAddr = HostPhysAddr;
-    type VirtAddr = HostVirtAddr;
-    fn root(&mut self) -> (Self::PhysAddr, mmu::walker::Level) {
+    type WalkerPhysAddr = HostPhysAddr;
+    type WalkerVirtAddr = HostVirtAddr;
+    fn root(&mut self) -> (Self::WalkerPhysAddr, mmu::walker::Level) {
         (HostPhysAddr::new(self.offset), Level::L4)
     }
-    fn translate(&self, phys_addr: Self::PhysAddr) -> HostVirtAddr {
+    fn translate(&self, phys_addr: Self::WalkerPhysAddr) -> HostVirtAddr {
         let top = self.pages.as_ptr() as *const u64 as u64;
         let addr = phys_addr.as_u64() - self.offset as u64 + top;
         HostVirtAddr::new(addr as usize)
     }
-    fn get_phys_addr(_: u64) -> <Self as Walker>::PhysAddr {
+    fn get_phys_addr(_: u64) -> <Self as Walker>::WalkerPhysAddr {
         todo!()
     }
 }

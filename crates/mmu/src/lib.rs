@@ -2,6 +2,7 @@
 #![no_std]
 
 pub mod frame_allocator;
+pub mod guest_ptmapper;
 pub mod ioptmapper;
 pub mod memory_coloring;
 pub mod ptmapper;

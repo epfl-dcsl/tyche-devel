@@ -183,6 +183,7 @@ pub enum VmcsField {
     Cr3TargetValue1 = 0x0000600a,
     Cr3TargetValue2 = 0x0000600c,
     Cr3TargetValue3 = 0x0000600e,
+    //Table 28-1. Exit Qualification for Debug Exceptions
     ExitQualification = 0x00006400,
     GuestLinearAddress = 0x0000640a,
     GuestCr0 = 0x00006800,

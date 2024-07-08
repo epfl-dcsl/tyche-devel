@@ -13,13 +13,14 @@ use mmu::memory_coloring::color_to_phys::{
     MemoryRegion as S2MemRegion, MemoryRegionKind as S2MemoryRegionKind,
 };
 use mmu::memory_coloring::MemoryColoring;
+use mmu::walker::Address;
 use mmu::{PtFlag, PtMapper, RangeAllocator};
 use stage_two_abi::{EntryPoint, Manifest, Smp};
-use x86_64::{align_down, align_up};
+use x86_64::{align_down, align_up, VirtAddr};
 
 use crate::cpu::MAX_CPU_NUM;
 use crate::elf::relocate::relocate_elf;
-use crate::elf::{Elf64PhdrType, ElfProgram, NonContigElf64Phdr};
+use crate::elf::{ELfTargetEnvironment, Elf64PhdrType, ElfProgram, NonContigElf64Phdr};
 use crate::guests::ManifestInfo;
 use crate::mmu::frames::{MemoryPartition, PartitionedMemoryMap};
 use crate::mmu::PAGE_SIZE;
@@ -126,9 +127,10 @@ pub fn load<T: MemoryColoring + Clone>(
     relocate_elf(&mut second_stage, stage2_allocator, false);
     //load parsed elf binary into memory
     let mut stage2_loaded_elf = second_stage
-        .load::<HostPhysAddr, HostVirtAddr>(
+        .load(
             stage2_allocator,
-            stage1_allocator.get_physical_offset(),
+            stage1_allocator.get_physical_offset().as_usize(),
+            false,
         )
         .expect("Failed to load second stage");
 
@@ -136,9 +138,16 @@ pub fn load<T: MemoryColoring + Clone>(
     let smp_stacks: Vec<(HostVirtAddr, HostVirtAddr, HostPhysAddr)> = (0..smp_cores)
         .map(|cpuid| {
             let stack_virt_addr = STACK_VIRT_ADDR + STACK_SIZE * cpuid;
-            let (rsp, stack_phys_addr) =
-                stage2_loaded_elf.add_stack(stack_virt_addr, STACK_SIZE, stage2_allocator);
-            (stack_virt_addr, rsp, stack_phys_addr)
+            let (rsp, stack_phys_addr) = stage2_loaded_elf.add_stack(
+                VirtAddr::new(stack_virt_addr.as_u64()),
+                STACK_SIZE,
+                stage2_allocator,
+            );
+            (
+                stack_virt_addr,
+                HostVirtAddr::from_u64(rsp.as_u64()),
+                HostPhysAddr::from_u64(stack_phys_addr.as_u64()),
+            )
         })
         .collect();
 
@@ -150,13 +159,16 @@ pub fn load<T: MemoryColoring + Clone>(
         let virt_addr = HostVirtAddr::new(info.iommu as usize);
         let phys_addr = HostPhysAddr::new(info.iommu as usize);
         let size = 0x1000;
-        stage2_loaded_elf.pt_mapper.map_range(
-            stage2_allocator,
-            virt_addr,
-            phys_addr,
-            size,
-            PtFlag::PRESENT | PtFlag::WRITE,
-        );
+        match &mut stage2_loaded_elf.pt_mapper {
+            crate::elf::ELfTargetEnvironment::Host(host_mapper) => host_mapper.map_range(
+                stage2_allocator,
+                virt_addr,
+                phys_addr,
+                size,
+                PtFlag::PRESENT | PtFlag::WRITE,
+            ),
+            crate::elf::ELfTargetEnvironment::Guest(_) => panic!("stage2 with guest mapper"),
+        }
     }
 
     // Map the guest (e.g. linux) memory into Tyche.
@@ -164,14 +176,15 @@ pub fn load<T: MemoryColoring + Clone>(
     // buffers.
     // The amount of ranges required for the guest might be quite large. Thus, storing
     // them in a vec often depletes our heap. Instead, we directly process them in the callback
-    let map_guest_phys_range_cb = |pr: PhysRange| {
-        stage2_loaded_elf.pt_mapper.map_range(
+    let map_guest_phys_range_cb = |pr: PhysRange| match &mut stage2_loaded_elf.pt_mapper {
+        crate::elf::ELfTargetEnvironment::Host(host_mapper) => host_mapper.map_range(
             stage2_allocator,
             HostVirtAddr::new(pr.start.as_usize()),
             pr.start,
             pr.size(),
             PtFlag::PRESENT | PtFlag::WRITE,
-        );
+        ),
+        crate::elf::ELfTargetEnvironment::Guest(_) => panic!("stage2 with guest mapper"),
     };
     memory_partitions
         .iterate_over_ranges_for_mem_partition(MemoryPartition::GUEST, map_guest_phys_range_cb);
@@ -180,13 +193,19 @@ pub fn load<T: MemoryColoring + Clone>(
     // TODO aghosn: do we need to hide this?
 
     let lapic_phys_address: usize = 0xfee00000;
-    stage2_loaded_elf.pt_mapper.map_range(
-        stage2_allocator,
-        HostVirtAddr::new(lapic_phys_address),
-        HostPhysAddr::new(lapic_phys_address),
-        PAGE_SIZE,
-        PtFlag::PRESENT | PtFlag::WRITE | PtFlag::PAGE_WRITE_THROUGH | PtFlag::PAGE_CACHE_DISABLE,
-    );
+    match &mut stage2_loaded_elf.pt_mapper {
+        crate::elf::ELfTargetEnvironment::Host(host_mapper) => host_mapper.map_range(
+            stage2_allocator,
+            HostVirtAddr::new(lapic_phys_address),
+            HostPhysAddr::new(lapic_phys_address),
+            PAGE_SIZE,
+            PtFlag::PRESENT
+                | PtFlag::WRITE
+                | PtFlag::PAGE_WRITE_THROUGH
+                | PtFlag::PAGE_CACHE_DISABLE,
+        ),
+        crate::elf::ELfTargetEnvironment::Guest(_) => panic!("stage2 with guest mapper"),
+    };
 
     // If we setup VGA support
     if info.vga_info.is_valid {
@@ -199,13 +218,16 @@ pub fn load<T: MemoryColoring + Clone>(
             vga_virt.as_usize(),
             vga_phys.as_usize()
         );
-        stage2_loaded_elf.pt_mapper.map_range(
-            stage2_allocator,
-            vga_virt,
-            vga_phys,
-            info.vga_info.len,
-            PtFlag::PRESENT | PtFlag::WRITE,
-        );
+        match &mut stage2_loaded_elf.pt_mapper {
+            crate::elf::ELfTargetEnvironment::Host(host_mapper) => host_mapper.map_range(
+                stage2_allocator,
+                vga_virt,
+                vga_phys,
+                info.vga_info.len,
+                PtFlag::PRESENT | PtFlag::WRITE,
+            ),
+            crate::elf::ELfTargetEnvironment::Guest(_) => panic!("stage2 with guest mapper"),
+        };
     }
 
     // Map stage 2 into stage 1 page tables
@@ -217,20 +239,29 @@ pub fn load<T: MemoryColoring + Clone>(
             // Skip non-load segments.
             continue;
         }
-        unsafe { second_stage.map_segment(seg, pt_mapper, stage1_allocator) };
+        unsafe {
+            second_stage.map_segment(
+                seg,
+                &mut ELfTargetEnvironment::Host(pt_mapper.clone()),
+                stage1_allocator,
+            )
+        };
         if first_stage2_load_paddr.is_none() {
             first_stage2_load_paddr = Some(seg.phys_mem[0].start)
         }
     }
 
     // Map the MP wakeup mailbox page into stage 2
-    stage2_loaded_elf.pt_mapper.map_range(
-        stage2_allocator,
-        HostVirtAddr::new(smp.mailbox as usize),
-        HostPhysAddr::new(smp.mailbox as usize),
-        0x1000,
-        PtFlag::PRESENT | PtFlag::WRITE,
-    );
+    match &mut stage2_loaded_elf.pt_mapper {
+        crate::elf::ELfTargetEnvironment::Host(host_mapper) => host_mapper.map_range(
+            stage2_allocator,
+            HostVirtAddr::new(smp.mailbox as usize),
+            HostPhysAddr::new(smp.mailbox as usize),
+            0x1000,
+            PtFlag::PRESENT | PtFlag::WRITE,
+        ),
+        crate::elf::ELfTargetEnvironment::Guest(_) => panic!("stage2 with guest mapper"),
+    };
 
     smp_stacks
         .iter()
@@ -268,7 +299,13 @@ pub fn load<T: MemoryColoring + Clone>(
         ptr as *mut bool
     };
 
-    manifest.cr3 = stage2_loaded_elf.pt_root_spa.as_u64();
+    match stage2_loaded_elf.pt_mapper {
+        crate::elf::ELfTargetEnvironment::Host(host_mapper) => {
+            manifest.cr3 = host_mapper.get_pt_root().as_u64()
+        }
+        crate::elf::ELfTargetEnvironment::Guest(_) => panic!("stage2_laoded elf used guest mapper"),
+    }
+    //manifest.cr3 = stage2_loaded_elf.pt_root_spa.as_u64();
     println!("setting manifset.cr3 to 0x{:x}", manifest.cr3);
     manifest.info = info.guest_info.clone();
     manifest.iommu = info.iommu;

@@ -4,6 +4,7 @@ mod ffi;
 pub mod relocate;
 
 use alloc::vec::Vec;
+use core::marker::PhantomData;
 use core::str::from_utf8;
 
 pub use ffi::{
@@ -12,11 +13,14 @@ pub use ffi::{
 };
 use log::info;
 use mmu::frame_allocator::PhysRange;
+use mmu::guest_ptmapper::GuestPtMapper;
 use mmu::ioptmapper::{PAGE_MASK, PAGE_SIZE};
+use mmu::ptmapper::DEFAULT_PROTS;
 use mmu::walker::Address;
-use mmu::{PtFlag, PtMapper, RangeAllocator};
+use mmu::{ptmapper, PtFlag, PtMapper, RangeAllocator};
 use qemu::println;
 use vmx::HostPhysAddr;
+use x86_64::{PhysAddr, VirtAddr};
 
 use crate::mmu::scattered_writer::ScatteredIdMappedBuf;
 use crate::{GuestPhysAddr, GuestVirtAddr, HostVirtAddr};
@@ -70,13 +74,18 @@ pub struct ElfProgram {
     mapping: ElfMapping,
 }
 
-pub struct LoadedElf<PhysAddr, VirtAddr> {
-    /// The root of initial page tables.
-    pub pt_root_spa: PhysAddr,
+pub enum ELfTargetEnvironment {
+    Host(PtMapper<HostPhysAddr, HostVirtAddr>),
+    Guest(GuestPtMapper<GuestPhysAddr, GuestVirtAddr>),
+}
+
+pub struct LoadedElf {
     /// Offset in the host, used to load the guest into memory.
-    host_physical_offset: HostVirtAddr,
+    host_physical_offset: usize,
     /// The page table mapper of the guest.
-    pub pt_mapper: PtMapper<PhysAddr, VirtAddr>,
+    pub pt_mapper: ELfTargetEnvironment,
+    //_virt: PhantomData<VirtAddr>,
+    //_phys: PhantomData<PhysAddr>,
 }
 
 impl ElfProgram {
@@ -143,19 +152,47 @@ impl ElfProgram {
     ///
     /// On success, returns the guest physical address of the guest page table root (to bet set as
     /// CR3).
-    pub fn load<PhysAddr, VirtAddr>(
+    pub fn load(
         &self,
         allocator: &impl RangeAllocator,
-        host_physical_offset: HostVirtAddr,
-    ) -> Result<LoadedElf<PhysAddr, VirtAddr>, ()>
-    where
-        PhysAddr: Address,
-        VirtAddr: Address,
-    {
-        let pt_root = allocator.allocate_frame().ok_or(())?.zeroed();
-        let pt_root_guest_phys_addr = PhysAddr::from_usize(pt_root.phys_addr.as_usize());
-        let mut pt_mapper =
-            PtMapper::new(host_physical_offset.as_usize(), 0, pt_root_guest_phys_addr);
+        host_physical_offset: usize,
+        build_gpa_pts: bool,
+    ) -> Result<LoadedElf, ()> {
+        let mut pts_target_env: ELfTargetEnvironment = if build_gpa_pts {
+            let inner_spa_pt_root = allocator.allocate_frame().ok_or(())?.zeroed();
+            let mut inner_pt_mapper = PtMapper::<HostPhysAddr, GuestPhysAddr>::new(
+                host_physical_offset,
+                0,
+                inner_spa_pt_root.phys_addr,
+            );
+
+            let gpa_pt_root = allocator.gpa_of_next_allocation();
+            let spa_pt_root = allocator.allocate_frame().ok_or(())?.zeroed();
+            log::info!(
+                "storing GPA 0x{:x} -> SPA 0x{:x} in inner mapper",
+                gpa_pt_root.as_u64(),
+                spa_pt_root.phys_addr.as_u64()
+            );
+            inner_pt_mapper.map_range(
+                allocator,
+                gpa_pt_root,
+                spa_pt_root.phys_addr,
+                PAGE_SIZE,
+                DEFAULT_PROTS,
+            );
+
+            let pt_mapper = GuestPtMapper::new(gpa_pt_root, inner_pt_mapper);
+            ELfTargetEnvironment::Guest(pt_mapper)
+        } else {
+            let pt_root = allocator.allocate_frame().ok_or(())?.zeroed();
+            let pt_root_guest_phys_addr = HostPhysAddr::from_usize(pt_root.phys_addr.as_usize());
+            let pt_mapper = PtMapper::<HostPhysAddr, HostVirtAddr>::new(
+                host_physical_offset,
+                0,
+                pt_root_guest_phys_addr,
+            );
+            ELfTargetEnvironment::Host(pt_mapper)
+        };
 
         // Load and map segments
         for seg in self.segments.iter() {
@@ -165,15 +202,14 @@ impl ElfProgram {
             }
             unsafe {
                 // TODO: ensure that the segment does not overlap host memory
-                self.load_segment(seg, host_physical_offset);
-                self.map_segment(seg, &mut pt_mapper, allocator);
+                self.load_segment(seg, HostVirtAddr::new(host_physical_offset));
+                self.map_segment(seg, &mut pts_target_env, allocator);
             }
         }
 
         Ok(LoadedElf {
-            pt_root_spa: pt_root_guest_phys_addr,
+            pt_mapper: pts_target_env,
             host_physical_offset,
-            pt_mapper,
         })
     }
 
@@ -263,15 +299,12 @@ impl ElfProgram {
     /// # Arguments
     /// - `mapper` page table "abstractions" to which the mappins are added
     /// - `allocator` : mostly used to allocate memory for page table entires
-    pub unsafe fn map_segment<PhysAddr, VirtAddr>(
+    pub unsafe fn map_segment(
         &self,
         segment: &NonContigElf64Phdr,
-        mapper: &mut PtMapper<PhysAddr, VirtAddr>,
+        mapping_env: &mut ELfTargetEnvironment,
         allocator: &impl RangeAllocator,
-    ) where
-        PhysAddr: Address,
-        VirtAddr: Address,
-    {
+    ) {
         let align_page_down = |addr: u64| addr & !(PAGE_SIZE as u64 - 1);
         let p_vaddr = align_page_down(segment.phdr.p_vaddr);
 
@@ -284,24 +317,38 @@ impl ElfProgram {
         assert!(segment.phys_mem[0].start.as_usize() % PAGE_SIZE == 0);
 
         match self.mapping {
-            ElfMapping::ElfDefault => {
-                mapper.map_range(
+            ElfMapping::ElfDefault => match mapping_env {
+                ELfTargetEnvironment::Host(host_mapper) => host_mapper.map_range(
                     allocator,
-                    VirtAddr::from_u64(p_vaddr),
-                    PhysAddr::from_u64(segment.phys_mem[0].start.as_u64()),
+                    HostVirtAddr::from_u64(p_vaddr),
+                    HostPhysAddr::from_u64(segment.phys_mem[0].start.as_u64()),
                     memsz as usize,
                     flags_to_prot(segment.phdr.p_flags),
-                );
-            }
-            ElfMapping::Identity => {
-                mapper.map_range(
+                ),
+                ELfTargetEnvironment::Guest(guest_mapper) => guest_mapper.map_range(
                     allocator,
-                    VirtAddr::from_u64(segment.phys_mem[0].start.as_u64()),
-                    PhysAddr::from_u64(segment.phys_mem[0].start.as_u64()),
+                    GuestVirtAddr::from_u64(p_vaddr),
+                    GuestPhysAddr::new(segment.phys_mem[0].start.as_usize()),
                     memsz as usize,
                     flags_to_prot(segment.phdr.p_flags),
-                );
-            }
+                ),
+            },
+            ElfMapping::Identity => match mapping_env {
+                ELfTargetEnvironment::Host(host_mapper) => host_mapper.map_range(
+                    allocator,
+                    HostVirtAddr::from_u64(segment.phys_mem[0].start.as_u64()),
+                    HostPhysAddr::from_u64(segment.phys_mem[0].start.as_u64()),
+                    memsz as usize,
+                    flags_to_prot(segment.phdr.p_flags),
+                ),
+                ELfTargetEnvironment::Guest(guest_mapper) => guest_mapper.map_range(
+                    allocator,
+                    GuestVirtAddr::from_u64(segment.phys_mem[0].start.as_u64()),
+                    GuestPhysAddr::from_u64(segment.phys_mem[0].start.as_u64()),
+                    memsz as usize,
+                    flags_to_prot(segment.phdr.p_flags),
+                ),
+            },
             ElfMapping::Scattered => {
                 let p_vaddr = align_page_down(segment.phdr.p_vaddr);
 
@@ -313,21 +360,26 @@ impl ElfProgram {
                 assert!(p_vaddr % PAGE_SIZE as u64 == 0);
                 assert!(segment.phys_mem[0].start.as_usize() % PAGE_SIZE == 0);
 
-                log::info!(
-                    "ElfProgram calling map_range_scattered for p_vaddr 0x{:x}, ranges {:x?}",
-                    p_vaddr,
-                    segment.phys_mem
-                );
-                mapper
-                    .map_range_scattered(
-                        allocator,
-                        VirtAddr::from_u64(p_vaddr),
-                        &segment.phys_mem,
-                        memsz as usize,
-                        flags_to_prot(segment.phdr.p_flags),
-                    )
-                    .expect("failed to map segment using Scattered mapping");
-                println!("\n\n");
+                match mapping_env {
+                    ELfTargetEnvironment::Host(host_mapper) => host_mapper
+                        .map_range_scattered(
+                            allocator,
+                            HostVirtAddr::from_u64(p_vaddr),
+                            &segment.phys_mem,
+                            memsz as usize,
+                            flags_to_prot(segment.phdr.p_flags),
+                        )
+                        .expect("failed to map segment using Scattered mapping"),
+                    ELfTargetEnvironment::Guest(guest_mapper) => guest_mapper
+                        .map_range_scattered(
+                            allocator,
+                            GuestVirtAddr::from_u64(p_vaddr),
+                            &segment.phys_mem,
+                            memsz as usize,
+                            flags_to_prot(segment.phdr.p_flags),
+                        )
+                        .expect("failed to map segment using Scattered mapping"),
+                }
             }
             ElfMapping::ScatteredPaddr => {
                 let p_paddr = align_page_down(segment.phdr.p_paddr);
@@ -340,21 +392,26 @@ impl ElfProgram {
                 assert!(p_paddr % PAGE_SIZE as u64 == 0);
                 assert!(segment.phys_mem[0].start.as_usize() % PAGE_SIZE == 0);
 
-                log::info!(
-                    "ElfProgram calling map_range_scattered for p_paddr 0x{:x}, ranges {:x?}",
-                    p_paddr,
-                    segment.phys_mem
-                );
-                mapper
-                    .map_range_scattered(
-                        allocator,
-                        VirtAddr::from_u64(p_paddr),
-                        &segment.phys_mem,
-                        memsz as usize,
-                        flags_to_prot(segment.phdr.p_flags),
-                    )
-                    .expect("failed to map segment using Scattered mapping");
-                println!("\n\n");
+                match mapping_env {
+                    ELfTargetEnvironment::Host(host_mapper) => host_mapper
+                        .map_range_scattered(
+                            allocator,
+                            HostVirtAddr::from_u64(p_paddr),
+                            &segment.phys_mem,
+                            memsz as usize,
+                            flags_to_prot(segment.phdr.p_flags),
+                        )
+                        .expect("failed to map segment using Scattered mapping"),
+                    ELfTargetEnvironment::Guest(guest_mapper) => guest_mapper
+                        .map_range_scattered(
+                            allocator,
+                            GuestVirtAddr::from_u64(p_paddr),
+                            &segment.phys_mem,
+                            memsz as usize,
+                            flags_to_prot(segment.phdr.p_flags),
+                        )
+                        .expect("failed to map segment using Scattered mapping"),
+                }
             }
         }
     }
@@ -396,28 +453,29 @@ impl ElfProgram {
     }
 }
 
-impl<PhysAddr, VirtAddr> LoadedElf<PhysAddr, VirtAddr>
-where
-    PhysAddr: Address,
-    VirtAddr: Address,
-{
-    /// Load some arbitrary data into memory using the given allocator, assumign an identity mapping
-    /// Returns the first physical address of the loaded data. The data is not guaranteed to be loaded
-    /// to contiguous physical memory though
-    pub fn add_payload(&mut self, data: &[u8], allocator: &impl RangeAllocator) -> GuestPhysAddr {
+impl LoadedElf {
+    /// Load some arbitrary data into memory using the given allocator. The data is loaded contigously in the colored
+    /// GPA space but not in the host physical space. We add an identity GVA->GPA mapping to the PTs
+    pub fn add_payload(&mut self, data: &[u8], allocator: &impl RangeAllocator) -> GuestVirtAddr {
         let mut ranges = Vec::new();
-        //While the guest address space does not exist at this point, we can already derive the address
-        //where we will map the memory range that we allocate next
         let payload_contig_start_gpa = allocator.gpa_of_next_allocation();
         allocator
             .allocate_range(data.len(), |pr: PhysRange| ranges.push(pr))
             .expect("failed to allocate memory for payload");
         //use the identity mapping of the current stage1, to load `data`` to phys addrs in `ranges`
-        let mut dest = ScatteredIdMappedBuf::new(ranges, self.host_physical_offset.as_usize(), 0);
+        let mut dest = ScatteredIdMappedBuf::new(ranges.clone(), self.host_physical_offset, 0);
         dest.write(data)
             .expect("failed to write payload's data to memory");
 
-        payload_contig_start_gpa
+        let payload_gva = GuestVirtAddr::new(payload_contig_start_gpa.as_usize());
+        match &mut self.pt_mapper {
+            ELfTargetEnvironment::Host(_) => panic!("add_payload called with host mapping"),
+            ELfTargetEnvironment::Guest(guest_mapper) => guest_mapper
+                .map_range_scattered(allocator, payload_gva, &ranges, data.len(), DEFAULT_PROTS)
+                .expect("failed to map payload"),
+        };
+
+        payload_gva
     }
 
     /// Adds a stack to the guest, with an extra guard page.
@@ -425,12 +483,13 @@ where
     /// Returns the virtual address of the start of the stack (highest address with SysV
     /// conventions, to be put in %rsp) as well as the physical address corresponding to the start
     /// of the stack.
+    //luca: we only call this for stage2
     pub fn add_stack(
         &mut self,
         stack_virt_addr: VirtAddr,
         size: usize,
         guest_allocator: &impl RangeAllocator,
-    ) -> (VirtAddr, PhysAddr) {
+    ) -> (HostVirtAddr, HostPhysAddr) {
         assert!(
             size % PAGE_SIZE == 0,
             "Stack size must be a multiple of page size"
@@ -444,39 +503,45 @@ where
             .allocate_range(size + PAGE_SIZE, store_cb)
             .expect("Failed to allocate stack");
         // Map guard page
-        let guard_virt_addr = VirtAddr::from_usize(stack_virt_addr.as_usize() - PAGE_SIZE);
-        let guard_phys_addr = PhysAddr::from_usize(ranges[0].start.as_usize());
+        let guard_virt_addr = HostVirtAddr::new(stack_virt_addr.as_u64() as usize - PAGE_SIZE);
+        let guard_phys_addr = HostPhysAddr::new(ranges[0].start.as_usize());
         let stack_guard_prot = PtFlag::PRESENT | PtFlag::EXEC_DISABLE;
-        self.pt_mapper.map_range(
-            guest_allocator,
-            guard_virt_addr,
-            guard_phys_addr,
-            PAGE_SIZE,
-            stack_guard_prot,
-        );
+        match &mut self.pt_mapper {
+            ELfTargetEnvironment::Host(host_mapper) => host_mapper.map_range(
+                guest_allocator,
+                guard_virt_addr,
+                guard_phys_addr,
+                PAGE_SIZE,
+                stack_guard_prot,
+            ),
+            ELfTargetEnvironment::Guest(_) => panic!("add stack called for host mapping"),
+        };
 
         // Map stack
 
         //We allocated the guard page and the remaining stack pages in one go.
         //The "second" physical address is thus the start addr of the actual stack. If the first mem range
         //is only one page, this means we have to use the second mem range entry
-        let stack_phys_addr = PhysAddr::from_usize(if ranges[0].size() >= 2 * PAGE_SIZE {
+        let stack_phys_addr = HostPhysAddr::from_usize(if ranges[0].size() >= 2 * PAGE_SIZE {
             ranges[0].start.as_usize() + PAGE_SIZE
         } else {
             ranges[1].start.as_usize()
         });
         let stack_prot = PtFlag::WRITE | PtFlag::PRESENT | PtFlag::EXEC_DISABLE | PtFlag::USER;
-        self.pt_mapper.map_range(
-            guest_allocator,
-            stack_virt_addr,
-            stack_phys_addr,
-            size,
-            stack_prot,
-        );
+        match &mut self.pt_mapper {
+            ELfTargetEnvironment::Host(host_mapper) => host_mapper.map_range(
+                guest_allocator,
+                HostVirtAddr::new(stack_virt_addr.as_u64() as usize),
+                stack_phys_addr,
+                size,
+                stack_prot,
+            ),
+            ELfTargetEnvironment::Guest(_) => panic!("add stack called for host mapping"),
+        };
 
         // Start at the top of the stack. Note that the stack must be 16 bytes aligned with SysV
         // conventions.
-        let rsp = VirtAddr::from_usize(stack_virt_addr.as_usize() + size - 16);
+        let rsp = HostVirtAddr::from_usize(stack_virt_addr.as_u64() as usize + size - 16);
         (rsp, stack_phys_addr)
     }
 }

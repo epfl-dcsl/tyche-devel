@@ -36,15 +36,15 @@ pub const PRESENT: IoPtFlag = IoPtFlag::READ
     .union(IoPtFlag::EXECUTE);
 
 unsafe impl Walker for IoPtMapper {
-    type PhysAddr = HostPhysAddr;
-    type VirtAddr = GuestPhysAddr;
+    type WalkerPhysAddr = HostPhysAddr;
+    type WalkerVirtAddr = GuestPhysAddr;
 
-    fn translate(&self, phys_addr: Self::PhysAddr) -> HostVirtAddr {
+    fn translate(&self, phys_addr: Self::WalkerPhysAddr) -> HostVirtAddr {
         HostVirtAddr::new(phys_addr.as_usize() + self.host_offset)
     }
 
     //#[cfg(not(feature = "visionfive2"))]
-    fn root(&mut self) -> (Self::PhysAddr, Level) {
+    fn root(&mut self) -> (Self::WalkerPhysAddr, Level) {
         (self.root, Level::L4)
     }
 
@@ -54,8 +54,8 @@ unsafe impl Walker for IoPtMapper {
                     // compilation. So I had to put a proxy here.
     } */
 
-    fn get_phys_addr(entry: u64) -> Self::PhysAddr {
-        Self::PhysAddr::from_u64(entry & ADDRESS_MASK)
+    fn get_phys_addr(entry: u64) -> Self::WalkerPhysAddr {
+        Self::WalkerPhysAddr::from_u64(entry & ADDRESS_MASK)
     }
 }
 

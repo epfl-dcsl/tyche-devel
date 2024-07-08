@@ -10,7 +10,7 @@ use core::panic::PanicInfo;
 use core::sync::atomic::Ordering;
 
 use acpi::AcpiTables;
-use bootloader::boot_info::MemoryRegionKind;
+use bootloader::boot_info::{MemoryRegion, MemoryRegionKind};
 use bootloader::{entry_point, BootInfo};
 use log::LevelFilter;
 use mmu::memory_coloring::MemoryColoring;
@@ -28,6 +28,20 @@ const LOG_LEVEL: LevelFilter = LevelFilter::Info;
 
 entry_point!(kernel_main);
 
+fn sort_memregions(mem_regions: &mut [MemoryRegion]) {
+    let mut swapped = true;
+
+    while swapped {
+        swapped = false;
+        for i in 1..mem_regions.len() {
+            if mem_regions[i - 1].start > mem_regions[i].start {
+                mem_regions.swap(i - 1, i);
+                swapped = true;
+            }
+        }
+    }
+}
+
 fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     // Initialize display, if any
     let mut vga_info = VgaInfo::no_vga();
@@ -37,6 +51,8 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     logger::init(LOG_LEVEL);
     println!("============= First Stage =============");
 
+    //for some reason there is an unsorted entry in there. This makes the mem whole detection logic much harder
+    sort_memregions(&mut boot_info.memory_regions);
     // Initialize memory management
     let physical_memory_offset = HostVirtAddr::new(
         boot_info

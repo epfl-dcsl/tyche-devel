@@ -224,12 +224,12 @@ pub trait Monitor<T: PlatformState + 'static> {
         for mr in manifest.get_boot_mem_regions() {
             match mr.kind {
                 MemoryRegionKind::UseableRAM => {
-                    /*log::info!(
+                    log::info!(
                         "RAM root region start 0x{:x}, end 0x{:x}, size 0x{:x}",
                         mr.start,
                         mr.end,
                         mr.end - mr.start,
-                    );*/
+                    );
                     engine
                         .create_root_region(
                             domain,
@@ -244,12 +244,12 @@ pub trait Monitor<T: PlatformState + 'static> {
                 }
                 MemoryRegionKind::UsedByStage1Allocator => (), //should not ne mapped anywhere
                 MemoryRegionKind::Reserved => {
-                    /*log::info!(
+                    log::info!(
                         "Fake device root region, start 0x{:x}, end 0x{:x}, size 0x{:x}",
                         mr.start,
                         mr.end,
                         mr.end - mr.start,
-                    );*/
+                    );
                     if let Err(e) = engine.create_root_region(
                         domain,
                         AccessRights {
@@ -272,12 +272,10 @@ pub trait Monitor<T: PlatformState + 'static> {
         assert_ne!(prev.kind, MemoryRegionKind::UsedByStage1Allocator);
         for cur in manifest.get_boot_mem_regions().iter().skip(1) {
             if cur.start < prev.end {
-                log::info!(
-                    "ingoring weird, unsorted entry: 0x{:x} to 0x{:x}",
-                    cur.start,
-                    prev.end
+                panic!(
+                    "weird, unsorted entry: 0x{:x} to 0x{:x}",
+                    cur.start, prev.end
                 );
-                continue;
             }
             if cur.kind == MemoryRegionKind::UsedByStage1Allocator {
                 prev = cur;
@@ -288,13 +286,13 @@ pub trait Monitor<T: PlatformState + 'static> {
                 prev = cur;
                 continue;
             }
-            /*log::info!(
+            log::info!(
                 "Device root region start 0x{:x}, end 0x{:x}. prev {:x?}, cur {:x?}",
                 prev.end,
                 cur.start,
                 prev,
                 cur
-            );*/
+            );
             if let Err(e) = engine.create_root_region(
                 domain,
                 AccessRights {

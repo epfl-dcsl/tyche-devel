@@ -1,8 +1,11 @@
+use core::cmp::max;
 use core::marker::PhantomData;
 
 use bitflags::bitflags;
 use utils::HostVirtAddr;
 use vmx::ept::PAGE_SIZE;
+use vmx::GuestPhysAddr;
+use x86_64::{PhysAddr, VirtAddr};
 
 use super::frame_allocator::FrameAllocator;
 use super::walker::{Address, Level, WalkNext, Walker};
@@ -12,6 +15,7 @@ static PAGE_MASK: usize = !(0x1000 - 1);
 
 pub const ADDRESS_MASK: u64 = 0x7fffffffff000;
 
+#[derive(Clone)]
 pub struct PtMapper<PhysAddr, VirtAddr> {
     /// Offset between host physical memory and virtual memory.
     /// We use this to easily to a "reverse lookup", i.e. phys to virt
@@ -23,6 +27,8 @@ pub struct PtMapper<PhysAddr, VirtAddr> {
     /// this assumes that the underlying physical memory is contiguous
     enable_pse: bool,
     _virt: PhantomData<VirtAddr>,
+    //keep track of the largest vaddr used by these tables
+    highest_used_vaddr: VirtAddr,
 }
 
 bitflags! {
@@ -57,15 +63,15 @@ where
     PhysAddr: Address,
     VirtAddr: Address,
 {
-    type PhysAddr = PhysAddr;
-    type VirtAddr = VirtAddr;
+    type WalkerPhysAddr = PhysAddr;
+    type WalkerVirtAddr = VirtAddr;
 
-    fn translate(&self, phys_addr: Self::PhysAddr) -> HostVirtAddr {
+    fn translate(&self, phys_addr: Self::WalkerPhysAddr) -> HostVirtAddr {
         HostVirtAddr::new(phys_addr.as_usize() + self.offset + self.host_offset)
     }
 
     //#[cfg(not(feature = "visionfive2"))]
-    fn root(&mut self) -> (Self::PhysAddr, Level) {
+    fn root(&mut self) -> (Self::WalkerPhysAddr, Level) {
         (self.root, Level::L4)
     }
 
@@ -74,8 +80,8 @@ where
         todo!();
     } */
 
-    fn get_phys_addr(entry: u64) -> Self::PhysAddr {
-        Self::PhysAddr::from_u64(entry & ADDRESS_MASK)
+    fn get_phys_addr(entry: u64) -> Self::WalkerPhysAddr {
+        Self::WalkerPhysAddr::from_u64(entry & ADDRESS_MASK)
     }
 }
 
@@ -91,6 +97,7 @@ where
             root,
             enable_pse: true,
             _virt: PhantomData,
+            highest_used_vaddr: VirtAddr::from_u64(0),
         }
     }
 
@@ -98,6 +105,10 @@ where
         let mut r = Self::new(host_offset, offset, root);
         r.enable_pse = false;
         r
+    }
+
+    pub fn get_pt_root(&self) -> PhysAddr {
+        self.root
     }
 
     pub fn translate(&mut self, virt_addr: VirtAddr) -> Option<PhysAddr> {
@@ -124,6 +135,61 @@ where
         }
 
         phys_addr
+    }
+
+    pub fn get_highest_vaddr(&mut self) -> VirtAddr {
+        self.highest_used_vaddr
+    }
+
+    pub fn get_entry(&mut self, v: VirtAddr) -> Option<PhysAddr> {
+        let target_vaddr = v;
+        let mut target_paddr: Option<PhysAddr> = None;
+        //log::info!("searching ptmapper for 0x{:x}", v.as_u64());
+        let walk_result = unsafe {
+            self.walk_range(
+                target_vaddr,
+                VirtAddr::from_usize(target_vaddr.as_usize() + PAGE_SIZE),
+                &mut |addr, entry, level| {
+                    let flags = PtFlag::from_bits_truncate(*entry);
+                    let phys = *entry & ((1 << 63) - 1) & (PAGE_MASK as u64);
+
+                    // Print if present
+                    if flags.contains(PtFlag::PRESENT) {
+                        /*let padding = match level {
+                            Level::L4 => "",
+                            Level::L3 => "  ",
+                            Level::L2 => "    ",
+                            Level::L1 => "      ",
+                        };
+                        log::info!(
+                            "{}{:?} Virt: 0x{:x} - Phys: 0x{:x} - {:?}\n",
+                            padding,
+                            level,
+                            addr.as_usize(),
+                            phys,
+                            flags
+                        );*/
+                        if addr == target_vaddr && level == Level::L1 {
+                            target_paddr = Some(PhysAddr::from_u64(phys));
+                            WalkNext::Abort
+                        } else {
+                            WalkNext::Continue
+                        }
+                    } else {
+                        WalkNext::Leaf
+                    }
+                },
+            )
+        };
+        match (walk_result, target_paddr) {
+            (Ok(_), None) => None,
+            (Ok(_), Some(v)) => Some(v),
+            (Err(_), None) => panic!("get_entry, page table walk failed"),
+            //when we reach the target node, we immediately abort the Pt walk with WalkNext::Abort
+            //This will cause the walker to return an error. However, since target_paddr was set to Some
+            //we know that we reached target node
+            (Err(_), Some(v)) => Some(v),
+        }
     }
 
     /// Convenience wrapper around `map_range` that maps the contiguous virtual address range from
@@ -256,6 +322,10 @@ where
                 },
             )
             .expect("Failed to map PTs");
+            self.highest_used_vaddr = VirtAddr::from_usize(max(
+                self.highest_used_vaddr.as_usize(),
+                virt_addr.as_usize() + size,
+            ));
         }
     }
 

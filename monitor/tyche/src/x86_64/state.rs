@@ -203,7 +203,8 @@ impl StateX86 {
             .sum::<u64>() as f64
             / ((1 << 30) as f64);
         log::info!("boot mem regions can represent {} GiB", boot_mem_region_gib);
-
+        let mut mapped_ram_bytes = 0;
+        let mut mapped_device_bytes = 0;
         for (_, range) in domain.remapper.remap(permission_iter).enumerate() {
             if !range.ops.contains(MemOps::READ) {
                 log::error!("there is a region without read permission: {}", range);
@@ -252,12 +253,12 @@ impl StateX86 {
                     //TODO:have not yet implemented support for multiple repeat
                     assert!(range.repeat == 1);
 
-                    /*log::info!(
-                        "processing ram mapping start 0x{:x}, end 0x{:x}, size 0x{:x}",
+                    log::info!(
+                        "processing start 0x{:013x}, end 0x{:013x}, size 0x{:013x}, type RAM",
                         range.hpa,
                         range.hpa + range.size,
                         range.size
-                    );*/
+                    );
                     color_to_phys.visit_all_as_ranges(|partition_chunk| {
                         //figure out amout of bytes we can map before hitting the next range blocked for a device
                         let mut remaining_chunk_bytes = partition_chunk.size();
@@ -297,6 +298,7 @@ impl StateX86 {
                                 map_size,
                                 flags,
                             );
+                            mapped_ram_bytes += map_size;
                             remaining_chunk_bytes -= map_size;
                             next_ram_gpa += map_size;
                             if advance_next_blocked {
@@ -304,11 +306,11 @@ impl StateX86 {
                                 .as_ref()
                                 .expect("advance_next_blocked true but next block was None");
 
-                                //log::info!("skipping over device region at 0x{:x} to 0x{:x}", dev_region.hpa, dev_region.hpa+dev_region.size);
+                                log::info!("skipping over device region at 0x{:x} to 0x{:x}", dev_region.hpa, dev_region.hpa+dev_region.size);
 
+                                assert_eq!(next_ram_gpa, dev_region.hpa);
                                 next_ram_gpa += dev_region
                                     .size;
-
                                 next_blocked = next_blocked_iter.next();
                             }
                         } // end of "while remaining_chunk_bytes > 0"
@@ -317,6 +319,12 @@ impl StateX86 {
                 }
                 // Device memory must be identity mapped, to pass through the access to the pyhsical HW
                 capa_engine::ResourceKind::Device => {
+                    log::info!(
+                        "processing start 0x{:013x}, end 0x{:013x}, size 0x{:013x}, type Device",
+                        range.hpa,
+                        range.hpa + range.size,
+                        range.size
+                    );
                     mapper.map_range(
                         allocator,
                         GuestPhysAddr::new(range.hpa),
@@ -324,11 +332,29 @@ impl StateX86 {
                         range.size,
                         flags,
                     );
+                    mapped_device_bytes += range.size;
                 }
             } // end of "match resource_kind"
         }
 
-        log::info!("GPA->SPA Linux load segment 00");
+        log::info!("next_ram_gpa at end of mapping phase: 0x{:x}", next_ram_gpa);
+        log::info!(
+            "Mapped RAM {:0.2} GiB (0x{:x}) bytes)",
+            mapped_ram_bytes as f64 / (1 << 30) as f64,
+            mapped_ram_bytes
+        );
+        log::info!(
+            "Mapped Device {:0.2} GiB (0x{:x} bytes)",
+            mapped_device_bytes as f64 / (1 << 30) as f64,
+            mapped_device_bytes
+        );
+        log::info!(
+            "Total Mapped {:0.2} GiB (0x{:x} bytes",
+            (mapped_ram_bytes + mapped_device_bytes) as f64 / (1 << 30) as f64,
+            mapped_ram_bytes + mapped_device_bytes
+        );
+
+        /*log::info!("GPA->SPA Linux load segment 00");
         mapper.debug_range(GuestPhysAddr::new(0x1000000), 3 * PAGE_SIZE);
 
         log::info!("GPA->SPA Linux load segment 01");
@@ -341,7 +367,15 @@ impl StateX86 {
         mapper.debug_range(GuestPhysAddr::new(0x3268000), 3 * PAGE_SIZE);
 
         log::info!("GPA->SPA Linux CR3");
-        mapper.debug_range(GuestPhysAddr::new(0x7f328000), 0x1000);
+        mapper.debug_range(GuestPhysAddr::new(0x3829000), 0x1000);
+        log::info!("GPA->SPA for pages on PT walk for entry point");
+        let addrs_walk_entry = [0x382d000, 0x382e000, 0x382f000];
+        for x in addrs_walk_entry {
+            mapper.debug_range(GuestPhysAddr::new(x), 0x1000);
+        }*/
+
+        log::info!("GPA->SPA for 0x1ce9fd000");
+        mapper.debug_range(GuestPhysAddr::new(0x1ce9ff000), 0x2000);
 
         /*for (mr_idx, mr) in get_manifest().get_boot_mem_regions().iter().enumerate() {
             log::info!("mr_idx {:02} excerpt of PTs for mr {:x?}", mr_idx, mr);

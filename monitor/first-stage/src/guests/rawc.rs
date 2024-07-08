@@ -42,7 +42,8 @@ impl Guest for RawcBytes {
         color_map: &PartitionedMemoryMap<T>,
         _rsdp: u64,
     ) -> ManifestInfo {
-        let mut manifest = ManifestInfo::default();
+        todo!();
+        /*let mut manifest = ManifestInfo::default();
         let rawc_prog = ElfProgram::new(RAWCBYTES);
         let virtoffset = host_allocator.get_physical_offset();
 
@@ -95,6 +96,6 @@ impl Guest for RawcBytes {
         info.loaded = true;
         manifest.guest_info = info;
 
-        manifest
+        manifest*/
     }
 }

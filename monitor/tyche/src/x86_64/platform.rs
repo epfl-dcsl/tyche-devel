@@ -7,7 +7,7 @@ use capa_engine::context::RegisterGroup;
 use capa_engine::utils::BitmapIterator;
 use capa_engine::{AccessRights, CapaEngine, CapaError, Domain, Handle, MemOps};
 use mmu::eptmapper::EPT_ROOT_FLAGS;
-use mmu::FrameAllocator;
+use mmu::{EptMapper, FrameAllocator};
 use spin::MutexGuard;
 use stage_two_abi::{GuestInfo, Manifest};
 use utils::HostPhysAddr;
@@ -705,14 +705,16 @@ impl MonitorX86 {
             panic!("The vcpu {:x?}", vs.vcpu);
         }
         VmxExitReason::Exception if domain.idx() == 0 => {
-    
+            //luca: Table C-1. Basic Exit Reasons gives an overview of VmxExitReason
+            //luca: "executions of UD0, UD1, and UD2 (they cause #UD"
 
             let exception_info = vs.vcpu.get(VmcsField::ExitQualification).unwrap();
             let exception_vector = vs.vcpu.get(VmcsField::IdtVectoringInfoField).unwrap();
             let error_code = vs.vcpu.get(VmcsField::VmExitIntrErrorCode).unwrap();
-            log::error!("Exception Vector: {:#x}", exception_vector);
-            log::error!("Error Code: {:#x}", error_code);
-            log::error!("Exception Information: {:#x}", exception_info);
+            log::error!("VmcsField::VmExitReason: {:#x}", vs.vcpu.get(VmcsField::VmExitReason).unwrap());
+            log::error!("VmcsField::IdtVectoringInfoField: {:#x}", exception_vector);
+            log::error!("VmcsField::VmExitIntrErrorCode: {:#x}", error_code);
+            log::error!("VmcsField::ExitQualification: {:#x}", exception_info);
             log::error!("VCPU Dump  0x{:x?}", vs.vcpu);
     
 
@@ -816,6 +818,11 @@ impl MonitorX86 {
                     return Ok(HandlerResult::Crash);
                 }
             }
+        }
+        | VmxExitReason::MonitorTrapFlag => {
+            log::trace!("Handling MinitorTrapFlag exit");
+            log::info!("VCPU state: {:x?}", vs.vcpu);
+            return Ok(HandlerResult::Resume);
         }
         _ => {
             log::error!(

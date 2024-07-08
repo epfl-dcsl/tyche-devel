@@ -147,7 +147,14 @@ impl<T: MemoryColoring + Clone> PartitionedMemoryMap<T> {
             MemoryRange::ColoredRange(cr) => cr.mem_bytes,
             MemoryRange::PhysContigRange(pr) => pr.size(),
         };
+        log::info!(
+            "Building guset memory map assuming {:0.2} GiB of Memory",
+            guest_mem_bytes as f64 / (1 << 30) as f64
+        );
         let mut remaining_guest_mem_bytes = guest_mem_bytes as u64;
+
+        let mut ram_bytes = 0;
+        let mut device_bytes = 0;
 
         for bl_mr in self.all_regions {
             let bl_mr_bytes = bl_mr.end - bl_mr.start;
@@ -156,11 +163,12 @@ impl<T: MemoryColoring + Clone> PartitionedMemoryMap<T> {
                 MemoryRegionKind::Usable => {
                     //No more guest memory,
                     if remaining_guest_mem_bytes <= 0 {
-                        result.push(E820Entry {
+                        log::info!("dropping {:x?}", bl_mr);
+                        /*result.push(E820Entry {
                             addr: GuestPhysAddr::new(bl_mr.start as usize),
                             size: bl_mr_bytes,
                             mem_type: E820Types::Reserved,
-                        });
+                        });*/
                     //remaining guest memory is >=  bl_mr -> use whole region
                     } else if remaining_guest_mem_bytes >= bl_mr_bytes {
                         result.push(E820Entry {
@@ -169,20 +177,27 @@ impl<T: MemoryColoring + Clone> PartitionedMemoryMap<T> {
                             mem_type: E820Types::Ram,
                         });
                         remaining_guest_mem_bytes -= bl_mr_bytes;
+                        ram_bytes += bl_mr_bytes;
                     // remaining guest memory > 0 but smaller than region -> split region
                     } else {
+                        log::info!("Splitting final memory region. Useable 0x{:x} to 0x{:x}, blocking 0x{:x} to 0x{:x}",
+                        bl_mr.start, bl_mr.start+remaining_guest_mem_bytes, bl_mr.start + remaining_guest_mem_bytes, bl_mr.start + remaining_guest_mem_bytes + bl_mr_bytes - remaining_guest_mem_bytes 
+                    );
                         result.push(E820Entry {
                             addr: GuestPhysAddr::new(bl_mr.start as usize),
                             size: remaining_guest_mem_bytes,
                             mem_type: E820Types::Ram,
                         });
-                        result.push(E820Entry {
+                        /*result.push(E820Entry {
                             addr: GuestPhysAddr::new(
                                 (bl_mr.start + remaining_guest_mem_bytes) as usize,
                             ),
                             size: bl_mr_bytes - remaining_guest_mem_bytes,
                             mem_type: E820Types::Reserved,
-                        });
+                        });*/
+                        ram_bytes += remaining_guest_mem_bytes;
+                        assert!(remaining_guest_mem_bytes > 0 && remaining_guest_mem_bytes < bl_mr_bytes);
+                        remaining_guest_mem_bytes = 0;
                     }
                 }
                 //TODO: If we pass this pass this through
@@ -194,17 +209,27 @@ impl<T: MemoryColoring + Clone> PartitionedMemoryMap<T> {
                         size: bl_mr_bytes,
                         mem_type: E820Types::Ram,
                     });
+                    device_bytes += bl_mr_bytes;
+                    log::info!("0x{:x} to {:x} was BIOS but is now RAM", bl_mr.start, bl_mr.start+bl_mr_bytes);
                 }
+                //we used this to mark memory used by the stage1 allocator.
+                //just drop
+                MemoryRegionKind::UnknownBios(42) => (),
+                //passthrough
                 MemoryRegionKind::UnknownUefi(_) | MemoryRegionKind::UnknownBios(_) => {
                     result.push(E820Entry {
                         addr: GuestPhysAddr::new(bl_mr.start as usize),
                         size: bl_mr_bytes,
                         mem_type: E820Types::Reserved,
                     });
+                    device_bytes += bl_mr_bytes;
                 }
                 _ => todo!("Unknown boot loader memory type when building guest memory regions"),
             }
         }
+        log::info!("RAM: {:0.2} GiB (0x{:x} bytes). Device {:0.2} GiB (0x{:x} bytes)", ram_bytes as f64 / (1<<30) as f64, ram_bytes, device_bytes as f64 / (1<<30) as f64, device_bytes);
+        log::info!("Mem regions before: {}. Mem regions after: {}", self.all_regions.len(), result.len());
+
         result
     }
 
@@ -567,7 +592,7 @@ impl<T: MemoryColoring + Clone> ColoringRangeFrameAllocator<T> {
                 );
                 self.gpa_of_next_allocation.set(updated);
             } else if prev_region.end > mr.start {
-                log::info!("ignoring weird unsorted memory region for gap calculation");
+               panic!("weird unsorted memory region in gpa calculation");
             }
             //fallthrough is intended, we can have a GAP and then then e.g. the region is also not useable
             match mr.kind {

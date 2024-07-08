@@ -1,8 +1,12 @@
 //! Linux Guest
 
+use core::ptr::slice_from_raw_parts;
+use core::slice;
+
 use mmu::ioptmapper::PAGE_SIZE;
 use mmu::memory_coloring::MemoryColoring;
 use mmu::RangeAllocator;
+use qemu::println;
 use stage_two_abi::GuestInfo;
 
 use super::Guest;
@@ -15,6 +19,7 @@ use crate::guests::boot_params::{
 };
 use crate::guests::ManifestInfo;
 use crate::mmu::frames::PartitionedMemoryMap;
+use crate::print;
 use crate::vmx::{GuestPhysAddr, GuestVirtAddr};
 
 #[cfg(feature = "guest_linux")]
@@ -52,6 +57,7 @@ impl Guest for Linux {
     ) -> ManifestInfo {
         let mut manifest = ManifestInfo::default();
         let mut linux_prog = ElfProgram::new(LINUXBYTES);
+        //luca: TODO: why do we load identity mapped? Why does this not break the codes addressing?
         linux_prog.set_mapping(ElfMapping::ScatteredPaddr);
 
         //this will associate SPAs with the correct color for all of the segments that we load later on
@@ -96,18 +102,40 @@ impl Guest for Linux {
         //luca: this will do some allocations for the page tables
         // Load guest into memory.
         let mut loaded_linux = linux_prog
-            .load::<GuestPhysAddr, GuestVirtAddr>(guest_allocator, virtoffset)
+            .load(guest_allocator, virtoffset.as_usize(), true)
             .expect("Failed to load guest");
+
+        log::info!("Dumping PT walk to linux entry in stage1 constructed PTS");
+        match &mut loaded_linux.pt_mapper {
+            crate::elf::ELfTargetEnvironment::Host(_) => todo!(),
+            crate::elf::ELfTargetEnvironment::Guest(guest_mapper) => {
+                guest_mapper.debug_range(
+                    GuestVirtAddr::new(0x1000000),
+                    0x1000,
+                    mmu::walker::Level::L1,
+                );
+            }
+        }
+
         // Setup I/O MMU
         if let Some(_) = &acpi.iommu {
             manifest.iommu = 0;
         }
-
-        loaded_linux.pt_mapper.debug_range(
-            GuestVirtAddr::new(linux_prog.phys_entry.as_usize()),
-            0x2000,
-            mmu::walker::Level::L1,
-        );
+        {
+            let linux_exec_segment = linux_prog
+                .segments
+                .iter()
+                .filter(|v| v.phdr.p_type == Elf64PhdrType::PT_LOAD.bits())
+                .next()
+                .expect("failed to get linux exec segment");
+            let vaddr = linux_exec_segment.phys_mem[0].start.as_u64() + virtoffset.as_u64();
+            let bytes_linux_exec = unsafe { slice::from_raw_parts(vaddr as *const u8, PAGE_SIZE) };
+            log::info!("First few bytes of linux exec entry: ");
+            for v in &bytes_linux_exec[..64] {
+                print!("{:02x}", v);
+            }
+            println!("\n");
+        }
 
         // Build the boot params
         // Step1: load values contained in BootParams into memory
@@ -131,7 +159,12 @@ impl Guest for Linux {
         );
         let entry_point = linux_prog.phys_entry;
         let mut info = GuestInfo::default();
-        info.cr3 = loaded_linux.pt_root_spa.as_usize();
+        info.cr3 = match loaded_linux.pt_mapper {
+            crate::elf::ELfTargetEnvironment::Host(_) => {
+                panic!("loaded linux guset using host mapper")
+            }
+            crate::elf::ELfTargetEnvironment::Guest(guest) => guest.get_pt_root_gpa().as_usize(),
+        };
         info.rip = entry_point.as_usize();
         info.rsp = 0;
         info.rsi = boot_params.as_usize();
@@ -153,10 +186,15 @@ fn build_bootparams<T: MemoryColoring + Clone>(memory_map: &PartitionedMemoryMap
     //boot_params.hdr.ramdisk_image = ramdisk addr;
     //boot_params.hdr.ramdisk_size = ramdisk size;
 
-    //log::info!("Linux boot mem map as construted in stage1");
+    log::info!("Linux boot mem map as construted in stage1");
     let guest_memory_regions = memory_map.build_guest_memory_regions();
     for mr in guest_memory_regions {
-        //log::info!("{:x?}", mr);
+        log::info!(
+            "Linux boot map: addr 0x{:x}, size 0x{:x}, type {:?}",
+            mr.addr.as_usize(),
+            mr.size,
+            mr.mem_type
+        );
 
         boot_params
             .add_e820_entry(mr)
