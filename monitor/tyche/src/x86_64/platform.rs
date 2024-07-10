@@ -509,7 +509,7 @@ impl MonitorX86 {
             log::warn!("No guest found, exiting");
             return;
         }
-        log::info!("Staring main loop");
+        log::info!("Starting main loop");
         self.main_loop(state, domain);
         qemu::exit(qemu::ExitCode::Success);
     }
@@ -705,21 +705,7 @@ impl MonitorX86 {
             panic!("The vcpu {:x?}", vs.vcpu);
         }
         VmxExitReason::Exception if domain.idx() == 0 => {
-            //luca: Table C-1. Basic Exit Reasons gives an overview of VmxExitReason
-            //luca: "executions of UD0, UD1, and UD2 (they cause #UD"
-
-            let exception_info = vs.vcpu.get(VmcsField::ExitQualification).unwrap();
-            let exception_vector = vs.vcpu.get(VmcsField::IdtVectoringInfoField).unwrap();
-            let error_code = vs.vcpu.get(VmcsField::VmExitIntrErrorCode).unwrap();
-            log::error!("VmcsField::VmExitReason: {:#x}", vs.vcpu.get(VmcsField::VmExitReason).unwrap());
-            log::error!("VmcsField::IdtVectoringInfoField: {:#x}", exception_vector);
-            log::error!("VmcsField::VmExitIntrErrorCode: {:#x}", error_code);
-            log::error!("VmcsField::ExitQualification: {:#x}", exception_info);
-            log::error!("VCPU Dump  0x{:x?}", vs.vcpu);
-    
-
-            //panic!("Received an exception on dom0?");
-            return Ok(HandlerResult::Crash)
+            panic!("Received an exception on dom0?");
         }
         VmxExitReason::Xsetbv if domain.idx() == 0 => {
             let mut context = StateX86::get_context(*domain, cpuid());

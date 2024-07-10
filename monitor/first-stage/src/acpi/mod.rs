@@ -284,6 +284,7 @@ impl AcpiInfo {
         allocator
             .allocate_range(old_table_len * 2, store_cb)
             .expect("New MADT Allocation");
+        log::info!("New MADT Allocation, ranges: {:x?}", madt_ranges);
         let madt_vaddr = HostVirtAddr::new(madt_ranges[0].start.as_usize());
         mapper
             .map_range_scattered(

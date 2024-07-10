@@ -184,6 +184,7 @@ impl ElfProgram {
             let pt_mapper = GuestPtMapper::new(gpa_pt_root, inner_pt_mapper);
             ELfTargetEnvironment::Guest(pt_mapper)
         } else {
+            log::info!("Setting up host pt mapper");
             let pt_root = allocator.allocate_frame().ok_or(())?.zeroed();
             let pt_root_guest_phys_addr = HostPhysAddr::from_usize(pt_root.phys_addr.as_usize());
             let pt_mapper = PtMapper::<HostPhysAddr, HostVirtAddr>::new(
@@ -200,9 +201,12 @@ impl ElfProgram {
                 // Skip non-load segments.
                 continue;
             }
+            log::info!("Processing segment {:x?}", seg);
             unsafe {
                 // TODO: ensure that the segment does not overlap host memory
+                log::info!("\t loading");
                 self.load_segment(seg, HostVirtAddr::new(host_physical_offset));
+                log::info!("\t mapping");
                 self.map_segment(seg, &mut pts_target_env, allocator);
             }
         }

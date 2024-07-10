@@ -53,6 +53,11 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
 
     //for some reason there is an unsorted entry in there. This makes the mem whole detection logic much harder
     sort_memregions(&mut boot_info.memory_regions);
+    log::info!("Unmodified boot memory regions");
+    for (mr_idx, mr) in boot_info.memory_regions.iter().enumerate() {
+        log::info!("{:03} {:x?}", mr_idx, mr);
+    }
+
     // Initialize memory management
     let physical_memory_offset = HostVirtAddr::new(
         boot_info
@@ -118,6 +123,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         .rsdp_addr
         .into_option()
         .expect("Missing RSDP address");
+    log::info!("stage1 value for rsdp is 0x{:013x}", rsdp);
 
     let acpi_tables = match unsafe { AcpiTables::from_rsdp(TycheACPIHandler, rsdp as usize) } {
         Ok(acpi_tables) => acpi_tables,
@@ -239,6 +245,7 @@ fn launch_guest<T: MemoryColoring + Clone>(
             smp,
             &color_map,
         );
+        log::info!("Finished loading stage1");
         smp::BSP_READY.store(true, Ordering::SeqCst);
         log::info!("stage1::launch_guest : Calling second_stage::enter()");
         second_stage::enter();

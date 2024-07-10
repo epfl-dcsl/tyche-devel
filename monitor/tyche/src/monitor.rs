@@ -225,7 +225,7 @@ pub trait Monitor<T: PlatformState + 'static> {
             match mr.kind {
                 MemoryRegionKind::UseableRAM => {
                     log::info!(
-                        "RAM root region start 0x{:x}, end 0x{:x}, size 0x{:x}",
+                        "Tyche-Region start 0x{:013x}, end 0x{:013x}, size 0x{:013x}, type RAM",
                         mr.start,
                         mr.end,
                         mr.end - mr.start,
@@ -245,7 +245,7 @@ pub trait Monitor<T: PlatformState + 'static> {
                 MemoryRegionKind::UsedByStage1Allocator => (), //should not ne mapped anywhere
                 MemoryRegionKind::Reserved => {
                     log::info!(
-                        "Fake device root region, start 0x{:x}, end 0x{:x}, size 0x{:x}",
+                        "Tyche-Region start 0x{:013x}, end 0x{:013x}, size 0x{:013x}, type Fake Device",
                         mr.start,
                         mr.end,
                         mr.end - mr.start,
@@ -287,7 +287,7 @@ pub trait Monitor<T: PlatformState + 'static> {
                 continue;
             }
             log::info!(
-                "Device root region start 0x{:x}, end 0x{:x}. prev {:x?}, cur {:x?}",
+                "Tyche-Region start 0x{:013x}, end 0x{:013x}, type Device\n\tprev {:013x?}, cur {:013x?}",
                 prev.end,
                 cur.start,
                 prev,

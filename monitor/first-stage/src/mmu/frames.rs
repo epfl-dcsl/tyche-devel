@@ -1,3 +1,4 @@
+use alloc::borrow::ToOwned;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::cell::Cell;
@@ -143,6 +144,8 @@ impl<T: MemoryColoring + Clone> PartitionedMemoryMap<T> {
            available memory
         */
         let mut result = Vec::new();
+
+      
         let guest_mem_bytes = match self.guest {
             MemoryRange::ColoredRange(cr) => cr.mem_bytes,
             MemoryRange::PhysContigRange(pr) => pr.size(),
@@ -164,11 +167,11 @@ impl<T: MemoryColoring + Clone> PartitionedMemoryMap<T> {
                     //No more guest memory,
                     if remaining_guest_mem_bytes <= 0 {
                         log::info!("dropping {:x?}", bl_mr);
-                        /*result.push(E820Entry {
+                        result.push(E820Entry {
                             addr: GuestPhysAddr::new(bl_mr.start as usize),
                             size: bl_mr_bytes,
                             mem_type: E820Types::Reserved,
-                        });*/
+                        });
                     //remaining guest memory is >=  bl_mr -> use whole region
                     } else if remaining_guest_mem_bytes >= bl_mr_bytes {
                         result.push(E820Entry {
@@ -188,13 +191,13 @@ impl<T: MemoryColoring + Clone> PartitionedMemoryMap<T> {
                             size: remaining_guest_mem_bytes,
                             mem_type: E820Types::Ram,
                         });
-                        /*result.push(E820Entry {
+                        result.push(E820Entry {
                             addr: GuestPhysAddr::new(
                                 (bl_mr.start + remaining_guest_mem_bytes) as usize,
                             ),
                             size: bl_mr_bytes - remaining_guest_mem_bytes,
                             mem_type: E820Types::Reserved,
-                        });*/
+                        });
                         ram_bytes += remaining_guest_mem_bytes;
                         assert!(remaining_guest_mem_bytes > 0 && remaining_guest_mem_bytes < bl_mr_bytes);
                         remaining_guest_mem_bytes = 0;
@@ -227,6 +230,21 @@ impl<T: MemoryColoring + Clone> PartitionedMemoryMap<T> {
                 _ => todo!("Unknown boot loader memory type when building guest memory regions"),
             }
         }
+
+        //tell linux about stage1 allocator memory. we use this e.g. for some ACPI data
+        //It probably is enough to make sure that stage2 maps this into the EPTs but it
+        //felt bettter to also include this into the boot memory map
+        let stage1_alloc_mem = match self.stage1 {
+            MemoryRange::ColoredRange(_) => todo!("should not happend"),
+            MemoryRange::PhysContigRange(pcr) => pcr,
+        };
+        result.push(E820Entry{
+            addr: GuestPhysAddr::new(stage1_alloc_mem.start.as_usize()),
+            size: stage1_alloc_mem.size() as u64,
+            mem_type: E820Types::Reserved,
+        });
+
+
         log::info!("RAM: {:0.2} GiB (0x{:x} bytes). Device {:0.2} GiB (0x{:x} bytes)", ram_bytes as f64 / (1<<30) as f64, ram_bytes, device_bytes as f64 / (1<<30) as f64, device_bytes);
         log::info!("Mem regions before: {}. Mem regions after: {}", self.all_regions.len(), result.len());
 
@@ -357,11 +375,11 @@ pub unsafe fn init(
     (),
 > {
     //just out of caution that using these low regions might lead to trouble
-    for mr in regions.iter_mut() {
+    /*for mr in regions.iter_mut() {
         if mr.start < 0xa0000 && mr.kind == MemoryRegionKind::Usable {
             mr.kind = MemoryRegionKind::UnknownBios(1);
         }
-    }
+    }*/
     let stage2_phys_range = if cfg!(feature = "color-s2") {
         println!("\nUsing colors for stage2\n");
         None
@@ -454,6 +472,10 @@ pub unsafe fn init(
     println!("Initialized heap\nAbout to transofmr guest_allocator into shared allocator\n");
     let guest_allocator = SharedFrameAllocator::new(guest_allocator);
     println!("init memory done");
+    log::info!("Modified memory regions");
+    for (mr_idx, mr) in regions.iter().enumerate() {
+        log::info!("{:03} {:x?}", mr_idx, mr);
+    }
     Ok((
         stage1_allocator,
         stage2_allocator,
@@ -467,21 +489,19 @@ pub unsafe fn init(
 /// of the requested size. `regions` is modified to make the memory unavailable to other parts of the system
 fn reserve_memory_region(
     regions: &mut [MemoryRegion],
-    required_bytes_stage1_alloc: usize,
+    required_bytes: usize,
 ) -> Option<PhysRange> {
     let mut matching_mr = None;
-    //TODO: search for smallest matching region
-    for (mr_idx, mr) in regions.iter_mut().enumerate() {
+    for (mr_idx, mr) in regions.iter().enumerate().rev() {
         if mr.kind == MemoryRegionKind::Usable
-            && ((mr.end - mr.start) as usize > required_bytes_stage1_alloc)
+            && ((mr.end - mr.start) as usize > required_bytes)
         {
             let pr = PhysRange {
                 start: HostPhysAddr::new(mr.start as usize),
                 end: HostPhysAddr::new(mr.end as usize),
             };
 
-            mr.kind = MR_USED_BY_OUR_ALLOCATOR;
-            matching_mr = Some(pr);
+            matching_mr = Some((mr_idx,pr));
             println!(
                 "Using mr at idx {:02} {:x?} for contig range allocator",
                 mr_idx, mr
@@ -489,7 +509,37 @@ fn reserve_memory_region(
             break;
         }
     }
-    matching_mr
+    match &mut matching_mr {
+        Some((idx,pr)) => {
+            log::info!("Using mem region at idx {} (out of {}) to fulfill request", idx, regions.len());
+            //if this is the last region, just could it short instead of marking as reserved
+            //this way another call to reserve_memory_region can easily draw from the same region again
+            if *idx == regions.len()-1 {
+                let v = &mut regions[*idx];
+              
+                pr.start = HostPhysAddr::new(v.end as usize-required_bytes);
+                pr.end = HostPhysAddr::new(v.end as usize);
+                assert_eq!(pr.start.as_usize()%PAGE_SIZE,0);
+                assert_eq!(pr.end.as_usize()%PAGE_SIZE,0);
+
+                v.end -= required_bytes as u64;
+                log::info!("cutting region short");
+            } else {
+                let mut prev : Option<MemoryRegion> = regions.get(*idx-1).copied();
+                for mr in regions.iter_mut().skip(*idx) {
+                    log::info!("marking regions as MR_USED_BY_OUR_ALLOCATOR");
+                    mr.kind = MR_USED_BY_OUR_ALLOCATOR;
+                    if let Some(prev) = prev {
+                        assert_eq!(prev.end,mr.start,"reserve_memory_region. prev={:x?}, cur={:x?}, marking as unused would destroy gap", prev,mr)
+                    }
+                    prev = Some(*mr);
+                }
+            }
+          
+            return Some(*pr)
+        },
+        None => return None,
+    }
 }
 
 // ———————————————————————————— Coloring Range Frame Allocator ————————————————//

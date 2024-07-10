@@ -76,7 +76,7 @@ impl EptMapper {
 
     fn get_hpa(entry: u64) -> u64 {
         let hfn_mask = 0xFFFFFFFFFF000_u64;
-        (entry & hfn_mask)
+        entry & hfn_mask
     }
     pub fn debug_range(&mut self, gpa: GuestPhysAddr, size: usize) {
         let (phys_addr, _) = self.root();
@@ -89,12 +89,14 @@ impl EptMapper {
                     if (*entry & EPT_PRESENT.bits()) == 0 {
                         return WalkNext::Leaf;
                     }
+                    let flags = EptEntryFlags::from_bits_truncate(*entry);
                     log::info!(
-                        "{:?} -> 0x{:x} | {:x?} , hpa = 0x{:x}",
+                        "{:?} -> 0x{:x} | {:x?} , hpa = 0x{:x}, flags = {:#?}",
                         level,
                         addr.as_usize(),
                         entry,
-                        Self::get_hpa(*entry)
+                        Self::get_hpa(*entry),
+                        flags
                     );
                     if (*entry & EptEntryFlags::PAGE.bits()) != 0 {
                         return WalkNext::Leaf;
@@ -145,8 +147,12 @@ impl EptMapper {
         hpa: HostPhysAddr,
         size: usize,
         prot: EptEntryFlags,
+        allow_large: Option<bool>,
     ) {
-        let allow_large = self.allow_large_mappings;
+        let allow_large = match allow_large {
+            Some(b) => b,
+            None => self.allow_large_mappings,
+        };
         unsafe {
             self.walk_range(
                 gpa,
@@ -304,6 +310,7 @@ impl EptMapper {
                                 | EptEntryFlags::WRITE
                                 | EptEntryFlags::USER_EXECUTE
                                 | EPT_PRESENT,
+                            None,
                         );
                     }
                     // Some mapping on the left.
@@ -318,6 +325,7 @@ impl EptMapper {
                                 | EptEntryFlags::WRITE
                                 | EptEntryFlags::USER_EXECUTE
                                 | EPT_PRESENT,
+                            None,
                         );
                     }
                     return WalkNext::Leaf;

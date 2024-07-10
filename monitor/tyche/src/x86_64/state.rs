@@ -1,4 +1,5 @@
 use core::cmp::min;
+use core::ops::Neg;
 use core::sync::atomic::{AtomicBool, Ordering};
 
 use capa_engine::config::{NB_CORES, NB_DOMAINS, NB_REMAP_REGIONS};
@@ -297,6 +298,7 @@ impl StateX86 {
                                 HostPhysAddr::new(partition_chunk.end - remaining_chunk_bytes),
                                 map_size,
                                 flags,
+                                None,
                             );
                             mapped_ram_bytes += map_size;
                             remaining_chunk_bytes -= map_size;
@@ -331,6 +333,7 @@ impl StateX86 {
                         HostPhysAddr::new(range.hpa),
                         range.size,
                         flags,
+                        Some(true),
                     );
                     mapped_device_bytes += range.size;
                 }
@@ -349,7 +352,7 @@ impl StateX86 {
             mapped_device_bytes
         );
         log::info!(
-            "Total Mapped {:0.2} GiB (0x{:x} bytes",
+            "Total Mapped {:0.2} GiB (0x{:x} bytes)",
             (mapped_ram_bytes + mapped_device_bytes) as f64 / (1 << 30) as f64,
             mapped_ram_bytes + mapped_device_bytes
         );
@@ -374,8 +377,8 @@ impl StateX86 {
             mapper.debug_range(GuestPhysAddr::new(x), 0x1000);
         }*/
 
-        log::info!("GPA->SPA for 0x1ce9fd000");
-        mapper.debug_range(GuestPhysAddr::new(0x1ce9ff000), 0x2000);
+        log::info!("GPA->SPA for DMAR 0x000000fe_d90_000. Should be ID mapped to SPA");
+        mapper.debug_range(GuestPhysAddr::new(0x000000fed90000), 0x2000);
 
         /*for (mr_idx, mr) in get_manifest().get_boot_mem_regions().iter().enumerate() {
             log::info!("mr_idx {:02} excerpt of PTs for mr {:x?}", mr_idx, mr);

@@ -12,7 +12,7 @@ use mmu::ioptmapper::PAGE_MASK;
 use mmu::memory_coloring::color_to_phys::{
     MemoryRegion as S2MemRegion, MemoryRegionKind as S2MemoryRegionKind,
 };
-use mmu::memory_coloring::MemoryColoring;
+use mmu::memory_coloring::{MemoryColoring, MemoryRange};
 use mmu::walker::Address;
 use mmu::{PtFlag, PtMapper, RangeAllocator};
 use stage_two_abi::{EntryPoint, Manifest, Smp};
@@ -125,6 +125,7 @@ pub fn load<T: MemoryColoring + Clone>(
     //this allocates memory for every elf segment. Currently it allocates one physical contiguous chunk
     //the elf headers are updated to point to these memory addresses (in contrast to the default addresses, this is the "relocate" part)
     relocate_elf(&mut second_stage, stage2_allocator, false);
+    log::info!("relocated_elf for stage2 segments done;");
     //load parsed elf binary into memory
     let mut stage2_loaded_elf = second_stage
         .load(
@@ -133,6 +134,8 @@ pub fn load<T: MemoryColoring + Clone>(
             false,
         )
         .expect("Failed to load second stage");
+
+    log::info!("loading + mapping for stage2 binary done");
 
     let smp_cores = cpu::cores();
     let smp_stacks: Vec<(HostVirtAddr, HostVirtAddr, HostPhysAddr)> = (0..smp_cores)
@@ -335,31 +338,39 @@ pub fn load<T: MemoryColoring + Clone>(
     //manifest_s2 len is the capacity, i.e. the max amount of entries that this slice can store
     // `raw_mem_regions_slice_valid_entries` tracks the number of valid entries
     assert!(memory_partitions.get_boot_memory_regions().len() <= manifest_s2_mem_regions.len());
-    for (idx, boot_mr) in memory_partitions
-        .get_boot_memory_regions()
-        .iter()
-        .enumerate()
-    {
+    let mut next_boot_mr_idx = 0;
+    for boot_mr in memory_partitions.get_boot_memory_regions().iter() {
         /*log::info!(
             "handing over memregion start 0x{:x}, end 0x{:x}",
             boot_mr.start,
             boot_mr.end
         );*/
-        manifest_s2_mem_regions[idx] = S2MemRegion {
+        manifest_s2_mem_regions[next_boot_mr_idx] = S2MemRegion {
             start: boot_mr.start,
             end: boot_mr.end,
             kind: match boot_mr.kind {
                 MemoryRegionKind::Usable => S2MemoryRegionKind::UseableRAM,
+                //TODO: this does not really exist anymore, because we carve from last memory region instead of marking in unused
                 MemoryRegionKind::UnknownBios(42) => S2MemoryRegionKind::UsedByStage1Allocator,
                 MemoryRegionKind::Bootloader
                 | MemoryRegionKind::UnknownUefi(_)
                 | MemoryRegionKind::UnknownBios(_) => S2MemoryRegionKind::Reserved,
                 _ => todo!(),
             },
-        }
+        };
+        next_boot_mr_idx += 1;
     }
-    manifest.raw_mem_regions_slice_valid_entries =
-        memory_partitions.get_boot_memory_regions().len();
+    let stage1_mem_range = match memory_partitions.stage1 {
+        MemoryRange::ColoredRange(_) => todo!("should not happend"),
+        MemoryRange::PhysContigRange(pcr) => pcr,
+    };
+    manifest_s2_mem_regions[next_boot_mr_idx] = S2MemRegion {
+        start: stage1_mem_range.start.as_u64(),
+        end: stage1_mem_range.end.as_u64(),
+        kind: S2MemoryRegionKind::Reserved,
+    };
+    next_boot_mr_idx += 1;
+    manifest.raw_mem_regions_slice_valid_entries = next_boot_mr_idx;
 
     debug::hook_stage2_offsets(manifest.poffset, manifest.voffset);
     debug::tyche_hook_stage1(1);

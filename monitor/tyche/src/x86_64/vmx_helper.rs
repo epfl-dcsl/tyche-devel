@@ -32,19 +32,15 @@ pub unsafe fn init_vcpu<'vmx>(
         .initialize_msr_bitmaps(bit_frame)
         .expect("Failed to install MSR bitmaps");
     msr_bitmaps.allow_all();
-    log::info!("Intial VCPU RIP: 0x{:x}", info.rip);
     context
         .set(VmcsField::GuestRip, info.rip, Some(vcpu))
         .unwrap();
-    log::info!("Initial VCPU CR3: 0x{:x}", info.cr3);
     context
         .set(VmcsField::GuestCr3, info.cr3, Some(vcpu))
         .unwrap();
-    log::info!("Initial VCPU RSP: 0x{:x}", info.rsp);
     context
         .set(VmcsField::GuestRsp, info.rsp, Some(vcpu))
         .unwrap();
-    log::info!("Initial VCPU RSI: 0x{:x}", info.rsi);
     context
         .set(VmcsField::GuestRsi, info.rsi, Some(vcpu))
         .unwrap();
@@ -92,11 +88,8 @@ pub fn default_vmcs_config(vmcs: &mut ActiveVmcs, info: &GuestInfo, switching: b
     log::trace!("Config: {:?}", err);
     let err = configure_msr();
     log::trace!("MSRs:   {:?}", err);
-    let err = vmcs.set_primary_ctrls(
-        PrimaryControls::SECONDARY_CONTROLS
-            | PrimaryControls::USE_MSR_BITMAPS
-           /*| PrimaryControls::MONITOR_TRAP_FLAG,*/
-    );
+    let err = vmcs
+        .set_primary_ctrls(PrimaryControls::SECONDARY_CONTROLS | PrimaryControls::USE_MSR_BITMAPS);
     log::trace!("1'Ctrl: {:?}", err);
 
     let mut secondary_ctrls = SecondaryControls::ENABLE_RDTSCP
@@ -192,7 +185,7 @@ fn setup_guest(vcpu: &mut ActiveVmcs, info: &GuestInfo) -> Result<(), VmxError> 
         log::warn!("Ia32Efer field is not supported");
     }
     vcpu.set(VmcsField::GuestIa32Efer, info.efer as usize)?;
-    vcpu.set(VmcsField::GuestRflags, 0x2 /*| (0x1 << 14)*/)?;
+    vcpu.set(VmcsField::GuestRflags, 0x2)?;
 
     vcpu.set(VmcsField::GuestActivityState, 0)?;
     vcpu.set(VmcsField::VmcsLinkPointer, usize::max_value())?;
