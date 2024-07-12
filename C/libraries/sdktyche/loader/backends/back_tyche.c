@@ -311,7 +311,7 @@ int backend_td_vcpu_run(tyche_domain_t* domain, usize core, uint32_t delta)
   }
 
   if (ioctl(domain->handle, TYCHE_TRANSITION, &params) != SUCCESS) {
-    ERROR("Failure to run on core %lld", core);
+    DEBUG("Failure to run on core %lld", core);
     goto failure;
   }
   //All done!

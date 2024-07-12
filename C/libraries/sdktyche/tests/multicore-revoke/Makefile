@@ -1,4 +1,4 @@
-all: hogger_enclave
+all: multicore_revoke 
 
 ARCH ?=x86
 GCC ?=gcc
@@ -69,7 +69,7 @@ CODE_PTS=$(wildcard $(PTS)/src/*.c)
 HDRS_PTS=$(wildcard $(PTS)/include/*.h)
 
 ## —————————————————————— Application code and headers —————————————————————— ##
-CODE_APP=$(CODE_ELF64) $(CODE_PTS) $(CODE_LOADER) $(CODE_UNTRUSTED)
+CODE_APP=$(CODE_ELF64) $(CODE_PTS) $(CODE_LOADER) $(CODE_UNTRUSTED) $(CODE_CAPAS)
 HDRS_APP=$(HDRS_ELF64) $(HDRS_PTS) $(HDRS_LOADER) $(HDRS_UNTRUSTED)
 
 ## ———————————————————————— Enclave code and headers ———————————————————————— ##
@@ -90,9 +90,9 @@ endif
 
 ## ————————————————————— Configuration for the install —————————————————————— ##
 ifeq ($(ARCH), x86)
-DISK_PATH ?= /tmp/mount/tyche/programs 
+DISK_PATH ?= /tmp/mount/tyche/tests 
 else ifeq ($(ARCH), riscv)
-DISK_PATH ?= /tmp/ubuntu_riscv_mount/tyche/programs
+DISK_PATH ?= /tmp/ubuntu_riscv_mount/tyche/tests
 endif
 
 TYCHOOLS_PATH ?= ../../../../../crates/tychools/ 
@@ -107,10 +107,10 @@ enclave: $(CODE_ENCLAVE) $(HDRS_ENCLAVE)
 	echo "x86"
 	$(GCC) -DTYCHE_USER_SPACE=2 -DTYCHE_ENCLAVE=1 -g $(COMMON_INCLUDES) -nostdlib -static -o $@ $(CODE_ENCLAVE)
 
-hogger_enclave: app enclave
+multicore_revoke: app enclave
 	cargo -Z unstable-options -C $(TYCHOOLS_PATH) install --path . --locked
 	tychools instrument -s manifests/default.json 
-	chmod +x hogger_enclave
+	chmod +x multicore_revoke
 	rm app enclave
 
 else ifeq ($(ARCH), riscv)
@@ -120,19 +120,19 @@ enclave: $(CODE_ENCLAVE) $(HDRS_ENCLAVE)
 	echo $(GCC)
 	$(GCC) -DTYCHE_USER_SPACE=2 -DTYCHE_ENCLAVE=1 -DCONFIG_RISCV=1 -g $(COMMON_INCLUDES) -nostdlib -static -o $@ $(CODE_ENCLAVE) -Wl,--section-start=.data=0x16000
 
-hogger_enclave: app enclave
+multicore_revoke: app enclave
 	cargo -Z unstable-options -C $(TYCHOOLS_PATH) install --path . --locked
 	tychools instrument -s manifests/default.json --riscv-enabled 
-	chmod +x simple_enclave
+	chmod +x multicore_revoke 
 	rm app enclave
 
 endif
 
 install_disk: all 
 	mkdir -p $(DISK_PATH)
-	cp -t $(DISK_PATH) hogger_enclave 
+	cp -t $(DISK_PATH) multicore_revoke 
 
 .PHONY: clean
 
 clean:
-	rm hogger_enclave 
+	rm multicore_revoke enclave app 

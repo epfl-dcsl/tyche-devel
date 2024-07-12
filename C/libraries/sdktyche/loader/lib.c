@@ -696,7 +696,7 @@ int sdk_call_domain_on_core(tyche_domain_t* domain, usize core, uint32_t delta)
   }
 
   if (backend_td_vcpu_run(domain, core, delta) != SUCCESS) {
-    ERROR("Unable to switch to the domain %d on core %lld", domain->handle, core);
+    DEBUG("Unable to switch to the domain %d on core %lld", domain->handle, core);
     goto failure;
   }
   return SUCCESS;

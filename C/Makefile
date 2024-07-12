@@ -50,6 +50,8 @@ update_disk:
 	make -B -C debug/test-bearssl/test-ssl-endpoint install_disk
 	#make ARCH=x86 -B -C libraries/tyche-trusted-runtime install_disk
 	#cp scripts/x86_64_install_drivers.sh /tmp/mount/tyche
+	mkdir -p /tmp/mount/tyche/tests
+	make ARCH=x86 KVM=0 DISK_PATH=/tmp/mount/tyche/tests/sdk_tyche -B -C libraries/sdktyche/tests/ install_disk
 	cp $(TYCHOOLS_LOCAL_BIN_PATH)/tychools $(PROGRAMGS_PATH)/tychools 
 	
 else ifeq ($(ARCH), riscv)

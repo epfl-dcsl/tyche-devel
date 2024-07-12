@@ -150,7 +150,7 @@ impl Domain {
     /// Get a capability from a domain.
     pub(crate) fn get(&self, index: LocalCapa) -> Result<Capa, CapaError> {
         if self.free_list.is_free(index.idx) {
-            log::info!("Invalid capability index: {}", index.idx);
+            log::error!("Invalid capability index: {} (get)", index.idx);
             return Err(CapaError::CapabilityDoesNotExist);
         }
         Ok(self.capas[index.idx])
@@ -159,7 +159,7 @@ impl Domain {
     /// Get a mutable reference to a capability from a domain.
     fn get_mut(&mut self, index: LocalCapa) -> Result<&mut Capa, CapaError> {
         if self.free_list.is_free(index.idx) {
-            log::info!("Invalid capability index: {}", index.idx);
+            log::error!("Invalid capability index: {} (get_mut)", index.idx);
             return Err(CapaError::CapabilityDoesNotExist);
         }
         Ok(&mut self.capas[index.idx])
@@ -625,9 +625,10 @@ pub(crate) fn revoke(
     } else {
         // Mark as being revoked
         domain.is_being_revoked = true;
-        updates
-            .push(Update::RevokeDomain { domain: handle })
-            .unwrap();
+        // The domain is still scheduled on some cores.
+        if domain.cores() != 0 {
+            return Err(CapaError::InvalidOperation);
+        }
     }
 
     // Drop all capabilities

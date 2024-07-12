@@ -5,7 +5,7 @@ use core::sync::atomic::Ordering;
 
 use capa_engine::context::RegisterGroup;
 use capa_engine::utils::BitmapIterator;
-use capa_engine::{AccessRights, CapaEngine, CapaError, Domain, Handle, MemOps};
+use capa_engine::{AccessRights, CapaEngine, CapaError, Domain, Handle, LocalCapa, MemOps};
 use mmu::eptmapper::EPT_ROOT_FLAGS;
 use mmu::FrameAllocator;
 use spin::MutexGuard;
@@ -22,10 +22,10 @@ use super::state::{DataX86, StateX86, VmxState, CONTEXTS, DOMAINS, IOMMU, RC_VMC
 use super::vmx_helper::{dump_host_state, load_host_state};
 use super::{cpuid, vmx_helper};
 use crate::allocator::{self, allocator};
-use crate::calls;
 use crate::monitor::{CoreUpdate, Monitor, PlatformState};
 use crate::rcframe::{drop_rc, RCFrame};
 use crate::x86_64::state::TLB_FLUSH_BARRIERS;
+use crate::{calls, MonitorErrors};
 
 #[derive(PartialEq, Debug)]
 pub enum HandlerResult {
@@ -240,6 +240,42 @@ impl PlatformState for StateX86 {
                     vcpu.get_exception_bitmap().expect("Failed to read bitmpap")
                 );
                 todo!("Update this code path.");
+            }
+            CoreUpdate::DomainRevocation { revok, next } => {
+                // Do a switch.
+                {
+                    // Mark ourselves as interrupted.
+                    let mut curr_ctx = Self::get_context(*current_domain, core);
+                    curr_ctx.interrupted = true;
+                    let mut next_ctx = Self::get_context(*next, core);
+                    let next_dom = Self::get_domain(*next);
+                    Self::switch_domain(
+                        vcpu,
+                        &mut curr_ctx,
+                        &mut next_ctx,
+                        next_dom,
+                        // Fake the capa, it's just passed into the domain as idx
+                        // TODO it should actually be removed from the call altogether.
+                        LocalCapa::new(0),
+                        0,
+                    )
+                    .expect("Unable to perform the switch");
+                    // Notify that we preemted the domain.
+                    // This has to be done after the switch to override the exit
+                    // reason.
+                    next_ctx.set(VmcsField::GuestRax, 1, None).unwrap();
+                    next_ctx
+                        .set(
+                            VmcsField::GuestR8,
+                            MonitorErrors::DomainRevoked as usize,
+                            None,
+                        )
+                        .unwrap();
+                }
+                *current_domain = *next;
+                TLB_FLUSH_BARRIERS[revok.idx()].wait();
+                // Wait for the main thread to finish updating the engine.
+                TLB_FLUSH_BARRIERS[next.idx()].wait();
             }
         }
     }
@@ -599,15 +635,15 @@ impl MonitorX86 {
                     },
                     Ok(false) => {},
                     Err(e) => {
-                        log::error!("Failure monitor call: {:?}, call: {}", e, vmcall);
+                        log::debug!("Failure monitor call: {:?}, call: {}", e, vmcall);
                         context.set(VmcsField::GuestRax, 1, None).unwrap();
-                        log::error!("The vcpu: {:#x?}", vs.vcpu);
+                        log::debug!("The vcpu: {:#x?}", vs.vcpu);
                         drop(context);
                         let callback = |dom: Handle<Domain>, engine: &mut CapaEngine| {
                             let dom_dat = StateX86::get_domain(dom);
-                            log::info!("remaps {}", dom_dat.remapper.iter_segments());
+                            log::debug!("remaps {}", dom_dat.remapper.iter_segments());
                             let remap = dom_dat.remapper.remap(engine.get_domain_permissions(dom).unwrap());
-                            log::info!("remapped: {}", remap);
+                            log::debug!("remapped: {}", remap);
                         };
                         Self::do_debug(vs, domain, callback);
                     }

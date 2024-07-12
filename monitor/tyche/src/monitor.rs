@@ -29,6 +29,10 @@ pub enum CoreUpdate {
         trap: u64,
         info: u64,
     },
+    DomainRevocation {
+        revok: Handle<Domain>,
+        next: Handle<Domain>,
+    },
 }
 
 // ————————————————————————— Statics & Backend Data ————————————————————————— //
@@ -150,6 +154,7 @@ pub trait PlatformState {
         size: usize,
     ) -> Result<(), CapaError>;
 
+    /// This assumes that the engine is locked!
     fn prepare_notify(domain: &Handle<Domain>, core_count: usize);
 
     fn notify_cores(domain: &Handle<Domain>, core_id: usize, core_map: usize);
@@ -229,13 +234,13 @@ pub trait Monitor<T: PlatformState + 'static> {
         while let Some((domain, next_next)) = engine.enumerate_domains(next) {
             next = next_next;
 
-            log::info!("Domain {}", domain.idx());
+            log::debug!("Domain {}", domain.idx());
             let mut next_capa = NextCapaToken::new();
             while let Some((info, next_next_capa)) = engine.enumerate(domain, next_capa) {
                 next_capa = next_next_capa;
-                log::info!(" - {}", info);
+                log::debug!(" - {}", info);
             }
-            log::info!(
+            log::debug!(
                 "tracker: {}",
                 engine.get_domain_regions(domain).expect("Invalid domain")
             );
@@ -795,8 +800,7 @@ pub trait Monitor<T: PlatformState + 'static> {
                     LocalCapa::new(args[1]),
                     args[2],
                     args[3],
-                )
-                .unwrap();
+                )?;
                 return Ok(true);
             }
             calls::SERIALIZE_ATTESTATION => {
@@ -867,7 +871,63 @@ pub trait Monitor<T: PlatformState + 'static> {
                         region.fill(0);
                     }
                 }
-                capa_engine::Update::RevokeDomain { domain } => T::revoke_domain(domain),
+                capa_engine::Update::RevokeDomain {
+                    manager,
+                    mgmt_capa,
+                    domain,
+                } => {
+                    let cores = engine.get_domain_cores(domain).unwrap();
+                    let mut count = cores.count_ones() as usize;
+                    let core_id = cpuid();
+                    // RevokeDomain updates never happen if the domain is not running.
+                    if count == 0 {
+                        panic!("This should never happen");
+                    } else {
+                        // We need to add one to the count to block on the barrier ourself..
+                        count += 1;
+                    }
+                    // The algorithm includes 2 barriers:
+                    // 1) Send a message to everyone so that they get out of the vm.
+                    //  a) The engine is locked guaranteeing atomicity
+                    // 2) All relevant cores get the update and switch to the manager.
+                    // 3) They notify this thread that it's done on the domain's barrier.
+                    // 3) They block on the manager's barrier.
+                    // 4) The main thread can safely update other
+                    //    cores engine state.
+                    // 5) The main thread notifies everyone to resume.
+                    let manager_core_map = engine
+                        .get_domain_permission(manager, permission::PermissionIndex::AllowedCores);
+                    T::prepare_notify(&domain, count);
+                    T::prepare_notify(&manager, count);
+                    for core in BitmapIterator::new(cores) {
+                        if core == core_id {
+                            continue;
+                        }
+                        // Check that the manager can run on that core.
+                        if manager_core_map & (1 << core) == 0 {
+                            panic!("The manager cannot run on the target core!");
+                        }
+                        let mut core_updates = CORE_UPDATES[core as usize].lock();
+                        core_updates
+                            .push(CoreUpdate::DomainRevocation {
+                                revok: domain,
+                                next: manager,
+                            })
+                            .unwrap();
+                    }
+                    T::notify_cores(&domain, core_id, cores as usize);
+                    T::acknowledge_notify(&domain);
+                    // All cores should have stopped now and are blocking on the manager's signal.
+                    for core in BitmapIterator::new(cores) {
+                        // Change the domain on the core.
+                        engine.partial_switch(domain, manager, core).unwrap();
+                    }
+                    // Check the domain's cores have been preempted.
+                    assert_eq!(engine.get_domain_cores(domain), Ok(0));
+                    engine.revoke(manager, mgmt_capa).unwrap();
+                    // Free the threads
+                    T::acknowledge_notify(&manager);
+                }
                 capa_engine::Update::CreateDomain { domain } => T::create_domain(domain),
                 capa_engine::Update::Switch {
                     domain,
@@ -924,6 +984,12 @@ impl core::fmt::Display for CoreUpdate {
             } => {
                 write!(f, "Trap({}, {} | {:b})", manager, interrupt, inf)
             }
+            CoreUpdate::DomainRevocation { revok, next } => write!(
+                f,
+                "Domain Revocation {} goes to {}",
+                revok.idx(),
+                next.idx()
+            ),
         }
     }
 }

@@ -1,0 +1,164 @@
+diff --git a/C/libraries/sdktyche/example/simple-enclave/trusted/main.c b/C/libraries/sdktyche/example/simple-enclave/trusted/main.c
+index 5581176a..8f74a89d 100644
+--- a/C/libraries/sdktyche/example/simple-enclave/trusted/main.c
++++ b/C/libraries/sdktyche/example/simple-enclave/trusted/main.c
+@@ -6,66 +6,12 @@
+ config_t* shared = NULL;
+ 
+ 
+-// ————————————————————————————— Static define —————————————————————————————— //
+-
+-static int tyche_domain_attestation(usize nonce, unsigned long long* ans, int mode) {
+-  vmcall_frame_t frame = {
+-    .vmcall = 20,
+-    .arg_1 = nonce,
+-    .arg_2 = mode,
+-  };
+-  if (tyche_call(&frame) != SUCCESS) {
+-    goto failure;
+-  }
+-  
+-  ans[0] = frame.value_1;
+-  ans[1] = frame.value_2;
+-  ans[2] = frame.value_3;
+-  ans[3] = frame.value_4;
+-  ans[4] = frame.value_5;
+-  ans[5] = frame.value_6;
+-  
+-  return SUCCESS;
+-failure:
+-  return FAILURE;
+-}
+-
+ // ————————————————————————— HELLO_WORLD Functions —————————————————————————— //
+ 
+ const char* message = "Hello World!\n\t\0";
+ const char* message2 = "Bye Bye! :)!\n\t\0";
+ const char* message3 = "Done attestation!\n\t\0";
+ 
+-void put_bytes_in_arr(char* arr, unsigned long long val) {
+-  for(int i = 0; i < 8;i++) {
+-    char c = (char)(val & 0xFF);
+-    *arr = c;
+-    arr++;
+-    val>>=8;
+-  }
+-}
+-
+-void tyche_call_wrapper(usize nonce, hello_world_t* ans, int mode) {
+-  unsigned long long vals[6];
+-  tyche_domain_attestation(nonce, vals, mode);
+-  if(mode == CALC_REPORT) {
+-    put_bytes_in_arr(ans->pub_key, vals[0]);
+-    put_bytes_in_arr(ans->pub_key + 8, vals[1]);
+-    put_bytes_in_arr(ans->pub_key + 16, vals[2]);
+-    put_bytes_in_arr(ans->pub_key + 24, vals[3]);
+-    put_bytes_in_arr(ans->signed_enclave_data, vals[4]);
+-    put_bytes_in_arr(ans->signed_enclave_data + 8, vals[5]);
+-  }
+-  else if(mode == READ_REPORT) {
+-    put_bytes_in_arr(ans->signed_enclave_data + 16, vals[0]);
+-    put_bytes_in_arr(ans->signed_enclave_data + 24, vals[1]);
+-    put_bytes_in_arr(ans->signed_enclave_data + 32, vals[2]);
+-    put_bytes_in_arr(ans->signed_enclave_data + 40, vals[3]);
+-    put_bytes_in_arr(ans->signed_enclave_data + 48, vals[4]);
+-    put_bytes_in_arr(ans->signed_enclave_data + 56, vals[5]);
+-  }
+-}
+-
+ void my_memcpy(void* dest, void* src, int size)
+ {
+   char* ptr_dest = (char*) dest;
+@@ -93,9 +39,6 @@ void hello_world(void)
+   // Do a return.
+   gate_call();
+ 
+-  nonce_t nonce = msg->nonce;
+-  tyche_call_wrapper(nonce, msg, CALC_REPORT);
+-  tyche_call_wrapper(nonce, msg, READ_REPORT);
+   print_message((void*)message3, 20);
+ }
+ 
+diff --git a/C/libraries/sdktyche/example/simple-enclave/untrusted/main.c b/C/libraries/sdktyche/example/simple-enclave/untrusted/main.c
+index 34125aae..cf1cab33 100644
+--- a/C/libraries/sdktyche/example/simple-enclave/untrusted/main.c
++++ b/C/libraries/sdktyche/example/simple-enclave/untrusted/main.c
+@@ -45,53 +45,6 @@ failure:
+ 
+ // ————————————————————————— Application functions —————————————————————————— //
+ 
+-void call_tychools(nonce_t nonce, unsigned long long offset) {
+-  char cmd[256];
+-  // TODO: detect architecture to run the proper command (e.g. remove
+-  // --riscv-enabled on non-riscv platforms)
+-  sprintf(cmd,
+-          "sudo chmod ugo+rx tychools;./tychools attestation "
+-          "--att-src=file_tychools.txt --src-bin=enclave_iso --offset=0x%llx "
+-          "--nonce=0x%llx --riscv-enabled",
+-          offset, nonce);
+-  LOG("cmd %s", cmd);
+-  LOG("WARNING: for now this assume we run on RISC-V! Update code for x86");
+-  system(cmd);
+-}
+-
+-void write_to_tychools(hello_world_t *msg) {
+-  file_tychools = fopen("file_tychools.txt", "w");
+-  if (file_tychools == NULL) {
+-    LOG("File failed to open tychools file\n");
+-  } else {
+-    LOG("Writing public key and data to tychools file\n");
+-    for (int i = 0; i < 32; i++) {
+-      uint32_t x = (uint32_t)msg->pub_key[i] & 0x0FF;
+-      fprintf(file_tychools, "%u\n", x);
+-    }
+-    for (int i = 0; i < 64; i++) {
+-      uint32_t x = (uint32_t)msg->signed_enclave_data[i] & 0x0FF;
+-      fprintf(file_tychools, "%u\n", x);
+-    }
+-    fclose(file_tychools);
+-  }
+-}
+-
+-void read_tychools_response() {
+-  tychools_response = fopen("tychools_response.txt", "r");
+-  if (tychools_response == NULL) {
+-    LOG("Failed to open a reponse file");
+-  } else {
+-    LOG("Answer from tychools\n");
+-    char *line = NULL;
+-    size_t len = 0;
+-    while ((getline(&line, &len, tychools_response)) != -1) {
+-      LOG("%s", line);
+-    }
+-    fclose(tychools_response);
+-  }
+-}
+-
+ /// Calls the enclave twice to print a message.
+ int hello_world() {
+   TEST(enclave != NULL);
+@@ -106,11 +59,6 @@ int hello_world() {
+   }
+   LOG("First enclave message:\n%s", msg->reply);
+ 
+-  // Generating random nonce
+-  const nonce_t mod = (1e9 + 7);
+-  nonce_t nonce = rand() % mod;
+-  LOG("Nonce sent by the client is %llx", nonce);
+-  msg->nonce = nonce;
+   // Call to enclave, which will do attestation
+   LOG("Calling enclave to execute attestation");
+   if (sdk_call_domain(enclave) != SUCCESS) {
+@@ -118,12 +66,6 @@ int hello_world() {
+     goto failure;
+   }
+ 
+-  write_to_tychools(msg);
+-  LOG("Calling the command to tychools to compare the result\n");
+-  //TODO: fix this.
+-  call_tychools(msg->nonce, /*enclave->map.physoffset*/ 0);
+-  read_tychools_response();
+-
+   // Clean up.
+   if (sdk_delete_domain(enclave) != SUCCESS) {
+     ERROR("Unable to delete the enclave %d", enclave->handle);

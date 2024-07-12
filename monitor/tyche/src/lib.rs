@@ -27,3 +27,9 @@ pub mod arch {
 pub mod arch {
     pub use crate::riscv::*;
 }
+
+/// Special return values supplied by the monitor.
+#[repr(usize)]
+pub enum MonitorErrors {
+    DomainRevoked = 66,
+}

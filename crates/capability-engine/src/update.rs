@@ -14,6 +14,8 @@ pub enum Update {
         core_map: u64,
     },
     RevokeDomain {
+        manager: Handle<Domain>,
+        mgmt_capa: LocalCapa,
         domain: Handle<Domain>,
     },
     CreateDomain {
@@ -118,7 +120,13 @@ impl fmt::Display for Update {
             Update::PermissionUpdate { domain, .. } => {
                 write!(f, "PermissionUpdate({})", domain)
             }
-            Update::RevokeDomain { domain } => write!(f, "RevokeDomain({})", domain),
+            Update::RevokeDomain {
+                manager,
+                mgmt_capa,
+                domain,
+            } => {
+                write!(f, "RevokeDomain({}, {:?}, {})", manager, mgmt_capa, domain)
+            }
             Update::CreateDomain { domain } => write!(f, "CreateDomain({})", domain),
             Update::Switch { domain, core, .. } => write!(f, "Switch({}, core {})", domain, core),
             Update::Cleanup { start, end } => write!(f, "Cleanup([0x{:x}, 0x{:x}])", start, end),

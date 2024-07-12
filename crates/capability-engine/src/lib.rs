@@ -459,6 +459,14 @@ impl CapaEngine {
             Capa::Region(region) if self.regions[region].is_root() => {
                 Err(CapaError::InvalidOperation)
             }
+            // If the domain is running, put an update rather than revoke.
+            Capa::Management(dom) if self.domains[dom].cores() != 0 => {
+                self.updates.push(Update::RevokeDomain {
+                    manager: domain,
+                    mgmt_capa: capa,
+                    domain: dom,
+                })
+            }
             // All other are simply revoked
             _ => domain::revoke_capa(
                 domain,
@@ -526,6 +534,18 @@ impl CapaEngine {
         Ok(())
     }
 
+    pub fn partial_switch(
+        &mut self,
+        domain: Handle<Domain>,
+        manager: Handle<Domain>,
+        core: usize,
+    ) -> Result<(), CapaError> {
+        self.domains[domain].remove_from_core(core);
+        self.domains[manager].execute_on_core(core);
+        self.cores[core].set_domain(manager);
+        Ok(())
+    }
+
     pub fn handle_trap(
         &mut self,
         domain: Handle<Domain>,
@@ -549,6 +569,11 @@ impl CapaEngine {
             })
             .unwrap();
         Ok(())
+    }
+
+    pub fn get_manager(&mut self, domain: Handle<Domain>) -> Result<Handle<Domain>, CapaError> {
+        let dom = &self.domains[domain];
+        dom.get_manager().ok_or(CapaError::CapabilityDoesNotExist)
     }
 
     pub fn handle_violation(
@@ -658,6 +683,10 @@ impl CapaEngine {
             return Err(CapaError::InvalidValue);
         };
         Ok(domain.regions().permissions(&self.tracker))
+    }
+
+    pub fn get_domain_cores(&self, domain: Handle<Domain>) -> Result<u64, CapaError> {
+        Ok(self.domains[domain].cores())
     }
 
     pub fn pop_update(&mut self) -> Option<Update> {

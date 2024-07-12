@@ -1,4 +1,4 @@
-all: hogger_enclave
+all: attestation_enclave
 
 ARCH ?=x86
 GCC ?=gcc
@@ -107,10 +107,24 @@ enclave: $(CODE_ENCLAVE) $(HDRS_ENCLAVE)
 	echo "x86"
 	$(GCC) -DTYCHE_USER_SPACE=2 -DTYCHE_ENCLAVE=1 -g $(COMMON_INCLUDES) -nostdlib -static -o $@ $(CODE_ENCLAVE)
 
-hogger_enclave: app enclave
+enclave_iso: app enclave
+	cargo -Z unstable-options -C $(TYCHOOLS_PATH) install --path . --locked
+	tychools instrument -s manifests/enclave_iso.json 
+	chmod +x enclave_iso
+	rm app enclave
+
+simple_enclave: app enclave
 	cargo -Z unstable-options -C $(TYCHOOLS_PATH) install --path . --locked
 	tychools instrument -s manifests/default.json 
-	chmod +x hogger_enclave
+	chmod +x simple_enclave
+	rm app enclave
+
+attestation_enclave: app enclave
+	cargo -Z unstable-options -C $(TYCHOOLS_PATH) install --path . --locked
+	tychools instrument -s manifests/default.json 
+	chmod +x simple_enclave
+	tychools instrument -s manifests/enclave_iso.json 
+	chmod +x enclave_iso
 	rm app enclave
 
 else ifeq ($(ARCH), riscv)
@@ -120,19 +134,34 @@ enclave: $(CODE_ENCLAVE) $(HDRS_ENCLAVE)
 	echo $(GCC)
 	$(GCC) -DTYCHE_USER_SPACE=2 -DTYCHE_ENCLAVE=1 -DCONFIG_RISCV=1 -g $(COMMON_INCLUDES) -nostdlib -static -o $@ $(CODE_ENCLAVE) -Wl,--section-start=.data=0x16000
 
-hogger_enclave: app enclave
+enclave_iso: app enclave
+	cargo -C $(TYCHOOLS_PATH) install --path . --locked
+	tychools instrument -s manifests/enclave_iso.json --riscv-enabled  
+	chmod +x enclave_iso
+	rm app enclave
+
+simple_enclave: app enclave
 	cargo -Z unstable-options -C $(TYCHOOLS_PATH) install --path . --locked
 	tychools instrument -s manifests/default.json --riscv-enabled 
 	chmod +x simple_enclave
 	rm app enclave
 
+attestation_enclave: app enclave
+	echo "Building attestation enclave for RISCV"
+	cargo -Z unstable-options -C $(TYCHOOLS_PATH) install --path . --locked 
+	tychools instrument -s manifests/default.json --riscv-enabled    
+	chmod +x simple_enclave
+	tychools instrument -s manifests/enclave_iso.json --riscv-enabled 
+	chmod +x enclave_iso
+	rm app enclave
 endif
 
 install_disk: all 
 	mkdir -p $(DISK_PATH)
-	cp -t $(DISK_PATH) hogger_enclave 
+	cp -t $(DISK_PATH) simple_enclave 
+	cp -t $(DISK_PATH) enclave_iso
 
 .PHONY: clean
 
 clean:
-	rm hogger_enclave 
+	rm simple_enclave 
