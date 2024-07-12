@@ -1,0 +1,59 @@
+diff --git a/drivers/iommu/intel/dmar.c b/drivers/iommu/intel/dmar.c
+index b00a0ceb2d13..30d6accc82a3 100644
+--- a/drivers/iommu/intel/dmar.c
++++ b/drivers/iommu/intel/dmar.c
+@@ -1385,7 +1385,19 @@ int qi_submit_sync(struct intel_iommu *iommu, struct qi_desc *desc,
+ 			QI_IWD_STATUS_WRITE | QI_IWD_TYPE;
+ 	if (options & QI_OPT_WAIT_DRAIN)
+ 		wait_desc.qw0 |= QI_IWD_PRQ_DRAIN;
++	//luca: here we communicate an addr over the descriptor interface
++	//later, we poll this addr to figure out if the operation completed
++
++	if( (virt_to_phys(&qi->desc_status[wait_index]) >> 12)  == (0x100207000 >> 12) ) {
++		//TODO: fixup address
++		//0x100207000 | 1d5280037 , hpa = 0x1d5280000
++		u64 fixdup_addr = 0x1d5280000ULL | (((u64)(&qi->desc_status[wait_index])) & 0xfffULL);
++		printk("%s:%d %s: fixing up wait addr, old=0x%llx, new=0x%llx", __FILE__,__LINE__, __FUNCTION__, virt_to_phys(&qi->desc_status[wait_index]), fixdup_addr );
++
++		wait_desc.qw1 = fixdup_addr;		
++	} else {
+ 	wait_desc.qw1 = virt_to_phys(&qi->desc_status[wait_index]);
++	}
+ 	wait_desc.qw2 = 0;
+ 	wait_desc.qw3 = 0;
+ 
+@@ -1673,8 +1685,15 @@ static void __dmar_enable_qi(struct intel_iommu *iommu)
+ 	/* write zero to the tail reg */
+ 	writel(0, iommu->reg + DMAR_IQT_REG);
+ 
++	//luca: here we inform the HW/Qemu about the address 
++	//luca: quick and dirty hack for testing
++	if( val == 0x10028b000 ) {
++		printk("%s:%d %s : rewriting addr", __FILE__, __LINE__, __FUNCTION__);
++		dmar_writeq(iommu->reg + DMAR_IQA_REG, 0x1d5804000);
++	} else {
+ 	dmar_writeq(iommu->reg + DMAR_IQA_REG, val);
+ 
++	}
+ 	iommu->gcmd |= DMA_GCMD_QIE;
+ 	writel(iommu->gcmd, iommu->reg + DMAR_GCMD_REG);
+ 
+diff --git a/drivers/iommu/intel/irq_remapping.c b/drivers/iommu/intel/irq_remapping.c
+index f58f5f57af78..b155240eca81 100644
+--- a/drivers/iommu/intel/irq_remapping.c
++++ b/drivers/iommu/intel/irq_remapping.c
+@@ -474,7 +474,14 @@ static void iommu_set_irq_remapping(struct intel_iommu *iommu, int mode)
+ 	u64 addr;
+ 	u32 sts;
+ 
++	//0x100300000 | 1d5879037 , hpa = 0x1d5879000
+ 	addr = virt_to_phys((void *)iommu->ir_table->base);
++	if( addr == 0x100300000 ) {
++		printk("%s:%d %s: USING hardcoded fixup address address", __FILE__, __LINE__, __FUNCTION__);
++		addr = 0x1d5879000;
++	} else {
++		printk("%s:%d %s: USING original address", __FILE__, __LINE__, __FUNCTION__);
++	}
+ 
+ 	raw_spin_lock_irqsave(&iommu->register_lock, flags);
+ 

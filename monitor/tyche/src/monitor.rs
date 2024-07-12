@@ -319,7 +319,9 @@ pub trait Monitor<T: PlatformState + 'static> {
         let io_domain = engine.create_io_domain(domain).unwrap();
         let mut initial_io_domain = IO_DOMAIN.lock();
         *initial_io_domain = Some(io_domain);
+
         //TODO figure that out.
+        //luca: once mapping in stage1 works, this shoudl get enabled
         if manifest.iommu != 0 {
             state.platform_init_io_mmu(manifest.iommu as usize);
         }

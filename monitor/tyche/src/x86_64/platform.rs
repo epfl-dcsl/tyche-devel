@@ -693,6 +693,13 @@ impl MonitorX86 {
         }
         VmxExitReason::EptViolation if domain.idx() == 0 => {
             let addr = vs.vcpu.guest_phys_addr().or(Err(CapaError::PlatformError))?;
+            let exit_qualification = match vs.vcpu.get(VmcsField::ExitQualification) {
+                Ok(v) => Some(v),
+                Err(e) =>  {
+                    log::error!("Failed to read VmcsField::ExitQualification from vmcs: {:?}",e);
+                    None
+                }
+            };
             log::error!(
                 "EPT Violation on dom0 core {}! gva: 0x{:x}, gpa: 0x{:x}",
                 cpuid(),
@@ -702,6 +709,29 @@ impl MonitorX86 {
                     .as_u64(),
                 addr.as_u64(),
             );
+            if let Some(exit_qualification) = exit_qualification {
+                // Extract the relevant bits
+                let ept_violation_type = exit_qualification & 0b111; // Bits 0-2
+                let read_access_misconfig = (exit_qualification >> 3) & 1; // Bit 3
+                let write_access_misconfig = (exit_qualification >> 4) & 1; // Bit 4
+                let execute_access_misconfig = (exit_qualification >> 5) & 1; // Bit 5
+                let ept_page_walk_length = (exit_qualification >> 8) & 0b1111; // Bits 8-11
+            
+                // Determine the violation type as a string
+                let violation_type_str = match ept_violation_type {
+                    0 => "Read",
+                    1 => "Write",
+                    2 => "Execute",
+                    _ => "Unknown",
+                };
+            
+                log::info!("EPT Violation Details:");
+                log::info!("  Violation Type: {}", violation_type_str);
+                log::info!("  Read Access Misconfiguration: {}", if read_access_misconfig == 1 { "Yes" } else { "No" });
+                log::info!("  Write Access Misconfiguration: {}", if write_access_misconfig == 1 { "Yes" } else { "No" });
+                log::info!("  Execute Access Misconfiguration: {}", if execute_access_misconfig == 1 { "Yes" } else { "No" });
+                log::info!("  EPT Page Walk Length: {}", ept_page_walk_length);
+            }
             panic!("The vcpu {:x?}", vs.vcpu);
         }
         VmxExitReason::Exception if domain.idx() == 0 => {

@@ -333,7 +333,7 @@ impl StateX86 {
                         HostPhysAddr::new(range.hpa),
                         range.size,
                         flags,
-                        Some(true),
+                        None,
                     );
                     mapped_device_bytes += range.size;
                 }
@@ -377,9 +377,28 @@ impl StateX86 {
             mapper.debug_range(GuestPhysAddr::new(x), 0x1000);
         }*/
 
-        log::info!("GPA->SPA for DMAR 0x000000fe_d90_000. Should be ID mapped to SPA");
-        mapper.debug_range(GuestPhysAddr::new(0x000000fed90000), 0x2000);
+        /*log::info!("GPA->SPA for DMAR 0x000000fe_d90_000. Should be ID mapped to SPA");
+        mapper.debug_range(GuestPhysAddr::new(0x000000fed90000), 0x2000);*/
 
+        /*log::info!("GPA->SPA for qi : 0x100207000");
+        mapper.debug_range(GuestPhysAddr::new(0x100207000), 0x1000);*/
+
+        log::info!("GPA-> for pci crash");
+        mapper.debug_range(GuestPhysAddr::new(0x80_000_001), 0x1000);
+
+
+        /*
+        //Addresses used in the vt-d interrupt remapping code
+        log::info!("GPA->SPA for qi: 0x100_28a_000");
+        mapper.debug_range(GuestPhysAddr::new(0x10028a000), 0x1000);
+
+        log::info!("GPA->SPA for qi  : 0x100_28b_000");
+        mapper.debug_range(GuestPhysAddr::new(0x10028b000), 0x1000);
+        
+        log::info!("GPA->SPA for qi  : 0x100_300_000");
+        mapper.debug_range(GuestPhysAddr::new(0x100300000), 0x1000);*/
+
+        
         /*for (mr_idx, mr) in get_manifest().get_boot_mem_regions().iter().enumerate() {
             log::info!("mr_idx {:02} excerpt of PTs for mr {:x?}", mr_idx, mr);
             mapper.debug_range(GuestPhysAddr::new(mr.start as usize), 0x1000);
