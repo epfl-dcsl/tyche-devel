@@ -27,10 +27,10 @@ pub use domain::{Domain, LocalCapa, NextCapaToken};
 pub use gen_arena::{GenArena, Handle};
 pub use region::ResourceKind::*;
 pub use region::{
-    AccessRights, MemOps, MemoryPermission, Region, RegionIterator, RegionTracker, ResourceKind,
+    AccessRights, MemOps, MemoryPermission, Region, RegionIterator, RegionTracker, ResourceKind,PermissionIterator,
     MEMOPS_ALL, MEMOPS_EXTRAS,
 };
-use region::{PermissionIterator, TrackerPool, EMPTY_REGION};
+use region::{TrackerPool, EMPTY_REGION};
 pub use remapper::Remapper;
 pub use segment::EffectiveRegionIterator;
 use segment::{RegionCapa, RegionHash, RegionPool, EMPTY_REGION_CAPA};

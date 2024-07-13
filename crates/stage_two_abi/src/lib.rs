@@ -89,7 +89,8 @@ pub struct Manifest {
     /// VGA infor, in case VGA screen is available.
     pub vga: VgaInfo,
     /// Optionnal address of the I/O MMU. Absent if set to 0.
-    pub iommu: u64,
+    pub iommu_hva: u64,
+    pub iommu_hpa: u64,
     /// SMP info:
     pub smp: Smp,
     /// Used to transfer memory regions from stage1 to stage2
@@ -166,7 +167,8 @@ macro_rules! make_manifest {
                 voffset: 0,
                 info: $crate::GuestInfo::default_config(),
                 vga: $crate::VgaInfo::no_vga(),
-                iommu: 0,
+                iommu_hva: 0,
+                iommu_hpa: 0,
                 smp: $crate::Smp {
                     smp: 0,
                     mailbox: 0,

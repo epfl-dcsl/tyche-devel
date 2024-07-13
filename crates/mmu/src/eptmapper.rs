@@ -3,8 +3,10 @@
 use utils::{GuestPhysAddr, HostPhysAddr, HostVirtAddr};
 use vmx::bitmaps::{EptEntryFlags, EptMemoryType};
 use vmx::ept::{GIANT_PAGE_SIZE, HUGE_PAGE_SIZE, PAGE_SIZE};
+use vmx::GuestVirtAddr;
 
 use crate::frame_allocator::FrameAllocator;
+use crate::mapper::Mapper;
 use crate::walker::{Address, Level, WalkNext, Walker};
 
 pub const ADDRESS_MASK: u64 = 0x7fffffffff000;
@@ -42,6 +44,76 @@ unsafe impl Walker for EptMapper {
 
     fn get_phys_addr(entry: u64) -> Self::WalkerPhysAddr {
         Self::WalkerPhysAddr::from_u64(entry & ADDRESS_MASK)
+    }
+}
+
+impl Mapper for EptMapper {
+    fn map_range(
+        &mut self,
+        allocator: &impl FrameAllocator,
+        addr_in: &impl Address,
+        addr_out: &impl Address,
+        size: usize,
+        prot: u64,
+    ) {
+        let allow_large = self.allow_large_mappings;
+        unsafe {
+            self.walk_range(
+                GuestPhysAddr::new(addr_in.as_usize()),
+                GuestPhysAddr::new(addr_in.as_usize() + size),
+                &mut |addr, entry, level| {
+                    if (*entry & EPT_PRESENT.bits()) != 0 {
+                        if (level == Level::L3 || level == Level::L2)
+                            && ((*entry & EptEntryFlags::PAGE.bits()) != 0)
+                        {
+                            return WalkNext::Leaf;
+                        }
+                        return WalkNext::Continue;
+                    }
+
+                    let end = addr_in.as_usize() + size;
+                    let hphys = addr_out.as_usize() + (addr.as_usize() - addr_in.as_usize());
+                    if level == Level::L3 {
+                        if allow_large
+                            && (addr.as_usize() + GIANT_PAGE_SIZE <= end)
+                            && (hphys % GIANT_PAGE_SIZE == 0)
+                        {
+                            *entry = hphys as u64
+                                | EptEntryFlags::PAGE.bits()
+                                | prot
+                                | EptMemoryType::WB.bits()
+                                | (1 << 7);
+                            return WalkNext::Leaf;
+                        }
+                    }
+                    if level == Level::L2 {
+                        if allow_large
+                            && (addr.as_usize() + HUGE_PAGE_SIZE <= end)
+                            && (hphys % HUGE_PAGE_SIZE == 0)
+                        {
+                            *entry = hphys as u64
+                                | EptEntryFlags::PAGE.bits()
+                                | prot
+                                | EptMemoryType::WB.bits();
+                            return WalkNext::Leaf;
+                        }
+                    }
+                    if level == Level::L1 {
+                        assert!(hphys % PAGE_SIZE == 0);
+                        *entry = hphys as u64 | prot | EptMemoryType::WB.bits();
+                        return WalkNext::Leaf;
+                    }
+                    let frame = allocator
+                        .allocate_frame()
+                        .expect("map_range: unable to allocate page table entry")
+                        .zeroed();
+                    //*entry = frame.phys_addr.as_u64() | prot.bits();
+                    *entry = frame.phys_addr.as_u64() | EPT_PRESENT.bits();
+                    WalkNext::Continue
+                },
+            )
+            .expect("Failed to map EPTs");
+        }
     }
 }
 
@@ -139,79 +211,6 @@ impl EptMapper {
         found_leaf_in_range
     }
 
-    /// Maps a range of physical memory to the given virtual memory.
-    pub fn map_range(
-        &mut self,
-        allocator: &impl FrameAllocator,
-        gpa: GuestPhysAddr,
-        hpa: HostPhysAddr,
-        size: usize,
-        prot: EptEntryFlags,
-        allow_large: Option<bool>,
-    ) {
-        let allow_large = match allow_large {
-            Some(b) => b,
-            None => self.allow_large_mappings,
-        };
-        unsafe {
-            self.walk_range(
-                gpa,
-                GuestPhysAddr::new(gpa.as_usize() + size),
-                &mut |addr, entry, level| {
-                    if (*entry & EPT_PRESENT.bits()) != 0 {
-                        if (level == Level::L3 || level == Level::L2)
-                            && ((*entry & EptEntryFlags::PAGE.bits()) != 0)
-                        {
-                            return WalkNext::Leaf;
-                        }
-                        return WalkNext::Continue;
-                    }
-
-                    let end = gpa.as_usize() + size;
-                    let hphys = hpa.as_usize() + (addr.as_usize() - gpa.as_usize());
-                    if level == Level::L3 {
-                        if allow_large
-                            && (addr.as_usize() + GIANT_PAGE_SIZE <= end)
-                            && (hphys % GIANT_PAGE_SIZE == 0)
-                        {
-                            *entry = hphys as u64
-                                | EptEntryFlags::PAGE.bits()
-                                | prot.bits()
-                                | EptMemoryType::WB.bits()
-                                | (1 << 7);
-                            return WalkNext::Leaf;
-                        }
-                    }
-                    if level == Level::L2 {
-                        if allow_large
-                            && (addr.as_usize() + HUGE_PAGE_SIZE <= end)
-                            && (hphys % HUGE_PAGE_SIZE == 0)
-                        {
-                            *entry = hphys as u64
-                                | EptEntryFlags::PAGE.bits()
-                                | prot.bits()
-                                | EptMemoryType::WB.bits();
-                            return WalkNext::Leaf;
-                        }
-                    }
-                    if level == Level::L1 {
-                        assert!(hphys % PAGE_SIZE == 0);
-                        *entry = hphys as u64 | prot.bits() | EptMemoryType::WB.bits();
-                        return WalkNext::Leaf;
-                    }
-                    let frame = allocator
-                        .allocate_frame()
-                        .expect("map_range: unable to allocate page table entry")
-                        .zeroed();
-                    //*entry = frame.phys_addr.as_u64() | prot.bits();
-                    *entry = frame.phys_addr.as_u64() | EPT_PRESENT.bits();
-                    WalkNext::Continue
-                },
-            )
-            .expect("Failed to map EPTs");
-        }
-    }
-
     pub fn free_all(mut self, allocator: &impl FrameAllocator) {
         let (root, _) = self.root();
         let host_offset = self.host_offset;
@@ -303,14 +302,14 @@ impl EptMapper {
                         let n_size = gpa.as_usize() - aligned_addr;
                         mapper.map_range(
                             allocator,
-                            GuestPhysAddr::new(aligned_addr),
-                            HostPhysAddr::new(aligned_addr),
+                            &GuestPhysAddr::new(aligned_addr),
+                            &HostPhysAddr::new(aligned_addr),
                             n_size,
-                            EptEntryFlags::READ
+                            (EptEntryFlags::READ
                                 | EptEntryFlags::WRITE
                                 | EptEntryFlags::USER_EXECUTE
-                                | EPT_PRESENT,
-                            None,
+                                | EPT_PRESENT)
+                                .bits(),
                         );
                     }
                     // Some mapping on the left.
@@ -318,14 +317,14 @@ impl EptMapper {
                         let n_size = aligned_addr + big_size - gpa.as_usize() - size;
                         mapper.map_range(
                             allocator,
-                            gpa + size,
-                            HostPhysAddr::new(gpa.as_usize() + size),
+                            &(gpa + size),
+                            &HostPhysAddr::new(gpa.as_usize() + size),
                             n_size,
-                            EptEntryFlags::READ
+                            (EptEntryFlags::READ
                                 | EptEntryFlags::WRITE
                                 | EptEntryFlags::USER_EXECUTE
-                                | EPT_PRESENT,
-                            None,
+                                | EPT_PRESENT)
+                                .bits(),
                         );
                     }
                     return WalkNext::Leaf;

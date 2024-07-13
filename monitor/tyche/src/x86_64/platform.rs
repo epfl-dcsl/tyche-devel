@@ -14,7 +14,7 @@ use utils::HostPhysAddr;
 use vmx::bitmaps::exit_qualification;
 use vmx::fields::VmcsField;
 use vmx::raw::vmread;
-use vmx::VmxExitReason;
+use vmx::{HostVirtAddr, VmxExitReason};
 
 use super::context::{ContextGpx86, Contextx86};
 use super::cpuid_filter::{filter_mpk, filter_tpause};
@@ -99,9 +99,14 @@ impl PlatformState for StateX86 {
         return None;
     }
 
-    fn platform_init_io_mmu(&self, addr: usize) {
+    fn platform_init_io_mmu(&self, addr: HostVirtAddr) {
         let mut iommu = IOMMU.lock();
         iommu.set_addr(addr);
+        //we already log this in stage1 but his is a good sanity check
+        //that mapping+passing the IOMMU addr to Tyche worked
+        log::info!("IOMMU version: 0x{:x}", iommu.get_version());
+        log::info!("IOMMUU capabilities {:?}", iommu.get_capability());
+        log::info!("IOMMU extended capabilities {:?}", iommu.get_extended_capability());
     }
 
     fn get_domain(domain: Handle<Domain>) -> MutexGuard<'static, Self::DomainData> {
@@ -168,7 +173,10 @@ impl PlatformState for StateX86 {
         if engine[domain].is_io() {
             Self::update_domain_iopt(domain, engine)
         } else {
-            Self::update_domain_ept(domain, engine)
+            //TODO: dirty hack, io domains seem to be a different concept
+            Self::update_domain_ept(domain, engine) |
+            Self::update_domain_iopt(domain, engine)
+
         }
     }
 

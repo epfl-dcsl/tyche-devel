@@ -493,7 +493,7 @@ impl PlatformState for StateRiscv {
         todo!("Implement");
     }
 
-    fn platform_init_io_mmu(&self, addr: usize) {
+    fn platform_init_io_mmu(&self, addr: HostVirtAddr) {
         todo!();
     }
 

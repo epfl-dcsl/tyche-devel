@@ -168,11 +168,6 @@ impl ElfProgram {
 
             let gpa_pt_root = allocator.gpa_of_next_allocation();
             let spa_pt_root = allocator.allocate_frame().ok_or(())?.zeroed();
-            log::info!(
-                "storing GPA 0x{:x} -> SPA 0x{:x} in inner mapper",
-                gpa_pt_root.as_u64(),
-                spa_pt_root.phys_addr.as_u64()
-            );
             inner_pt_mapper.map_range(
                 allocator,
                 gpa_pt_root,
@@ -184,7 +179,6 @@ impl ElfProgram {
             let pt_mapper = GuestPtMapper::new(gpa_pt_root, inner_pt_mapper);
             ELfTargetEnvironment::Guest(pt_mapper)
         } else {
-            log::info!("Setting up host pt mapper");
             let pt_root = allocator.allocate_frame().ok_or(())?.zeroed();
             let pt_root_guest_phys_addr = HostPhysAddr::from_usize(pt_root.phys_addr.as_usize());
             let pt_mapper = PtMapper::<HostPhysAddr, HostVirtAddr>::new(
@@ -201,12 +195,12 @@ impl ElfProgram {
                 // Skip non-load segments.
                 continue;
             }
-            log::info!("Processing segment {:x?}", seg);
+            //log::info!("Processing segment {:x?}", seg);
             unsafe {
                 // TODO: ensure that the segment does not overlap host memory
-                log::info!("\t loading");
+                //log::info!("\t loading");
                 self.load_segment(seg, HostVirtAddr::new(host_physical_offset));
-                log::info!("\t mapping");
+                //log::info!("\t mapping");
                 self.map_segment(seg, &mut pts_target_env, allocator);
             }
         }
@@ -364,6 +358,7 @@ impl ElfProgram {
                 assert!(p_vaddr % PAGE_SIZE as u64 == 0);
                 assert!(segment.phys_mem[0].start.as_usize() % PAGE_SIZE == 0);
 
+                log::info!("ElfMapping::Scattered start 0x{:13x} end 0x{:13x}", p_vaddr, p_vaddr+memsz);
                 match mapping_env {
                     ELfTargetEnvironment::Host(host_mapper) => host_mapper
                         .map_range_scattered(

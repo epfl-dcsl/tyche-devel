@@ -53,10 +53,10 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
 
     //for some reason there is an unsorted entry in there. This makes the mem whole detection logic much harder
     sort_memregions(&mut boot_info.memory_regions);
-    log::info!("Unmodified boot memory regions");
+    /*log::info!("Unmodified boot memory regions");
     for (mr_idx, mr) in boot_info.memory_regions.iter().enumerate() {
         log::info!("{:03} {:x?}", mr_idx, mr);
-    }
+    }*/
 
     // Initialize memory management
     let physical_memory_offset = HostVirtAddr::new(
@@ -152,10 +152,18 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             iommus[0].base_address.as_usize() + physical_memory_offset.as_usize(),
         );
         let iommu = unsafe { vtd::Iommu::new(iommu_addr) };
-        log::info!("IO MMU: capabilities {:?}", iommu.get_capability(),);
-        log::info!("        extended {:?}", iommu.get_extended_capability());
+        log::info!(
+            "IOMMU: base HVA 0x{:013x}, base HPA 0x{:013x}",
+            iommu_addr.as_u64(),
+            iommus[0].base_address.as_u64()
+        );
+        log::info!("IOMMU: capabilities          {:?}", iommu.get_capability(),);
+        log::info!(
+            "IOMMU: extended capabilities {:?}",
+            iommu.get_extended_capability()
+        );
     } else {
-        log::info!("IO MMU: None");
+        log::info!("IOMMU: None");
     }
 
     // Initiates the SMP boot process

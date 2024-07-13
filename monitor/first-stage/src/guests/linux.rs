@@ -3,6 +3,7 @@
 use core::ptr::slice_from_raw_parts;
 use core::slice;
 
+use mmu::frame_allocator::PhysRange;
 use mmu::ioptmapper::PAGE_SIZE;
 use mmu::memory_coloring::MemoryColoring;
 use mmu::RangeAllocator;
@@ -20,7 +21,6 @@ use crate::guests::boot_params::{
 use crate::guests::ManifestInfo;
 use crate::mmu::frames::PartitionedMemoryMap;
 use crate::print;
-use crate::vmx::{GuestPhysAddr, GuestVirtAddr};
 
 #[cfg(feature = "guest_linux")]
 const LINUXBYTES: &'static [u8] = include_bytes!("../../../../builds/linux-x86/vmlinux");
@@ -38,7 +38,7 @@ const SETUP_HDR: u64 = 0x1f1;
 #[cfg(not(feature = "bare_metal"))]
 //option to bypass dmar error: intremap=off
 static COMMAND_LINE: &'static [u8] =
-    b"root=/dev/sdb2 apic=debug earlyprintk=serial,ttyS0 console=ttyS0 iommu=off\0";
+    b"root=/dev/sdb2 apic=debug earlyprintk=serial,ttyS0 console=ttyS0 iommu=pt intel_iommu=off intremap=off\0";
 #[cfg(feature = "bare_metal")]
 static COMMAND_LINE: &'static [u8] =
     b"root=/dev/sdb2 apic=debug earlyprintk=serial,ttyS0,115200 console=ttyS0,115200\0";
@@ -106,7 +106,7 @@ impl Guest for Linux {
             .load(guest_allocator, virtoffset.as_usize(), true)
             .expect("Failed to load guest");
 
-        log::info!("Dumping PT walk to linux entry in stage1 constructed PTS");
+        /*log::info!("Dumping PT walk to linux entry in stage1 constructed PTS");
         match &mut loaded_linux.pt_mapper {
             crate::elf::ELfTargetEnvironment::Host(_) => todo!(),
             crate::elf::ELfTargetEnvironment::Guest(guest_mapper) => {
@@ -116,11 +116,16 @@ impl Guest for Linux {
                     mmu::walker::Level::L1,
                 );
             }
-        }
+        }*/
 
         // Setup I/O MMU
-        if let Some(_) = &acpi.iommu {
-            manifest.iommu = 0;
+        if let Some(iommus) = &acpi.iommu {
+            let iommu = if iommus.len() == 1 {
+                iommus[0]
+            } else {
+                panic!("we only support one iommu right now")
+            };
+            manifest.iommu = Some(iommu);
         }
         {
             let linux_exec_segment = linux_prog
@@ -137,6 +142,9 @@ impl Guest for Linux {
             }
             println!("\n");
         }
+
+        //This will remove the DMAR header if it is present in order to hide the IOMMU from the Linux guest
+        AcpiInfo::invalidate_dmar(rsdp, host_allocator.get_physical_offset());
 
         // Build the boot params
         // Step1: load values contained in BootParams into memory
@@ -190,12 +198,12 @@ fn build_bootparams<T: MemoryColoring + Clone>(memory_map: &PartitionedMemoryMap
     log::info!("Linux boot mem map as construted in stage1");
     let guest_memory_regions = memory_map.build_guest_memory_regions();
     for mr in guest_memory_regions {
-        log::info!(
+        /*log::info!(
             "Linux boot map: addr 0x{:x}, size 0x{:x}, type {:?}",
             mr.addr.as_usize(),
             mr.size,
             mr.mem_type
-        );
+        );*/
 
         boot_params
             .add_e820_entry(mr)

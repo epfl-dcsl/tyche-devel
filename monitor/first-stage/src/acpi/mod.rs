@@ -24,7 +24,7 @@ pub struct AcpiInfo {
 }
 
 /// Information about I/O MMU.
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct IommuInfo {
     /// Base address of the I/O MMU configuration.
     pub base_address: HostPhysAddr,
@@ -85,6 +85,39 @@ impl AcpiInfo {
         }
 
         acpi_info
+    }
+
+    /// this will change the magic signature of the `DMAR` table to `XXXX`, effectively disabling it
+    /// TODO: update table to actually remove the entry
+    pub unsafe fn invalidate_dmar(rsdp_ptr: u64, physical_memory_offset: HostVirtAddr) {
+        // Get RSDP virtual address
+        let rsdp = &*((rsdp_ptr + physical_memory_offset.as_u64()) as *const Rsdp);
+        rsdp.check().expect("Invalid RSDP checksum");
+        if rsdp.revision == 0 {
+            panic!("Missing XSDT");
+        }
+
+        // Parse the XSDT
+        let xsdt_ptr = (rsdp.xsdt_address + physical_memory_offset.as_u64()) as *const u8;
+        let xsdt_header = &*(xsdt_ptr as *const SdtHeader);
+        let lenght = xsdt_header.length as usize;
+
+        //luca: TODO: propberly update the table. For now, we just write garbage hoping that Linux will ignore the entry
+        let invalidate_if_dmar = |table_addr: u64| {
+            let header = &mut *((table_addr + physical_memory_offset.as_u64()) as *mut SdtHeader);
+            if &header.signature != b"DMAR" {
+                return;
+            }
+            header.signature = *b"XXXX";
+        };
+
+        // Iterate over table entries
+        let mut table_ptr = xsdt_ptr.offset(mem::size_of::<SdtHeader>() as isize);
+        while table_ptr < xsdt_ptr.offset(lenght as isize) {
+            let table_addr = ptr::read_unaligned(table_ptr as *const u64);
+            invalidate_if_dmar(table_addr);
+            table_ptr = table_ptr.offset(mem::size_of::<u64>() as isize);
+        }
     }
 
     unsafe fn handle_table(&mut self, table_addr: u64, physical_memory_offset: HostVirtAddr) {

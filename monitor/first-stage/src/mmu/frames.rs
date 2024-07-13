@@ -1,4 +1,3 @@
-use alloc::borrow::ToOwned;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::cell::Cell;
@@ -145,13 +144,12 @@ impl<T: MemoryColoring + Clone> PartitionedMemoryMap<T> {
         */
         let mut result = Vec::new();
 
-      
         let guest_mem_bytes = match self.guest {
             MemoryRange::ColoredRange(cr) => cr.mem_bytes,
             MemoryRange::PhysContigRange(pr) => pr.size(),
         };
         log::info!(
-            "Building guset memory map assuming {:0.2} GiB of Memory",
+            "Building guest memory map assuming {:0.2} GiB of Memory",
             guest_mem_bytes as f64 / (1 << 30) as f64
         );
         let mut remaining_guest_mem_bytes = guest_mem_bytes as u64;
@@ -166,7 +164,7 @@ impl<T: MemoryColoring + Clone> PartitionedMemoryMap<T> {
                 MemoryRegionKind::Usable => {
                     //No more guest memory,
                     if remaining_guest_mem_bytes <= 0 {
-                        log::info!("dropping {:x?}", bl_mr);
+                        //log::info!("dropping {:x?}", bl_mr);
                         result.push(E820Entry {
                             addr: GuestPhysAddr::new(bl_mr.start as usize),
                             size: bl_mr_bytes,
@@ -183,9 +181,9 @@ impl<T: MemoryColoring + Clone> PartitionedMemoryMap<T> {
                         ram_bytes += bl_mr_bytes;
                     // remaining guest memory > 0 but smaller than region -> split region
                     } else {
-                        log::info!("Splitting final memory region. Useable 0x{:x} to 0x{:x}, blocking 0x{:x} to 0x{:x}",
-                        bl_mr.start, bl_mr.start+remaining_guest_mem_bytes, bl_mr.start + remaining_guest_mem_bytes, bl_mr.start + remaining_guest_mem_bytes + bl_mr_bytes - remaining_guest_mem_bytes 
-                    );
+                        /*log::info!("Splitting final memory region. Useable 0x{:x} to 0x{:x}, blocking 0x{:x} to 0x{:x}",
+                            bl_mr.start, bl_mr.start+remaining_guest_mem_bytes, bl_mr.start + remaining_guest_mem_bytes, bl_mr.start + remaining_guest_mem_bytes + bl_mr_bytes - remaining_guest_mem_bytes
+                        );*/
                         result.push(E820Entry {
                             addr: GuestPhysAddr::new(bl_mr.start as usize),
                             size: remaining_guest_mem_bytes,
@@ -199,7 +197,10 @@ impl<T: MemoryColoring + Clone> PartitionedMemoryMap<T> {
                             mem_type: E820Types::Reserved,
                         });
                         ram_bytes += remaining_guest_mem_bytes;
-                        assert!(remaining_guest_mem_bytes > 0 && remaining_guest_mem_bytes < bl_mr_bytes);
+                        assert!(
+                            remaining_guest_mem_bytes > 0
+                                && remaining_guest_mem_bytes < bl_mr_bytes
+                        );
                         remaining_guest_mem_bytes = 0;
                     }
                 }
@@ -213,7 +214,7 @@ impl<T: MemoryColoring + Clone> PartitionedMemoryMap<T> {
                         mem_type: E820Types::Ram,
                     });
                     device_bytes += bl_mr_bytes;
-                    log::info!("0x{:x} to {:x} was BIOS but is now RAM", bl_mr.start, bl_mr.start+bl_mr_bytes);
+                    //log::info!("0x{:x} to {:x} was BIOS but is now RAM", bl_mr.start, bl_mr.start+bl_mr_bytes);
                 }
                 //we used this to mark memory used by the stage1 allocator.
                 //just drop
@@ -238,15 +239,24 @@ impl<T: MemoryColoring + Clone> PartitionedMemoryMap<T> {
             MemoryRange::ColoredRange(_) => todo!("should not happend"),
             MemoryRange::PhysContigRange(pcr) => pcr,
         };
-        result.push(E820Entry{
+        result.push(E820Entry {
             addr: GuestPhysAddr::new(stage1_alloc_mem.start.as_usize()),
             size: stage1_alloc_mem.size() as u64,
             mem_type: E820Types::Reserved,
         });
 
-
-        log::info!("RAM: {:0.2} GiB (0x{:x} bytes). Device {:0.2} GiB (0x{:x} bytes)", ram_bytes as f64 / (1<<30) as f64, ram_bytes, device_bytes as f64 / (1<<30) as f64, device_bytes);
-        log::info!("Mem regions before: {}. Mem regions after: {}", self.all_regions.len(), result.len());
+        log::info!(
+            "RAM: {:0.2} GiB (0x{:x} bytes). Device {:0.2} GiB (0x{:x} bytes)",
+            ram_bytes as f64 / (1 << 30) as f64,
+            ram_bytes,
+            device_bytes as f64 / (1 << 30) as f64,
+            device_bytes
+        );
+        log::info!(
+            "Mem regions before: {}. Mem regions after: {}",
+            self.all_regions.len(),
+            result.len()
+        );
 
         result
     }
@@ -472,10 +482,11 @@ pub unsafe fn init(
     println!("Initialized heap\nAbout to transofmr guest_allocator into shared allocator\n");
     let guest_allocator = SharedFrameAllocator::new(guest_allocator);
     println!("init memory done");
-    log::info!("Modified memory regions");
+
+    /*log::info!("Modified memory regions");
     for (mr_idx, mr) in regions.iter().enumerate() {
         log::info!("{:03} {:x?}", mr_idx, mr);
-    }
+    }*/
     Ok((
         stage1_allocator,
         stage2_allocator,
@@ -487,21 +498,16 @@ pub unsafe fn init(
 
 /// Searches and returns a memory region a physically contiguous memory range
 /// of the requested size. `regions` is modified to make the memory unavailable to other parts of the system
-fn reserve_memory_region(
-    regions: &mut [MemoryRegion],
-    required_bytes: usize,
-) -> Option<PhysRange> {
+fn reserve_memory_region(regions: &mut [MemoryRegion], required_bytes: usize) -> Option<PhysRange> {
     let mut matching_mr = None;
     for (mr_idx, mr) in regions.iter().enumerate().rev() {
-        if mr.kind == MemoryRegionKind::Usable
-            && ((mr.end - mr.start) as usize > required_bytes)
-        {
+        if mr.kind == MemoryRegionKind::Usable && ((mr.end - mr.start) as usize > required_bytes) {
             let pr = PhysRange {
                 start: HostPhysAddr::new(mr.start as usize),
                 end: HostPhysAddr::new(mr.end as usize),
             };
 
-            matching_mr = Some((mr_idx,pr));
+            matching_mr = Some((mr_idx, pr));
             println!(
                 "Using mr at idx {:02} {:x?} for contig range allocator",
                 mr_idx, mr
@@ -510,22 +516,26 @@ fn reserve_memory_region(
         }
     }
     match &mut matching_mr {
-        Some((idx,pr)) => {
-            log::info!("Using mem region at idx {} (out of {}) to fulfill request", idx, regions.len());
+        Some((idx, pr)) => {
+            log::info!(
+                "Using mem region at idx {} (out of {}) to fulfill request",
+                idx,
+                regions.len()
+            );
             //if this is the last region, just could it short instead of marking as reserved
             //this way another call to reserve_memory_region can easily draw from the same region again
-            if *idx == regions.len()-1 {
+            if *idx == regions.len() - 1 {
                 let v = &mut regions[*idx];
-              
-                pr.start = HostPhysAddr::new(v.end as usize-required_bytes);
+
+                pr.start = HostPhysAddr::new(v.end as usize - required_bytes);
                 pr.end = HostPhysAddr::new(v.end as usize);
-                assert_eq!(pr.start.as_usize()%PAGE_SIZE,0);
-                assert_eq!(pr.end.as_usize()%PAGE_SIZE,0);
+                assert_eq!(pr.start.as_usize() % PAGE_SIZE, 0);
+                assert_eq!(pr.end.as_usize() % PAGE_SIZE, 0);
 
                 v.end -= required_bytes as u64;
                 log::info!("cutting region short");
             } else {
-                let mut prev : Option<MemoryRegion> = regions.get(*idx-1).copied();
+                let mut prev: Option<MemoryRegion> = regions.get(*idx - 1).copied();
                 for mr in regions.iter_mut().skip(*idx) {
                     log::info!("marking regions as MR_USED_BY_OUR_ALLOCATOR");
                     mr.kind = MR_USED_BY_OUR_ALLOCATOR;
@@ -535,9 +545,9 @@ fn reserve_memory_region(
                     prev = Some(*mr);
                 }
             }
-          
-            return Some(*pr)
-        },
+
+            return Some(*pr);
+        }
         None => return None,
     }
 }
@@ -598,16 +608,16 @@ impl<T: MemoryColoring + Clone> ColoringRangeFrameAllocator<T> {
             gpa_of_next_allocation: Cell::new(0),
         };
 
-        log::info!("initializing new color allocator gpa");
+        //log::info!("initializing new color allocator gpa");
         if cur_mr.kind != MemoryRegionKind::Usable {
             res.inside_cur_region_cursor.set(PhysAddr::new(cur_mr.end));
             res.gpa_of_next_allocation.set(cur_mr.end as usize);
             res.advance_to_next_region().unwrap();
         }
-        log::info!(
+        /*log::info!(
             "initial next_gpa value is 0x{:x}",
             res.gpa_of_next_allocation.get()
-        );
+        );*/
 
         res
     }
@@ -635,14 +645,14 @@ impl<T: MemoryColoring + Clone> ColoringRangeFrameAllocator<T> {
                     "gap between regions is not multiple of page size"
                 );
                 let updated = self.gpa_of_next_allocation.get() + gap_size;
-                log::info!(
+                /*log::info!(
                     "processing gap, old gpa 0x{:x}, new gpa 0x{:x}",
                     self.gpa_of_next_allocation.get(),
                     updated
-                );
+                );*/
                 self.gpa_of_next_allocation.set(updated);
             } else if prev_region.end > mr.start {
-               panic!("weird unsorted memory region in gpa calculation");
+                panic!("weird unsorted memory region in gpa calculation");
             }
             //fallthrough is intended, we can have a GAP and then then e.g. the region is also not useable
             match mr.kind {
@@ -673,11 +683,11 @@ impl<T: MemoryColoring + Clone> ColoringRangeFrameAllocator<T> {
                         "blocked region has size that is not multiple of page size"
                     );
                     let updated: usize = self.gpa_of_next_allocation.get() + size;
-                    log::info!(
+                    /*log::info!(
                         "processing blocked region, old gpa 0x{:x}, new gpa 0x{:x}",
                         self.gpa_of_next_allocation.get(),
                         updated
-                    );
+                    );*/
                     self.gpa_of_next_allocation.set(updated);
                 }
                 _ => todo!("unknown memory region"),

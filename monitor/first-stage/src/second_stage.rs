@@ -154,24 +154,30 @@ pub fn load<T: MemoryColoring + Clone>(
         })
         .collect();
 
-    // If we setup I/O MMU support
-    if info.iommu != 0 {
+    // If we have IOMMU, map it to tyche
+    let stage2_iommu_hva;
+    let iommu_hpa;
+    if let Some(iommu) = info.iommu {
         // Map I/O MMU page, using one to one mapping
-        // TODO: unmap from guest EPT
-        log::info!("Setup I/O MMU");
-        let virt_addr = HostVirtAddr::new(info.iommu as usize);
-        let phys_addr = HostPhysAddr::new(info.iommu as usize);
-        let size = 0x1000;
+        log::info!(
+            "Mapping IOMMU to Tyche at HVA 0x{:013x}",
+            iommu.base_address.as_u64(),
+        );
+        stage2_iommu_hva = HostVirtAddr::new(iommu.base_address.as_usize());
+        iommu_hpa = iommu.base_address;
         match &mut stage2_loaded_elf.pt_mapper {
             crate::elf::ELfTargetEnvironment::Host(host_mapper) => host_mapper.map_range(
                 stage2_allocator,
-                virt_addr,
-                phys_addr,
-                size,
+                stage2_iommu_hva,
+                iommu.base_address,
+                iommu.size,
                 PtFlag::PRESENT | PtFlag::WRITE,
             ),
             crate::elf::ELfTargetEnvironment::Guest(_) => panic!("stage2 with guest mapper"),
         }
+    } else {
+        stage2_iommu_hva = HostVirtAddr::new(0);
+        iommu_hpa = HostPhysAddr::new(0);
     }
 
     // Map the guest (e.g. linux) memory into Tyche.
@@ -311,7 +317,10 @@ pub fn load<T: MemoryColoring + Clone>(
     //manifest.cr3 = stage2_loaded_elf.pt_root_spa.as_u64();
     println!("setting manifset.cr3 to 0x{:x}", manifest.cr3);
     manifest.info = info.guest_info.clone();
-    manifest.iommu = info.iommu;
+
+    manifest.iommu_hva = stage2_iommu_hva.as_u64();
+    manifest.iommu_hpa = iommu_hpa.as_u64();
+
     manifest.poffset = first_stage2_load_paddr
         .expect("first_stage2_load_paddr is uninitialized")
         .as_u64();

@@ -39,6 +39,7 @@ pub struct ContextEntry {
 
 /// An helper for accessing I/O MMU configuration.
 pub struct Iommu {
+    //raw pointer to IOMMU. Virt addr in HVA space of stage2/tyche
     addr: *mut u8,
 }
 
@@ -86,11 +87,11 @@ impl Iommu {
         }
     }
 
-    pub fn set_addr(&mut self, addr: usize) {
-        self.addr = addr as *mut u8;
+    pub fn set_addr(&mut self, addr: HostVirtAddr) {
+        self.addr = addr.as_u64() as *mut u8;
     }
 
-    pub fn get_addr(&mut self) -> *mut u8 {
+    pub fn as_ptr_mut(&mut self) -> *mut u8 {
         self.addr
     }
 
@@ -279,6 +280,12 @@ impl<'iommu> Iterator for FaultIterator<'iommu> {
     }
 }
 
+/// Will create IOMMU Legacy Mode Address Translation structure that maps the whole PCI
+/// bus number space and all device functions to use `iopt_root`
+/// See 3.4.2 in vtd spec
+/// # Arguments
+/// - `iopt_root` : Root of Second-Stage Page Table structure (as defined by vt-d spec)
+/// - `allocator` : Used to allocate pages used for building the table structure
 pub fn setup_iommu_context(
     iopt_root: HostPhysAddr,
     allocator: &impl FrameAllocator,
@@ -291,10 +298,14 @@ pub fn setup_iommu_context(
         .allocate_frame()
         .expect("I/O MMU root frame")
         .zeroed();
+
+    //TODO: use nice constants
     let ctx_entry = ContextEntry {
         upper: 0b010, // 4 lvl pages
         lower: iopt_root.as_u64() | 0b0001,
     };
+
+    //TODO: use nice constants
     let root_entry = RootEntry {
         reserved: 0,
         entry: ctx_frame.phys_addr.as_u64() | 0b1, // Mark as present
@@ -307,6 +318,7 @@ pub fn setup_iommu_context(
         for entry in ctx_array {
             *entry = ctx_entry;
         }
+        // root table maps PCI bus number space [0;255] to context tables
         for entry in root_array {
             *entry = root_entry;
         }

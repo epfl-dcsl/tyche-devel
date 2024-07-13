@@ -11,6 +11,7 @@ use mmu::memory_coloring::color_to_phys::MemoryRegionKind;
 use mmu::memory_coloring::{ActiveMemoryColoring, PartitionBitmap};
 use spin::{Mutex, MutexGuard};
 use stage_two_abi::Manifest;
+use vmx::HostVirtAddr;
 
 use crate::arch::cpuid;
 use crate::attestation_domain::calculate_attestation_hash;
@@ -65,7 +66,7 @@ pub trait PlatformState {
         core: usize,
     ) -> Result<(), CapaError>;
 
-    fn platform_init_io_mmu(&self, addr: usize);
+    fn platform_init_io_mmu(&self, addr: HostVirtAddr);
 
     fn get_domain(domain: Handle<Domain>) -> MutexGuard<'static, Self::DomainData>;
 
@@ -186,6 +187,15 @@ pub trait Monitor<T: PlatformState + 'static> {
      */
     fn do_init(state: &mut T, manifest: &'static Manifest) -> Handle<Domain> {
         log::info!("do_init");
+
+        if manifest.iommu_hva != 0 {
+            log::info!(
+                "Initializing IOMMU in tyche using HVA 0x{:013x}",
+                manifest.iommu_hva
+            );
+            state.platform_init_io_mmu(HostVirtAddr::new(manifest.iommu_hva as usize));
+        }
+
         // No one else is running yet
         let mut engine = CAPA_ENGINE.lock();
         log::info!("calling create_manager_domain");
@@ -224,12 +234,12 @@ pub trait Monitor<T: PlatformState + 'static> {
         for mr in manifest.get_boot_mem_regions() {
             match mr.kind {
                 MemoryRegionKind::UseableRAM => {
-                    log::info!(
+                    /*log::info!(
                         "Tyche-Region start 0x{:013x}, end 0x{:013x}, size 0x{:013x}, type RAM",
                         mr.start,
                         mr.end,
                         mr.end - mr.start,
-                    );
+                    );*/
                     engine
                         .create_root_region(
                             domain,
@@ -244,12 +254,12 @@ pub trait Monitor<T: PlatformState + 'static> {
                 }
                 MemoryRegionKind::UsedByStage1Allocator => (), //should not ne mapped anywhere
                 MemoryRegionKind::Reserved => {
-                    log::info!(
+                    /*log::info!(
                         "Tyche-Region start 0x{:013x}, end 0x{:013x}, size 0x{:013x}, type Fake Device",
                         mr.start,
                         mr.end,
                         mr.end - mr.start,
-                    );
+                    );*/
                     if let Err(e) = engine.create_root_region(
                         domain,
                         AccessRights {
@@ -286,13 +296,13 @@ pub trait Monitor<T: PlatformState + 'static> {
                 prev = cur;
                 continue;
             }
-            log::info!(
+            /*log::info!(
                 "Tyche-Region start 0x{:013x}, end 0x{:013x}, type Device\n\tprev {:013x?}, cur {:013x?}",
-                prev.end,
-                cur.start,
+                start,
+                end,
                 prev,
                 cur
-            );
+            );*/
             if let Err(e) = engine.create_root_region(
                 domain,
                 AccessRights {
@@ -319,12 +329,6 @@ pub trait Monitor<T: PlatformState + 'static> {
         let io_domain = engine.create_io_domain(domain).unwrap();
         let mut initial_io_domain = IO_DOMAIN.lock();
         *initial_io_domain = Some(io_domain);
-
-        //TODO figure that out.
-        //luca: once mapping in stage1 works, this shoudl get enabled
-        if manifest.iommu != 0 {
-            state.platform_init_io_mmu(manifest.iommu as usize);
-        }
 
         log::info!("Calling start_domain_on_core...");
         // TODO: taken from part of init_vcpu.

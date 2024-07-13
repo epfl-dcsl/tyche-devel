@@ -2,7 +2,7 @@ use mmu::memory_coloring::MemoryColoring;
 use mmu::RangeAllocator;
 use stage_two_abi::{GuestInfo, VgaInfo};
 
-use crate::acpi::AcpiInfo;
+use crate::acpi::{AcpiInfo, IommuInfo};
 use crate::mmu::frames::PartitionedMemoryMap;
 
 pub mod boot_params;
@@ -21,7 +21,7 @@ pub enum HandlerResult {
 pub struct ManifestInfo {
     pub guest_info: GuestInfo,
     pub vga_info: VgaInfo,
-    pub iommu: u64,
+    pub iommu: Option<IommuInfo>,
 }
 
 impl Default for ManifestInfo {
