@@ -7,6 +7,7 @@ use capa_engine::{
     permission, AccessRights, Buffer, CapaEngine, CapaError, CapaInfo, Domain, Handle, LocalCapa,
     MemOps, NextCapaToken, ResourceKind, MEMOPS_ALL, MEMOPS_EXTRAS,
 };
+use mmu::ioptmapper::PAGE_SIZE;
 use mmu::memory_coloring::color_to_phys::MemoryRegionKind;
 use mmu::memory_coloring::{ActiveMemoryColoring, PartitionBitmap};
 use spin::{Mutex, MutexGuard};
@@ -278,17 +279,84 @@ pub trait Monitor<T: PlatformState + 'static> {
                 prev = cur;
                 continue;
             }
-            if let Err(e) = engine.create_root_region(
-                domain,
-                AccessRights {
-                    start: prev.end as usize,
-                    end: cur.start as usize,
-                    resource: ResourceKind::Device,
-                    ops: MEMOPS_ALL,
-                },
-            ) {
-                log::error!("create_root_region failed with {:?}", e);
-                panic!("error creating root region");
+
+            //Exclude IOMMU
+            let device_start = prev.end;
+            let device_end = cur.start;
+            log::info!("gap->device 0x{:013x} 0x{:013x}", device_start, device_end);
+            if manifest.iommu_hpa != 0
+                && manifest.iommu_hpa >= device_start
+                && manifest.iommu_hpa < device_end
+            {
+                //edge case
+                assert!(manifest.iommu_hpa != device_start);
+                //mem before iommu
+                let prefix_size = manifest.iommu_hpa - device_start;
+                //mem after iommu. The -PAGE_SIZE excludes the IOMMU itself
+                let suffix_size = (device_end - device_start) - prefix_size - PAGE_SIZE as u64;
+
+                assert_eq!(
+                    prefix_size + suffix_size,
+                    (device_end - device_start) - 0x1000
+                );
+                //region for prefix
+                if let Err(e) = engine.create_root_region(
+                    domain,
+                    AccessRights {
+                        start: device_start as usize,
+                        end: (device_start + prefix_size) as usize,
+                        resource: ResourceKind::Device,
+                        ops: MEMOPS_ALL,
+                    },
+                ) {
+                    log::error!("create_root_region for device prefix failed with {:?}", e);
+                    panic!("error creating root region");
+                }
+                //blocked iommu region
+                log::info!(
+                    "Blocked IOMMU part start 0x{:013x} end 0x{:013x}",
+                    manifest.iommu_hpa,
+                    manifest.iommu_hpa as usize + PAGE_SIZE
+                );
+
+                if let Err(e) = engine.create_root_region(
+                    domain,
+                    AccessRights {
+                        start: manifest.iommu_hpa as usize,
+                        end: manifest.iommu_hpa as usize + PAGE_SIZE,
+                        resource: ResourceKind::Device,
+                        ops: MemOps::NONE,
+                    },
+                ) {
+                    log::error!("create_root_region for device prefix failed with {:?}", e);
+                    panic!("error creating root region");
+                }
+                //region for suffix
+                if let Err(e) = engine.create_root_region(
+                    domain,
+                    AccessRights {
+                        start: manifest.iommu_hpa as usize + PAGE_SIZE,
+                        end: device_end as usize,
+                        resource: ResourceKind::Device,
+                        ops: MEMOPS_ALL,
+                    },
+                ) {
+                    log::error!("create_root_region for device prefix failed with {:?}", e);
+                    panic!("error creating root region");
+                }
+            } else {
+                if let Err(e) = engine.create_root_region(
+                    domain,
+                    AccessRights {
+                        start: device_start as usize,
+                        end: device_end as usize,
+                        resource: ResourceKind::Device,
+                        ops: MEMOPS_ALL,
+                    },
+                ) {
+                    log::error!("create_root_region failed with {:?}", e);
+                    panic!("error creating root region");
+                }
             }
 
             prev = cur;

@@ -16,7 +16,7 @@ pub struct Remapper<const N: usize> {
 }
 
 /// A mapping from HPA to HPA
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct Mapping {
     /// Host Physical Address
     pub hpa: usize,

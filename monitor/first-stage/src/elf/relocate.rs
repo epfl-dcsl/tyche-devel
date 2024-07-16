@@ -157,7 +157,6 @@ pub fn relocate_elf(
                 .expect("failed to alloc mem for segment");
         }
         segment.phys_mem = ranges;
-        log::info!("segment relocated. ranges {:x?}", &segment.phys_mem);
 
         all_allocated_mem.push(segment.phys_mem.clone());
         prev_segment = Some(segment);

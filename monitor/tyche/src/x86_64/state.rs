@@ -1,21 +1,17 @@
-use core::cmp::min;
-use core::ops::Neg;
 use core::sync::atomic::{AtomicBool, Ordering};
 
 use capa_engine::config::{NB_CORES, NB_DOMAINS, NB_REMAP_REGIONS};
 use capa_engine::context::{RegisterContext, RegisterState};
-use capa_engine::ResourceKind::{self, Device};
 use capa_engine::{
     CapaEngine, CapaError, Domain, GenArena, Handle, LocalCapa, MemOps, PermissionIterator,
-    Remapper,
+    Remapper, ResourceKind,
 };
 use mmu::eptmapper::EPT_ROOT_FLAGS;
-use mmu::frame_allocator::PhysRange;
 use mmu::ioptmapper::{PAGE_MASK, PAGE_SIZE};
 use mmu::mapper::Mapper;
-use mmu::memory_coloring::color_to_phys::{self, ColorToPhys, MemoryRegion, MemoryRegionKind};
+use mmu::memory_coloring::color_to_phys::{ColorToPhys, MemoryRegionKind};
 use mmu::memory_coloring::ActiveMemoryColoring;
-use mmu::{EptMapper, FrameAllocator, IoPtFlag, IoPtMapper};
+use mmu::{EptMapper, FrameAllocator, IoPtMapper};
 use spin::{Mutex, MutexGuard};
 use stage_two_abi::Manifest;
 use utils::{GuestPhysAddr, HostPhysAddr, HostVirtAddr};
@@ -95,8 +91,19 @@ fn color_aware_mapper(
     let mut next_blocked_iter = domain
         .remapper
         .remap(permission_iter.clone())
-        .filter(|v| ResourceKind::same_kind(&v.resource_kind, &ResourceKind::Device));
+        .filter(|v| match v.resource_kind {
+            ResourceKind::RAM(_) => false,
+            ResourceKind::Device => true,
+        });
     let mut next_blocked = next_blocked_iter.next();
+
+    for dr in domain.remapper.remap(permission_iter.clone()) {
+        log::info!(
+            "device region 0x{:013x} 0x{:013x}",
+            dr.hpa,
+            dr.hpa + dr.size
+        );
+    }
 
     let mut next_ram_gpa = 0;
     //skip over device regions that have smaller addr than first ram region
@@ -130,11 +137,21 @@ fn color_aware_mapper(
     let mut mapped_ram_bytes = 0;
     let mut mapped_device_bytes = 0;
     for (_, range) in domain.remapper.remap(permission_iter).enumerate() {
+        let mut flags = EptEntryFlags::empty();
         if !range.ops.contains(MemOps::READ) {
-            log::error!("there is a region without read permission: {}", range);
-            continue;
+            match range.resource_kind {
+                ResourceKind::RAM(_) => {
+                    log::error!("there is a region without read permission: {}", range);
+                    continue;
+                }
+                //device region can have no access permissions to repreent that a device is blocked
+                //without changing the GPA layout
+                ResourceKind::Device => (),
+            }
         }
-        let mut flags = EptEntryFlags::READ;
+        if range.ops.contains(MemOps::READ) {
+            flags |= EptEntryFlags::READ;
+        }
         if range.ops.contains(MemOps::WRITE) {
             flags |= EptEntryFlags::WRITE;
         }
@@ -198,11 +215,9 @@ fn color_aware_mapper(
                              assert!(bytes_until_blocked > 0, "bytes untill blocked was 0. next_blocked.hpa = 0x{:x}, next_ram_gpa 0x{:x}", next_blocked.hpa, next_ram_gpa);
                              if remaining_chunk_bytes < bytes_until_blocked {
                                  map_size = remaining_chunk_bytes;
-                                 //log::info!("have blocking dev, but not hitting it, mapping 0x{:x}", map_size);
                              } else {
                                  advance_next_blocked = true;
                                  map_size = bytes_until_blocked;
-                                 //log::info!("hitting blocking dev at 0{:x}, mapping only 0x{:x} out of 0x{:x}", next_blocked.hpa, map_size, remaining_chunk_bytes);
                              }
                          }
                          None => {
@@ -226,83 +241,55 @@ fn color_aware_mapper(
                      remaining_chunk_bytes -= map_size;
                      next_ram_gpa += map_size;
                      if advance_next_blocked {
-                         let dev_region = next_blocked
-                         .as_ref()
+                         let mut cur_blocked = next_blocked
                          .expect("advance_next_blocked true but next block was None");
 
-                         log::info!("skipping over device region at 0x{:x} to 0x{:x}", dev_region.hpa, dev_region.hpa+dev_region.size);
+                         log::info!("skipping over device region at 0x{:x} to 0x{:x}", cur_blocked.hpa, cur_blocked.hpa+cur_blocked.size);
 
-                         assert_eq!(next_ram_gpa, dev_region.hpa);
-                         next_ram_gpa += dev_region
+                         assert_eq!(next_ram_gpa, cur_blocked.hpa);
+                         next_ram_gpa += cur_blocked
                              .size;
+
                          next_blocked = next_blocked_iter.next();
+                        
+                        //next blocked might by contiguous -> skip over next until there is a gap
+                         while let Some(nb) = next_blocked {
+                            if nb.hpa == (cur_blocked.hpa + cur_blocked.size) {
+                                log::info!("also skipping over contiguous region 0x{:x} to 0x{:x}", nb.hpa, nb.hpa+nb.size);
+                                assert_eq!(next_ram_gpa,nb.hpa);
+                                next_ram_gpa += nb.size;
+                                cur_blocked = nb;
+                                next_blocked = next_blocked_iter.next();
+                            } else {
+                                break
+                            }
+                         }
                      }
                  } // end of "while remaining_chunk_bytes > 0"
                  chunk_idx += 1;
              });
             }
             // Device memory must be identity mapped, to pass through the access to the pyhsical HW
-            capa_engine::ResourceKind::Device => {
+            ResourceKind::Device => {
                 log::info!(
                     "processing start 0x{:013x}, end 0x{:013x}, size 0x{:013x}, type Device",
                     range.hpa,
                     range.hpa + range.size,
                     range.size
                 );
-                //TODO: quick hack for blocking iommu
-                let iommu_hpa = 0x00000fe_d90_000;
-                if iommu_hpa > range.hpa && iommu_hpa < (range.hpa + range.size) {
-                    log::info!("Hiding IOMMU EPTs");
-                    //edge case that we don't handle yet
-                    assert!(iommu_hpa != range.hpa);
 
-                    let prefix_size = iommu_hpa - range.hpa;
-                    let suffix_size = range.size - prefix_size - 0x1000;
-                    assert_eq!(prefix_size + suffix_size, range.size - 0x1000);
-                    mapper.map_range(
-                        allocator,
-                        &GuestPhysAddr::new(range.hpa),
-                        &HostPhysAddr::new(range.hpa),
-                        prefix_size,
-                        flags.bits(),
-                    );
-                    mapper.map_range(
-                        allocator,
-                        &GuestPhysAddr::new(iommu_hpa + 0x1000),
-                        &HostPhysAddr::new(iommu_hpa + 0x1000),
-                        suffix_size,
-                        flags.bits(),
-                    );
-                } else {
-                    mapper.map_range(
-                        allocator,
-                        &GuestPhysAddr::new(range.hpa),
-                        &HostPhysAddr::new(range.hpa),
-                        range.size,
-                        flags.bits(),
-                    );
-                }
+                mapper.map_range(
+                    allocator,
+                    &GuestPhysAddr::new(range.hpa),
+                    &HostPhysAddr::new(range.hpa),
+                    range.size,
+                    flags.bits(),
+                );
 
                 mapped_device_bytes += range.size;
             }
         } // end of "match resource_kind"
 
-        log::info!("next_ram_gpa at end of mapping phase: 0x{:x}", next_ram_gpa);
-        log::info!(
-            "Mapped RAM {:0.2} GiB (0x{:x}) bytes)",
-            mapped_ram_bytes as f64 / (1 << 30) as f64,
-            mapped_ram_bytes
-        );
-        log::info!(
-            "Mapped Device {:0.2} GiB (0x{:x} bytes)",
-            mapped_device_bytes as f64 / (1 << 30) as f64,
-            mapped_device_bytes
-        );
-        log::info!(
-            "Total Mapped {:0.2} GiB (0x{:x} bytes)",
-            (mapped_ram_bytes + mapped_device_bytes) as f64 / (1 << 30) as f64,
-            mapped_ram_bytes + mapped_device_bytes
-        );
     }
 }
 
