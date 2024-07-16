@@ -317,11 +317,10 @@ impl StateX86 {
         mapper.free_all(allocator);
     }
 
-    pub fn update_domain_iopt(
+    fn update_iommu_page_tables(
         domain_handle: Handle<Domain>,
         engine: &mut MutexGuard<CapaEngine>,
     ) -> bool {
-        log::info!("Inside update_domain_iopt");
         let mut domain: MutexGuard<'_, DataX86> = Self::get_domain(domain_handle);
         let allocator = allocator();
         if let Some(iopt) = domain.iopt {
@@ -364,25 +363,20 @@ impl StateX86 {
              * to support scalable mode
              */
             let rtar_val = root_addr.as_u64();
-            log::info!("rtar val: 0x{:016x}", rtar_val);
             iommu.set_root_table_addr(rtar_val);
-            log::info!("set root table addr");
             iommu.update_root_table_addr();
-            log::info!("updated root table addr");
             iommu.enable_translation();
             log::info!("enabled translation");
             log::info!("I/O MMU: {:?}", iommu.get_global_status());
             log::warn!("I/O MMU Fault: {:?}", iommu.get_fault_status());
         }
-
         false
     }
 
-    pub fn update_domain_ept(
+    fn update_ept_tables(
         domain_handle: Handle<Domain>,
         engine: &mut MutexGuard<CapaEngine>,
     ) -> bool {
-        log::info!("\n ### entering update_domain_ept ###\n");
         let mut domain = Self::get_domain(domain_handle);
         let allocator = allocator();
         if domain.ept_old.is_some() {
@@ -397,55 +391,11 @@ impl StateX86 {
             ept_root.phys_addr,
         );
 
+        log::info!("\n #### Updating EPTs ####\n");
+
         //luca: iterator over ranges with same memory access permissions
         let permission_iter = engine.get_domain_permissions(domain_handle).unwrap();
         color_aware_mapper(&mut mapper, permission_iter, &domain);
-
-        /*log::info!("GPA->SPA Linux load segment 00");
-        mapper.debug_range(GuestPhysAddr::new(0x1000000), 3 * PAGE_SIZE);
-
-        log::info!("GPA->SPA Linux load segment 01");
-        mapper.debug_range(GuestPhysAddr::new(0x2a00000), 3 * PAGE_SIZE);
-
-        log::info!("GPA->SPA Linux load segment 02");
-        mapper.debug_range(GuestPhysAddr::new(0x323b000), 3 * PAGE_SIZE);
-
-        log::info!("GPA->SPA Linux load segment 03");
-        mapper.debug_range(GuestPhysAddr::new(0x3268000), 3 * PAGE_SIZE);
-
-        log::info!("GPA->SPA Linux CR3");
-        mapper.debug_range(GuestPhysAddr::new(0x3829000), 0x1000);
-        log::info!("GPA->SPA for pages on PT walk for entry point");
-        let addrs_walk_entry = [0x382d000, 0x382e000, 0x382f000];
-        for x in addrs_walk_entry {
-            mapper.debug_range(GuestPhysAddr::new(x), 0x1000);
-        }*/
-
-        /*log::info!("GPA->SPA for DMAR 0x000000fe_d90_000. Should be ID mapped to SPA");
-        mapper.debug_range(GuestPhysAddr::new(0x000000fed90000), 0x2000);*/
-
-        /*log::info!("GPA->SPA for qi : 0x100207000");
-        mapper.debug_range(GuestPhysAddr::new(0x100207000), 0x1000);*/
-
-        log::info!("GPA-> for pci crash");
-        mapper.debug_range(GuestPhysAddr::new(0x80_000_001), 0x1000);
-
-        /*
-        //Addresses used in the vt-d interrupt remapping code
-        log::info!("GPA->SPA for qi: 0x100_28a_000");
-        mapper.debug_range(GuestPhysAddr::new(0x10028a000), 0x1000);
-
-        log::info!("GPA->SPA for qi  : 0x100_28b_000");
-        mapper.debug_range(GuestPhysAddr::new(0x10028b000), 0x1000);
-
-        log::info!("GPA->SPA for qi  : 0x100_300_000");
-        mapper.debug_range(GuestPhysAddr::new(0x100300000), 0x1000);*/
-
-        /*for (mr_idx, mr) in get_manifest().get_boot_mem_regions().iter().enumerate() {
-            log::info!("mr_idx {:02} excerpt of PTs for mr {:x?}", mr_idx, mr);
-            mapper.debug_range(GuestPhysAddr::new(mr.start as usize), 0x1000);
-            mapper.debug_range(GuestPhysAddr::new((mr.end - 0x1000) as usize), 0x1000);
-        }*/
 
         loop {
             match TLB_FLUSH[domain_handle.idx()].compare_exchange(
@@ -464,8 +414,30 @@ impl StateX86 {
         // The contexts per core will be updated in the permission change update.
         domain.ept_old = domain.ept;
         domain.ept = Some(ept_root.phys_addr);
-
         true
+    }
+
+    pub fn update_domain_iopt(
+        domain_handle: Handle<Domain>,
+        engine: &mut MutexGuard<CapaEngine>,
+    ) -> bool {
+        log::info!("Inside update_domain_iopt");
+        Self::update_iommu_page_tables(domain_handle, engine);
+        false
+    }
+
+    pub fn update_domain_ept(
+        domain_handle: Handle<Domain>,
+        engine: &mut MutexGuard<CapaEngine>,
+    ) -> bool {
+        log::info!("\n ### entering update_domain_ept ###\n");
+
+        let ept_res = Self::update_ept_tables(domain_handle, engine);
+
+        log::info!("\n #### Updating IOPTs ####\n");
+        let iommu_res = Self::update_iommu_page_tables(domain_handle, engine);
+
+        ept_res || iommu_res
     }
 
     pub fn switch_domain(

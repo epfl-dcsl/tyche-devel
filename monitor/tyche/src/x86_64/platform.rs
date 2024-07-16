@@ -173,10 +173,7 @@ impl PlatformState for StateX86 {
         if engine[domain].is_io() {
             Self::update_domain_iopt(domain, engine)
         } else {
-            //TODO: dirty hack, io domains seem to be a different concept
-            Self::update_domain_ept(domain, engine) |
-            Self::update_domain_iopt(domain, engine)
-
+            Self::update_domain_ept(domain, engine)
         }
     }
 
