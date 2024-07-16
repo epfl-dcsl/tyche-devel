@@ -58,7 +58,6 @@ impl Guest for Linux {
     ) -> ManifestInfo {
         let mut manifest = ManifestInfo::default();
         let mut linux_prog = ElfProgram::new(LINUXBYTES);
-        //luca: TODO: why do we load identity mapped? Why does this not break the codes addressing?
         linux_prog.set_mapping(ElfMapping::ScatteredPaddr);
 
         //this will associate SPAs with the correct color for all of the segments that we load later on

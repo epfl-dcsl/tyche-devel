@@ -88,7 +88,6 @@ impl AcpiInfo {
     }
 
     /// this will change the magic signature of the `DMAR` table to `XXXX`, effectively disabling it
-    /// TODO: update table to actually remove the entry
     pub unsafe fn invalidate_dmar(rsdp_ptr: u64, physical_memory_offset: HostVirtAddr) {
         // Get RSDP virtual address
         let rsdp = &*((rsdp_ptr + physical_memory_offset.as_u64()) as *const Rsdp);
@@ -102,7 +101,8 @@ impl AcpiInfo {
         let xsdt_header = &*(xsdt_ptr as *const SdtHeader);
         let lenght = xsdt_header.length as usize;
 
-        //luca: TODO: propberly update the table. For now, we just write garbage hoping that Linux will ignore the entry
+        //Instead of messing with the table structure, we just change the magic bytes, that identify the DMAR section
+        //Linux will ignore the "unknown" section
         let invalidate_if_dmar = |table_addr: u64| {
             let header = &mut *((table_addr + physical_memory_offset.as_u64()) as *mut SdtHeader);
             if &header.signature != b"DMAR" {

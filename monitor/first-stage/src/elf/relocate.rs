@@ -73,7 +73,6 @@ pub fn relocate_elf(
                 assert!(overlapping_pr.start < overlapping_pr.end);
                 ranges.push(overlapping_pr);
                 //number of bytes on shared page
-                //TODO: double check the mask calculation with a print
                 let size_adjust = min(
                     PAGE_SIZE - (segment.phdr.p_paddr as usize & PAGE_MASK),
                     segment.phdr.p_memsz as usize,

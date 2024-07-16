@@ -178,8 +178,6 @@ pub trait Monitor<T: PlatformState + 'static> {
         locked.unwrap()
     }
 
-    //luca: central capa engine initialization
-    //TODO: continue here
     /*
     1) create one root region for each physical contiguous range of memory that should initially be available to dom0
     2) create one root region for each device memory
@@ -225,21 +223,11 @@ pub trait Monitor<T: PlatformState + 'static> {
         }
         //give dom0 access to each dom0 component that belongs to its partitions/colors
         //TODO: how do we restrict memory in one partition case? Or does it not matter becase
-        //there driver has more freedom regarding memory managementin this case???
-        /*println!("\n\n");
-        for mr in manifest.get_boot_mem_regions() {
-            log::info!("memory region 0x{:x}, end 0x{:x}", mr.start, mr.end);
-        }*/
+        //there driver has more freedom regarding memory managementin this case??
         println!("\n\n");
         for mr in manifest.get_boot_mem_regions() {
             match mr.kind {
                 MemoryRegionKind::UseableRAM => {
-                    /*log::info!(
-                        "Tyche-Region start 0x{:013x}, end 0x{:013x}, size 0x{:013x}, type RAM",
-                        mr.start,
-                        mr.end,
-                        mr.end - mr.start,
-                    );*/
                     engine
                         .create_root_region(
                             domain,
@@ -254,12 +242,6 @@ pub trait Monitor<T: PlatformState + 'static> {
                 }
                 MemoryRegionKind::UsedByStage1Allocator => (), //should not ne mapped anywhere
                 MemoryRegionKind::Reserved => {
-                    /*log::info!(
-                        "Tyche-Region start 0x{:013x}, end 0x{:013x}, size 0x{:013x}, type Fake Device",
-                        mr.start,
-                        mr.end,
-                        mr.end - mr.start,
-                    );*/
                     if let Err(e) = engine.create_root_region(
                         domain,
                         AccessRights {
@@ -296,13 +278,6 @@ pub trait Monitor<T: PlatformState + 'static> {
                 prev = cur;
                 continue;
             }
-            /*log::info!(
-                "Tyche-Region start 0x{:013x}, end 0x{:013x}, type Device\n\tprev {:013x?}, cur {:013x?}",
-                start,
-                end,
-                prev,
-                cur
-            );*/
             if let Err(e) = engine.create_root_region(
                 domain,
                 AccessRights {
