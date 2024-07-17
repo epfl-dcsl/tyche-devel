@@ -65,8 +65,15 @@ impl<T: MemoryColoring + Clone> ColorToPhys<T> {
         additional_range_filter: Option<(usize, usize)>,
     ) -> Self {
         let mut first_usable_region = None;
+        let region_contains_start_addr = |mr: &MemoryRegion| match additional_range_filter {
+            Some((start_allowed, _)) => {
+                mr.start <= (start_allowed as u64) && (start_allowed as u64) < mr.end
+            }
+
+            None => true,
+        };
         for (mr_idx, mr) in memory_regions.as_ref().iter().enumerate() {
-            if mr.kind == MemoryRegionKind::UseableRAM {
+            if mr.kind == MemoryRegionKind::UseableRAM && region_contains_start_addr(mr) {
                 first_usable_region = Some(mr_idx);
                 break;
             }
