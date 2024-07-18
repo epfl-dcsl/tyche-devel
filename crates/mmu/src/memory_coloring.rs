@@ -62,9 +62,12 @@ impl<const N: usize, const K: usize> MyBitmap<N, K> {
 
     /// Set the bit at `bit_idx` to `value`
     pub fn set(&mut self, bit_idx: usize, value: bool) {
-        if bit_idx >= self.bits_count {
-            panic!("Out of bound bit idx");
-        }
+        assert!(
+            bit_idx < self.bits_count,
+            "Out of bounds bit idx: bit_idx={}, bits_count={}",
+            bit_idx,
+            self.bits_count
+        );
         //idx of the byte in `data` that stores the targeted bit
         let byte_idx = bit_idx / 8;
         //offset inside the targeted byte that stores the bit
@@ -84,9 +87,12 @@ impl<const N: usize, const K: usize> MyBitmap<N, K> {
 
     /// Return the value of bit at `bit_idx`
     pub fn get(&self, bit_idx: usize) -> bool {
-        if bit_idx >= self.bits_count {
-            panic!("Out of bound bit idx");
-        }
+        assert!(
+            bit_idx < self.bits_count,
+            "Out of bounds bit idx: bit_idx={}, bits_count={}",
+            bit_idx,
+            self.bits_count
+        );
         //idx of the byte in `data` that stores the targeted bit
         let byte_idx = bit_idx / 8;
         //offset inside the targeted byte that stores the bit
@@ -169,16 +175,21 @@ pub type PartitionBitmap = MyBitmap<
 #[derive(Debug, Clone)]
 pub struct DummyMemoryColoring {}
 
+impl DummyMemoryColoring {
+    //use 2 to the power of COLOR_ORDER many colors
+    pub const COLOR_ORDER: usize = 4;
+    //mask to apply to page bits (after shifting) to get color id for address
+    pub const COLOR_MASK: u64 = (1 << Self::COLOR_ORDER) - 1;
+}
+
 impl MemoryColoring for DummyMemoryColoring {
     fn compute_color(&self, frame: HostPhysAddr) -> u64 {
-        //TODO: large color chunks make debugging ept creation easier
-        let color = (frame.as_u64() >> 20) & 0x7;
+        let color = (frame.as_u64() >> 12) & Self::COLOR_MASK;
         color
     }
 
-    const COLOR_COUNT: usize = 1 << 3;
-
-    const BYTES_FOR_COLOR_BITMAP: usize = 1;
+    const COLOR_COUNT: usize = 1 << Self::COLOR_ORDER;
+    const BYTES_FOR_COLOR_BITMAP: usize = Self::COLOR_COUNT / 8;
 }
 
 //TODO: add feature flags to switch this
@@ -209,7 +220,7 @@ pub enum MemoryRange {
 }
 
 mod test {
-    use super::MyBitmap;
+    use super::{DummyMemoryColoring, MyBitmap};
 
     #[test]
     fn test_payload_bits_len() {
