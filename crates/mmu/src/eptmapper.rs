@@ -100,7 +100,7 @@ impl Mapper for EptMapper {
                     }
                     if level == Level::L1 {
                         assert!(hphys % PAGE_SIZE == 0);
-                        *entry = hphys as u64 | prot | EptMemoryType::WB.bits();
+                        *entry = hphys as u64 | prot;
                         return WalkNext::Leaf;
                     }
                     let frame = allocator
@@ -309,7 +309,8 @@ impl EptMapper {
                                 | EptEntryFlags::WRITE
                                 | EptEntryFlags::USER_EXECUTE
                                 | EPT_PRESENT)
-                                .bits(),
+                                .bits()
+                                | EptMemoryType::WB.bits(),
                         );
                     }
                     // Some mapping on the left.
@@ -324,7 +325,8 @@ impl EptMapper {
                                 | EptEntryFlags::WRITE
                                 | EptEntryFlags::USER_EXECUTE
                                 | EPT_PRESENT)
-                                .bits(),
+                                .bits()
+                                | EptMemoryType::WB.bits(),
                         );
                     }
                     return WalkNext::Leaf;

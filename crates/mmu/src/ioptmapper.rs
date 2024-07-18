@@ -18,8 +18,7 @@ bitflags! {
     pub struct IoPtFlag: u64 {
         const READ      = 1 << 0;
         const WRITE     = 1 << 1;
-        const EXECUTE   = 1 << 2;
-        ///If 1, this is a leaf that points to 4KiB page
+        ///If 1 in intermediate levels, we get giga/huge/large pages. Ignored for L1 entries
         const PAGE_SIZE = 1 << 7;
         const ACCESSED  = 1 << 8;
         const DIRTY     = 1 << 9;
@@ -32,12 +31,8 @@ pub const PAGE_SHIFT: usize = 12;
 pub const PAGE_SIZE: usize = 1 << PAGE_SHIFT;
 pub const PAGE_MASK: usize = PAGE_SIZE - 1;
 
-pub const DEFAULT_PROTS: IoPtFlag = IoPtFlag::READ
-    .union(IoPtFlag::WRITE)
-    .union(IoPtFlag::EXECUTE);
-pub const PRESENT: IoPtFlag = IoPtFlag::READ
-    .union(IoPtFlag::WRITE)
-    .union(IoPtFlag::EXECUTE);
+pub const DEFAULT_PROTS: IoPtFlag = IoPtFlag::READ.union(IoPtFlag::WRITE);
+pub const PRESENT: IoPtFlag = IoPtFlag::READ.union(IoPtFlag::WRITE);
 
 unsafe impl Walker for IoPtMapper {
     type WalkerPhysAddr = HostPhysAddr;

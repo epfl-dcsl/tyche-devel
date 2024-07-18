@@ -11,11 +11,11 @@ use mmu::ioptmapper::{PAGE_MASK, PAGE_SIZE};
 use mmu::mapper::Mapper;
 use mmu::memory_coloring::color_to_phys::{ColorToPhys, MemoryRegionKind};
 use mmu::memory_coloring::ActiveMemoryColoring;
-use mmu::{EptMapper, FrameAllocator, IoPtMapper};
+use mmu::{EptMapper, FrameAllocator, IoPtFlag, IoPtMapper};
 use spin::{Mutex, MutexGuard};
 use stage_two_abi::Manifest;
 use utils::{GuestPhysAddr, HostPhysAddr, HostVirtAddr};
-use vmx::bitmaps::EptEntryFlags;
+use vmx::bitmaps::{EptEntryFlags, EptMemoryType};
 use vmx::fields::VmcsField;
 use vmx::{ActiveVmcs, Vmxon};
 use vtd::Iommu;
@@ -81,10 +81,13 @@ pub struct DataX86 {
 pub type StateX86 = VmxState;
 
 /// Maps `ResourceKind::RAM` according to the color attribute. `ResourceKind::Device` are passed through mapped
-fn color_aware_mapper(
+/// # Arguments
+/// - `permission_builder` : build page table entry permission flags for the mappings
+fn color_aware_mapper<F: Fn(&MemOps,&ResourceKind)->Result<u64,()>>(
     mapper: &mut impl Mapper,
     permission_iter: PermissionIterator,
     domain: &MutexGuard<'static, DataX86>,
+    permission_builder : F,
 ) {
     let allocator = allocator();
 
@@ -136,40 +139,11 @@ fn color_aware_mapper(
     log::info!("boot mem regions can represent {} GiB", boot_mem_region_gib);
     let mut mapped_ram_bytes = 0;
     let mut mapped_device_bytes = 0;
+    //total number of contig phys ranges that we used to back the GPA RAM space
+    let mut total_ram_range_count = 0;
     for (_, range) in domain.remapper.remap(permission_iter).enumerate() {
-        let mut flags = EptEntryFlags::empty();
-        if !range.ops.contains(MemOps::READ) {
-            match range.resource_kind {
-                ResourceKind::RAM(_) => {
-                    log::error!("there is a region without read permission: {}", range);
-                    continue;
-                }
-                //device region can have no access permissions to repreent that a device is blocked
-                //without changing the GPA layout
-                ResourceKind::Device => (),
-            }
-        }
-        if range.ops.contains(MemOps::READ) {
-            flags |= EptEntryFlags::READ;
-        }
-        if range.ops.contains(MemOps::WRITE) {
-            flags |= EptEntryFlags::WRITE;
-        }
-
-        if range.ops.contains(MemOps::EXEC) {
-            if range.ops.contains(MemOps::SUPER) {
-                flags |= EptEntryFlags::SUPERVISOR_EXECUTE;
-            } else {
-                flags |= EptEntryFlags::USER_EXECUTE;
-            }
-        }
-        /*log::info!(
-            "range object: Kind {:x?} start 0x{:x}, end 0x{:x}, size 0x{:x}",
-            range.resource_kind,
-            range.hpa,
-            range.hpa + range.size,
-            range.size
-        );*/
+        
+        let flags = permission_builder(&range.ops, &range.resource_kind).expect("failed to build flags");
         /* Observations/Assumptions:
          * The results of the iterator are sorted, i.e. we go through the address space "left to right".
          * With partititions, a memory range might be smaller that its actually physical bounds, however
@@ -235,7 +209,7 @@ fn color_aware_mapper(
                          &GuestPhysAddr::new(next_ram_gpa),
                          &HostPhysAddr::new(partition_chunk.end - remaining_chunk_bytes),
                          map_size,
-                         flags.bits(),
+                         flags,
                      );
                      mapped_ram_bytes += map_size;
                      remaining_chunk_bytes -= map_size;
@@ -244,7 +218,7 @@ fn color_aware_mapper(
                          let mut cur_blocked = next_blocked
                          .expect("advance_next_blocked true but next block was None");
 
-                         log::info!("skipping over device region at 0x{:x} to 0x{:x}", cur_blocked.hpa, cur_blocked.hpa+cur_blocked.size);
+                         //log::info!("skipping over device region at 0x{:x} to 0x{:x}", cur_blocked.hpa, cur_blocked.hpa+cur_blocked.size);
 
                          assert_eq!(next_ram_gpa, cur_blocked.hpa);
                          next_ram_gpa += cur_blocked
@@ -267,6 +241,8 @@ fn color_aware_mapper(
                      }
                  } // end of "while remaining_chunk_bytes > 0"
                  chunk_idx += 1;
+                total_ram_range_count += 1;
+
              });
             }
             // Device memory must be identity mapped, to pass through the access to the pyhsical HW
@@ -283,13 +259,15 @@ fn color_aware_mapper(
                     &GuestPhysAddr::new(range.hpa),
                     &HostPhysAddr::new(range.hpa),
                     range.size,
-                    flags.bits(),
+                    flags,
                 );
 
                 mapped_device_bytes += range.size;
             }
         } // end of "match resource_kind"
-
+    log::info!("Mapped RAM bytes: {:0.2} GiB (0x{:x} bytes)", mapped_ram_bytes as f64 / (1<<30) as f64, mapped_ram_bytes);
+    log::info!("Largest RAM GPA: 0x{:013x}", next_ram_gpa);
+    log::info!("total ram range count: {}",total_ram_range_count);
     }
 }
 
@@ -324,8 +302,21 @@ impl StateX86 {
             iopt_root.phys_addr,
         );
 
+      
+        let permission_cb = |ops:& MemOps, kind: &ResourceKind| {
+            let mut flags = IoPtFlag::empty();
+
+            if ops.contains(MemOps::READ) {
+                flags |= IoPtFlag::READ;
+            }
+            if ops.contains(MemOps::WRITE) {
+                flags |= IoPtFlag::WRITE;
+            }
+
+            Ok(flags.bits())
+        };
         let permission_iter = engine.get_domain_permissions(domain_handle).unwrap();
-        color_aware_mapper(&mut iopt_mapper, permission_iter, &domain);
+        color_aware_mapper(&mut iopt_mapper, permission_iter, &domain, permission_cb);
 
         domain.iopt = Some(iopt_root.phys_addr);
 
@@ -379,10 +370,44 @@ impl StateX86 {
         );
 
         log::info!("\n #### Updating EPTs ####\n");
+        let permission_cb = |ops:& MemOps, kind: &ResourceKind| {
+            let mut flags = EptEntryFlags::empty();
+            if !ops.contains(MemOps::READ) {
+                match kind {
+                    ResourceKind::RAM(_) => {
+                        log::error!("there is a region without read permission: ");
+                        return Err(());
+                    }
+                    //device region can have no access permissions to repreent that a device is blocked
+                    //without changing the GPA layout
+                    ResourceKind::Device => (),
+                }
+            }
+            if ops.contains(MemOps::READ) {
+                flags |= EptEntryFlags::READ;
+            }
+            if ops.contains(MemOps::WRITE) {
+                flags |= EptEntryFlags::WRITE;
+            }
+    
+            if ops.contains(MemOps::EXEC) {
+                if ops.contains(MemOps::SUPER) {
+                    flags |= EptEntryFlags::SUPERVISOR_EXECUTE;
+                } else {
+                    flags |= EptEntryFlags::USER_EXECUTE;
+                }
+            }
+            let mut flags = flags.bits();
+            match kind {
+                ResourceKind::RAM(_) => flags |= EptMemoryType::WB.bits(),
+                ResourceKind::Device => flags |= EptMemoryType::UC.bits(),
+            }
+            Ok(flags)
+        };
 
         //luca: iterator over ranges with same memory access permissions
         let permission_iter = engine.get_domain_permissions(domain_handle).unwrap();
-        color_aware_mapper(&mut mapper, permission_iter, &domain);
+        color_aware_mapper(&mut mapper, permission_iter, &domain,permission_cb);
 
         loop {
             match TLB_FLUSH[domain_handle.idx()].compare_exchange(

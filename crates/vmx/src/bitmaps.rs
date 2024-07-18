@@ -318,7 +318,8 @@ bitflags! {
         /// Enable supervisor-mode execution. If mode-based execute control bit is 0, also control
         /// user-mode execution.
         const SUPERVISOR_EXECUTE = 1 << 2;
-        /// ???
+        /// If CRD0.CD=0 and IGNORE_PAT=1, the EPT mem type solely decides the mem type. Otherwise PAT is also consulted
+        /// See 29.3.7.2 Memory Type Used for Translated Guest-Physical Addresses
         const IGNORE_PAT = 1 << 6;
         /// If 1, points to a data page instead of a page table.
         const PAGE = 1 << 7;
