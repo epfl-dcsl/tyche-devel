@@ -18,7 +18,7 @@ use utils::{GuestPhysAddr, HostPhysAddr, HostVirtAddr};
 use vmx::bitmaps::{EptEntryFlags, EptMemoryType};
 use vmx::fields::VmcsField;
 use vmx::{ActiveVmcs, Vmxon};
-use vtd::Iommu;
+use vtd::{Command, Iommu};
 
 use super::context::Contextx86;
 use super::vmx_helper::{dump_host_state, load_host_state};
@@ -330,6 +330,16 @@ impl StateX86 {
         let mut iommu = IOMMU.lock();
         //will only be != 0 if we have initialized the IOMUU. Could be more elegant with an option
         if iommu.as_ptr_mut() as usize != 0 {
+
+            //Enable queued invalidation if it is not already enabled
+            if !iommu.get_global_status().contains(Command::QUEUED_INVALIDATION) {
+                if let Err(e) = iommu.enable_quid_invalidation(allocator) {
+                    log::error!("Failed to enable queued invalidation: {}", e);
+                    panic!("IOMMU setup failed");
+                }
+                log::info!("IOMMU: enabled queued invalidation");
+            }
+
             log::info!("Updating IOMMU!!!");
             let root_addr: HostPhysAddr =
                 vtd::setup_iommu_context(iopt_mapper.get_root(), allocator);
@@ -347,6 +357,14 @@ impl StateX86 {
             log::info!("enabled translation");
             log::info!("I/O MMU: {:?}", iommu.get_global_status());
             log::warn!("I/O MMU Fault: {:?}", iommu.get_fault_status());
+
+            log::info!("IOMMU: flushing");
+            if let Err(e) = iommu.full_flush_sync() {
+                log::error!("IOMMU: flush failed: {}",e);
+                panic!("IOMMU flush failed");
+            }
+            log::warn!("I/O MMU Fault: {:?}", iommu.get_fault_status());
+
         }
         false
     }
