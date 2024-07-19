@@ -119,13 +119,11 @@ pub fn load<T: MemoryColoring + Clone>(
 
     //parse elf binary
     let mut second_stage = ElfProgram::new(SECOND_STAGE);
-    //TODO: luca: make configurable
     second_stage.set_mapping(crate::elf::ElfMapping::Scattered);
 
     //this allocates memory for every elf segment. Currently it allocates one physical contiguous chunk
     //the elf headers are updated to point to these memory addresses (in contrast to the default addresses, this is the "relocate" part)
     relocate_elf(&mut second_stage, stage2_allocator, false);
-    log::info!("relocated_elf for stage2 segments done;");
     //load parsed elf binary into memory
     let mut stage2_loaded_elf = second_stage
         .load(
@@ -134,8 +132,6 @@ pub fn load<T: MemoryColoring + Clone>(
             false,
         )
         .expect("Failed to load second stage");
-
-    log::info!("loading + mapping for stage2 binary done");
 
     let smp_cores = cpu::cores();
     let smp_stacks: Vec<(HostVirtAddr, HostVirtAddr, HostPhysAddr)> = (0..smp_cores)
@@ -325,11 +321,6 @@ pub fn load<T: MemoryColoring + Clone>(
         .expect("first_stage2_load_paddr is uninitialized")
         .as_u64();
     manifest.voffset = LOAD_VIRT_ADDR.as_u64();
-    log::info!(
-        "manifset.poffset = 0x{:x}, manifset.voffset = 0x{:x}",
-        manifest.poffset,
-        manifest.voffset
-    );
     manifest.vga = info.vga_info.clone();
     manifest.smp = smp;
 

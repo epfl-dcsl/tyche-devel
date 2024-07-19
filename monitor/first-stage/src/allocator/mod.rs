@@ -36,11 +36,6 @@ pub fn init_heap(
     }
 
     let mut heap_vaddr = HostVirtAddr::new(HEAP_START);
-    log::info!(
-        "Heap start vaddr 0x{:013x} end vaddr 0x{:013x}",
-        heap_vaddr.as_usize(),
-        heap_vaddr.as_usize() + HEAP_SIZE
-    );
     let heap_prot = PtFlag::PRESENT | PtFlag::WRITE | PtFlag::EXEC_DISABLE;
     // Find space for the heap and create the mappings
     frame_allocator

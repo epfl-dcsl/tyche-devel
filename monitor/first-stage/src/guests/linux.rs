@@ -75,17 +75,11 @@ impl Guest for Linux {
             .filter(|v| v.phdr.p_type == Elf64PhdrType::PT_LOAD.bits())
             .enumerate()
         {
-            log::info!(
-                "Linux load segment {:02}, load GPA 0x{:x}",
-                load_segment_idx,
-                load_segment.phdr.p_paddr
-            );
             let mut linux_page_counter = 0;
             let abort_linux_page_print_at = 3;
             for phys_range in load_segment.phys_mem.iter().take(3) {
                 let mut spa = phys_range.start.as_usize();
                 while spa < phys_range.end.as_usize() {
-                    log::info!("\t{:02}-th spa is 0x{:0x}", linux_page_counter, spa);
                     linux_page_counter += 1;
                     if linux_page_counter >= abort_linux_page_print_at {
                         break;
@@ -100,23 +94,10 @@ impl Guest for Linux {
 
         let virtoffset = host_allocator.get_physical_offset();
 
-        //luca: this will do some allocations for the page tables
         // Load guest into memory.
         let mut loaded_linux = linux_prog
             .load(guest_allocator, virtoffset.as_usize(), true)
             .expect("Failed to load guest");
-
-        /*log::info!("Dumping PT walk to linux entry in stage1 constructed PTS");
-        match &mut loaded_linux.pt_mapper {
-            crate::elf::ELfTargetEnvironment::Host(_) => todo!(),
-            crate::elf::ELfTargetEnvironment::Guest(guest_mapper) => {
-                guest_mapper.debug_range(
-                    GuestVirtAddr::new(0x1000000),
-                    0x1000,
-                    mmu::walker::Level::L1,
-                );
-            }
-        }*/
 
         // Setup I/O MMU
         if let Some(iommus) = &acpi.iommu {
@@ -127,45 +108,24 @@ impl Guest for Linux {
             };
             manifest.iommu = Some(iommu);
         }
-        {
-            let linux_exec_segment = linux_prog
-                .segments
-                .iter()
-                .filter(|v| v.phdr.p_type == Elf64PhdrType::PT_LOAD.bits())
-                .next()
-                .expect("failed to get linux exec segment");
-            let vaddr = linux_exec_segment.phys_mem[0].start.as_u64() + virtoffset.as_u64();
-            let bytes_linux_exec = unsafe { slice::from_raw_parts(vaddr as *const u8, PAGE_SIZE) };
-            log::info!("First few bytes of linux exec entry: ");
-            for v in &bytes_linux_exec[..64] {
-                print!("{:02x}", v);
-            }
-            println!("\n");
-        }
 
         //This will remove the DMAR header if it is present in order to hide the IOMMU from the Linux guest
         AcpiInfo::invalidate_dmar(rsdp, host_allocator.get_physical_offset());
 
         // Build the boot params
+
         // Step1: load values contained in BootParams into memory
         let mut boot_params = build_bootparams(&memory_map);
         let command_line = loaded_linux.add_payload(COMMAND_LINE, guest_allocator);
-        log::info!(
-            "color space gpa thingy for command line: 0x{:x}",
-            command_line.as_u64()
-        );
         let command_line_addr_low = (command_line.as_usize() & 0xFFFF_FFFF) as u32;
         let command_line_addr_high = (command_line.as_usize() >> 32) as u32;
         boot_params.ext_cmd_line_ptr = command_line_addr_high;
         boot_params.hdr.cmd_line_ptr = command_line_addr_low;
         boot_params.hdr.cmdline_size = COMMAND_LINE.len() as u32;
         boot_params.acpi_rsdp_addr = rsdp;
+
         //Step2 load the BootParams "struct" itself into memory
         let boot_params = loaded_linux.add_payload(boot_params.as_bytes(), guest_allocator);
-        log::info!(
-            "color space gpa thingy for boot params 0x{:x}",
-            boot_params.as_u64()
-        );
         let entry_point = linux_prog.phys_entry;
         let mut info = GuestInfo::default();
         info.cr3 = match loaded_linux.pt_mapper {

@@ -12,15 +12,15 @@ use crate::elf::Elf64PhdrType;
 use crate::mmu::PAGE_SIZE;
 
 /// Relocates the physical addresses of an elf program.
+/// # Arguments
+/// - `force_seek_allocator` : If true, allocate mem from allocator until next gpa equals the p_paddr
+/// from the next elf segment. We use this to load stuff to the address where the EPT builder in stage2
+/// will eventually map it to
 pub fn relocate_elf(
     elf: &mut ElfProgram,
     allocator: &impl RangeAllocator,
     force_seek_allocator: bool,
 ) {
-    log::info!(
-        "relocate_elf: force_seek_allocator? {}",
-        force_seek_allocator
-    );
     let mut all_allocated_mem = Vec::new();
 
     let mut prev_segment: Option<&NonContigElf64Phdr> = None;
@@ -29,12 +29,6 @@ pub fn relocate_elf(
             continue;
         }
         let mut aligned_size = align_up(segment.phdr.p_memsz, PAGE_SIZE as u64) as usize;
-        log::info!(
-            "relocate_elf : segment paddr 0x{:x}, size 0x{:x}, aligned_size 0x{:x}",
-            segment.phdr.p_paddr,
-            segment.phdr.p_memsz,
-            aligned_size
-        );
 
         let mut ranges: Vec<PhysRange> = Vec::new();
 
@@ -77,16 +71,8 @@ pub fn relocate_elf(
                     PAGE_SIZE - (segment.phdr.p_paddr as usize & PAGE_MASK),
                     segment.phdr.p_memsz as usize,
                 );
-                log::info!(
-                    "size_adjust: 0x{:x}, memsz 0x{:x}",
-                    size_adjust,
-                    segment.phdr.p_memsz
-                );
-                let old_aligned_size = aligned_size;
                 aligned_size =
                     align_up(segment.phdr.p_memsz - size_adjust as u64, PAGE_SIZE as u64) as usize;
-                log::info!("updating aligned size. prev value 0x:{:x}, bytes used on shared page {:x}, new aligned size 0x{:x}",
-            old_aligned_size, size_adjust, aligned_size);
             }
             if aligned_size > 0 {
                 if force_seek_allocator {
@@ -94,9 +80,6 @@ pub fn relocate_elf(
                     let want_for_next_gpa = segment.phdr.p_paddr as usize;
 
                     if cur_next_gpa < want_for_next_gpa {
-                        let diff = want_for_next_gpa - cur_next_gpa;
-                        log::info!("force seeking allocator: cur_next_gpa {:x}, want {:x}, seeking {:x} bytes which equals {} pages",
-                        cur_next_gpa, want_for_next_gpa, diff,diff/PAGE_SIZE);
                         //we cannot do range allocation here as jumping over blocked ranges or gaps affects
                         //our next gpa in hard to precalculate ways
                         while allocator.gpa_of_next_allocation().as_usize() < want_for_next_gpa {
@@ -127,18 +110,13 @@ pub fn relocate_elf(
                 let want_for_next_gpa = segment.phdr.p_paddr as usize;
 
                 if cur_next_gpa < want_for_next_gpa {
-                    let diff = want_for_next_gpa - cur_next_gpa;
-                    log::info!("force seeking allocator: cur_next_gpa {:x}, want {:x}, seeking {:x} bytes which equals {} pages",
-                    cur_next_gpa, want_for_next_gpa, diff,diff/PAGE_SIZE);
                     //we cannot do range allocation here as jumping over blocked ranges or gaps affects
                     //our next gpa in hard to precalculate ways
                     while allocator.gpa_of_next_allocation().as_usize() < want_for_next_gpa {
                         allocator.allocate_frame();
                     }
                 } else if cur_next_gpa > want_for_next_gpa {
-                    panic!(
-                        "force_seek allocator ant cur_next gpa is past want gpa, cannot go back"
-                    );
+                    panic!("force_seek allocator cur_next gpa is past want gpa, cannot go back");
                 }
                 assert_eq!(
                     want_for_next_gpa,

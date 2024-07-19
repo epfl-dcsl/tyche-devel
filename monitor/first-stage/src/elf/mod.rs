@@ -195,12 +195,9 @@ impl ElfProgram {
                 // Skip non-load segments.
                 continue;
             }
-            //log::info!("Processing segment {:x?}", seg);
             unsafe {
                 // TODO: ensure that the segment does not overlap host memory
-                //log::info!("\t loading");
                 self.load_segment(seg, HostVirtAddr::new(host_physical_offset));
-                //log::info!("\t mapping");
                 self.map_segment(seg, &mut pts_target_env, allocator);
             }
         }
@@ -358,7 +355,6 @@ impl ElfProgram {
                 assert!(p_vaddr % PAGE_SIZE as u64 == 0);
                 assert!(segment.phys_mem[0].start.as_usize() % PAGE_SIZE == 0);
 
-                log::info!("ElfMapping::Scattered start 0x{:13x} end 0x{:13x}", p_vaddr, p_vaddr+memsz);
                 match mapping_env {
                     ELfTargetEnvironment::Host(host_mapper) => host_mapper
                         .map_range_scattered(

@@ -149,14 +149,9 @@ impl<T: MemoryColoring + Clone> PartitionedMemoryMap<T> {
             MemoryRange::ColoredRange(cr) => cr.mem_bytes,
             MemoryRange::AllRamRegionInRange(rr) => rr.mem_bytes,
             MemoryRange::SinglePhysContigRange(_) => {
-                panic!("SInglePhysContig range is not supported for describing guest memory")
+                panic!("SinglePhysContigRange range is not supported for describing guest memory")
             }
         };
-        log::info!(
-            "Building guest memory map assuming {:0.2} GiB of Memory (0x{:x} bytes)",
-            guest_mem_bytes as f64 / (1 << 30) as f64,
-            guest_mem_bytes
-        );
         let mut remaining_guest_mem_bytes = guest_mem_bytes as u64;
 
         let mut ram_bytes = 0;
@@ -170,7 +165,6 @@ impl<T: MemoryColoring + Clone> PartitionedMemoryMap<T> {
                 MemoryRegionKind::Usable => {
                     //No more guest memory,
                     if remaining_guest_mem_bytes <= 0 {
-                        //log::info!("dropping {:x?}", bl_mr);
                         result.push(E820Entry {
                             addr: GuestPhysAddr::new(bl_mr.start as usize),
                             size: bl_mr_bytes,
@@ -187,9 +181,6 @@ impl<T: MemoryColoring + Clone> PartitionedMemoryMap<T> {
                         ram_bytes += bl_mr_bytes;
                     // remaining guest memory > 0 but smaller than region -> split region
                     } else {
-                        /*log::info!("Splitting final memory region. Useable 0x{:x} to 0x{:x}, blocking 0x{:x} to 0x{:x}",
-                            bl_mr.start, bl_mr.start+remaining_guest_mem_bytes, bl_mr.start + remaining_guest_mem_bytes, bl_mr.start + remaining_guest_mem_bytes + bl_mr_bytes - remaining_guest_mem_bytes
-                        );*/
                         result.push(E820Entry {
                             addr: GuestPhysAddr::new(bl_mr.start as usize),
                             size: remaining_guest_mem_bytes,
@@ -220,12 +211,6 @@ impl<T: MemoryColoring + Clone> PartitionedMemoryMap<T> {
                     });
                     device_bytes += bl_mr_bytes;
                     bootloader_ram_bytes += bl_mr_bytes;
-                    log::info!(
-                        "0x{:x} to {:x} was BIOS but is now RAM, ({:x} bytes)",
-                        bl_mr.start,
-                        bl_mr.start + bl_mr_bytes,
-                        bl_mr_bytes,
-                    );
                 }
                 //passthrough
                 MemoryRegionKind::UnknownUefi(_) | MemoryRegionKind::UnknownBios(_) => {
@@ -260,11 +245,6 @@ impl<T: MemoryColoring + Clone> PartitionedMemoryMap<T> {
             ram_bytes,
             device_bytes as f64 / (1 << 30) as f64,
             device_bytes
-        );
-        log::info!(
-            "Mem regions before: {}. Mem regions after: {}",
-            self.all_regions.len(),
-            result.len()
         );
 
         result
@@ -367,13 +347,6 @@ pub fn create_guest_allocator<T: MemoryColoring + Clone>(
 ) -> (ColoringRangeFrameAllocator<T>, MemoryRange, MemoryRange) {
     #[cfg(feature = "color-dom0")]
     {
-        log::info!(
-            "Have {} colors, order {}, mask 0x:{:x}, bytes for bitmap {}",
-            MemoryColoringType::COLOR_COUNT,
-            MemoryColoringType::COLOR_ORDER,
-            MemoryColoringType::COLOR_MASK,
-            MemoryColoringType::BYTES_FOR_COLOR_BITMAP
-        );
         log::info!("Computing number of colors required for dom0");
         let (first_guest_color, guest_color_count, guest_mem_bytes) = contig_color_range(
             regions,
@@ -642,10 +615,6 @@ pub unsafe fn init(
     let guest_allocator = SharedFrameAllocator::new(guest_allocator);
     println!("init memory done");
 
-    /*log::info!("Modified memory regions");
-    for (mr_idx, mr) in regions.iter().enumerate() {
-        log::info!("{:03} {:x?}", mr_idx, mr);
-    }*/
     Ok((
         stage1_allocator,
         stage2_allocator,
@@ -667,20 +636,11 @@ fn reserve_memory_region(regions: &mut [MemoryRegion], required_bytes: usize) ->
             };
 
             matching_mr = Some((mr_idx, pr));
-            println!(
-                "Using mr at idx {:02} {:x?} for contig range allocator",
-                mr_idx, mr
-            );
             break;
         }
     }
     match &mut matching_mr {
         Some((idx, pr)) => {
-            log::info!(
-                "Using mem region at idx {} (have {} regions) to fulfill request",
-                idx,
-                regions.len()
-            );
             //if this is the last region, just could it short instead of marking as reserved
             //this way another call to reserve_memory_region can easily draw from the same region again
             if *idx == regions.len() - 1 {
@@ -692,7 +652,6 @@ fn reserve_memory_region(regions: &mut [MemoryRegion], required_bytes: usize) ->
                 assert_eq!(pr.end.as_usize() % PAGE_SIZE, 0);
 
                 v.end -= required_bytes as u64;
-                log::info!("cutting region short");
             } else {
                 panic!("should not happend");
             }
@@ -758,16 +717,11 @@ impl<T: MemoryColoring + Clone> ColoringRangeFrameAllocator<T> {
             additional_range_filter,
         };
 
-        //log::info!("initializing new color allocator gpa");
         if cur_mr.kind != MemoryRegionKind::Usable {
             res.inside_cur_region_cursor.set(PhysAddr::new(cur_mr.end));
             res.gpa_of_next_allocation.set(cur_mr.end as usize);
             res.advance_to_next_region().unwrap();
         }
-        /*log::info!(
-            "initial next_gpa value is 0x{:x}",
-            res.gpa_of_next_allocation.get()
-        );*/
 
         res
     }
@@ -795,11 +749,6 @@ impl<T: MemoryColoring + Clone> ColoringRangeFrameAllocator<T> {
                     "gap between regions is not multiple of page size"
                 );
                 let updated = self.gpa_of_next_allocation.get() + gap_size;
-                /*log::info!(
-                    "processing gap, old gpa 0x{:x}, new gpa 0x{:x}",
-                    self.gpa_of_next_allocation.get(),
-                    updated
-                );*/
                 self.gpa_of_next_allocation.set(updated);
             } else if prev_region.end > mr.start {
                 panic!("weird unsorted memory region in gpa calculation");
@@ -832,11 +781,6 @@ impl<T: MemoryColoring + Clone> ColoringRangeFrameAllocator<T> {
                         "blocked region has size that is not multiple of page size"
                     );
                     let updated: usize = self.gpa_of_next_allocation.get() + size;
-                    /*log::info!(
-                        "processing blocked region, old gpa 0x{:x}, new gpa 0x{:x}",
-                        self.gpa_of_next_allocation.get(),
-                        updated
-                    );*/
                     self.gpa_of_next_allocation.set(updated);
                 }
                 _ => todo!("unknown memory region"),
@@ -957,13 +901,6 @@ unsafe impl<T: MemoryColoring + Clone> RangeAllocator for ColoringRangeFrameAllo
                 end: frame.phys_addr + PAGE_SIZE,
             });
             return Ok(());
-        }
-
-        if self.gpa_of_next_allocation.get() == 0x1000000 {
-            log::info!(
-                "Allocation for 0x1000000: cur mem region: {:x?}",
-                self.memory_regions[self.cur_region.get().idx]
-            );
         }
 
         //normal case: need at least two pages for request

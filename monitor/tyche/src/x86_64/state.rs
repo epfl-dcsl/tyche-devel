@@ -100,13 +100,6 @@ fn color_aware_mapper<F: Fn(&MemOps,&ResourceKind)->Result<u64,()>>(
         });
     let mut next_blocked = next_blocked_iter.next();
 
-    for dr in domain.remapper.remap(permission_iter.clone()) {
-        log::info!(
-            "device region 0x{:013x} 0x{:013x}",
-            dr.hpa,
-            dr.hpa + dr.size
-        );
-    }
 
     let mut next_ram_gpa = 0;
     //skip over device regions that have smaller addr than first ram region
@@ -125,20 +118,9 @@ fn color_aware_mapper<F: Fn(&MemOps,&ResourceKind)->Result<u64,()>>(
         next_ram_gpa += nb.size;
         next_blocked = next_blocked_iter.next();
     }
-    log::info!("First ram region is {:x?}", &first_ram_region);
-    log::info!("First blocking dev region is {:x?}", &next_blocked);
-    log::info!("Initial next_ram_gpa value is 0x{:x}", &next_ram_gpa);
 
-    let boot_mem_region_gib = get_manifest()
-        .get_boot_mem_regions()
-        .iter()
-        .filter(|v| v.kind == MemoryRegionKind::UseableRAM)
-        .map(|v| v.end - v.start)
-        .sum::<u64>() as f64
-        / ((1 << 30) as f64);
-    log::info!("boot mem regions can represent {} GiB", boot_mem_region_gib);
-    let mut mapped_ram_bytes = 0;
-    let mut mapped_device_bytes = 0;
+    let mut _mapped_ram_bytes = 0;
+    let mut _mapped_device_bytes = 0;
     //total number of contig phys ranges that we used to back the GPA RAM space
     let mut total_ram_range_count = 0;
     for (_, range) in domain.remapper.remap(permission_iter).enumerate() {
@@ -165,19 +147,12 @@ fn color_aware_mapper<F: Fn(&MemOps,&ResourceKind)->Result<u64,()>>(
 
                 let mut chunk_idx = 0;
 
-                //TODO:have not yet implemented support for multiple repeat
+                //TODO: luca: have not yet implemented support for multiple repeat
                 assert!(range.repeat == 1);
 
-                log::info!(
-                    "processing start 0x{:013x}, end 0x{:013x}, size 0x{:013x}, type RAM",
-                    range.hpa,
-                    range.hpa + range.size,
-                    range.size
-                );
                 color_to_phys.visit_all_as_ranges(|partition_chunk| {
                  //figure out amout of bytes we can map before hitting the next range blocked for a device
                  let mut remaining_chunk_bytes = partition_chunk.size();
-                 //log::info!("chunck {:x?}. size 0x{:x}", &partition_chunk, remaining_chunk_bytes);
                  while remaining_chunk_bytes > 0 {
                      let map_size;
                      let mut advance_next_blocked = false;
@@ -197,7 +172,6 @@ fn color_aware_mapper<F: Fn(&MemOps,&ResourceKind)->Result<u64,()>>(
                          None => {
                              //No more blocked ranges -> can map everything
                              map_size = remaining_chunk_bytes;
-                             //log::info!("no blocking dev path, mapping whole 0x{:x}", map_size);
                          }
                      }
 
@@ -211,14 +185,13 @@ fn color_aware_mapper<F: Fn(&MemOps,&ResourceKind)->Result<u64,()>>(
                          map_size,
                          flags,
                      );
-                     mapped_ram_bytes += map_size;
+                     _mapped_ram_bytes += map_size;
                      remaining_chunk_bytes -= map_size;
                      next_ram_gpa += map_size;
                      if advance_next_blocked {
                          let mut cur_blocked = next_blocked
                          .expect("advance_next_blocked true but next block was None");
 
-                         //log::info!("skipping over device region at 0x{:x} to 0x{:x}", cur_blocked.hpa, cur_blocked.hpa+cur_blocked.size);
 
                          assert_eq!(next_ram_gpa, cur_blocked.hpa);
                          next_ram_gpa += cur_blocked
@@ -229,7 +202,6 @@ fn color_aware_mapper<F: Fn(&MemOps,&ResourceKind)->Result<u64,()>>(
                         //next blocked might by contiguous -> skip over next until there is a gap
                          while let Some(nb) = next_blocked {
                             if nb.hpa == (cur_blocked.hpa + cur_blocked.size) {
-                                log::info!("also skipping over contiguous region 0x{:x} to 0x{:x}", nb.hpa, nb.hpa+nb.size);
                                 assert_eq!(next_ram_gpa,nb.hpa);
                                 next_ram_gpa += nb.size;
                                 cur_blocked = nb;
@@ -247,13 +219,6 @@ fn color_aware_mapper<F: Fn(&MemOps,&ResourceKind)->Result<u64,()>>(
             }
             // Device memory must be identity mapped, to pass through the access to the pyhsical HW
             ResourceKind::Device => {
-                log::info!(
-                    "processing start 0x{:013x}, end 0x{:013x}, size 0x{:013x}, type Device",
-                    range.hpa,
-                    range.hpa + range.size,
-                    range.size
-                );
-
                 mapper.map_range(
                     allocator,
                     &GuestPhysAddr::new(range.hpa),
@@ -262,12 +227,9 @@ fn color_aware_mapper<F: Fn(&MemOps,&ResourceKind)->Result<u64,()>>(
                     flags,
                 );
 
-                mapped_device_bytes += range.size;
+                _mapped_device_bytes += range.size;
             }
         } // end of "match resource_kind"
-    log::info!("Mapped RAM bytes: {:0.2} GiB (0x{:x} bytes)", mapped_ram_bytes as f64 / (1<<30) as f64, mapped_ram_bytes);
-    log::info!("Largest RAM GPA: 0x{:013x}", next_ram_gpa);
-    log::info!("total ram range count: {}",total_ram_range_count);
     }
 }
 
@@ -290,7 +252,6 @@ impl StateX86 {
         let allocator = allocator();
         if let Some(iopt) = domain.iopt {
             unsafe { Self::free_iopt(iopt, allocator) };
-            // TODO: global invalidate context cache, PASID cache, and flush the IOTLB
         }
 
         let iopt_root = allocator
@@ -303,7 +264,7 @@ impl StateX86 {
         );
 
       
-        let permission_cb = |ops:& MemOps, kind: &ResourceKind| {
+        let permission_cb = |ops:& MemOps, _ : &ResourceKind| {
             let mut flags = IoPtFlag::empty();
 
             if ops.contains(MemOps::READ) {
@@ -319,9 +280,6 @@ impl StateX86 {
         color_aware_mapper(&mut iopt_mapper, permission_iter, &domain, permission_cb);
 
         domain.iopt = Some(iopt_root.phys_addr);
-
-        log::info!("IOMMU PTs GPA->HPA");
-        iopt_mapper.debug_range(GuestPhysAddr::new(0x101_d80_400), 0x1000);
 
         // Update the IOMMU (i.e. the actual hardware device)
         // TODO: @yuchen ideally we only need to change the 2nd stage page translation pointer on the

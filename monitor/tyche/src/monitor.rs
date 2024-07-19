@@ -197,14 +197,11 @@ pub trait Monitor<T: PlatformState + 'static> {
 
         // No one else is running yet
         let mut engine = CAPA_ENGINE.lock();
-        log::info!("calling create_manager_domain");
         let domain = engine
             .create_manager_domain(permission::monitor_inter_perm::ALL)
             .unwrap();
-        log::info!("calling apply_updates");
         Self::apply_updates(state, &mut engine);
         let mut dom0_partititons = PartitionBitmap::new();
-        log::info!("Creating dom0 based on manifest...");
         match manifest.dom0_memory {
             MemoryRange::ColoredRange(cr) => {
                 log::info!(
@@ -219,12 +216,11 @@ pub trait Monitor<T: PlatformState + 'static> {
             MemoryRange::SinglePhysContigRange(_) => {
                 panic!("SinglePhysContigRange is not supported")
             }
-            /// In this case we don't want any specific colors for dom0
+            // In this case we don't want any specific colors for dom0
             MemoryRange::AllRamRegionInRange(_) => {
                 dom0_partititons.set_all(true);
             }
         }
-        println!("\n\n");
         for mr in manifest.get_boot_mem_regions() {
             match mr.kind {
                 MemoryRegionKind::UseableRAM => match manifest.dom0_memory {
@@ -291,7 +287,6 @@ pub trait Monitor<T: PlatformState + 'static> {
             }
         }
 
-        log::info!("Creating device ranges");
         //give dom0 access to all device ranges : devices are in gaps of boot mem map
         let mut prev = &manifest.get_boot_mem_regions()[0];
         for cur in manifest.get_boot_mem_regions().iter().skip(1) {
@@ -310,7 +305,6 @@ pub trait Monitor<T: PlatformState + 'static> {
             //Exclude IOMMU
             let device_start = prev.end;
             let device_end = cur.start;
-            log::info!("gap->device 0x{:013x} 0x{:013x}", device_start, device_end);
             if manifest.iommu_hpa != 0
                 && manifest.iommu_hpa >= device_start
                 && manifest.iommu_hpa < device_end
