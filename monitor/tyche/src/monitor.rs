@@ -9,14 +9,14 @@ use capa_engine::{
 };
 use mmu::ioptmapper::PAGE_SIZE;
 use mmu::memory_coloring::color_to_phys::MemoryRegionKind;
-use mmu::memory_coloring::{ActiveMemoryColoring, MemoryRange, PartitionBitmap};
+use mmu::memory_coloring::{MemoryRange, PartitionBitmap};
 use spin::{Mutex, MutexGuard};
 use stage_two_abi::Manifest;
 use vmx::HostVirtAddr;
 
 use crate::arch::cpuid;
 use crate::attestation_domain::calculate_attestation_hash;
-use crate::{calls, println};
+use crate::calls;
 
 // ———————————————————————————————— Updates ————————————————————————————————— //
 /// Per-core updates

@@ -3,7 +3,6 @@ use core::ops::BitOrAssign;
 use utils::HostPhysAddr;
 
 use crate::frame_allocator::PhysRange;
-use crate::ioptmapper::PAGE_SHIFT;
 
 pub mod color_to_phys;
 
@@ -231,8 +230,9 @@ pub enum MemoryRange {
     AllRamRegionInRange(RamRegionsInRange),
 }
 
+#[cfg(test)]
 pub mod test {
-    use super::{DummyMemoryColoring, MyBitmap};
+    use super::MyBitmap;
 
     #[test]
     fn test_payload_bits_len() {

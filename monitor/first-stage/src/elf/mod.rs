@@ -4,23 +4,20 @@ mod ffi;
 pub mod relocate;
 
 use alloc::vec::Vec;
-use core::marker::PhantomData;
 use core::str::from_utf8;
 
 pub use ffi::{
     Elf64Hdr, Elf64Phdr, Elf64PhdrFlags, Elf64PhdrType, Elf64Shdr, Elf64ShdrType, Elf64Sym,
     FromBytes,
 };
-use log::info;
 use mmu::frame_allocator::PhysRange;
 use mmu::guest_ptmapper::GuestPtMapper;
 use mmu::ioptmapper::{PAGE_MASK, PAGE_SIZE};
 use mmu::ptmapper::DEFAULT_PROTS;
 use mmu::walker::Address;
-use mmu::{ptmapper, PtFlag, PtMapper, RangeAllocator};
-use qemu::println;
+use mmu::{PtFlag, PtMapper, RangeAllocator};
 use vmx::HostPhysAddr;
-use x86_64::{PhysAddr, VirtAddr};
+use x86_64::VirtAddr;
 
 use crate::mmu::scattered_writer::ScatteredIdMappedBuf;
 use crate::{GuestPhysAddr, GuestVirtAddr, HostVirtAddr};

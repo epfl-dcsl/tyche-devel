@@ -156,7 +156,6 @@ impl<T: MemoryColoring + Clone> PartitionedMemoryMap<T> {
 
         let mut ram_bytes = 0;
         let mut device_bytes = 0;
-        let mut bootloader_ram_bytes = 0;
 
         for bl_mr in self.all_regions {
             let bl_mr_bytes = bl_mr.end - bl_mr.start;
@@ -210,7 +209,6 @@ impl<T: MemoryColoring + Clone> PartitionedMemoryMap<T> {
                         mem_type: E820Types::Ram,
                     });
                     device_bytes += bl_mr_bytes;
-                    bootloader_ram_bytes += bl_mr_bytes;
                 }
                 //passthrough
                 MemoryRegionKind::UnknownUefi(_) | MemoryRegionKind::UnknownBios(_) => {
@@ -542,12 +540,6 @@ pub unsafe fn init(
     ),
     (),
 > {
-    //just out of caution that using these low regions might lead to trouble
-    /*for mr in regions.iter_mut() {
-        if mr.start < 0xa0000 && mr.kind == MemoryRegionKind::Usable {
-            mr.kind = MemoryRegionKind::UnknownBios(1);
-        }
-    }*/
     let stage2_phys_range = if cfg!(feature = "color-s2") {
         println!("\nUsing colors for stage2\n");
         None
@@ -948,6 +940,7 @@ unsafe impl<T: MemoryColoring + Clone> RangeAllocator for ColoringRangeFrameAllo
 /// - `total_color_count` absolute number of colors provided by the coloring
 /// # Returns
 /// On succcess returns tuple (first color id, color count, size in bytes)
+#[cfg(feature = "color-dom0")]
 fn contig_color_range<T: MemoryColoring + Clone>(
     all_regions: &'static [MemoryRegion],
     coloring: &T,
@@ -981,6 +974,7 @@ fn contig_color_range<T: MemoryColoring + Clone>(
 }
 
 /// Computes the size of the memory partition with the given color_id in bytes
+#[cfg(feature = "color-dom0")]
 fn compute_color_partition_size<T: MemoryColoring + Clone>(
     all_regions: &'static [MemoryRegion],
     coloring: &T,

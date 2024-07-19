@@ -4,8 +4,6 @@ use core::marker::PhantomData;
 use bitflags::bitflags;
 use utils::HostVirtAddr;
 use vmx::ept::PAGE_SIZE;
-use vmx::GuestPhysAddr;
-use x86_64::{PhysAddr, VirtAddr};
 
 use super::frame_allocator::FrameAllocator;
 use super::walker::{Address, Level, WalkNext, Walker};

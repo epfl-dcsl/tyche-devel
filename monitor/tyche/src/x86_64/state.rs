@@ -7,9 +7,9 @@ use capa_engine::{
     Remapper, ResourceKind,
 };
 use mmu::eptmapper::EPT_ROOT_FLAGS;
-use mmu::ioptmapper::{PAGE_MASK, PAGE_SIZE};
+use mmu::ioptmapper:: PAGE_SIZE;
 use mmu::mapper::Mapper;
-use mmu::memory_coloring::color_to_phys::{ColorToPhys, MemoryRegionKind};
+use mmu::memory_coloring::color_to_phys::ColorToPhys;
 use mmu::memory_coloring::ActiveMemoryColoring;
 use mmu::{EptMapper, FrameAllocator, IoPtFlag, IoPtMapper};
 use spin::{Mutex, MutexGuard};

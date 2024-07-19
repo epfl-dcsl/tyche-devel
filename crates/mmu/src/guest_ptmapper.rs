@@ -1,8 +1,11 @@
+///This mapper does not require the GPAs to be identity mapped
+/// to the stage1 memory. Instead it stores explictly stores 
+/// the HPA for each GPA. To achieve this we hackily reuse the
+/// existing ptmapper as a "hashmap"
 use core::cell::RefCell;
 use core::marker::PhantomData;
 
 use vmx::{GuestPhysAddr, GuestVirtAddr, HostPhysAddr};
-use x86_64::{PhysAddr, VirtAddr};
 
 use crate::frame_allocator::PhysRange;
 use crate::ioptmapper::PAGE_SIZE;
@@ -108,7 +111,6 @@ impl GuestPtMapper<GuestPhysAddr, GuestVirtAddr> {
                 phys_range
             );*/
             assert_eq!(phys_range.start.as_usize() % PAGE_SIZE, 0);
-            let phys_addr = GuestPhysAddr::from_usize(phys_range.start.as_usize());
 
             //compute number of bytes that we can map in this iteration
             let mapping_size = if remaining_bytes > phys_range.size() {
@@ -122,8 +124,6 @@ impl GuestPtMapper<GuestPhysAddr, GuestVirtAddr> {
              * which might not be the case for our phys range. Could be optimized later on, by adjusting
              * based on phys range size.
              */
-            /*log::info!("map_range_scattered: calling map_range with vaddr 0x{:x}, paddr 0x{:x}, size 0x{:x}",
-            next_virt_addr.as_u64(), phys_addr.as_u64(), mapping_size);*/
             self.enable_pse = false;
             self.map_range(allocator, next_virt_addr, GuestPhysAddr::new(next_virt_addr.as_usize()), mapping_size, prot);
             self.enable_pse = true;

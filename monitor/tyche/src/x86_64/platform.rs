@@ -7,13 +7,12 @@ use capa_engine::context::RegisterGroup;
 use capa_engine::utils::BitmapIterator;
 use capa_engine::{AccessRights, CapaEngine, CapaError, Domain, Handle, MemOps};
 use mmu::eptmapper::EPT_ROOT_FLAGS;
-use mmu::{EptMapper, FrameAllocator};
+use mmu::FrameAllocator;
 use spin::MutexGuard;
 use stage_two_abi::{GuestInfo, Manifest};
 use utils::HostPhysAddr;
 use vmx::bitmaps::exit_qualification;
 use vmx::fields::VmcsField;
-use vmx::raw::vmread;
 use vmx::{HostVirtAddr, VmxExitReason};
 
 use super::context::{ContextGpx86, Contextx86};

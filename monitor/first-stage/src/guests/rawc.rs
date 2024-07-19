@@ -1,14 +1,16 @@
-use mmu::memory_coloring::MemoryColoring;
-use mmu::{IoPtMapper, RangeAllocator};
+use mmu::memory_coloring::{MemoryColoring, MemoryRange};
+use mmu::{IoPtFlag, IoPtMapper, Mapper, RangeAllocator};
 use stage_two_abi::GuestInfo;
+use vmx::HostPhysAddr;
 use vtd::Iommu;
+use x86_64::VirtAddr;
 
 use super::Guest;
 use crate::acpi::AcpiInfo;
-use crate::elf::ElfProgram;
+use crate::elf::{ELfTargetEnvironment, ElfProgram};
 use crate::guests::ManifestInfo;
 use crate::mmu::frames::PartitionedMemoryMap;
-use crate::{GuestPhysAddr, GuestVirtAddr, HostVirtAddr};
+use crate::{GuestPhysAddr, HostVirtAddr};
 
 #[cfg(feature = "guest_rawc")]
 const RAWCBYTES: &'static [u8] = include_bytes!("../../../../guest/rawc");
@@ -42,8 +44,7 @@ impl Guest for RawcBytes {
         color_map: &PartitionedMemoryMap<T>,
         _rsdp: u64,
     ) -> ManifestInfo {
-        todo!();
-        /*let mut manifest = ManifestInfo::default();
+        let mut manifest = ManifestInfo::default();
         let rawc_prog = ElfProgram::new(RAWCBYTES);
         let virtoffset = host_allocator.get_physical_offset();
 
@@ -52,26 +53,32 @@ impl Guest for RawcBytes {
             .expect("I/O PT root allocation")
             .zeroed();
         let mut iopt_mapper = IoPtMapper::new(virtoffset.as_usize(), iopt_root.phys_addr);
-        todo!("implement scatter iopt_mapper");
-        /*
-         let host_range = color_map.compute_host_phys_ranges();
+
+        let host_range = match color_map.stage2 {
+            MemoryRange::ColoredRange(_) => todo!("not yet supported"),
+            MemoryRange::SinglePhysContigRange(spc) => spc,
+            MemoryRange::AllRamRegionInRange(_) => todo!("not yet supported"),
+        };
         iopt_mapper.map_range(
             host_allocator,
-            GuestPhysAddr::new(0),
-            HostPhysAddr::new(0),
+            &GuestPhysAddr::new(0),
+            &HostPhysAddr::new(0),
             host_range.start.as_usize(),
-            IoPtFlag::WRITE | IoPtFlag::READ | IoPtFlag::EXECUTE,
-        );*/
+            (IoPtFlag::WRITE | IoPtFlag::READ).bits(),
+        );
 
         // Load guest into memory.
         let mut loaded_rawc = rawc_prog
-            .load::<GuestPhysAddr, GuestVirtAddr>(guest_allocator, virtoffset)
+            .load(guest_allocator, virtoffset.as_usize(), false)
             .expect("Failed to load guest");
-        let pt_root = loaded_rawc.pt_root_spa;
+        let pt_root = match &loaded_rawc.pt_mapper {
+            ELfTargetEnvironment::Host(m) => m.get_pt_root(),
+            ELfTargetEnvironment::Guest(_) => panic!("rawc does not supprot guest mapper"),
+        };
 
         // Setup stack
         let (rsp, _stack_phys) =
-            loaded_rawc.add_stack(GuestVirtAddr::new(STACK), 0x2000, guest_allocator);
+            loaded_rawc.add_stack(VirtAddr::new(STACK as u64), 0x2000, guest_allocator);
 
         // Setup I/O MMU
         if let Some(iommus) = &acpi.iommu {
@@ -83,7 +90,7 @@ impl Guest for RawcBytes {
             iommu.set_root_table_addr(root_addr.as_u64() | (0b00 << 10)); // Set legacy mode
             iommu.update_root_table_addr();
             iommu.enable_translation();
-            manifest.iommu = iommus[0].base_address.as_u64();
+            manifest.iommu = Some(iommus[0]);
             log::info!("I/O MMU: {:?}", iommu.get_global_status());
         }
 
@@ -96,6 +103,6 @@ impl Guest for RawcBytes {
         info.loaded = true;
         manifest.guest_info = info;
 
-        manifest*/
+        manifest
     }
 }

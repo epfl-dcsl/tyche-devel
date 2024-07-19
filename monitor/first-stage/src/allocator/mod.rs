@@ -3,8 +3,6 @@
 use alloc::alloc::GlobalAlloc;
 use core::sync::atomic::{AtomicBool, Ordering};
 
-use mmu::frame_allocator::PhysRange;
-use mmu::ioptmapper::PAGE_SIZE;
 use mmu::{PtFlag, PtMapper, RangeAllocator};
 use x86_64::instructions::tlb;
 

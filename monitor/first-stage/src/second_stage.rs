@@ -2,13 +2,11 @@
 
 use alloc::vec::Vec;
 use core::arch::asm;
-use core::cmp::min;
 use core::sync::atomic::{AtomicBool, Ordering};
 use core::{mem, slice};
 
 use bootloader::boot_info::MemoryRegionKind;
 use mmu::frame_allocator::PhysRange;
-use mmu::ioptmapper::PAGE_MASK;
 use mmu::memory_coloring::color_to_phys::{
     MemoryRegion as S2MemRegion, MemoryRegionKind as S2MemoryRegionKind,
 };
@@ -16,11 +14,11 @@ use mmu::memory_coloring::{MemoryColoring, MemoryRange};
 use mmu::walker::Address;
 use mmu::{PtFlag, PtMapper, RangeAllocator};
 use stage_two_abi::{EntryPoint, Manifest, Smp};
-use x86_64::{align_down, align_up, VirtAddr};
+use x86_64::VirtAddr;
 
 use crate::cpu::MAX_CPU_NUM;
 use crate::elf::relocate::relocate_elf;
-use crate::elf::{ELfTargetEnvironment, Elf64PhdrType, ElfProgram, NonContigElf64Phdr};
+use crate::elf::{ELfTargetEnvironment, Elf64PhdrType, ElfProgram};
 use crate::guests::ManifestInfo;
 use crate::mmu::frames::{MemoryPartition, PartitionedMemoryMap};
 use crate::mmu::PAGE_SIZE;

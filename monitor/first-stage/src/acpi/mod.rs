@@ -6,9 +6,7 @@ use alloc::vec::Vec;
 use core::{mem, ptr, slice};
 
 use mmu::frame_allocator::PhysRange;
-use mmu::ioptmapper::{PAGE_MASK, PAGE_SIZE};
 use mmu::{PtFlag, PtMapper, RangeAllocator};
-use qemu::println;
 use tables::{dmar, McfgItem, Rsdp, SdtHeader};
 
 use crate::mmu::scattered_writer::ScatteredIdMappedBuf;

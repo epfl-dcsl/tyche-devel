@@ -1,14 +1,9 @@
 //! Linux Guest
 
 use alloc::vec::Vec;
-use core::ptr::slice_from_raw_parts;
-use core::slice;
 
-use mmu::frame_allocator::PhysRange;
-use mmu::ioptmapper::PAGE_SIZE;
 use mmu::memory_coloring::MemoryColoring;
 use mmu::RangeAllocator;
-use qemu::println;
 use stage_two_abi::GuestInfo;
 
 use super::Guest;
@@ -16,12 +11,12 @@ use crate::acpi::AcpiInfo;
 use crate::elf::relocate::relocate_elf;
 use crate::elf::{Elf64PhdrType, ElfMapping, ElfProgram};
 use crate::guests::boot_params::{
-    BootParams, E820Entry, E820Types, KERNEL_BOOT_FLAG_MAGIC, KERNEL_HDR_MAGIC,
-    KERNEL_LOADER_OTHER, KERNEL_MIN_ALIGNMENT_BYTES,
+    BootParams, E820Types, KERNEL_BOOT_FLAG_MAGIC, KERNEL_HDR_MAGIC, KERNEL_LOADER_OTHER,
+    KERNEL_MIN_ALIGNMENT_BYTES,
 };
 use crate::guests::ManifestInfo;
 use crate::mmu::frames::PartitionedMemoryMap;
-use crate::print;
+use crate::mmu::PAGE_SIZE;
 
 #[cfg(feature = "guest_linux")]
 const LINUXBYTES: &'static [u8] = include_bytes!("../../../../builds/linux-x86/vmlinux");
@@ -69,11 +64,10 @@ impl Guest for Linux {
         //We want to have an identity map between GPAs on the compactified, color partitioned SPA space
 
         //debug print to get the first SPAs where linux is loaded
-        for (load_segment_idx, load_segment) in linux_prog
+        for load_segment in linux_prog
             .segments
             .iter()
             .filter(|v| v.phdr.p_type == Elf64PhdrType::PT_LOAD.bits())
-            .enumerate()
         {
             let mut linux_page_counter = 0;
             let abort_linux_page_print_at = 3;
@@ -130,7 +124,7 @@ impl Guest for Linux {
         let mut info = GuestInfo::default();
         info.cr3 = match loaded_linux.pt_mapper {
             crate::elf::ELfTargetEnvironment::Host(_) => {
-                panic!("loaded linux guset using host mapper")
+                panic!("loaded linux guest using host mapper")
             }
             crate::elf::ELfTargetEnvironment::Guest(guest) => guest.get_pt_root_gpa().as_usize(),
         };

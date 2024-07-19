@@ -3,7 +3,6 @@
 use utils::{GuestPhysAddr, HostPhysAddr, HostVirtAddr};
 use vmx::bitmaps::{EptEntryFlags, EptMemoryType};
 use vmx::ept::{GIANT_PAGE_SIZE, HUGE_PAGE_SIZE, PAGE_SIZE};
-use vmx::GuestVirtAddr;
 
 use crate::frame_allocator::FrameAllocator;
 use crate::mapper::Mapper;

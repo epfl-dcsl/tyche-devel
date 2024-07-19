@@ -5,8 +5,6 @@
 
 use core::{cmp, fmt};
 
-use mmu::memory_coloring::PartitionBitmap;
-
 use crate::region::{MemoryPermission, PermissionIterator};
 use crate::{CapaError, GenArena, Handle, MemOps, ResourceKind};
 
