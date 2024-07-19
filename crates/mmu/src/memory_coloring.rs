@@ -177,7 +177,7 @@ pub struct DummyMemoryColoring {}
 
 impl DummyMemoryColoring {
     //use 2 to the power of COLOR_ORDER many colors
-    pub const COLOR_ORDER: usize = 4;
+    pub const COLOR_ORDER: usize = 5;
     //mask to apply to page bits (after shifting) to get color id for address
     pub const COLOR_MASK: u64 = (1 << Self::COLOR_ORDER) - 1;
 }
@@ -210,16 +210,28 @@ pub struct ColorRange {
     pub mem_bytes: usize,
 }
 
+#[derive(Debug, Clone, Copy)]
+#[repr(C)]
+pub struct RamRegionsInRange {
+    pub range: PhysRange,
+    pub mem_bytes: usize,
+}
+
 /// Wrapper type to dynmaically handle
 /// contiguous pyhs ranges and scattered colored ranges
 #[derive(Debug, Copy, Clone)]
 #[repr(C)]
 pub enum MemoryRange {
+    /// Represents all pages within and upper and lower address limits that have the specified colors
     ColoredRange(ColorRange),
-    PhysContigRange(PhysRange),
+    /// Physical Contiguous Memory Range
+    SinglePhysContigRange(PhysRange),
+    /// Represents all useable ram regions in that range under the current memory map. Might not be contiguous if there
+    /// are gaps in the memory map
+    AllRamRegionInRange(RamRegionsInRange),
 }
 
-mod test {
+pub mod test {
     use super::{DummyMemoryColoring, MyBitmap};
 
     #[test]

@@ -17,7 +17,11 @@ mod utils;
 pub use fallback::FallbackAllocator;
 
 pub const HEAP_START: usize = 0x4444_4444_0000;
-pub const HEAP_SIZE: usize = 20 * 0x1000;
+//pub const HEAP_SIZE: usize = 20 * 0x1000;
+//(1<<20) = MiB, larger heap than previously because when the memory coloring function is really fine granular,
+//we need some memory to store the vectors with all of the scattered
+//physsical ranges
+pub const HEAP_SIZE: usize = 20 * (1 << 20);
 
 static IS_INITIALIZED: AtomicBool = AtomicBool::new(false);
 
@@ -31,46 +35,32 @@ pub fn init_heap(
         return Ok(());
     }
 
-    /* as heap is not yet initialized, we cannot do dynamic allocation
-     * to store the ranges. However, as the heap has a fixed size and each
-     * phys range will contain at least on page, have an static sized upper boundary
-     */
-    let mut ranges = [PhysRange {
-        start: HostPhysAddr::new(0),
-        end: HostPhysAddr::new(0),
-    }; HEAP_SIZE / PAGE_SIZE];
-    //track the elements in `ranges` that contain valid data after allocation
-    let mut ranges_next_idx = 0;
-    let store_cb = |pr: PhysRange| {
-        assert!(ranges_next_idx < ranges.len());
-        ranges[ranges_next_idx] = pr;
-        ranges_next_idx += 1;
-    };
+    let mut heap_vaddr = HostVirtAddr::new(HEAP_START);
+    log::info!(
+        "Heap start vaddr 0x{:013x} end vaddr 0x{:013x}",
+        heap_vaddr.as_usize(),
+        heap_vaddr.as_usize() + HEAP_SIZE
+    );
+    let heap_prot = PtFlag::PRESENT | PtFlag::WRITE | PtFlag::EXEC_DISABLE;
     // Find space for the heap and create the mappings
     frame_allocator
-        .allocate_range(HEAP_SIZE, store_cb)
+        .allocate_range(HEAP_SIZE, |range| {
+            mapper.map_range(
+                frame_allocator,
+                heap_vaddr,
+                range.start,
+                range.size(),
+                heap_prot,
+            );
+            heap_vaddr = heap_vaddr + range.size();
+        })
         .expect("could not allocate kernel heap");
-    let mut heap_vaddr = HostVirtAddr::new(HEAP_START);
-    let heap_prot = PtFlag::PRESENT | PtFlag::WRITE | PtFlag::EXEC_DISABLE;
-
-    for range in &ranges {
-        mapper.map_range(
-            frame_allocator,
-            heap_vaddr,
-            range.start,
-            range.size(),
-            heap_prot,
-        );
-        heap_vaddr = heap_vaddr + range.size();
-    }
-
     // SAFETY: We check that the method is called only once and the heap is valid (mappings are
     // created just above).
     unsafe {
         tlb::flush_all(); // Update page table to prevent #PF
         GLOBAL_ALLOC.lock().init(HEAP_START, HEAP_SIZE);
     }
-
     Ok(())
 }
 

@@ -9,7 +9,7 @@ use capa_engine::{
 };
 use mmu::ioptmapper::PAGE_SIZE;
 use mmu::memory_coloring::color_to_phys::MemoryRegionKind;
-use mmu::memory_coloring::{ActiveMemoryColoring, PartitionBitmap};
+use mmu::memory_coloring::{ActiveMemoryColoring, MemoryRange, PartitionBitmap};
 use spin::{Mutex, MutexGuard};
 use stage_two_abi::Manifest;
 use vmx::HostVirtAddr;
@@ -206,7 +206,7 @@ pub trait Monitor<T: PlatformState + 'static> {
         let mut dom0_partititons = PartitionBitmap::new();
         log::info!("Creating dom0 based on manifest...");
         match manifest.dom0_memory {
-            mmu::memory_coloring::MemoryRange::ColoredRange(cr) => {
+            MemoryRange::ColoredRange(cr) => {
                 log::info!(
                     "Using colors [{},{}[ for dom0",
                     cr.first_color,
@@ -216,32 +216,64 @@ pub trait Monitor<T: PlatformState + 'static> {
                     dom0_partititons.set(v as usize, true);
                 }
             }
-            mmu::memory_coloring::MemoryRange::PhysContigRange(_) => {
-                log::info!("Using phys_contig for dom0, THIS IS NOT YET IMPLEMENTED");
+            MemoryRange::SinglePhysContigRange(_) => {
+                panic!("SinglePhysContigRange is not supported")
+            }
+            /// In this case we don't want any specific colors for dom0
+            MemoryRange::AllRamRegionInRange(_) => {
                 dom0_partititons.set_all(true);
-                todo!("pyhs contig init does not yet capture the phys range stuff");
             }
         }
-        //give dom0 access to each dom0 component that belongs to its partitions/colors
-        //TODO: how do we restrict memory in one partition case? Or does it not matter becase
-        //there driver has more freedom regarding memory managementin this case??
         println!("\n\n");
         for mr in manifest.get_boot_mem_regions() {
             match mr.kind {
-                MemoryRegionKind::UseableRAM => {
-                    engine
-                        .create_root_region(
-                            domain,
-                            AccessRights {
-                                start: mr.start as usize,
-                                end: mr.end as usize,
-                                resource: ResourceKind::RAM(dom0_partititons),
-                                ops: MEMOPS_ALL,
-                            },
-                        )
-                        .unwrap();
-                }
-                MemoryRegionKind::UsedByStage1Allocator => (), //should not ne mapped anywhere
+                MemoryRegionKind::UseableRAM => match manifest.dom0_memory {
+                    MemoryRange::ColoredRange(_) => {
+                        engine
+                            .create_root_region(
+                                domain,
+                                AccessRights {
+                                    start: mr.start as usize,
+                                    end: mr.end as usize,
+                                    resource: ResourceKind::RAM(dom0_partititons),
+                                    ops: MEMOPS_ALL,
+                                },
+                            )
+                            .unwrap();
+                    }
+                    MemoryRange::AllRamRegionInRange(pr) => {
+                        //For phys contig case, only create capa for ram if it is inside the
+                        //allowed range
+                        if mr.start >= pr.range.start.as_u64() && mr.end <= pr.range.end.as_u64() {
+                            engine
+                                .create_root_region(
+                                    domain,
+                                    AccessRights {
+                                        start: mr.start as usize,
+                                        end: mr.end as usize,
+                                        resource: ResourceKind::RAM(dom0_partititons),
+                                        ops: MEMOPS_ALL,
+                                    },
+                                )
+                                .unwrap();
+                        } else if mr.start >= pr.range.start.as_u64()
+                            && pr.range.end.as_u64() < mr.end
+                        {
+                            engine
+                                .create_root_region(
+                                    domain,
+                                    AccessRights {
+                                        start: mr.start as usize,
+                                        end: pr.range.end.as_usize(),
+                                        resource: ResourceKind::RAM(dom0_partititons),
+                                        ops: MEMOPS_ALL,
+                                    },
+                                )
+                                .unwrap();
+                        }
+                    }
+                    MemoryRange::SinglePhysContigRange(_) => panic!("not supported"),
+                },
                 MemoryRegionKind::Reserved => {
                     if let Err(e) = engine.create_root_region(
                         domain,
@@ -262,17 +294,12 @@ pub trait Monitor<T: PlatformState + 'static> {
         log::info!("Creating device ranges");
         //give dom0 access to all device ranges : devices are in gaps of boot mem map
         let mut prev = &manifest.get_boot_mem_regions()[0];
-        assert_ne!(prev.kind, MemoryRegionKind::UsedByStage1Allocator);
         for cur in manifest.get_boot_mem_regions().iter().skip(1) {
             if cur.start < prev.end {
                 panic!(
                     "weird, unsorted entry: 0x{:x} to 0x{:x}",
                     cur.start, prev.end
                 );
-            }
-            if cur.kind == MemoryRegionKind::UsedByStage1Allocator {
-                prev = cur;
-                continue;
             }
             //no gap -> continue
             if prev.end == cur.start {

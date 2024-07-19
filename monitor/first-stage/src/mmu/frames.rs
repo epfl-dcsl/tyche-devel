@@ -5,7 +5,10 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 
 use bootloader::boot_info::{MemoryRegion, MemoryRegionKind};
 use mmu::frame_allocator::PhysRange;
-use mmu::memory_coloring::{ColorRange, MemoryColoring, MemoryColoringType, MemoryRange};
+use mmu::memory_coloring::{
+    ActiveMemoryColoring, ColorRange, MemoryColoring, MemoryColoringType, MemoryRange,
+    RamRegionsInRange,
+};
 use mmu::ptmapper::PtMapper;
 use mmu::{FrameAllocator, RangeAllocator};
 use spin::Mutex;
@@ -24,10 +27,8 @@ pub const PAGE_SIZE: usize = 0x1000;
 /// Gibibyte as bytes
 const GIB: usize = 1 << 30;
 const MIB: usize = 1 << 20;
-const GUEST_RESERVED_MEMORY: usize = 2 * GIB;
-const SECOND_STAGE_RESERVED_MEMORY: u64 = 200 * MIB as u64;
-
-pub const MR_USED_BY_OUR_ALLOCATOR: MemoryRegionKind = MemoryRegionKind::UnknownBios(42);
+const GUEST_RESERVED_MEMORY: usize = 4 * GIB;
+const SECOND_STAGE_RESERVED_MEMORY: u64 = 400 * MIB as u64;
 
 // ————————————————————————— Physical Memory Offset ————————————————————————— //
 
@@ -146,16 +147,21 @@ impl<T: MemoryColoring + Clone> PartitionedMemoryMap<T> {
 
         let guest_mem_bytes = match self.guest {
             MemoryRange::ColoredRange(cr) => cr.mem_bytes,
-            MemoryRange::PhysContigRange(pr) => pr.size(),
+            MemoryRange::AllRamRegionInRange(rr) => rr.mem_bytes,
+            MemoryRange::SinglePhysContigRange(_) => {
+                panic!("SInglePhysContig range is not supported for describing guest memory")
+            }
         };
         log::info!(
-            "Building guest memory map assuming {:0.2} GiB of Memory",
-            guest_mem_bytes as f64 / (1 << 30) as f64
+            "Building guest memory map assuming {:0.2} GiB of Memory (0x{:x} bytes)",
+            guest_mem_bytes as f64 / (1 << 30) as f64,
+            guest_mem_bytes
         );
         let mut remaining_guest_mem_bytes = guest_mem_bytes as u64;
 
         let mut ram_bytes = 0;
         let mut device_bytes = 0;
+        let mut bootloader_ram_bytes = 0;
 
         for bl_mr in self.all_regions {
             let bl_mr_bytes = bl_mr.end - bl_mr.start;
@@ -204,9 +210,8 @@ impl<T: MemoryColoring + Clone> PartitionedMemoryMap<T> {
                         remaining_guest_mem_bytes = 0;
                     }
                 }
-                //TODO: If we pass this pass this through
-                //This would enable color interference
-                //Could be a case for a crash, since orig code seems to pass it through
+                //TODO: This enables some color interference, but we need it for linux to boot
+                // Copy information to memory with dom0 color and hide this in the EPTs?
                 MemoryRegionKind::Bootloader => {
                     result.push(E820Entry {
                         addr: GuestPhysAddr::new(bl_mr.start as usize),
@@ -214,11 +219,14 @@ impl<T: MemoryColoring + Clone> PartitionedMemoryMap<T> {
                         mem_type: E820Types::Ram,
                     });
                     device_bytes += bl_mr_bytes;
-                    //log::info!("0x{:x} to {:x} was BIOS but is now RAM", bl_mr.start, bl_mr.start+bl_mr_bytes);
+                    bootloader_ram_bytes += bl_mr_bytes;
+                    log::info!(
+                        "0x{:x} to {:x} was BIOS but is now RAM, ({:x} bytes)",
+                        bl_mr.start,
+                        bl_mr.start + bl_mr_bytes,
+                        bl_mr_bytes,
+                    );
                 }
-                //we used this to mark memory used by the stage1 allocator.
-                //just drop
-                MemoryRegionKind::UnknownBios(42) => (),
                 //passthrough
                 MemoryRegionKind::UnknownUefi(_) | MemoryRegionKind::UnknownBios(_) => {
                     result.push(E820Entry {
@@ -236,8 +244,9 @@ impl<T: MemoryColoring + Clone> PartitionedMemoryMap<T> {
         //It probably is enough to make sure that stage2 maps this into the EPTs but it
         //felt bettter to also include this into the boot memory map
         let stage1_alloc_mem = match self.stage1 {
-            MemoryRange::ColoredRange(_) => todo!("should not happend"),
-            MemoryRange::PhysContigRange(pcr) => pcr,
+            MemoryRange::ColoredRange(_) => panic!("should not happend"),
+            MemoryRange::SinglePhysContigRange(pcr) => pcr,
+            MemoryRange::AllRamRegionInRange(_) => panic!("should not happen"),
         };
         result.push(E820Entry {
             addr: GuestPhysAddr::new(stage1_alloc_mem.start.as_usize()),
@@ -261,6 +270,41 @@ impl<T: MemoryColoring + Clone> PartitionedMemoryMap<T> {
         result
     }
 
+    ///Create phys ranges for all useable RAM memory in the specified range.
+    /// "Useable" is defined by the passed memory region description
+    pub fn iterate_over_ranges_for_mem_range<F: FnMut(PhysRange)>(
+        regions: &[MemoryRegion],
+        range: PhysRange,
+        mut range_cb: F,
+    ) {
+        for mr in regions {
+            //mr is before the allowed range
+            if mr.end < range.start.as_u64() {
+                continue;
+            }
+            //mr ist after allowed range, since sorted thered cannot be any more matching memory ranges
+            if range.end.as_u64() < mr.start {
+                break;
+            }
+            //mr overlaps with allowed range
+            if range.start.as_u64() >= mr.start {
+                //mr is completely contained
+                if range.end.as_u64() >= mr.end {
+                    range_cb(PhysRange {
+                        start: HostPhysAddr::new(mr.start as usize),
+                        end: HostPhysAddr::new(mr.end as usize),
+                    });
+                } else {
+                    //allowed range ends in mr
+                    range_cb(PhysRange {
+                        start: HostPhysAddr::new(mr.start as usize),
+                        end: range.end,
+                    });
+                }
+            }
+        }
+    }
+
     /// Calls range_cb for each physical contiguous memory range that belongs to `partition`
     pub fn iterate_over_ranges_for_mem_partition<F: FnMut(PhysRange)>(
         &self,
@@ -276,7 +320,10 @@ impl<T: MemoryColoring + Clone> PartitionedMemoryMap<T> {
 
         match &memory_range {
             MemoryRange::ColoredRange(cr) => self.vist_all_ranges_for_color(cr, range_cb),
-            MemoryRange::PhysContigRange(pr) => range_cb(*pr),
+            MemoryRange::SinglePhysContigRange(pr) => range_cb(*pr),
+            MemoryRange::AllRamRegionInRange(rr) => {
+                Self::iterate_over_ranges_for_mem_range(&self.all_regions, rr.range, range_cb)
+            }
         }
     }
 
@@ -299,10 +346,148 @@ impl<T: MemoryColoring + Clone> PartitionedMemoryMap<T> {
             HostVirtAddr::new(0),
             self.all_regions,
             coloring,
+            None,
         );
         allocator
             .allocate_range(color_range.mem_bytes, range_cb)
             .expect("MemoryColoring::compute_ranges_for_color : alloc range failed");
+    }
+}
+
+/// Create allocator for guest based on `color-dom0` compile time switch
+/// Returns (guest allocator, guest memory range, unused memory range)
+/// # Arguments
+/// - `next_free_color` : This is the first color that may be used by any coloring allocator in this range.
+/// In case of not coloring dom0 this should be 0
+pub fn create_guest_allocator<T: MemoryColoring + Clone>(
+    regions: &'static [MemoryRegion],
+    mem_painter: T,
+    next_free_color: u64,
+    physical_memory_offset: HostVirtAddr,
+) -> (ColoringRangeFrameAllocator<T>, MemoryRange, MemoryRange) {
+    #[cfg(feature = "color-dom0")]
+    {
+        log::info!(
+            "Have {} colors, order {}, mask 0x:{:x}, bytes for bitmap {}",
+            MemoryColoringType::COLOR_COUNT,
+            MemoryColoringType::COLOR_ORDER,
+            MemoryColoringType::COLOR_MASK,
+            MemoryColoringType::BYTES_FOR_COLOR_BITMAP
+        );
+        log::info!("Computing number of colors required for dom0");
+        let (first_guest_color, guest_color_count, guest_mem_bytes) = contig_color_range(
+            regions,
+            &mem_painter.clone(),
+            next_free_color,
+            MemoryColoringType::COLOR_COUNT as u64,
+            GUEST_RESERVED_MEMORY,
+        )
+        .expect("failed to gather colors for guest memory");
+        let guest_allocator = ColoringRangeFrameAllocator::new(
+            first_guest_color,
+            guest_color_count,
+            physical_memory_offset,
+            regions,
+            &mem_painter,
+            None,
+        );
+        let guest_mem_partition = MemoryRange::ColoredRange(ColorRange {
+            first_color: first_guest_color,
+            color_count: guest_color_count,
+            mem_bytes: guest_mem_bytes,
+        });
+        let first_unused_color = first_guest_color + guest_color_count;
+        let mut unused_mem_bytes = 0;
+        for color_id in (first_unused_color as usize)..MemoryColoringType::COLOR_COUNT {
+            unused_mem_bytes +=
+                compute_color_partition_size(regions, &mem_painter, color_id as u64);
+        }
+        let unused_memory_partition = MemoryRange::ColoredRange(ColorRange {
+            first_color: first_unused_color,
+            color_count: MemoryColoringType::COLOR_COUNT as u64 - first_unused_color,
+            mem_bytes: unused_mem_bytes,
+        });
+        return (
+            guest_allocator,
+            guest_mem_partition,
+            unused_memory_partition,
+        );
+    }
+    #[cfg(not(feature = "color-dom0"))]
+    {
+        //create coloring allocator with access to all colors. This is
+        //basically equal to the boot frame allocator that was previously used
+        assert_eq!(
+            next_free_color, 0,
+            "Using uncolored dom0 assumes that whole color range is available"
+        );
+
+        //compute lowest and highest HPA that we will use to fullill allocations
+        //this info is only valid in combination with the memory map, similar to coloring
+        let mut guest_start_hpa = None;
+        let mut guest_end_hpa = 0;
+        let mut remaining_bytes = GUEST_RESERVED_MEMORY as u64;
+        for mr in regions {
+            if mr.kind != MemoryRegionKind::Usable {
+                continue;
+            }
+            if guest_start_hpa.is_none() {
+                guest_start_hpa = Some(mr.start);
+            }
+            let mr_size = mr.end - mr.start;
+            //memory region is larger than remaining requires bytes
+            if mr_size > remaining_bytes {
+                assert_eq!(remaining_bytes as usize % PAGE_SIZE, 0);
+                let early_end = mr.start + remaining_bytes;
+                guest_end_hpa = early_end;
+                remaining_bytes = 0;
+                break;
+            }
+
+            //can use whole memory region
+            remaining_bytes -= mr_size;
+            guest_end_hpa = mr.end;
+        }
+        assert_eq!(remaining_bytes, 0, "Not enough memory to fullfill request");
+        let guest_start_hpa = guest_start_hpa.expect("did not find any useable memory range");
+
+        //allow all colors but add range filter
+        let guest_allocator = ColoringRangeFrameAllocator::new(
+            0,
+            ActiveMemoryColoring::COLOR_COUNT as u64,
+            physical_memory_offset,
+            regions,
+            &mem_painter,
+            Some((guest_start_hpa as usize, guest_end_hpa as usize)),
+        );
+
+        let guest_mem_partition = MemoryRange::AllRamRegionInRange(RamRegionsInRange {
+            range: PhysRange {
+                start: HostPhysAddr::new(guest_start_hpa as usize),
+                end: HostPhysAddr::new(guest_end_hpa as usize),
+            },
+            mem_bytes: GUEST_RESERVED_MEMORY,
+        });
+        let last_ram_region = regions
+            .iter()
+            .rev()
+            .find(|v| v.kind == MemoryRegionKind::Usable)
+            .unwrap();
+        let unused_memory_range = PhysRange {
+            start: HostPhysAddr::new(guest_start_hpa as usize),
+            end: HostPhysAddr::new(last_ram_region.end as usize),
+        };
+        let mut unused_memory_range_size = 0;
+        PartitionedMemoryMap::<T>::iterate_over_ranges_for_mem_range(
+            &regions,
+            unused_memory_range,
+            |pr| unused_memory_range_size += pr.size(),
+        );
+        let unused_mem_partition = MemoryRange::AllRamRegionInRange(RamRegionsInRange {
+            range: unused_memory_range,
+            mem_bytes: unused_memory_range_size,
+        });
+        return (guest_allocator, guest_mem_partition, unused_mem_partition);
     }
 }
 
@@ -353,7 +538,7 @@ pub unsafe fn create_stage2_allocator<T: MemoryColoring + Clone>(
             physical_memory_offset,
         );
         let next_free_color = 0;
-        let stage2_mem_partiton = MemoryRange::PhysContigRange(stage2_contig_mr);
+        let stage2_mem_partiton = MemoryRange::SinglePhysContigRange(stage2_contig_mr);
         return (stage2_allocator, next_free_color, stage2_mem_partiton);
     }
 }
@@ -417,7 +602,7 @@ pub unsafe fn init(
         contig_mr_for_stage1_alloc.end,
         physical_memory_offset,
     );
-    let stage1_mem_partition = MemoryRange::PhysContigRange(contig_mr_for_stage1_alloc);
+    let stage1_mem_partition = MemoryRange::SinglePhysContigRange(contig_mr_for_stage1_alloc);
 
     let mem_painter = MemoryColoringType {};
 
@@ -428,38 +613,12 @@ pub unsafe fn init(
         stage2_phys_range,
     );
 
-    let (first_guest_color, guest_color_count, guest_mem_bytes) = contig_color_range(
+    let (guest_allocator, guest_mem_partition, unused_mem_partiton) = create_guest_allocator(
         regions,
-        &mem_painter,
+        mem_painter.clone(),
         next_free_color,
-        MemoryColoringType::COLOR_COUNT as u64,
-        GUEST_RESERVED_MEMORY,
-    )
-    .expect("failed to gather colors for guest memory");
-    let guest_allocator = ColoringRangeFrameAllocator::new(
-        first_guest_color,
-        guest_color_count,
         physical_memory_offset,
-        regions,
-        &mem_painter,
     );
-
-    let guest_mem_partition = MemoryRange::ColoredRange(ColorRange {
-        first_color: first_guest_color,
-        color_count: guest_color_count,
-        mem_bytes: guest_mem_bytes,
-    });
-
-    let first_unused_color = first_guest_color + guest_color_count;
-    let mut unused_mem_bytes = 0;
-    for color_id in (first_unused_color as usize)..MemoryColoringType::COLOR_COUNT {
-        unused_mem_bytes += compute_color_partition_size(regions, &mem_painter, color_id as u64);
-    }
-    let unused_mem_partiton = MemoryRange::ColoredRange(ColorRange {
-        first_color: first_unused_color,
-        color_count: MemoryColoringType::COLOR_COUNT as u64 - first_unused_color,
-        mem_bytes: unused_mem_bytes,
-    });
 
     let memory_partitions = PartitionedMemoryMap::new(
         guest_mem_partition,
@@ -518,7 +677,7 @@ fn reserve_memory_region(regions: &mut [MemoryRegion], required_bytes: usize) ->
     match &mut matching_mr {
         Some((idx, pr)) => {
             log::info!(
-                "Using mem region at idx {} (out of {}) to fulfill request",
+                "Using mem region at idx {} (have {} regions) to fulfill request",
                 idx,
                 regions.len()
             );
@@ -535,15 +694,7 @@ fn reserve_memory_region(regions: &mut [MemoryRegion], required_bytes: usize) ->
                 v.end -= required_bytes as u64;
                 log::info!("cutting region short");
             } else {
-                let mut prev: Option<MemoryRegion> = regions.get(*idx - 1).copied();
-                for mr in regions.iter_mut().skip(*idx) {
-                    log::info!("marking regions as MR_USED_BY_OUR_ALLOCATOR");
-                    mr.kind = MR_USED_BY_OUR_ALLOCATOR;
-                    if let Some(prev) = prev {
-                        assert_eq!(prev.end,mr.start,"reserve_memory_region. prev={:x?}, cur={:x?}, marking as unused would destroy gap", prev,mr)
-                    }
-                    prev = Some(*mr);
-                }
+                panic!("should not happend");
             }
 
             return Some(*pr);
@@ -559,6 +710,7 @@ struct CurrentRegion {
     idx: usize,
     aligned_end: u64,
 }
+
 pub struct ColoringRangeFrameAllocator<T: MemoryColoring> {
     memory_regions: &'static [MemoryRegion],
     cur_region: Cell<CurrentRegion>,
@@ -570,6 +722,8 @@ pub struct ColoringRangeFrameAllocator<T: MemoryColoring> {
     //number of contiguous colors, starting at `first_color`, that this allocator may use
     color_count: u64,
     gpa_of_next_allocation: Cell<usize>,
+    //if set, only consider phys addrs in this range
+    additional_range_filter: Option<(usize, usize)>,
 }
 
 impl<T: MemoryColoring + Clone> ColoringRangeFrameAllocator<T> {
@@ -579,14 +733,9 @@ impl<T: MemoryColoring + Clone> ColoringRangeFrameAllocator<T> {
         physical_memory_offset: HostVirtAddr,
         memory_regions: &'static [MemoryRegion],
         memory_coloring: &T,
+        //if set, only consider phys addrs in this range
+        additional_range_filter: Option<(usize, usize)>,
     ) -> Self {
-        /*let mut first_usable_region = None;
-        for (mr_idx, mr) in memory_regions.as_ref().iter().enumerate() {
-            if mr.kind == MemoryRegionKind::Usable {
-                first_usable_region = Some(mr_idx);
-                break;
-            }
-        }*/
         let cur_region_idx = 0;
         let cur_mr = &memory_regions[cur_region_idx];
         let cur_phys_start = HostPhysAddr::new(cur_mr.start as usize);
@@ -606,6 +755,7 @@ impl<T: MemoryColoring + Clone> ColoringRangeFrameAllocator<T> {
             first_color,
             color_count,
             gpa_of_next_allocation: Cell::new(0),
+            additional_range_filter,
         };
 
         //log::info!("initializing new color allocator gpa");
@@ -672,7 +822,6 @@ impl<T: MemoryColoring + Clone> ColoringRangeFrameAllocator<T> {
                         .set(PhysAddr::new(region_start));
                     return Ok(());
                 }
-                MemoryRegionKind::UnknownBios(42) => (), //these are used by another low level allocator and will not be mapped to a guest
                 MemoryRegionKind::Bootloader
                 | MemoryRegionKind::UnknownUefi(_)
                 | MemoryRegionKind::UnknownBios(_) => {
@@ -742,9 +891,29 @@ impl<T: MemoryColoring + Clone> ColoringRangeFrameAllocator<T> {
 unsafe impl<T: MemoryColoring + Clone> FrameAllocator for ColoringRangeFrameAllocator<T> {
     fn allocate_frame(&self) -> Option<vmx::Frame> {
         let mut next_frame = self.next_frame_in_region_with_color();
+
+        let is_frame_in_allowed_range = |frame: vmx::Frame| match self.additional_range_filter {
+            Some((allowed_start, allowed_end)) => {
+                allowed_start <= frame.phys_addr.as_usize()
+                    && frame.phys_addr.as_usize() < allowed_end
+            }
+            None => true,
+        };
         //if None, advance region and try again until we run out of regions
-        while next_frame.is_none() {
-            if self.advance_to_next_region().is_err() {
+        while next_frame.is_none()
+            || next_frame.is_some_and(|frame| !is_frame_in_allowed_range(frame))
+        {
+            //if next frame is larger than allowed_end there will be no more valid frames -> we ran out of memory
+            //This improves performance as we do not iterate untill the end of all memory ranges
+            match (next_frame, self.additional_range_filter) {
+                (Some(next_frame), Some((_, allowed_end))) => {
+                    if next_frame.phys_addr.as_usize() >= allowed_end {
+                        return None;
+                    }
+                }
+                _ => (),
+            }
+            if next_frame.is_none() && self.advance_to_next_region().is_err() {
                 return None;
             }
             next_frame = self.next_frame_in_region_with_color();
@@ -886,8 +1055,14 @@ fn compute_color_partition_size<T: MemoryColoring + Clone>(
      * Here, we just use it to get the count of all frames with this color;
      * The value of the `physical_memory_offset` argument is not important here
      */
-    let allocator =
-        ColoringRangeFrameAllocator::new(color_id, 1, HostVirtAddr::new(0), all_regions, coloring);
+    let allocator = ColoringRangeFrameAllocator::new(
+        color_id,
+        1,
+        HostVirtAddr::new(0),
+        all_regions,
+        coloring,
+        None,
+    );
     let mut frame_opt = allocator.allocate_frame();
     while let Some(_frame) = frame_opt {
         frame_count += 1;

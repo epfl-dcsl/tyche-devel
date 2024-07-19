@@ -10,7 +10,6 @@ use crate::ioptmapper::PAGE_SIZE;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MemoryRegionKind {
     UseableRAM,
-    UsedByStage1Allocator,
     Reserved,
 }
 

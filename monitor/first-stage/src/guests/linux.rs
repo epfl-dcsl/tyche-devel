@@ -1,5 +1,6 @@
 //! Linux Guest
 
+use alloc::vec::Vec;
 use core::ptr::slice_from_raw_parts;
 use core::slice;
 
@@ -15,8 +16,8 @@ use crate::acpi::AcpiInfo;
 use crate::elf::relocate::relocate_elf;
 use crate::elf::{Elf64PhdrType, ElfMapping, ElfProgram};
 use crate::guests::boot_params::{
-    BootParams, KERNEL_BOOT_FLAG_MAGIC, KERNEL_HDR_MAGIC, KERNEL_LOADER_OTHER,
-    KERNEL_MIN_ALIGNMENT_BYTES,
+    BootParams, E820Entry, E820Types, KERNEL_BOOT_FLAG_MAGIC, KERNEL_HDR_MAGIC,
+    KERNEL_LOADER_OTHER, KERNEL_MIN_ALIGNMENT_BYTES,
 };
 use crate::guests::ManifestInfo;
 use crate::mmu::frames::PartitionedMemoryMap;
@@ -38,7 +39,7 @@ const SETUP_HDR: u64 = 0x1f1;
 #[cfg(not(feature = "bare_metal"))]
 //option to bypass dmar error: intremap=off
 static COMMAND_LINE: &'static [u8] =
-    b"root=/dev/sdb2 apic=debug earlyprintk=serial,ttyS0 console=ttyS0 iommu=pt intel_iommu=off intremap=off\0";
+    b"root=/dev/sdb2 apic=debug earlyprintk=serial,ttyS0 console=ttyS0 iommu=pt intel_iommu=off intremap=off transparent_hugepage=never nohugeiomap nohugevmalloc\0";
 #[cfg(feature = "bare_metal")]
 static COMMAND_LINE: &'static [u8] =
     b"root=/dev/sdb2 apic=debug earlyprintk=serial,ttyS0,115200 console=ttyS0,115200\0";
@@ -194,19 +195,40 @@ fn build_bootparams<T: MemoryColoring + Clone>(memory_map: &PartitionedMemoryMap
     //boot_params.hdr.ramdisk_image = ramdisk addr;
     //boot_params.hdr.ramdisk_size = ramdisk size;
 
-    log::info!("Linux boot mem map as construted in stage1");
+    //We use this to gather data for some debug output
+    let mut ram_regions = Vec::new();
+
     let guest_memory_regions = memory_map.build_guest_memory_regions();
     for mr in guest_memory_regions {
-        /*log::info!(
-            "Linux boot map: addr 0x{:x}, size 0x{:x}, type {:?}",
-            mr.addr.as_usize(),
-            mr.size,
-            mr.mem_type
-        );*/
+        match mr.mem_type {
+            E820Types::Ram => {
+                ram_regions.push((mr.addr.as_usize(), mr.addr.as_usize() + mr.size as usize));
+            }
+            _ => (),
+        }
 
         boot_params
             .add_e820_entry(mr)
             .expect("error adding e820 entry");
+    }
+
+    //This is only for debugging. We merge contiguous regions and
+    //mimic the format of the bootmap that Linux shows during startup
+    let mut merged_ram_regions = Vec::new();
+    let (mut prev_start, mut prev_end) = ram_regions[0];
+    for (cur_start, cur_end) in ram_regions.into_iter().skip(1) {
+        if cur_start == prev_end {
+            prev_end = cur_end
+        } else {
+            merged_ram_regions.push((prev_start, prev_end));
+            prev_start = cur_start;
+            prev_end = cur_end;
+        }
+    }
+    log::info!("Linux boot mem map as construted in stage1");
+    merged_ram_regions.push((prev_start, prev_end));
+    for (start, end) in merged_ram_regions.iter() {
+        log::info!("[mem 0x{:016x}-0x{:016x}]", start, end - 1);
     }
 
     boot_params

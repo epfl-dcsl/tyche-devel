@@ -360,7 +360,6 @@ pub fn load<T: MemoryColoring + Clone>(
             kind: match boot_mr.kind {
                 MemoryRegionKind::Usable => S2MemoryRegionKind::UseableRAM,
                 //TODO: this does not really exist anymore, because we carve from last memory region instead of marking in unused
-                MemoryRegionKind::UnknownBios(42) => S2MemoryRegionKind::UsedByStage1Allocator,
                 MemoryRegionKind::Bootloader
                 | MemoryRegionKind::UnknownUefi(_)
                 | MemoryRegionKind::UnknownBios(_) => S2MemoryRegionKind::Reserved,
@@ -370,8 +369,9 @@ pub fn load<T: MemoryColoring + Clone>(
         next_boot_mr_idx += 1;
     }
     let stage1_mem_range = match memory_partitions.stage1 {
-        MemoryRange::ColoredRange(_) => todo!("should not happend"),
-        MemoryRange::PhysContigRange(pcr) => pcr,
+        MemoryRange::ColoredRange(_) => panic!("should not happen"),
+        MemoryRange::SinglePhysContigRange(pcr) => pcr,
+        MemoryRange::AllRamRegionInRange(_) => panic!("should not happen"),
     };
     manifest_s2_mem_regions[next_boot_mr_idx] = S2MemRegion {
         start: stage1_mem_range.start.as_u64(),

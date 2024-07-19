@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [features]
+default = []
 # Print to VGA text mode
 vga = ["dep:vga"]
 bare_metal = []
@@ -13,8 +14,12 @@ guest_linux = []
 guest_rawc = []
 no_guest = []
 second-stage = []
-#If enabled, we apply memory coloring to stage2
+#If enabled, we apply memory coloring to stage2.
+#Very much WIP. Transitition to stage2 works but afterwards we
+#crash due to identity map assumptions
 color-s2 = []
+#If enabled, we apply memory coloring for dom0.
+color-dom0 = []
 
 [dependencies]
 # Internal
