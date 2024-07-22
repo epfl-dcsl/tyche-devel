@@ -691,6 +691,7 @@ impl PlatformState for StateRiscv {
             } => {
                 log::debug!("Trap {} on core {}", trap, core_id);
             }
+            CoreUpdate::DomainRevocation { .. } => todo!("Not implemented on riscv"),
         }
     }
 
