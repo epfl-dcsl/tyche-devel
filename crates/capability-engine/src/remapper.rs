@@ -5,6 +5,8 @@
 
 use core::{cmp, fmt};
 
+use mmu::memory_coloring::MemoryColoring;
+
 use crate::region::{MemoryPermission, PermissionIterator};
 use crate::{CapaError, GenArena, Handle, MemOps, ResourceKind};
 
@@ -74,13 +76,13 @@ impl<const N: usize> Remapper<N> {
         }
     }
 
-    pub fn remap<'a>(&'a self, regions: PermissionIterator<'a>) -> RemapIterator<'a, N> {
+    pub fn remap<'a, T: MemoryColoring + Clone>(
+        &'a self,
+        regions: PermissionIterator<'a, T>,
+    ) -> RemapIterator<'a, N, T> {
         RemapIterator {
             regions,
             next_region_start: None,
-            /*luca: remapper if probably long lived as it is stored in the domin object.
-            These are simply the segments that have been created by prior runs
-            */
             segments: self.iter_segments(),
             next_segment_start: None,
             cursor: 0,
@@ -311,19 +313,19 @@ impl<const N: usize> Remapper<N> {
 // ——————————————————————————————— Iterators ———————————————————————————————— //
 
 #[derive(Clone)]
-pub struct RemapIterator<'a, const N: usize> {
+pub struct RemapIterator<'a, const N: usize, T: MemoryColoring + Clone> {
     //luca: deduplicated view of the memory permissions for our domain
-    regions: PermissionIterator<'a>,
+    regions: PermissionIterator<'a, T>,
     //luca: just simple iterator over existing segments
     segments: RemapperSegmentIterator<'a, N>,
     cursor: usize,
     next_region_start: Option<usize>,
     next_segment_start: Option<usize>,
     max_segment: Option<usize>,
-    ongoing_segment: Option<SingleSegmentIterator<'a>>,
+    ongoing_segment: Option<SingleSegmentIterator<'a, T>>,
 }
 
-impl<'a, const N: usize> Iterator for RemapIterator<'a, N> {
+impl<'a, const N: usize, T: MemoryColoring + Clone> Iterator for RemapIterator<'a, N, T> {
     type Item = Mapping;
 
     /*luca: initial state
@@ -338,7 +340,6 @@ impl<'a, const N: usize> Iterator for RemapIterator<'a, N> {
            max_segment: None,
        }
     */
-    //luca: do not touch. Instead add additional layer at call site
     fn next(&mut self) -> Option<Self::Item> {
         // First, if there is an ongoing segment being remapped, continue
         if let Some(ongoing_segment) = &mut self.ongoing_segment {
@@ -467,14 +468,14 @@ impl<'a, const N: usize> Iterator for RemapIterator<'a, N> {
 /// Creates all mapping objects for the given Segment by matching
 /// the segment to the given regions
 #[derive(Clone)]
-struct SingleSegmentIterator<'a> {
-    regions: PermissionIterator<'a>,
+struct SingleSegmentIterator<'a, T: MemoryColoring + Clone> {
+    regions: PermissionIterator<'a, T>,
     next_region: Option<MemoryPermission>,
     cursor: usize,
     segment: Segment,
 }
 
-impl<'a> SingleSegmentIterator<'a> {
+impl<'a, T: MemoryColoring + Clone> SingleSegmentIterator<'a, T> {
     fn next(&mut self) -> Option<Mapping> {
         // Retrieve the current region and segment
         let segment = &self.segment;
@@ -572,11 +573,44 @@ impl<'a, const N: usize> Iterator for RemapperSegmentIterator<'a, N> {
 
 #[cfg(test)]
 mod tests {
+    use mmu::memory_coloring::color_to_phys::PhysRange;
+    use mmu::memory_coloring::{self, ActiveMemoryColoring, AllSameColor, MyBitmap};
+    use utils::HostPhysAddr;
+
     use super::*;
     use crate::config::NB_TRACKER;
     use crate::debug::snap;
     use crate::region::{TrackerPool, EMPTY_REGION};
-    use crate::{RegionTracker, ResourceKind, MEMOPS_ALL};
+    use crate::{permission, RegionTracker, ResourceKind, MEMOPS_ALL};
+
+    #[derive(Clone)]
+    struct RangeBasedTestColoring {
+        //tuples of phys range with the corresponding color
+        ranges: Vec<(PhysRange, u64)>,
+    }
+
+    impl RangeBasedTestColoring {
+        pub fn new(ranges: Vec<(PhysRange, u64)>) -> Self {
+            Self { ranges }
+        }
+    }
+
+    impl MemoryColoring for RangeBasedTestColoring {
+        const COLOR_COUNT: usize = memory_coloring::MAX_COLOR_COUNT;
+
+        const BYTES_FOR_COLOR_BITMAP: usize = memory_coloring::MAX_COLOR_BITMAP_BYTES;
+
+        type Bitmap = MyBitmap<{ Self::BYTES_FOR_COLOR_BITMAP }, { Self::COLOR_COUNT }>;
+
+        fn compute_color(&self, frame: HostPhysAddr) -> u64 {
+            for (range, color) in &self.ranges {
+                if range.start <= frame.as_usize() && frame.as_usize() < range.end {
+                    return *color;
+                }
+            }
+            panic!("invalid test valid coloring config")
+        }
+    }
 
     fn dummy_segment(hpa: usize, gpa: usize, size: usize, repeat: usize) -> Segment {
         Segment {
@@ -609,35 +643,45 @@ mod tests {
         let mut pool = TrackerPool::new([EMPTY_REGION; NB_TRACKER]);
         let mut tracker = RegionTracker::new();
         let mut remapper: Remapper<32> = Remapper::new();
+        let all_same_color = RangeBasedTestColoring::new(vec![(
+            PhysRange {
+                start: 0x0,
+                end: 0x10000,
+            },
+            0,
+        )]);
 
         // Add a first region
         tracker
             .add_region(
-                0x10,
-                0x20,
+                0x1000,
+                0x2000,
                 MEMOPS_ALL,
                 ResourceKind::ram_with_all_partitions(),
                 &mut pool,
             )
             .unwrap();
-        snap("{[0x10, 0x20 | 1 (1 - 1 - 1 - 1)]}", &tracker.iter(&pool));
         snap(
-            "{[0x10, 0x20 at 0x10, rep 1 | RWXS]}",
-            &remapper.remap(tracker.permissions(&pool)),
+            "{[0x1000, 0x2000 | 1 (1 - 1 - 1 - 1)]}",
+            &tracker.iter(&pool),
+        );
+        snap(
+            "{[0x1000, 0x2000 at 0x1000, rep 1 | RWXS]}",
+            &remapper.remap(tracker.permissions(&pool, all_same_color.clone())),
         );
 
         // Remap that region
-        remapper.map_range(0x10, 0x110, 0x10, 1).unwrap();
+        remapper.map_range(0x1_000, 0x10_010, 0x1000, 1).unwrap();
         snap(
-            "{[0x10, 0x20 at 0x110, rep 1 | RWXS]}",
-            &remapper.remap(tracker.permissions(&pool)),
+            "{[0x1000, 0x2000 at 0x10010, rep 1 | RWXS]}",
+            &remapper.remap(tracker.permissions(&pool, all_same_color.clone())),
         );
 
         // Let's add a few more!
         tracker
             .add_region(
-                0x30,
-                0x40,
+                0x3000,
+                0x4000,
                 MEMOPS_ALL,
                 ResourceKind::ram_with_all_partitions(),
                 &mut pool,
@@ -645,77 +689,77 @@ mod tests {
             .unwrap();
         tracker
             .add_region(
-                0x40,
-                0x50,
+                0x4000,
+                0x5000,
                 MemOps::READ,
                 ResourceKind::ram_with_all_partitions(),
                 &mut pool,
             )
             .unwrap();
-        snap("{[0x10, 0x20 | 1 (1 - 1 - 1 - 1)] -> [0x30, 0x40 | 1 (1 - 1 - 1 - 1)] -> [0x40, 0x50 | 1 (1 - 0 - 0 - 0)]}", &tracker.iter(&pool));
+        snap("{[0x1000, 0x2000 | 1 (1 - 1 - 1 - 1)] -> [0x3000, 0x4000 | 1 (1 - 1 - 1 - 1)] -> [0x4000, 0x5000 | 1 (1 - 0 - 0 - 0)]}", &tracker.iter(&pool));
         snap(
-            "{[0x10, 0x20 at 0x110, rep 1 | RWXS] -> [0x30, 0x40 at 0x30, rep 1 | RWXS] -> [0x40, 0x50 at 0x40, rep 1 | R___]}",
-            &remapper.remap(tracker.permissions(&pool)),
+            "{[0x1000, 0x2000 at 0x10010, rep 1 | RWXS] -> [0x3000, 0x4000 at 0x3000, rep 1 | RWXS] -> [0x4000, 0x5000 at 0x4000, rep 1 | R___]}",
+            &remapper.remap(tracker.permissions(&pool, all_same_color.clone())),
         );
 
         // And (partially) remap those
-        remapper.map_range(0x30, 0x130, 0x8, 1).unwrap();
+        remapper.map_range(0x3000, 0x13000, 0x800, 1).unwrap();
         snap(
-            "{[0x10, 0x20 at 0x110, rep 1 | RWXS] -> [0x30, 0x38 at 0x130, rep 1 | RWXS] -> [0x38, 0x40 at 0x38, rep 1 | RWXS] -> [0x40, 0x50 at 0x40, rep 1 | R___]}",
-            &remapper.remap(tracker.permissions(&pool)),
+            "{[0x1000, 0x2000 at 0x10010, rep 1 | RWXS] -> [0x3000, 0x3800 at 0x13000, rep 1 | RWXS] -> [0x3800, 0x4000 at 0x3800, rep 1 | RWXS] -> [0x4000, 0x5000 at 0x4000, rep 1 | R___]}",
+            &remapper.remap(tracker.permissions(&pool,all_same_color.clone())),
         );
-        remapper.map_range(0x38, 0x238, 0x8, 1).unwrap();
+        remapper.map_range(0x3800, 0x23800, 0x800, 1).unwrap();
         snap(
-            "{[0x10, 0x20 at 0x110, rep 1 | RWXS] -> [0x30, 0x38 at 0x130, rep 1 | RWXS] -> [0x38, 0x40 at 0x238, rep 1 | RWXS] -> [0x40, 0x50 at 0x40, rep 1 | R___]}",
-            &remapper.remap(tracker.permissions(&pool)),
+            "{[0x1000, 0x2000 at 0x10010, rep 1 | RWXS] -> [0x3000, 0x3800 at 0x13000, rep 1 | RWXS] -> [0x3800, 0x4000 at 0x23800, rep 1 | RWXS] -> [0x4000, 0x5000 at 0x4000, rep 1 | R___]}",
+            &remapper.remap(tracker.permissions(&pool, all_same_color.clone())),
         );
-        remapper.map_range(0x40, 0x140, 0x10, 3).unwrap();
+        remapper.map_range(0x4000, 0x14000, 0x1000, 3).unwrap();
         snap(
-            "{[0x10, 0x20 at 0x110, rep 1 | RWXS] -> [0x30, 0x38 at 0x130, rep 1 | RWXS] -> [0x38, 0x40 at 0x238, rep 1 | RWXS] -> [0x40, 0x50 at 0x140, rep 3 | R___]}",
-            &remapper.remap(tracker.permissions(&pool)),
+            "{[0x1000, 0x2000 at 0x10010, rep 1 | RWXS] -> [0x3000, 0x3800 at 0x13000, rep 1 | RWXS] -> [0x3800, 0x4000 at 0x23800, rep 1 | RWXS] -> [0x4000, 0x5000 at 0x14000, rep 3 | R___]}",
+            &remapper.remap(tracker.permissions(&pool, all_same_color.clone())),
         );
 
         // Unmap some segments
-        remapper.unmap_range(0x38, 0x8).unwrap();
+        remapper.unmap_range(0x3800, 0x800).unwrap();
         snap(
-            "{[0x10, 0x20 at 0x110, rep 1 | RWXS] -> [0x30, 0x38 at 0x130, rep 1 | RWXS] -> [0x38, 0x40 at 0x38, rep 1 | RWXS] -> [0x40, 0x50 at 0x140, rep 3 | R___]}",
-            &remapper.remap(tracker.permissions(&pool)),
+            "{[0x1000, 0x2000 at 0x10010, rep 1 | RWXS] -> [0x3000, 0x3800 at 0x13000, rep 1 | RWXS] -> [0x3800, 0x4000 at 0x3800, rep 1 | RWXS] -> [0x4000, 0x5000 at 0x14000, rep 3 | R___]}",
+            &remapper.remap(tracker.permissions(&pool, all_same_color.clone())),
         );
-        remapper.unmap_range(0x30, 0x8).unwrap();
+        remapper.unmap_range(0x3000, 0x800).unwrap();
         snap(
-            "{[0x10, 0x20 at 0x110, rep 1 | RWXS] -> [0x30, 0x40 at 0x30, rep 1 | RWXS] -> [0x40, 0x50 at 0x140, rep 3 | R___]}",
-            &remapper.remap(tracker.permissions(&pool)),
+            "{[0x1000, 0x2000 at 0x10010, rep 1 | RWXS] -> [0x3000, 0x4000 at 0x3000, rep 1 | RWXS] -> [0x4000, 0x5000 at 0x14000, rep 3 | R___]}",
+            &remapper.remap(tracker.permissions(&pool, all_same_color.clone())),
         );
 
         // Delete regions but not the segments yet
         tracker
             .remove_region(
-                0x40,
-                0x50,
+                0x4000,
+                0x5000,
                 MemOps::READ,
                 ResourceKind::ram_with_all_partitions(),
                 &mut pool,
             )
             .unwrap();
         snap(
-            "{[0x10, 0x20 | 1 (1 - 1 - 1 - 1)] -> [0x30, 0x40 | 1 (1 - 1 - 1 - 1)]}",
+            "{[0x1000, 0x2000 | 1 (1 - 1 - 1 - 1)] -> [0x3000, 0x4000 | 1 (1 - 1 - 1 - 1)]}",
             &tracker.iter(&pool),
         );
         snap(
-            "{[0x10, 0x20 at 0x110, rep 1 | RWXS] -> [0x30, 0x40 at 0x30, rep 1 | RWXS]}",
-            &remapper.remap(tracker.permissions(&pool)),
+            "{[0x1000, 0x2000 at 0x10010, rep 1 | RWXS] -> [0x3000, 0x4000 at 0x3000, rep 1 | RWXS]}",
+            &remapper.remap(tracker.permissions(&pool, all_same_color.clone())),
         );
 
         // Unmap more segments
-        remapper.unmap_range(0x40, 0x10).unwrap();
+        remapper.unmap_range(0x4000, 0x1000).unwrap();
         snap(
-            "{[0x10, 0x20 at 0x110, rep 1 | RWXS] -> [0x30, 0x40 at 0x30, rep 1 | RWXS]}",
-            &remapper.remap(tracker.permissions(&pool)),
+            "{[0x1000, 0x2000 at 0x10010, rep 1 | RWXS] -> [0x3000, 0x4000 at 0x3000, rep 1 | RWXS]}",
+            &remapper.remap(tracker.permissions(&pool, all_same_color.clone())),
         );
-        remapper.unmap_range(0x10, 0x10).unwrap();
+        remapper.unmap_range(0x1000, 0x1000).unwrap();
         snap(
-            "{[0x10, 0x20 at 0x10, rep 1 | RWXS] -> [0x30, 0x40 at 0x30, rep 1 | RWXS]}",
-            &remapper.remap(tracker.permissions(&pool)),
+            "{[0x1000, 0x2000 at 0x1000, rep 1 | RWXS] -> [0x3000, 0x4000 at 0x3000, rep 1 | RWXS]}",
+            &remapper.remap(tracker.permissions(&pool, all_same_color.clone())),
         );
     }
 
@@ -724,12 +768,19 @@ mod tests {
         let mut pool = TrackerPool::new([EMPTY_REGION; NB_TRACKER]);
         let mut tracker = RegionTracker::new();
         let mut remapper: Remapper<32> = Remapper::new();
+        let all_same_color = RangeBasedTestColoring::new(vec![(
+            PhysRange {
+                start: 0x0,
+                end: 0x10000,
+            },
+            0,
+        )]);
 
         // Add two regions with hole
         tracker
             .add_region(
-                0x10,
-                0x30,
+                0x1000,
+                0x3000,
                 MEMOPS_ALL,
                 ResourceKind::ram_with_all_partitions(),
                 &mut pool,
@@ -737,27 +788,27 @@ mod tests {
             .unwrap();
         tracker
             .add_region(
-                0x40,
-                0x60,
+                0x4000,
+                0x6000,
                 MEMOPS_ALL,
                 ResourceKind::ram_with_all_partitions(),
                 &mut pool,
             )
             .unwrap();
         snap(
-            "{[0x10, 0x30 | 1 (1 - 1 - 1 - 1)] -> [0x40, 0x60 | 1 (1 - 1 - 1 - 1)]}",
+            "{[0x1000, 0x3000 | 1 (1 - 1 - 1 - 1)] -> [0x4000, 0x6000 | 1 (1 - 1 - 1 - 1)]}",
             &tracker.iter(&pool),
         );
         snap(
-            "{[0x10, 0x30 at 0x10, rep 1 | RWXS] -> [0x40, 0x60 at 0x40, rep 1 | RWXS]}",
-            &remapper.remap(tracker.permissions(&pool)),
+            "{[0x1000, 0x3000 at 0x1000, rep 1 | RWXS] -> [0x4000, 0x6000 at 0x4000, rep 1 | RWXS]}",
+            &remapper.remap(tracker.permissions(&pool, all_same_color.clone())),
         );
 
         // Create a mapping that cross the region boundary
-        remapper.map_range(0x20, 0x100, 0x100, 1).unwrap();
+        remapper.map_range(0x2000, 0x10000, 0x10000, 1).unwrap();
         snap(
-            "{[0x10, 0x20 at 0x10, rep 1 | RWXS] -> [0x20, 0x30 at 0x100, rep 1 | RWXS] -> [0x40, 0x60 at 0x120, rep 1 | RWXS]}",
-            &remapper.remap(tracker.permissions(&pool)),
+            "{[0x1000, 0x2000 at 0x1000, rep 1 | RWXS] -> [0x2000, 0x3000 at 0x10000, rep 1 | RWXS] -> [0x4000, 0x6000 at 0x12000, rep 1 | RWXS]}",
+            &remapper.remap(tracker.permissions(&pool, all_same_color.clone())),
         );
     }
 
@@ -766,11 +817,18 @@ mod tests {
         let mut pool = TrackerPool::new([EMPTY_REGION; NB_TRACKER]);
         let mut tracker = RegionTracker::new();
         let mut remapper: Remapper<32> = Remapper::new();
+        let all_same_color = RangeBasedTestColoring::new(vec![(
+            PhysRange {
+                start: 0x0,
+                end: 0x10000,
+            },
+            0,
+        )]);
 
         tracker
             .add_region(
-                0x10,
-                0x40,
+                0x1000,
+                0x4000,
                 MEMOPS_ALL,
                 ResourceKind::ram_with_all_partitions(),
                 &mut pool,
@@ -778,29 +836,57 @@ mod tests {
             .unwrap();
         tracker
             .add_region(
-                0x30,
-                0x40,
+                0x3000,
+                0x4000,
                 MEMOPS_ALL,
                 ResourceKind::ram_with_all_partitions(),
                 &mut pool,
             )
             .unwrap();
         snap(
-            "{[0x10, 0x30 | 1 (1 - 1 - 1 - 1)] -> [0x30, 0x40 | 2 (2 - 2 - 2 - 2)]}",
+            "{[0x1000, 0x3000 | 1 (1 - 1 - 1 - 1)] -> [0x3000, 0x4000 | 2 (2 - 2 - 2 - 2)]}",
             &tracker.iter(&pool),
         );
 
-        remapper.map_range(0x10, 0x100, 0x30, 1).unwrap();
-        remapper.map_range(0x30, 0x50, 0x10, 1).unwrap();
+        remapper.map_range(0x1000, 0x10000, 0x3000, 1).unwrap();
+        remapper.map_range(0x3000, 0x5000, 0x1000, 1).unwrap();
         snap(
-            "{[0x10, 0x40 at 0x100, rep 1] -> [0x30, 0x40 at 0x50, rep 1]}",
+            "{[0x1000, 0x4000 at 0x10000, rep 1] -> [0x3000, 0x4000 at 0x5000, rep 1]}",
             remapper.iter_segments(),
         );
         snap(
             // Note: here for some reason the tracker do not properly merge the two contiguous
             // regions. We should figure that out at some point and optimize the tracker.
-            "{[0x10, 0x30 at 0x100, rep 1 | RWXS] -> [0x30, 0x40 at 0x120, rep 1 | RWXS] -> [0x30, 0x40 at 0x50, rep 1 | RWXS]}",
-            &remapper.remap(tracker.permissions(&pool)),
+            "{[0x1000, 0x3000 at 0x10000, rep 1 | RWXS] -> [0x3000, 0x4000 at 0x12000, rep 1 | RWXS] -> [0x3000, 0x4000 at 0x5000, rep 1 | RWXS]}",
+            &remapper.remap(tracker.permissions(&pool, all_same_color)),
+        );
+    }
+
+    #[test]
+    fn remapper_wip_coloring_test_simple() {
+        let mut pool = TrackerPool::new([EMPTY_REGION; NB_TRACKER]);
+        let mut tracker = RegionTracker::new();
+        let mut remapper: Remapper<32> = Remapper::new();
+
+        tracker
+            .add_region(
+                0x1000,
+                0x4000,
+                MEMOPS_ALL,
+                ResourceKind::ram_with_all_partitions(),
+                &mut pool,
+            )
+            .unwrap();
+        snap(
+            "{[0x1000, 0x4000 | 1 (1 - 1 - 1 - 1)]}",
+            &tracker.iter(&pool),
+        );
+        remapper.map_range(0x1_000, 0x10_000, 0x10, 1).unwrap();
+        //format: map [HPA_s, HPA_e contig at GPA_s]
+        //strategy: everything that is not explicity remapped will be identity mapped
+        snap(
+            "{[0x1000, 0x1010 at 0x10000, rep 1 | RWXS] -> [0x1010, 0x4000 at 0x1010, rep 1 | RWXS]}",
+            &remapper.remap(tracker.permissions(&pool, ActiveMemoryColoring {})),
         );
     }
 
@@ -809,29 +895,48 @@ mod tests {
         let mut pool = TrackerPool::new([EMPTY_REGION; NB_TRACKER]);
         let mut tracker = RegionTracker::new();
         let mut remapper: Remapper<32> = Remapper::new();
+        let all_same_color = RangeBasedTestColoring::new(vec![(
+            PhysRange {
+                start: 0x0,
+                end: 0x1_000_000,
+            },
+            0,
+        )]);
 
         tracker
             .add_region(
-                0x10,
-                0x40,
+                0x1_000,
+                0x4_000,
                 MEMOPS_ALL,
                 ResourceKind::ram_with_all_partitions(),
                 &mut pool,
             )
             .unwrap();
-        snap("{[0x10, 0x40 | 1 (1 - 1 - 1 - 1)]}", &tracker.iter(&pool));
-
-        remapper.map_range(0x20, 0x100, 0x10, 1).unwrap();
-        remapper.map_range(0x30, 0x200, 0x10, 1).unwrap();
         snap(
-            "{[0x10, 0x20 at 0x10, rep 1 | RWXS] -> [0x20, 0x30 at 0x100, rep 1 | RWXS] -> [0x30, 0x40 at 0x200, rep 1 | RWXS]}",
-            &remapper.remap(tracker.permissions(&pool)),
+            "{[0x1000, 0x4000 | 1 (1 - 1 - 1 - 1)]}",
+            &tracker.iter(&pool),
+        );
+        snap(
+            "{[0x1000, 0x4000 | RWXS]}",
+            tracker.permissions(&pool, all_same_color.clone()),
         );
 
-        remapper.map_range(0x10, 0x300, 0x30, 1).unwrap();
+        remapper.map_range(0x2_000, 0x10_000, 0x1000, 1).unwrap();
+        remapper.map_range(0x3_000, 0x20_000, 0x1000, 1).unwrap();
+
+        println!(
+            "Permissions Iterator: {}",
+            tracker.permissions(&pool, all_same_color.clone())
+        );
         snap(
-            "{[0x10, 0x40 at 0x300, rep 1 | RWXS] -> [0x20, 0x30 at 0x100, rep 1 | RWXS] -> [0x30, 0x40 at 0x200, rep 1 | RWXS]}",
-            &remapper.remap(tracker.permissions(&pool)),
+            "{[0x1000, 0x2000 at 0x1000, rep 1 | RWXS] -> [0x2000, 0x3000 at 0x10000, rep 1 | RWXS] -> [0x3000, 0x4000 at 0x20000, rep 1 | RWXS]}",
+            &remapper.remap(tracker.permissions(&pool, all_same_color.clone())),
+        );
+
+        remapper.map_range(0x1_000, 0x30_000, 0x3_000, 1).unwrap();
+        snap(
+            "{[0x1000, 0x4000 at 0x30000, rep 1 | RWXS] -> [0x2000, 0x3000 at 0x10000, rep 1 | RWXS] -> [0x3000, 0x4000 at 0x20000, rep 1 | RWXS]}",
+            &remapper.remap(tracker.permissions(&pool,all_same_color.clone())),
         );
     }
 
@@ -840,35 +945,45 @@ mod tests {
         let mut pool = TrackerPool::new([EMPTY_REGION; NB_TRACKER]);
         let mut tracker = RegionTracker::new();
         let mut remapper: Remapper<32> = Remapper::new();
+        let all_same_color = RangeBasedTestColoring::new(vec![(
+            PhysRange {
+                start: 0x0,
+                end: 0x1_000_000,
+            },
+            0,
+        )]);
 
         // Add one region
         tracker
             .add_region(
-                0x10,
-                0x60,
+                0x1000,
+                0x6000,
                 MEMOPS_ALL,
                 ResourceKind::ram_with_all_partitions(),
                 &mut pool,
             )
             .unwrap();
-        snap("{[0x10, 0x60 | 1 (1 - 1 - 1 - 1)]}", &tracker.iter(&pool));
         snap(
-            "{[0x10, 0x60 at 0x10, rep 1 | RWXS]}",
-            &remapper.remap(tracker.permissions(&pool)),
+            "{[0x1000, 0x6000 | 1 (1 - 1 - 1 - 1)]}",
+            &tracker.iter(&pool),
+        );
+        snap(
+            "{[0x1000, 0x6000 at 0x1000, rep 1 | RWXS]}",
+            &remapper.remap(tracker.permissions(&pool, all_same_color.clone())),
         );
 
         // Remap the whole region
-        remapper.map_range(0x10, 0x100, 0x50, 1).unwrap();
+        remapper.map_range(0x1000, 0x10000, 0x5000, 1).unwrap();
         snap(
-            "{[0x10, 0x60 at 0x100, rep 1 | RWXS]}",
-            &remapper.remap(tracker.permissions(&pool)),
+            "{[0x1000, 0x6000 at 0x10000, rep 1 | RWXS]}",
+            &remapper.remap(tracker.permissions(&pool, all_same_color.clone())),
         );
 
         // Split the region in two
         tracker
             .remove_region(
-                0x10,
-                0x60,
+                0x1000,
+                0x6000,
                 MEMOPS_ALL,
                 ResourceKind::ram_with_all_partitions(),
                 &mut pool,
@@ -876,8 +991,8 @@ mod tests {
             .unwrap();
         tracker
             .add_region(
-                0x10,
-                0x20,
+                0x1000,
+                0x2000,
                 MEMOPS_ALL,
                 ResourceKind::ram_with_all_partitions(),
                 &mut pool,
@@ -885,8 +1000,8 @@ mod tests {
             .unwrap();
         tracker
             .add_region(
-                0x20,
-                0x40,
+                0x2000,
+                0x4000,
                 MEMOPS_ALL,
                 ResourceKind::ram_with_all_partitions(),
                 &mut pool,
@@ -894,17 +1009,20 @@ mod tests {
             .unwrap();
         tracker
             .add_region(
-                0x40,
-                0x60,
+                0x4000,
+                0x6000,
                 MEMOPS_ALL,
                 ResourceKind::ram_with_all_partitions(),
                 &mut pool,
             )
             .unwrap();
-        snap("{[0x10, 0x60 | 1 (1 - 1 - 1 - 1)]}", &tracker.iter(&pool));
         snap(
-            "{[0x10, 0x60 at 0x100, rep 1 | RWXS]}",
-            &remapper.remap(tracker.permissions(&pool)),
+            "{[0x1000, 0x6000 | 1 (1 - 1 - 1 - 1)]}",
+            &tracker.iter(&pool),
+        );
+        snap(
+            "{[0x1000, 0x6000 at 0x10000, rep 1 | RWXS]}",
+            &remapper.remap(tracker.permissions(&pool, all_same_color.clone())),
         );
     }
 
@@ -947,35 +1065,51 @@ mod tests {
         let mut pool = TrackerPool::new([EMPTY_REGION; NB_TRACKER]);
         let mut tracker = RegionTracker::new();
         let mut remapper: Remapper<32> = Remapper::new();
+        let all_same_color = RangeBasedTestColoring::new(vec![(
+            PhysRange {
+                start: 0x0,
+                end: 0x1_000_000,
+            },
+            0,
+        )]);
 
         tracker
             .add_region(
-                0x20,
-                0x80,
+                0x2000,
+                0x8000,
                 MEMOPS_ALL,
                 ResourceKind::ram_with_all_partitions(),
                 &mut pool,
             )
             .unwrap();
-        snap("{[0x20, 0x80 | 1 (1 - 1 - 1 - 1)]}", &tracker.iter(&pool));
-        remapper.map_range(0x20, 0x200, 0x60, 1).unwrap();
-        snap("{[0x20, 0x80 at 0x200, rep 1]}", remapper.iter_segments());
         snap(
-            "{[0x20, 0x80 at 0x200, rep 1 | RWXS]}",
-            &remapper.remap(tracker.permissions(&pool)),
+            "{[0x2000, 0x8000 | 1 (1 - 1 - 1 - 1)]}",
+            &tracker.iter(&pool),
+        );
+        remapper.map_range(0x2000, 0x20000, 0x6000, 1).unwrap();
+        snap(
+            "{[0x2000, 0x8000 at 0x20000, rep 1]}",
+            remapper.iter_segments(),
+        );
+        snap(
+            "{[0x2000, 0x8000 at 0x20000, rep 1 | RWXS]}",
+            &remapper.remap(tracker.permissions(&pool, all_same_color.clone())),
         );
 
         tracker
             .add_region(
-                0x80,
-                0xa0,
+                0x8000,
+                0xa000,
                 MEMOPS_ALL,
                 ResourceKind::ram_with_all_partitions(),
                 &mut pool,
             )
             .unwrap();
-        snap("{[0x20, 0xa0 | 1 (1 - 1 - 1 - 1)]}", &tracker.iter(&pool));
-        let err = remapper.map_range(0x80, 0x220, 0x20, 1);
+        snap(
+            "{[0x2000, 0xa000 | 1 (1 - 1 - 1 - 1)]}",
+            &tracker.iter(&pool),
+        );
+        let err = remapper.map_range(0x8000, 0x22000, 0x2000, 1);
         assert!(err.is_err());
         assert_eq!(err.err().unwrap(), CapaError::AlreadyAliased);
     }
@@ -999,90 +1133,99 @@ mod tests {
     fn single_segment_iterator() {
         let mut pool = TrackerPool::new([EMPTY_REGION; NB_TRACKER]);
         let mut tracker = RegionTracker::new();
+        let all_same_color = RangeBasedTestColoring::new(vec![(
+            PhysRange {
+                start: 0x0,
+                end: 0x1_000_000,
+            },
+            0,
+        )]);
 
         // Create a single region
         tracker
             .add_region(
-                0x30,
-                0x60,
+                0x3000,
+                0x6000,
                 MEMOPS_ALL,
                 ResourceKind::ram_with_all_partitions(),
                 &mut pool,
             )
             .unwrap();
-        snap("{[0x30, 0x60 | 1 (1 - 1 - 1 - 1)]}", &tracker.iter(&pool));
-
+        snap(
+            "{[0x3000, 0x6000 | 1 (1 - 1 - 1 - 1)]}",
+            &tracker.iter(&pool),
+        );
         let iterator = SingleSegmentIterator {
-            regions: tracker.permissions(&pool),
+            regions: tracker.permissions(&pool, all_same_color.clone()),
             next_region: None,
             cursor: 0,
-            segment: dummy_segment(0x10, 0x100, 0x10, 1),
+            segment: dummy_segment(0x1000, 0x10000, 0x1000, 1),
         };
         snap("", iterator);
 
         let iterator = SingleSegmentIterator {
-            regions: tracker.permissions(&pool),
+            regions: tracker.permissions(&pool, all_same_color.clone()),
             next_region: None,
             cursor: 0,
-            segment: dummy_segment(0x70, 0x100, 0x10, 1),
+            segment: dummy_segment(0x7000, 0x10000, 0x1000, 1),
         };
         snap("", iterator);
 
         let iterator = SingleSegmentIterator {
-            regions: tracker.permissions(&pool),
+            regions: tracker.permissions(&pool, all_same_color.clone()),
             next_region: None,
             cursor: 0,
-            segment: dummy_segment(0x20, 0x100, 0x20, 1),
+            segment: dummy_segment(0x2000, 0x10000, 0x2000, 1),
         };
-        snap("[0x30, 0x40 at 0x110, rep 1 | RWXS]", iterator);
+        snap("[0x3000, 0x4000 at 0x11000, rep 1 | RWXS]", iterator);
 
         let iterator = SingleSegmentIterator {
-            regions: tracker.permissions(&pool),
+            regions: tracker.permissions(&pool, all_same_color.clone()),
             next_region: None,
             cursor: 0,
-            segment: dummy_segment(0x50, 0x100, 0x20, 1),
+            segment: dummy_segment(0x5000, 0x10000, 0x2000, 1),
         };
-        snap("[0x50, 0x60 at 0x100, rep 1 | RWXS]", iterator);
+        snap("[0x5000, 0x6000 at 0x10000, rep 1 | RWXS]", iterator);
 
         let iterator = SingleSegmentIterator {
-            regions: tracker.permissions(&pool),
+            regions: tracker.permissions(&pool, all_same_color.clone()),
             next_region: None,
             cursor: 0,
-            segment: dummy_segment(0x40, 0x100, 0x10, 1),
+            segment: dummy_segment(0x4000, 0x10000, 0x1000, 1),
         };
-        snap("[0x40, 0x50 at 0x100, rep 1 | RWXS]", iterator);
+        snap("[0x4000, 0x5000 at 0x10000, rep 1 | RWXS]", iterator);
 
         let iterator = SingleSegmentIterator {
-            regions: tracker.permissions(&pool),
+            regions: tracker.permissions(&pool, all_same_color.clone()),
             next_region: None,
             cursor: 0,
-            segment: dummy_segment(0x20, 0x100, 0x50, 1),
+            segment: dummy_segment(0x2000, 0x10000, 0x5000, 1),
         };
-        snap("[0x30, 0x60 at 0x110, rep 1 | RWXS]", iterator);
+        snap("[0x3000, 0x6000 at 0x11000, rep 1 | RWXS]", iterator);
 
         // Let's experiment with multiple regions now
         tracker
             .add_region(
-                0x70,
-                0x80,
+                0x7000,
+                0x8000,
                 MEMOPS_ALL,
                 ResourceKind::ram_with_all_partitions(),
                 &mut pool,
             )
             .unwrap();
         snap(
-            "{[0x30, 0x60 | 1 (1 - 1 - 1 - 1)] -> [0x70, 0x80 | 1 (1 - 1 - 1 - 1)]}",
+            "{[0x3000, 0x6000 | 1 (1 - 1 - 1 - 1)] -> [0x7000, 0x8000 | 1 (1 - 1 - 1 - 1)]}",
             &tracker.iter(&pool),
         );
 
         let iterator = SingleSegmentIterator {
-            regions: tracker.permissions(&pool),
+            regions: tracker.permissions(&pool, all_same_color.clone()),
             next_region: None,
             cursor: 0,
-            segment: dummy_segment(0x20, 0x100, 0x80, 1),
+            segment: dummy_segment(0x2000, 0x10000, 0x8000, 1),
         };
         snap(
-            "[0x30, 0x60 at 0x110, rep 1 | RWXS] -> [0x70, 0x80 at 0x150, rep 1 | RWXS]",
+            "[0x3000, 0x6000 at 0x11000, rep 1 | RWXS] -> [0x7000, 0x8000 at 0x15000, rep 1 | RWXS]",
             iterator,
         );
     }
@@ -1104,7 +1247,7 @@ impl fmt::Display for Mapping {
     }
 }
 
-impl<'a, const N: usize> fmt::Display for RemapIterator<'a, N> {
+impl<'a, const N: usize, T: MemoryColoring + Clone> fmt::Display for RemapIterator<'a, N, T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut first = true;
         write!(f, "{{")?;
@@ -1143,7 +1286,7 @@ impl<'a, const N: usize> fmt::Display for RemapperSegmentIterator<'a, N> {
     }
 }
 
-impl<'a> fmt::Display for SingleSegmentIterator<'a> {
+impl<'a, T: MemoryColoring + Clone> fmt::Display for SingleSegmentIterator<'a, T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut first = true;
         let mut iter = self.clone();

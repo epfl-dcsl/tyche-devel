@@ -3,7 +3,6 @@ use core::ops::BitOrAssign;
 use utils::HostPhysAddr;
 
 use crate::frame_allocator::PhysRange;
-
 pub mod color_to_phys;
 
 ///Memory colorings as described by the Magheira paper
@@ -13,11 +12,53 @@ pub trait MemoryColoring {
     ///Number of bytes required for the color bitmap to represent the COLOR_COUNT many colors
     const BYTES_FOR_COLOR_BITMAP: usize;
 
+    type Bitmap: ColorBitmap + Clone;
+
     /// Computes the memory color for the given address
     fn compute_color(&self, frame: HostPhysAddr) -> u64;
 }
 
+//for akward tpye conversion in test code for capa engine
+//if you set the active memory coloring outside this limit, some tests and assertions fail
+pub const MAX_COLOR_BITMAP_BYTES: usize = 256;
+pub const MAX_COLOR_COUNT: usize = MAX_COLOR_BITMAP_BYTES * 8;
+
+/// Memory Coloring that assings same color to all memory
+/// Intended for places where we do not want to further subdivice
+/// the memory but still have to specify a memory coloring
+#[derive(Clone, Copy)]
+pub struct AllSameColor {}
+
+impl MemoryColoring for AllSameColor {
+    const COLOR_COUNT: usize = 1;
+
+    const BYTES_FOR_COLOR_BITMAP: usize = 1;
+
+    type Bitmap = MyBitmap<{ Self::BYTES_FOR_COLOR_BITMAP }, { Self::COLOR_COUNT }>;
+
+    fn compute_color(&self, _frame: HostPhysAddr) -> u64 {
+        0
+    }
+}
+
+impl AllSameColor {
+    pub fn allow_all_bitmap() -> <AllSameColor as MemoryColoring>::Bitmap {
+        MyBitmap::new_with_value(true)
+    }
+}
+
 pub type ActiveMemoryColoring = DummyMemoryColoring;
+
+pub trait ColorBitmap {
+    /// Creates a new bitmap with all bits set to false
+    fn new_nonconst() -> Self;
+    /// Set the bit at `bit_idx` to `value`
+    fn set(&mut self, bit_idx: usize, value: bool);
+    /// Return the value of bit at `bit_idx`
+    fn get(&self, bit_idx: usize) -> bool;
+    ///Returns ("number of bytes for the internal bitmap", "number of things bitmap can track")
+    fn dimensions(&self) -> (usize, usize);
+}
 
 //TODO: add unit tests
 #[derive(Debug, Clone, Copy)]
@@ -33,34 +74,17 @@ pub struct MyBitmap<const N: usize, const K: usize> {
     bits_count: usize,
     data: [u8; N],
 }
-impl<const N: usize, const K: usize> MyBitmap<N, K> {
+
+impl<const N: usize, const K: usize> ColorBitmap for MyBitmap<N, K> {
     /// Creates a new bitmap with all bits set to false
-    pub const fn new() -> Self {
+    fn new_nonconst() -> Self {
         Self {
             data: [0_u8; N],
             bits_count: K,
         }
     }
-
-    /// Length of "virtual" array that covers only the payload bits
-    /// Use this if you wan to iterate over all bits via `set` or `get`
-    pub fn get_payload_bits_len(&self) -> usize {
-        self.bits_count
-    }
-
-    pub fn new_with_value(value: bool) -> Self {
-        let init_value = match value {
-            true => 0xff,
-            false => 0x0,
-        };
-        Self {
-            data: [init_value; N],
-            bits_count: K,
-        }
-    }
-
     /// Set the bit at `bit_idx` to `value`
-    pub fn set(&mut self, bit_idx: usize, value: bool) {
+    fn set(&mut self, bit_idx: usize, value: bool) {
         assert!(
             bit_idx < self.bits_count,
             "Out of bounds bit idx: bit_idx={}, bits_count={}",
@@ -85,7 +109,7 @@ impl<const N: usize, const K: usize> MyBitmap<N, K> {
     }
 
     /// Return the value of bit at `bit_idx`
-    pub fn get(&self, bit_idx: usize) -> bool {
+    fn get(&self, bit_idx: usize) -> bool {
         assert!(
             bit_idx < self.bits_count,
             "Out of bounds bit idx: bit_idx={}, bits_count={}",
@@ -99,6 +123,36 @@ impl<const N: usize, const K: usize> MyBitmap<N, K> {
 
         let selection_mask = (0x1_u8) << byte_offset;
         (self.data[byte_idx] & selection_mask) != 0
+    }
+
+    fn dimensions(&self) -> (usize, usize) {
+        (N, K)
+    }
+}
+
+impl<const N: usize, const K: usize> MyBitmap<N, K> {
+    /// Creates a new bitmap with all bits set to false
+    pub const fn new() -> Self {
+        Self {
+            data: [0_u8; N],
+            bits_count: K,
+        }
+    }
+    /// Length of "virtual" array that covers only the payload bits
+    /// Use this if you wan to iterate over all bits via `set` or `get`
+    pub fn get_payload_bits_len(&self) -> usize {
+        self.bits_count
+    }
+
+    pub fn new_with_value(value: bool) -> Self {
+        let init_value = match value {
+            true => 0xff,
+            false => 0x0,
+        };
+        Self {
+            data: [init_value; N],
+            bits_count: K,
+        }
     }
 
     /// Set all bits to `value`
@@ -167,7 +221,7 @@ impl<const N: usize, const K: usize> BitOrAssign for MyBitmap<N, K> {
 pub type PartitionBitmap = MyBitmap<
     { ActiveMemoryColoring::BYTES_FOR_COLOR_BITMAP },
     { ActiveMemoryColoring::COLOR_COUNT },
->; //Bitmap<{ ActiveMemoryColoring::COLOR_COUNT }>;
+>;
 
 /// This memory coloring is only intended as an example and does not give
 /// You any isolation guarantees
@@ -189,6 +243,8 @@ impl MemoryColoring for DummyMemoryColoring {
 
     const COLOR_COUNT: usize = 1 << Self::COLOR_ORDER;
     const BYTES_FOR_COLOR_BITMAP: usize = Self::COLOR_COUNT / 8;
+
+    type Bitmap = MyBitmap<{ Self::BYTES_FOR_COLOR_BITMAP }, { Self::COLOR_COUNT }>;
 }
 
 //TODO: add feature flags to switch this
@@ -233,6 +289,7 @@ pub enum MemoryRange {
 #[cfg(test)]
 pub mod test {
     use super::MyBitmap;
+    use crate::memory_coloring::ColorBitmap;
 
     #[test]
     fn test_payload_bits_len() {

@@ -7,6 +7,7 @@ use capa_engine::context::RegisterGroup;
 use capa_engine::utils::BitmapIterator;
 use capa_engine::{AccessRights, CapaEngine, CapaError, Domain, Handle, MemOps};
 use mmu::eptmapper::EPT_ROOT_FLAGS;
+use mmu::memory_coloring::ActiveMemoryColoring;
 use mmu::FrameAllocator;
 use spin::MutexGuard;
 use stage_two_abi::{GuestInfo, Manifest};
@@ -77,7 +78,7 @@ impl PlatformState for StateX86 {
         end: usize,
     ) -> Option<usize> {
         let domain = Self::get_domain(domain_handle);
-        let permission_iter = engine.get_domain_permissions(domain_handle).unwrap();
+        let permission_iter = engine.get_domain_permissions(domain_handle, ActiveMemoryColoring{}).unwrap();
         for range in domain.remapper.remap(permission_iter) {
             let range_start = range.gpa;
             let range_end = range_start + range.size;
@@ -617,7 +618,7 @@ impl MonitorX86 {
                         let callback = |dom: Handle<Domain>, engine: &mut CapaEngine| {
                             let dom_dat = StateX86::get_domain(dom);
                             log::info!("remaps {}", dom_dat.remapper.iter_segments());
-                            let remap = dom_dat.remapper.remap(engine.get_domain_permissions(dom).unwrap());
+                            let remap = dom_dat.remapper.remap(engine.get_domain_permissions(dom, ActiveMemoryColoring{}).unwrap());
                             log::info!("remapped: {}", remap);
                         };
                         Self::do_debug(vs, domain, callback);

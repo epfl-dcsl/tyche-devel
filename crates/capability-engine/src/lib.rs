@@ -25,10 +25,11 @@ use cores::{Core, CoreList};
 use domain::{insert_capa, remove_capa, DomainHandle, DomainPool};
 pub use domain::{Domain, LocalCapa, NextCapaToken};
 pub use gen_arena::{GenArena, Handle};
+use mmu::memory_coloring::MemoryColoring;
 pub use region::ResourceKind::*;
 pub use region::{
-    AccessRights, MemOps, MemoryPermission, Region, RegionIterator, RegionTracker, ResourceKind,PermissionIterator,
-    MEMOPS_ALL, MEMOPS_EXTRAS,
+    AccessRights, MemOps, MemoryPermission, PermissionIterator, Region, RegionIterator,
+    RegionTracker, ResourceKind, MEMOPS_ALL, MEMOPS_EXTRAS,
 };
 use region::{TrackerPool, EMPTY_REGION};
 pub use remapper::Remapper;
@@ -640,14 +641,15 @@ impl CapaEngine {
         Ok(domain.regions().iter(&self.tracker))
     }
 
-    pub fn get_domain_permissions<'a>(
+    pub fn get_domain_permissions<'a, T: MemoryColoring + Clone>(
         &'a self,
         domain: Handle<Domain>,
-    ) -> Result<PermissionIterator<'a>, CapaError> {
+        memory_coloring: T,
+    ) -> Result<PermissionIterator<'a, T>, CapaError> {
         let Some(domain) = self.domains.get(domain) else {
             return Err(CapaError::InvalidValue);
         };
-        Ok(domain.regions().permissions(&self.tracker))
+        Ok(domain.regions().permissions(&self.tracker, memory_coloring))
     }
 
     pub fn pop_update(&mut self) -> Option<Update> {

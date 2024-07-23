@@ -1,7 +1,12 @@
 use core::fmt;
 
 use bitflags::bitflags;
-use mmu::memory_coloring::{ActiveMemoryColoring, MemoryColoring, MyBitmap, PartitionBitmap};
+use mmu::memory_coloring::color_to_phys::{
+    ColorToPhys, ColorToPhysIter, MemoryRegionDescription, PhysRange,
+};
+use mmu::memory_coloring::{
+    ActiveMemoryColoring, ColorBitmap, MemoryColoring, MyBitmap, PartitionBitmap,
+};
 
 use crate::config::NB_TRACKER;
 use crate::gen_arena::{GenArena, Handle};
@@ -68,7 +73,6 @@ impl MemOps {
 #[derive(Clone, Copy, Debug)]
 pub enum ResourceKind {
     /// Access to RAM memory, which may be suspect to further sub partitioning
-    //TODO: currently limited to 1024 as max size
     RAM(PartitionBitmap),
     /// Access to device memory
     Device,
@@ -922,11 +926,17 @@ impl RegionTracker {
         RegionIterator { pool, next: start }
     }
 
-    pub fn permissions<'a>(&'a self, pool: &'a TrackerPool) -> PermissionIterator<'a> {
+    pub fn permissions<'a, T: MemoryColoring + Clone>(
+        &'a self,
+        pool: &'a TrackerPool,
+        memory_coloring: T,
+    ) -> PermissionIterator<'a, T> {
         PermissionIterator {
             tracker: self,
             pool,
             next: self.head,
+            memory_coloring,
+            current_subranges: None,
         }
     }
 }
@@ -954,10 +964,13 @@ impl<'a> Iterator for RegionIterator<'a> {
 /// An iterator over a domain's memory access permissions. They are created based
 /// on the domains memory regions
 #[derive(Clone)]
-pub struct PermissionIterator<'a> {
+pub struct PermissionIterator<'a, T: MemoryColoring + Clone> {
     tracker: &'a RegionTracker,
     pool: &'a TrackerPool,
     next: Option<Handle<Region>>,
+    memory_coloring: T,
+    //If Some, we are still processing the colored subranges from the current region
+    current_subranges: Option<(ColorToPhysIter<T>, MemOps, ResourceKind)>,
 }
 
 #[derive(Clone, Copy)]
@@ -974,46 +987,126 @@ impl MemoryPermission {
     }
 }
 
-impl<'a> Iterator for PermissionIterator<'a> {
+impl<'a, T: MemoryColoring + Clone> Iterator for PermissionIterator<'a, T> {
     type Item = MemoryPermission;
 
-    //luca: region tracker is a linked list over regions. Regions are the deuplicated view of all resources that are described by the access rights
+    //luca: region tracker is a linked list over regions. Regions are a deduplicated view of all resources that are described
+    //by the access rights
     fn next(&mut self) -> Option<Self::Item> {
-        // Get the first valid region
-        let mut handle = None;
-        let mut start = None;
-        for (h, region) in self.tracker.iter_from(self.next, self.pool) {
-            if region.ref_count > 0 {
-                handle = Some(h);
-                start = Some(region.start);
+        loop {
+            //finish current colored subrange, before moving to next region
+            if let Some((colored_subrange, ops, kind)) = &mut self.current_subranges {
+                match colored_subrange.next() {
+                    Some(v) => {
+                        return Some(MemoryPermission {
+                            start: v.start,
+                            end: v.end,
+                            //TODO: this is probably no longer needed in the MemoryPermissions struct
+                            resource_kind: *kind,
+                            ops: *ops,
+                        });
+                    }
+                    //finished region -> move to next
+                    None => {
+                        self.current_subranges = None;
+                    }
+                }
+            }
+
+            // Get the first valid region
+            let mut handle = None;
+            let mut start = None;
+            for (h, region) in self.tracker.iter_from(self.next, self.pool) {
+                if region.ref_count > 0 {
+                    handle = Some(h);
+                    start = Some(region.start);
+                    break;
+                }
+            }
+
+            let Some(start) = start else {
+                self.next = None; // makes next iteration faster
+                return None;
+            };
+            let (end, ops, resource_kind) = {
+                let reg = &self.pool[handle.unwrap()];
+                (reg.end, reg.get_ops(), (&reg.resource_kind).into())
+            };
+
+            let mut next = None;
+            for (handle, _region) in self.tracker.iter_from(handle, self.pool).skip(1) {
+                //TODO(aghosn) charly had some optimization here that I had to remove.
+                //We can put something correct here in the future.
+                next = Some(handle);
                 break;
             }
+
+            self.next = next;
+
+            match resource_kind {
+                //RAM memory is subject to coloring, iterate over sub ranges create by the coloring before moving to the next region
+                ResourceKind::RAM(allowed_colors) => {
+                    /* Akward type conversion :( . For testing, we want memory coloring to be configurable and
+                     * Thus encode in in generic param. However, using the generic in the widely used type ResourceKind would
+                     * mean that it spreads everywhere making the codebase akward to use. Thus we also have a global constant with
+                     * The "currently active memory coloring". Here, we need to convert between these two types
+                     */
+                    let mut bm = T::Bitmap::new_nonconst();
+                    let need_dimensions = allowed_colors.dimensions();
+                    let have_dimensions = bm.dimensions();
+                    assert!(
+                        have_dimensions.0 >= need_dimensions.0,
+                        "Our bitmap has {} bytes but we need {} bytes",
+                        have_dimensions.0,
+                        need_dimensions.0
+                    );
+                    assert!(
+                        have_dimensions.1 >= need_dimensions.1,
+                        "Our bitmap can represent {} things we need to to represent {} things",
+                        have_dimensions.1,
+                        need_dimensions.1
+                    );
+                    for idx in 0..allowed_colors.get_payload_bits_len() {
+                        bm.set(idx, allowed_colors.get(idx));
+                    }
+
+                    let ctp = ColorToPhys::new(
+                        MemoryRegionDescription::SingleRange(PhysRange { start, end }),
+                        self.memory_coloring.clone(),
+                        bm,
+                        None,
+                    );
+                    let mut iter = ctp.into_iter();
+                    match iter.next() {
+                        Some(v) => {
+                            self.current_subranges = Some((iter, ops, resource_kind));
+                            return Some(MemoryPermission {
+                                start: v.start,
+                                end: v.end,
+                                resource_kind,
+                                ops,
+                            });
+                        }
+                        //region does not contain any entries with correct color
+                        //we will "fall trhough" to the next iteration of the outer loop and continue
+                        //with the next region
+                        None => {
+                            log::error!("Empty Region: Region [0x{:013x}-0x{:013x}[, does not have any subranges with color {:x?}", start,end, allowed_colors);
+                            self.current_subranges = None;
+                        }
+                    }
+                }
+                //Device mem is not subject to coloring, simply return range
+                ResourceKind::Device => {
+                    return Some(MemoryPermission {
+                        start,
+                        end,
+                        ops,
+                        resource_kind,
+                    })
+                }
+            }
         }
-
-        let Some(start) = start else {
-            self.next = None; // makes next iteration faster
-            return None;
-        };
-        let (end, ops, resource_kind) = {
-            let reg = &self.pool[handle.unwrap()];
-            (reg.end, reg.get_ops(), (&reg.resource_kind).into())
-        };
-
-        let mut next = None;
-        for (handle, _region) in self.tracker.iter_from(handle, self.pool).skip(1) {
-            //TODO(aghosn) charly had some optimization here that I had to remove.
-            //We can put something correct here in the future.
-            next = Some(handle);
-            break;
-        }
-
-        self.next = next;
-        Some(MemoryPermission {
-            start,
-            end,
-            ops,
-            resource_kind,
-        })
     }
 }
 
@@ -1021,8 +1114,45 @@ impl<'a> Iterator for PermissionIterator<'a> {
 
 #[cfg(test)]
 mod tests {
+    use mmu::memory_coloring::color_to_phys::PhysRange;
+    use mmu::memory_coloring::{self};
+    use utils::HostPhysAddr;
+
     use super::*;
     use crate::debug::snap;
+
+    #[derive(Clone)]
+    struct RangeBasedTestColoring {
+        //tuples of phys range with the corresponding color
+        ranges: Vec<(PhysRange, u64)>,
+    }
+
+    impl RangeBasedTestColoring {
+        pub fn new_contig(ranges: Vec<PhysRange>) -> Self {
+            let mut tuples = Vec::new();
+            for (color_id, range) in ranges.iter().enumerate() {
+                tuples.push((*range, color_id as u64))
+            }
+            Self { ranges: tuples }
+        }
+    }
+
+    impl MemoryColoring for RangeBasedTestColoring {
+        const COLOR_COUNT: usize = memory_coloring::MAX_COLOR_COUNT;
+
+        const BYTES_FOR_COLOR_BITMAP: usize = memory_coloring::MAX_COLOR_BITMAP_BYTES;
+
+        type Bitmap = MyBitmap<{ Self::BYTES_FOR_COLOR_BITMAP }, { Self::COLOR_COUNT }>;
+
+        fn compute_color(&self, frame: HostPhysAddr) -> u64 {
+            for (range, color) in &self.ranges {
+                if range.start <= frame.as_usize() && frame.as_usize() < range.end {
+                    return *color;
+                }
+            }
+            panic!("invalid test valid coloring config")
+        }
+    }
 
     #[test]
     fn region() {
@@ -1065,6 +1195,55 @@ mod tests {
         let head = tracker.head;
         assert_eq!(tracker.find_lower_bound(0x100, &mut pool), (head, None));
         assert_eq!(tracker.find_lower_bound(0x200, &mut pool), (head, None));
+    }
+
+    #[test]
+    fn color_filtering() {
+        let mut tracker = RegionTracker::new();
+        let mut pool = TrackerPool::new([EMPTY_REGION; NB_TRACKER]);
+
+        let coloring = RangeBasedTestColoring::new_contig(vec![
+            PhysRange {
+                start: 0x0,
+                end: 0x1_000,
+            },
+            PhysRange {
+                start: 0x1_000,
+                end: 0x2_000,
+            },
+            PhysRange {
+                start: 0x2_000,
+                end: 0x3_000,
+            },
+        ]);
+        let mut allowed_colors: <RangeBasedTestColoring as MemoryColoring>::Bitmap =
+            MyBitmap::new();
+        allowed_colors.set(0, true);
+
+        tracker
+            .add_region(
+                0x0_000,
+                0x2_000,
+                MEMOPS_ALL,
+                ResourceKind::ram_with_partitions(&[0, 2]),
+                &mut pool,
+            )
+            .unwrap();
+
+        tracker
+            .add_region(
+                0x2_000,
+                0x3_000,
+                MEMOPS_ALL,
+                ResourceKind::ram_with_partitions(&[0, 2]),
+                &mut pool,
+            )
+            .unwrap();
+        //Only sub range with colors 0 and 2 is returned, 0x1_000 - 0x2_000
+        snap(
+            "{[0x0, 0x1000 | RWXS] -> [0x2000, 0x3000 | RWXS]}",
+            tracker.permissions(&pool, coloring),
+        );
     }
 
     #[test]
@@ -1405,7 +1584,7 @@ impl<'a> fmt::Display for RegionIterator<'a> {
     }
 }
 
-impl<'a> fmt::Display for PermissionIterator<'a> {
+impl<'a, T: MemoryColoring + Clone> fmt::Display for PermissionIterator<'a, T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut is_first = true;
         write!(f, "{{")?;

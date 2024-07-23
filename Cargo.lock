@@ -188,6 +188,7 @@ dependencies = [
  "log",
  "mmu",
  "simple_logger",
+ "utils",
 ]
 
 [[package]]

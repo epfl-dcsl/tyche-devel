@@ -9,7 +9,7 @@ use capa_engine::{
 use mmu::eptmapper::EPT_ROOT_FLAGS;
 use mmu::ioptmapper:: PAGE_SIZE;
 use mmu::mapper::Mapper;
-use mmu::memory_coloring::color_to_phys::ColorToPhys;
+use mmu::memory_coloring::color_to_phys::{ColorToPhys, MemoryRegionDescription};
 use mmu::memory_coloring::ActiveMemoryColoring;
 use mmu::{EptMapper, FrameAllocator, IoPtFlag, IoPtMapper};
 use spin::{Mutex, MutexGuard};
@@ -85,7 +85,7 @@ pub type StateX86 = VmxState;
 /// - `permission_builder` : build page table entry permission flags for the mappings
 fn color_aware_mapper<F: Fn(&MemOps,&ResourceKind)->Result<u64,()>>(
     mapper: &mut impl Mapper,
-    permission_iter: PermissionIterator,
+    permission_iter: PermissionIterator<ActiveMemoryColoring>,
     domain: &MutexGuard<'static, DataX86>,
     permission_builder : F,
 ) {
@@ -139,7 +139,7 @@ fn color_aware_mapper<F: Fn(&MemOps,&ResourceKind)->Result<u64,()>>(
         match resource_kind {
             capa_engine::ResourceKind::RAM(partitions_ids) => {
                 let color_to_phys = ColorToPhys::new(
-                    get_manifest().get_boot_mem_regions(),
+                    MemoryRegionDescription::BootMemory(get_manifest().get_boot_mem_regions()),
                     ActiveMemoryColoring {},
                     partitions_ids,
                     Some((range.hpa, range.hpa + range.size)),
@@ -276,7 +276,7 @@ impl StateX86 {
 
             Ok(flags.bits())
         };
-        let permission_iter = engine.get_domain_permissions(domain_handle).unwrap();
+        let permission_iter = engine.get_domain_permissions(domain_handle, ActiveMemoryColoring{}).unwrap();
         color_aware_mapper(&mut iopt_mapper, permission_iter, &domain, permission_cb);
 
         domain.iopt = Some(iopt_root.phys_addr);
@@ -382,7 +382,7 @@ impl StateX86 {
         };
 
         //luca: iterator over ranges with same memory access permissions
-        let permission_iter = engine.get_domain_permissions(domain_handle).unwrap();
+        let permission_iter = engine.get_domain_permissions(domain_handle,ActiveMemoryColoring{}, ).unwrap();
         color_aware_mapper(&mut mapper, permission_iter, &domain,permission_cb);
 
         loop {
