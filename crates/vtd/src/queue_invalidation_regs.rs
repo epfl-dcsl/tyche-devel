@@ -218,6 +218,7 @@ impl InvalidationWaitDescriptor {
     const DW_FLAG: u64 = 0x1 << 5;
 
     const STATUS_DATA_SHIFT: u64 = 32;
+    #[allow(dead_code)]
     const STATUS_DATA_MASK: u64 = bitmask(Self::STATUS_DATA_SHIFT as u32, 63);
 
     /// New wait descritptor. Poll `status_wb_addr` for `wb_value` to check check completion
@@ -249,6 +250,7 @@ impl ContextCacheInvalidateDescriptor {
     const DESC_TYPE: u64 = 0x1;
 
     const GRANULARITY_SHIFT: u64 = 4;
+    #[allow(dead_code)]
     const GRANULARITY_MASK: u64 = bitmask(Self::GRANULARITY_SHIFT as u32, 5);
 
     pub fn new(granularity: FlushGranularity) -> Self {

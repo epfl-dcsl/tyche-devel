@@ -25,14 +25,16 @@ use cores::{Core, CoreList};
 use domain::{insert_capa, remove_capa, DomainHandle, DomainPool};
 pub use domain::{Domain, LocalCapa, NextCapaToken};
 pub use gen_arena::{GenArena, Handle};
-use mmu::memory_coloring::MemoryColoring;
+use mmu::memory_coloring::{MemoryColoring, PartitionBitmap};
 pub use region::ResourceKind::*;
 pub use region::{
     AccessRights, MemOps, MemoryPermission, PermissionIterator, Region, RegionIterator,
     RegionTracker, ResourceKind, MEMOPS_ALL, MEMOPS_EXTRAS,
 };
 use region::{TrackerPool, EMPTY_REGION};
-pub use remapper::Remapper;
+pub use remapper::{
+    compactify_colors_in_gpa_space, compactify_colors_in_gpa_space_cb_mapper, Remapper,
+};
 pub use segment::EffectiveRegionIterator;
 use segment::{RegionCapa, RegionHash, RegionPool, EMPTY_REGION_CAPA};
 use update::UpdateBuffer;
@@ -48,7 +50,7 @@ pub mod config {
     pub const NB_TRACKER: usize = 1024;
     pub const NB_UPDATES: usize = 128;
     pub const NB_CORES: usize = 32; // NOTE: Can't be greater than 64 as we use 64 bits bitmaps.
-    pub const NB_REMAP_REGIONS: usize = 128;
+    pub const NB_REMAP_REGIONS: usize = 2 << 15; //luca: this changes the remapping pool size
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -77,6 +79,7 @@ pub enum CapaError {
     AlreadyAliased,
     PlatformError,
     CapaOperationOnDifferentResourceKinds,
+    InternalMappingError,
 }
 
 pub struct CapaEngine {
@@ -645,11 +648,18 @@ impl CapaEngine {
         &'a self,
         domain: Handle<Domain>,
         memory_coloring: T,
+        additional_restrictions: Option<PartitionBitmap>,
+        include_devices: bool,
     ) -> Result<PermissionIterator<'a, T>, CapaError> {
         let Some(domain) = self.domains.get(domain) else {
             return Err(CapaError::InvalidValue);
         };
-        Ok(domain.regions().permissions(&self.tracker, memory_coloring))
+        Ok(domain.regions().permissions(
+            &self.tracker,
+            memory_coloring,
+            additional_restrictions,
+            include_devices,
+        ))
     }
 
     pub fn pop_update(&mut self) -> Option<Update> {

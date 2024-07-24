@@ -5,7 +5,9 @@
 
 use core::{cmp, fmt};
 
+use mmu::ioptmapper::PAGE_SIZE;
 use mmu::memory_coloring::MemoryColoring;
+use utils::{GuestPhysAddr, HostPhysAddr};
 
 use crate::region::{MemoryPermission, PermissionIterator};
 use crate::{CapaError, GenArena, Handle, MemOps, ResourceKind};
@@ -115,8 +117,11 @@ impl<const N: usize> Remapper<N> {
                 size,
                 repeat,
                 next: None,
-            })
-            .unwrap())
+            }).map_err(|e| {
+                log::error!("Remapper:map_range: failed to insert segment hpa 0x{:013x}, gpa 0x{:013x} size 0x{:x}, repeat {} : {:?}",
+            hpa,gpa, size,repeat,e);
+            CapaError::InternalMappingError
+            })?)
     }
 
     pub fn unmap_range(&mut self, hpa: usize, size: usize) -> Result<(), ()> {
@@ -275,7 +280,10 @@ impl<const N: usize> Remapper<N> {
 
     fn insert_segment(&mut self, segment: Segment) -> Result<(), ()> {
         let hpa = segment.hpa;
-        let new_segment = self.segments.allocate(segment).ok_or(())?;
+        let new_segment = self.segments.allocate(segment).ok_or_else(|| {
+            log::error!("insert_segment: failed to allocate new segment. Out of memory?");
+            ()
+        })?;
         let Some(head) = self.head else {
             // No segment yet, add as the head
             self.head = Some(new_segment);
@@ -569,19 +577,202 @@ impl<'a, const N: usize> Iterator for RemapperSegmentIterator<'a, N> {
     }
 }
 
+/// This will create create a contiguous GPA space mappings for the possibly scattered
+/// HPA memory range produced by the PermissionIterator (due to coloring).
+/// The strategy is to keep device memory identity. The RAM memory is remapped contiguously starting at
+/// `start_gpa`, with the expection of skipping over device memory.
+/// # Arguments
+/// - `map_cb` : Called for each (HPA,GPA,size) remapping that we generated. Store this e.g. in the domain's remapper
+/// - `permission_iter` : generates the HPA memory ranges that we want to remap
+/// - `start_gpa` first GPA of the contiguous mapping
+pub fn compactify_colors_in_gpa_space_cb_mapper<
+    T: MemoryColoring + Clone,
+    F: FnMut(HostPhysAddr, GuestPhysAddr, usize, usize) -> Result<(), CapaError>,
+>(
+    map_cb: &mut F,
+    permission_iter: PermissionIterator<T>,
+    start_gpa: GuestPhysAddr,
+) -> Result<(GuestPhysAddr, Option<GuestPhysAddr>), CapaError> {
+    let mut next_blocked_iter = permission_iter.clone().filter(|v| match v.resource_kind {
+        ResourceKind::RAM(_) => false,
+        ResourceKind::Device => true,
+    });
+    let mut next_blocked = next_blocked_iter.next();
+
+    let mut next_ram_gpa = start_gpa.as_usize();
+    let mut highest_device_gpa: Option<GuestPhysAddr> = None;
+    //skip over device regions that have smaller addr than first ram region
+    let first_ram_region = permission_iter
+        .clone()
+        .filter(|v| {
+            ResourceKind::same_kind(&v.resource_kind, &ResourceKind::ram_with_all_partitions())
+        })
+        .next()
+        .ok_or(CapaError::InternalRegionError)?;
+
+    while let Some(nb) = next_blocked.as_ref() {
+        if nb.start > first_ram_region.start {
+            break;
+        }
+        next_ram_gpa += nb.end - nb.start;
+        next_blocked = next_blocked_iter.next();
+    }
+
+    let mut _mapped_ram_bytes = 0;
+    let mut _mapped_device_bytes = 0;
+    //total number of contig phys ranges that we used to back the GPA RAM space
+    let mut _total_ram_range_count = 0;
+    //counts the number of created mappings
+    let mut mapping_count = 0;
+    for (_, range) in permission_iter.enumerate() {
+        if mapping_count > 0 && mapping_count % 10000 == 0 {
+            log::info!("Used {:08} remappings so far", mapping_count);
+        }
+        /* Observations/Assumptions:
+         * The results of the iterator are sorted, i.e. we go through the address space "left to right".
+         * With partititions, a memory range might be smaller that its actually physical bounds, however
+         * it cannot be larger. Thus, we cannot end up in the situation where we want to map an identity
+         * mapped device but have already used that part of the address space for one of the preceedign
+         * mappings
+         *
+         * TODO: preserve order when adding new colors later on
+         */
+        let resource_kind = range.resource_kind;
+        match resource_kind {
+            ResourceKind::RAM(_) => {
+                //figure out amout of bytes we can map before hitting the next range blocked for a device
+                let mut remaining_chunk_bytes = range.size();
+                while remaining_chunk_bytes > 0 {
+                    let map_size;
+                    let mut advance_next_blocked = false;
+                    match &next_blocked {
+                        Some(next_blocked) => {
+                            //for device mem we need to compare gour gpa with hpa, because we will passtrhough/identity map them
+                            assert!(next_ram_gpa <= next_blocked.start);
+                            let bytes_until_blocked = next_blocked.start - next_ram_gpa;
+                            assert!(bytes_until_blocked > 0, "bytes untill blocked was 0. next_blocked.hpa = 0x{:x}, next_ram_gpa 0x{:x}", next_blocked.start, next_ram_gpa);
+                            if remaining_chunk_bytes < bytes_until_blocked {
+                                map_size = remaining_chunk_bytes;
+                            } else {
+                                advance_next_blocked = true;
+                                map_size = bytes_until_blocked;
+                            }
+                        }
+                        None => {
+                            //No more blocked ranges -> can map everything
+                            map_size = remaining_chunk_bytes;
+                        }
+                    }
+
+                    assert_eq!(next_ram_gpa % PAGE_SIZE, 0, "next_ram_gpa is not aligned");
+                    assert_eq!(map_size % PAGE_SIZE, 0, "map_size ist not aligned");
+                    assert!(map_size > 0);
+
+                    map_cb(HostPhysAddr::new(range.end - remaining_chunk_bytes), GuestPhysAddr::new(next_ram_gpa), map_size,1).map_err(|e| {
+                            log::error!("failed to map HPA 0x{:013x} at GPA 0x{:013x} for 0x{:x} bytes in remappar",range.end - remaining_chunk_bytes, next_ram_gpa, map_size
+                        );
+                            e
+                        })?;
+                    _mapped_ram_bytes += map_size;
+                    remaining_chunk_bytes -= map_size;
+                    mapping_count += 1;
+                    next_ram_gpa += map_size;
+                    if advance_next_blocked {
+                        let mut cur_blocked = next_blocked.ok_or_else(|| {
+                            log::error!("advance_next_blocked true but next block was None");
+                            CapaError::InternalRegionError
+                        })?;
+
+                        assert_eq!(next_ram_gpa, cur_blocked.start,"Requested to advance next blocked, but have not hit it yet. Device GPA 0x{:013x}, next_ram GPA 0x{:013x}",
+                    cur_blocked.start, next_ram_gpa);
+                        next_ram_gpa += cur_blocked.size();
+
+                        next_blocked = next_blocked_iter.next();
+
+                        //next blocked might by contiguous -> skip over next until there is a gap
+                        while let Some(nb) = next_blocked {
+                            if nb.start == (cur_blocked.start + cur_blocked.size()) {
+                                assert_eq!(
+                                    next_ram_gpa, nb.start,
+                                    "next_ram_gpa 0x{:013x}, nb.start 0x{:013x}, cur_blocked.start 0x{:013x}, cur_blocked.end 0x{:013x}",
+                                    next_ram_gpa, nb.start, cur_blocked.start, cur_blocked.start + cur_blocked.size()
+                                );
+                                /*critical bugfix here, was + nb.start before. Found this only because the assertion in the previous line failed.
+                                Prior to the remapper refactor, we did not get the assert fail although we have been using the same memory layout.
+                                 */
+                                next_ram_gpa += nb.size();
+                                cur_blocked = nb;
+                                next_blocked = next_blocked_iter.next();
+                            } else {
+                                break;
+                            }
+                        }
+                    }
+                } // end of "while remaining_chunk_bytes > 0"
+                _total_ram_range_count += 1;
+            }
+            // Device memory must be identity mapped, to pass through the access to the pyhsical HW
+            ResourceKind::Device => {
+                let dev_start = range.start;
+                let dev_end = dev_start + range.size();
+                map_cb(
+                    HostPhysAddr::new(dev_start),
+                    GuestPhysAddr::new(dev_start),
+                    range.size(),
+                    1,
+                )
+                .map_err(|e| {
+                    log::error!(
+                        "failed to map HPA 0x{:013x} at GPA 0x{:013x} for 0x{:x} bytes in remappar",
+                        range.start,
+                        range.start,
+                        range.size()
+                    );
+                    e
+                })?;
+                mapping_count += 1;
+                highest_device_gpa = Some(GuestPhysAddr::new(match highest_device_gpa {
+                    Some(v) => {
+                        if v.as_usize() > dev_end {
+                            v.as_usize()
+                        } else {
+                            dev_end
+                        }
+                    }
+                    None => range.start + range.size(),
+                }));
+            }
+        } // end of "match resource_kind"
+    }
+    Ok((GuestPhysAddr::new(next_ram_gpa), highest_device_gpa))
+}
+
+/// Convenience wrapper around [`compactify_colors_in_gpa_space_cb_mapper`] that directly works with
+/// the provided `remapper`
+pub fn compactify_colors_in_gpa_space<const N: usize, T: MemoryColoring + Clone>(
+    remapper: &mut Remapper<N>,
+    permission_iter: PermissionIterator<T>,
+    start_gpa: GuestPhysAddr,
+) -> Result<(GuestPhysAddr, Option<GuestPhysAddr>), CapaError> {
+    let mut cb = |hpa: HostPhysAddr, gpa: GuestPhysAddr, size: usize, repeat: usize| {
+        remapper.map_range(hpa.as_usize(), gpa.as_usize(), size, repeat)
+    };
+    compactify_colors_in_gpa_space_cb_mapper(&mut cb, permission_iter, start_gpa)
+}
+
 // ————————————————————————————————— Tests —————————————————————————————————— //
 
 #[cfg(test)]
 mod tests {
     use mmu::memory_coloring::color_to_phys::PhysRange;
-    use mmu::memory_coloring::{self, ActiveMemoryColoring, AllSameColor, MyBitmap};
+    use mmu::memory_coloring::{self, ActiveMemoryColoring, MyBitmap};
     use utils::HostPhysAddr;
 
     use super::*;
     use crate::config::NB_TRACKER;
     use crate::debug::snap;
     use crate::region::{TrackerPool, EMPTY_REGION};
-    use crate::{permission, RegionTracker, ResourceKind, MEMOPS_ALL};
+    use crate::{RegionTracker, ResourceKind, MEMOPS_ALL};
 
     #[derive(Clone)]
     struct RangeBasedTestColoring {
@@ -620,6 +811,240 @@ mod tests {
             repeat,
             next: None,
         }
+    }
+
+    #[test]
+    fn simple_compactify() {
+        let mut pool = TrackerPool::new([EMPTY_REGION; NB_TRACKER]);
+        let mut tracker = RegionTracker::new();
+        let mut remapper: Remapper<32> = Remapper::new();
+        let coloring = RangeBasedTestColoring::new(vec![
+            (
+                PhysRange {
+                    start: 0x0_000,
+                    end: 0x1_000,
+                },
+                0,
+            ),
+            (
+                PhysRange {
+                    start: 0x1_000,
+                    end: 0x5_000,
+                },
+                1,
+            ),
+            (
+                PhysRange {
+                    //5 to 10
+                    start: 0x5_000,
+                    end: 0xa_000,
+                },
+                0,
+            ),
+            (
+                //We give the device a special color to ensure that its color is actually ignored
+                PhysRange {
+                    //10 to 11
+                    start: 0xa_000,
+                    end: 0xb_000,
+                },
+                2,
+            ),
+            (
+                PhysRange {
+                    //11 to 15
+                    start: 0xb_000,
+                    end: 0xf_000,
+                },
+                1,
+            ),
+            (
+                PhysRange {
+                    //15 to 20
+                    start: 0xf_000,
+                    end: 0x14_000,
+                },
+                0,
+            ),
+        ]);
+        // Mem Layout: [RAM A | Device B | RAM C ]
+        //Using our coloring
+        //- RAM A: 6 pages with color 0, 4 pages with color 1
+        //- RAM B: 5 pages with color 0, 5 pages with color 1
+
+        //11 ram pages + 1 device page
+        const WANT_END_RAM_GPA: GuestPhysAddr = GuestPhysAddr::new(0xc_000);
+        const WANT_END_DEVICE_GPA: GuestPhysAddr = GuestPhysAddr::new(0xb_000);
+
+        //RAM A
+        tracker
+            .add_region(
+                0x0_000,
+                0xa_000,
+                MEMOPS_ALL,
+                ResourceKind::ram_with_partitions(&[0]),
+                &mut pool,
+            )
+            .unwrap();
+        // Device B
+        tracker
+            .add_region(
+                0xa_000,
+                0xb_000,
+                MEMOPS_ALL,
+                ResourceKind::Device,
+                &mut pool,
+            )
+            .unwrap();
+        //RAM C
+        tracker
+            .add_region(
+                0xb_000,
+                0x14_000,
+                MEMOPS_ALL,
+                ResourceKind::ram_with_partitions(&[0]),
+                &mut pool,
+            )
+            .unwrap();
+
+        //program remapper to compactify
+        let (end_ram_gpa, end_device_gpa) = compactify_colors_in_gpa_space(
+            &mut remapper,
+            tracker.permissions(&pool, coloring.clone(), None, true),
+            GuestPhysAddr::new(0),
+        )
+        .expect("compactify failed");
+
+        /*HPA_{start}, HPA_{end}, GPA_{start}, results are entered into the rempapper
+         * ordered by their HPA_{start} not by their GPA_{start}
+         */
+        snap(
+            concat!(
+                "{",
+                "[0x0, 0x1000 at 0x0, rep 1 | RWXS] -> ", //Part 1 of RAM A
+                "[0x5000, 0xa000 at 0x1000, rep 1 | RWXS] -> ", //Part 2 of RAM A
+                "[0xa000, 0xb000 at 0xa000, rep 1 | RWXS] -> ", //Device B,
+                "[0xf000, 0x13000 at 0x6000, rep 1 | RWXS] -> ", // RAM C : stuff that fits before hitting device
+                "[0x13000, 0x14000 at 0xb000, rep 1 | RWXS]", // RAM C: stuff that did not fit before hitting device
+                "}"
+            ),
+            &remapper.remap(tracker.permissions(&pool, coloring.clone(), None, true)),
+        );
+        assert_eq!(
+            WANT_END_RAM_GPA,
+            end_ram_gpa,
+            "RAM, wanted last GPA 0x{:013x}, got last GPA 0x{:013x}",
+            WANT_END_RAM_GPA.as_u64(),
+            end_ram_gpa.as_u64()
+        );
+        let end_device_gpa = end_device_gpa.expect("exected Some last device GPA but got None");
+        assert_eq!(
+            WANT_END_DEVICE_GPA,
+            end_device_gpa,
+            "Device, wanted last GPA 0x{:013x}, got last GPA 0x{:013x}",
+            WANT_END_RAM_GPA.as_u64(),
+            end_device_gpa.as_u64()
+        );
+    }
+
+    #[test]
+    fn compactify_with_gap_to_last_device() {
+        let mut pool = TrackerPool::new([EMPTY_REGION; NB_TRACKER]);
+        let mut tracker = RegionTracker::new();
+        let mut remapper: Remapper<32> = Remapper::new();
+        let coloring = RangeBasedTestColoring::new(vec![
+            (
+                PhysRange {
+                    start: 0x0_000,
+                    end: 0x1_000,
+                },
+                0,
+            ),
+            (
+                PhysRange {
+                    start: 0x1_000,
+                    end: 0x5_000,
+                },
+                1,
+            ),
+            (
+                PhysRange {
+                    start: 0x5_000,
+                    end: 0xa_000,
+                },
+                0,
+            ),
+            (
+                PhysRange {
+                    //catch all
+                    start: 0xa_000,
+                    end: 0x10_000,
+                },
+                1,
+            ),
+        ]);
+        // Mem Layout: [RAM A | Device B]
+
+        const WANT_END_RAM_GPA: GuestPhysAddr = GuestPhysAddr::new(0x6_000);
+        const WANT_END_DEVICE_GPA: GuestPhysAddr = GuestPhysAddr::new(0xf_000);
+
+        //RAM A
+        tracker
+            .add_region(
+                0x0_000,
+                0xa_000,
+                MEMOPS_ALL,
+                ResourceKind::ram_with_partitions(&[0]),
+                &mut pool,
+            )
+            .unwrap();
+        // Device B
+        tracker
+            .add_region(
+                0xe_000,
+                0xf_000,
+                MEMOPS_ALL,
+                ResourceKind::Device,
+                &mut pool,
+            )
+            .unwrap();
+
+        //program remapper to compactify
+        let (end_ram_gpa, end_device_gpa) = compactify_colors_in_gpa_space(
+            &mut remapper,
+            tracker.permissions(&pool, coloring.clone(), None, true),
+            GuestPhysAddr::new(0),
+        )
+        .expect("compactify failed");
+
+        /*HPA_{start}, HPA_{end}, GPA_{start}, results are entered into the rempapper
+         * ordered by their HPA_{start} not by their GPA_{start}
+         */
+        snap(
+            concat!(
+                "{",
+                "[0x0, 0x1000 at 0x0, rep 1 | RWXS] -> ", //Part 1 of RAM A
+                "[0x5000, 0xa000 at 0x1000, rep 1 | RWXS] -> ", //Part 2 of RAM A
+                "[0xe000, 0xf000 at 0xe000, rep 1 | RWXS]", //Device B,
+                "}"
+            ),
+            &remapper.remap(tracker.permissions(&pool, coloring.clone(), None, true)),
+        );
+        assert_eq!(
+            WANT_END_RAM_GPA,
+            end_ram_gpa,
+            "RAM, wanted last GPA 0x{:013x}, got last GPA 0x{:013x}",
+            WANT_END_RAM_GPA.as_u64(),
+            end_ram_gpa.as_u64()
+        );
+        let end_device_gpa = end_device_gpa.expect("exected Some last device GPA but got None");
+        assert_eq!(
+            WANT_END_DEVICE_GPA,
+            end_device_gpa,
+            "Device, wanted last GPA 0x{:013x}, got last GPA 0x{:013x}",
+            WANT_END_RAM_GPA.as_u64(),
+            end_device_gpa.as_u64()
+        );
     }
 
     #[test]
@@ -667,14 +1092,14 @@ mod tests {
         );
         snap(
             "{[0x1000, 0x2000 at 0x1000, rep 1 | RWXS]}",
-            &remapper.remap(tracker.permissions(&pool, all_same_color.clone())),
+            &remapper.remap(tracker.permissions(&pool, all_same_color.clone(), None, true)),
         );
 
         // Remap that region
         remapper.map_range(0x1_000, 0x10_010, 0x1000, 1).unwrap();
         snap(
             "{[0x1000, 0x2000 at 0x10010, rep 1 | RWXS]}",
-            &remapper.remap(tracker.permissions(&pool, all_same_color.clone())),
+            &remapper.remap(tracker.permissions(&pool, all_same_color.clone(), None, true)),
         );
 
         // Let's add a few more!
@@ -699,36 +1124,36 @@ mod tests {
         snap("{[0x1000, 0x2000 | 1 (1 - 1 - 1 - 1)] -> [0x3000, 0x4000 | 1 (1 - 1 - 1 - 1)] -> [0x4000, 0x5000 | 1 (1 - 0 - 0 - 0)]}", &tracker.iter(&pool));
         snap(
             "{[0x1000, 0x2000 at 0x10010, rep 1 | RWXS] -> [0x3000, 0x4000 at 0x3000, rep 1 | RWXS] -> [0x4000, 0x5000 at 0x4000, rep 1 | R___]}",
-            &remapper.remap(tracker.permissions(&pool, all_same_color.clone())),
+            &remapper.remap(tracker.permissions(&pool, all_same_color.clone(),None,true)),
         );
 
         // And (partially) remap those
         remapper.map_range(0x3000, 0x13000, 0x800, 1).unwrap();
         snap(
             "{[0x1000, 0x2000 at 0x10010, rep 1 | RWXS] -> [0x3000, 0x3800 at 0x13000, rep 1 | RWXS] -> [0x3800, 0x4000 at 0x3800, rep 1 | RWXS] -> [0x4000, 0x5000 at 0x4000, rep 1 | R___]}",
-            &remapper.remap(tracker.permissions(&pool,all_same_color.clone())),
+            &remapper.remap(tracker.permissions(&pool,all_same_color.clone(),None,true)),
         );
         remapper.map_range(0x3800, 0x23800, 0x800, 1).unwrap();
         snap(
             "{[0x1000, 0x2000 at 0x10010, rep 1 | RWXS] -> [0x3000, 0x3800 at 0x13000, rep 1 | RWXS] -> [0x3800, 0x4000 at 0x23800, rep 1 | RWXS] -> [0x4000, 0x5000 at 0x4000, rep 1 | R___]}",
-            &remapper.remap(tracker.permissions(&pool, all_same_color.clone())),
+            &remapper.remap(tracker.permissions(&pool, all_same_color.clone(),None,true)),
         );
         remapper.map_range(0x4000, 0x14000, 0x1000, 3).unwrap();
         snap(
             "{[0x1000, 0x2000 at 0x10010, rep 1 | RWXS] -> [0x3000, 0x3800 at 0x13000, rep 1 | RWXS] -> [0x3800, 0x4000 at 0x23800, rep 1 | RWXS] -> [0x4000, 0x5000 at 0x14000, rep 3 | R___]}",
-            &remapper.remap(tracker.permissions(&pool, all_same_color.clone())),
+            &remapper.remap(tracker.permissions(&pool, all_same_color.clone(),None,true)),
         );
 
         // Unmap some segments
         remapper.unmap_range(0x3800, 0x800).unwrap();
         snap(
             "{[0x1000, 0x2000 at 0x10010, rep 1 | RWXS] -> [0x3000, 0x3800 at 0x13000, rep 1 | RWXS] -> [0x3800, 0x4000 at 0x3800, rep 1 | RWXS] -> [0x4000, 0x5000 at 0x14000, rep 3 | R___]}",
-            &remapper.remap(tracker.permissions(&pool, all_same_color.clone())),
+            &remapper.remap(tracker.permissions(&pool, all_same_color.clone(),None,true)),
         );
         remapper.unmap_range(0x3000, 0x800).unwrap();
         snap(
             "{[0x1000, 0x2000 at 0x10010, rep 1 | RWXS] -> [0x3000, 0x4000 at 0x3000, rep 1 | RWXS] -> [0x4000, 0x5000 at 0x14000, rep 3 | R___]}",
-            &remapper.remap(tracker.permissions(&pool, all_same_color.clone())),
+            &remapper.remap(tracker.permissions(&pool, all_same_color.clone(),None,true)),
         );
 
         // Delete regions but not the segments yet
@@ -747,19 +1172,19 @@ mod tests {
         );
         snap(
             "{[0x1000, 0x2000 at 0x10010, rep 1 | RWXS] -> [0x3000, 0x4000 at 0x3000, rep 1 | RWXS]}",
-            &remapper.remap(tracker.permissions(&pool, all_same_color.clone())),
+            &remapper.remap(tracker.permissions(&pool, all_same_color.clone(),None,true)),
         );
 
         // Unmap more segments
         remapper.unmap_range(0x4000, 0x1000).unwrap();
         snap(
             "{[0x1000, 0x2000 at 0x10010, rep 1 | RWXS] -> [0x3000, 0x4000 at 0x3000, rep 1 | RWXS]}",
-            &remapper.remap(tracker.permissions(&pool, all_same_color.clone())),
+            &remapper.remap(tracker.permissions(&pool, all_same_color.clone(),None,true)),
         );
         remapper.unmap_range(0x1000, 0x1000).unwrap();
         snap(
             "{[0x1000, 0x2000 at 0x1000, rep 1 | RWXS] -> [0x3000, 0x4000 at 0x3000, rep 1 | RWXS]}",
-            &remapper.remap(tracker.permissions(&pool, all_same_color.clone())),
+            &remapper.remap(tracker.permissions(&pool, all_same_color.clone(),None,true)),
         );
     }
 
@@ -801,14 +1226,14 @@ mod tests {
         );
         snap(
             "{[0x1000, 0x3000 at 0x1000, rep 1 | RWXS] -> [0x4000, 0x6000 at 0x4000, rep 1 | RWXS]}",
-            &remapper.remap(tracker.permissions(&pool, all_same_color.clone())),
+            &remapper.remap(tracker.permissions(&pool, all_same_color.clone(),None,true)),
         );
 
         // Create a mapping that cross the region boundary
         remapper.map_range(0x2000, 0x10000, 0x10000, 1).unwrap();
         snap(
             "{[0x1000, 0x2000 at 0x1000, rep 1 | RWXS] -> [0x2000, 0x3000 at 0x10000, rep 1 | RWXS] -> [0x4000, 0x6000 at 0x12000, rep 1 | RWXS]}",
-            &remapper.remap(tracker.permissions(&pool, all_same_color.clone())),
+            &remapper.remap(tracker.permissions(&pool, all_same_color.clone(),None,true)),
         );
     }
 
@@ -858,7 +1283,7 @@ mod tests {
             // Note: here for some reason the tracker do not properly merge the two contiguous
             // regions. We should figure that out at some point and optimize the tracker.
             "{[0x1000, 0x3000 at 0x10000, rep 1 | RWXS] -> [0x3000, 0x4000 at 0x12000, rep 1 | RWXS] -> [0x3000, 0x4000 at 0x5000, rep 1 | RWXS]}",
-            &remapper.remap(tracker.permissions(&pool, all_same_color)),
+            &remapper.remap(tracker.permissions(&pool, all_same_color,None,true)),
         );
     }
 
@@ -886,7 +1311,7 @@ mod tests {
         //strategy: everything that is not explicity remapped will be identity mapped
         snap(
             "{[0x1000, 0x1010 at 0x10000, rep 1 | RWXS] -> [0x1010, 0x4000 at 0x1010, rep 1 | RWXS]}",
-            &remapper.remap(tracker.permissions(&pool, ActiveMemoryColoring {})),
+            &remapper.remap(tracker.permissions(&pool, ActiveMemoryColoring {},None,true)),
         );
     }
 
@@ -918,7 +1343,7 @@ mod tests {
         );
         snap(
             "{[0x1000, 0x4000 | RWXS]}",
-            tracker.permissions(&pool, all_same_color.clone()),
+            tracker.permissions(&pool, all_same_color.clone(), None, true),
         );
 
         remapper.map_range(0x2_000, 0x10_000, 0x1000, 1).unwrap();
@@ -926,17 +1351,17 @@ mod tests {
 
         println!(
             "Permissions Iterator: {}",
-            tracker.permissions(&pool, all_same_color.clone())
+            tracker.permissions(&pool, all_same_color.clone(), None, true)
         );
         snap(
             "{[0x1000, 0x2000 at 0x1000, rep 1 | RWXS] -> [0x2000, 0x3000 at 0x10000, rep 1 | RWXS] -> [0x3000, 0x4000 at 0x20000, rep 1 | RWXS]}",
-            &remapper.remap(tracker.permissions(&pool, all_same_color.clone())),
+            &remapper.remap(tracker.permissions(&pool, all_same_color.clone(),None,true)),
         );
 
         remapper.map_range(0x1_000, 0x30_000, 0x3_000, 1).unwrap();
         snap(
             "{[0x1000, 0x4000 at 0x30000, rep 1 | RWXS] -> [0x2000, 0x3000 at 0x10000, rep 1 | RWXS] -> [0x3000, 0x4000 at 0x20000, rep 1 | RWXS]}",
-            &remapper.remap(tracker.permissions(&pool,all_same_color.clone())),
+            &remapper.remap(tracker.permissions(&pool,all_same_color.clone(),None,true)),
         );
     }
 
@@ -969,14 +1394,14 @@ mod tests {
         );
         snap(
             "{[0x1000, 0x6000 at 0x1000, rep 1 | RWXS]}",
-            &remapper.remap(tracker.permissions(&pool, all_same_color.clone())),
+            &remapper.remap(tracker.permissions(&pool, all_same_color.clone(), None, true)),
         );
 
         // Remap the whole region
         remapper.map_range(0x1000, 0x10000, 0x5000, 1).unwrap();
         snap(
             "{[0x1000, 0x6000 at 0x10000, rep 1 | RWXS]}",
-            &remapper.remap(tracker.permissions(&pool, all_same_color.clone())),
+            &remapper.remap(tracker.permissions(&pool, all_same_color.clone(), None, true)),
         );
 
         // Split the region in two
@@ -1022,7 +1447,7 @@ mod tests {
         );
         snap(
             "{[0x1000, 0x6000 at 0x10000, rep 1 | RWXS]}",
-            &remapper.remap(tracker.permissions(&pool, all_same_color.clone())),
+            &remapper.remap(tracker.permissions(&pool, all_same_color.clone(), None, true)),
         );
     }
 
@@ -1093,7 +1518,7 @@ mod tests {
         );
         snap(
             "{[0x2000, 0x8000 at 0x20000, rep 1 | RWXS]}",
-            &remapper.remap(tracker.permissions(&pool, all_same_color.clone())),
+            &remapper.remap(tracker.permissions(&pool, all_same_color.clone(), None, true)),
         );
 
         tracker
@@ -1156,7 +1581,7 @@ mod tests {
             &tracker.iter(&pool),
         );
         let iterator = SingleSegmentIterator {
-            regions: tracker.permissions(&pool, all_same_color.clone()),
+            regions: tracker.permissions(&pool, all_same_color.clone(), None, true),
             next_region: None,
             cursor: 0,
             segment: dummy_segment(0x1000, 0x10000, 0x1000, 1),
@@ -1164,7 +1589,7 @@ mod tests {
         snap("", iterator);
 
         let iterator = SingleSegmentIterator {
-            regions: tracker.permissions(&pool, all_same_color.clone()),
+            regions: tracker.permissions(&pool, all_same_color.clone(), None, true),
             next_region: None,
             cursor: 0,
             segment: dummy_segment(0x7000, 0x10000, 0x1000, 1),
@@ -1172,7 +1597,7 @@ mod tests {
         snap("", iterator);
 
         let iterator = SingleSegmentIterator {
-            regions: tracker.permissions(&pool, all_same_color.clone()),
+            regions: tracker.permissions(&pool, all_same_color.clone(), None, true),
             next_region: None,
             cursor: 0,
             segment: dummy_segment(0x2000, 0x10000, 0x2000, 1),
@@ -1180,7 +1605,7 @@ mod tests {
         snap("[0x3000, 0x4000 at 0x11000, rep 1 | RWXS]", iterator);
 
         let iterator = SingleSegmentIterator {
-            regions: tracker.permissions(&pool, all_same_color.clone()),
+            regions: tracker.permissions(&pool, all_same_color.clone(), None, true),
             next_region: None,
             cursor: 0,
             segment: dummy_segment(0x5000, 0x10000, 0x2000, 1),
@@ -1188,7 +1613,7 @@ mod tests {
         snap("[0x5000, 0x6000 at 0x10000, rep 1 | RWXS]", iterator);
 
         let iterator = SingleSegmentIterator {
-            regions: tracker.permissions(&pool, all_same_color.clone()),
+            regions: tracker.permissions(&pool, all_same_color.clone(), None, true),
             next_region: None,
             cursor: 0,
             segment: dummy_segment(0x4000, 0x10000, 0x1000, 1),
@@ -1196,7 +1621,7 @@ mod tests {
         snap("[0x4000, 0x5000 at 0x10000, rep 1 | RWXS]", iterator);
 
         let iterator = SingleSegmentIterator {
-            regions: tracker.permissions(&pool, all_same_color.clone()),
+            regions: tracker.permissions(&pool, all_same_color.clone(), None, true),
             next_region: None,
             cursor: 0,
             segment: dummy_segment(0x2000, 0x10000, 0x5000, 1),
@@ -1219,7 +1644,7 @@ mod tests {
         );
 
         let iterator = SingleSegmentIterator {
-            regions: tracker.permissions(&pool, all_same_color.clone()),
+            regions: tracker.permissions(&pool, all_same_color.clone(), None, true),
             next_region: None,
             cursor: 0,
             segment: dummy_segment(0x2000, 0x10000, 0x8000, 1),

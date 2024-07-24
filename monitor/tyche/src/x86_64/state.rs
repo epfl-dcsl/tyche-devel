@@ -3,13 +3,10 @@ use core::sync::atomic::{AtomicBool, Ordering};
 use capa_engine::config::{NB_CORES, NB_DOMAINS, NB_REMAP_REGIONS};
 use capa_engine::context::{RegisterContext, RegisterState};
 use capa_engine::{
-    CapaEngine, CapaError, Domain, GenArena, Handle, LocalCapa, MemOps, PermissionIterator,
-    Remapper, ResourceKind,
+    CapaEngine, CapaError, Domain, GenArena, Handle, LocalCapa, MemOps, Remapper, ResourceKind,
 };
 use mmu::eptmapper::EPT_ROOT_FLAGS;
-use mmu::ioptmapper:: PAGE_SIZE;
 use mmu::mapper::Mapper;
-use mmu::memory_coloring::color_to_phys::{ColorToPhys, MemoryRegionDescription};
 use mmu::memory_coloring::ActiveMemoryColoring;
 use mmu::{EptMapper, FrameAllocator, IoPtFlag, IoPtMapper};
 use spin::{Mutex, MutexGuard};
@@ -25,7 +22,6 @@ use super::vmx_helper::{dump_host_state, load_host_state};
 use crate::allocator::allocator;
 use crate::monitor::PlatformState;
 use crate::rcframe::{RCFrame, RCFramePool, EMPTY_RCFRAME};
-use crate::statics::get_manifest;
 use crate::sync::Barrier;
 
 /// VMXState encapsulates the vmxon and current vcpu.
@@ -80,159 +76,6 @@ pub struct DataX86 {
 
 pub type StateX86 = VmxState;
 
-/// Maps `ResourceKind::RAM` according to the color attribute. `ResourceKind::Device` are passed through mapped
-/// # Arguments
-/// - `permission_builder` : build page table entry permission flags for the mappings
-fn color_aware_mapper<F: Fn(&MemOps,&ResourceKind)->Result<u64,()>>(
-    mapper: &mut impl Mapper,
-    permission_iter: PermissionIterator<ActiveMemoryColoring>,
-    domain: &MutexGuard<'static, DataX86>,
-    permission_builder : F,
-) {
-    let allocator = allocator();
-
-    let mut next_blocked_iter = domain
-        .remapper
-        .remap(permission_iter.clone())
-        .filter(|v| match v.resource_kind {
-            ResourceKind::RAM(_) => false,
-            ResourceKind::Device => true,
-        });
-    let mut next_blocked = next_blocked_iter.next();
-
-
-    let mut next_ram_gpa = 0;
-    //skip over device regions that have smaller addr than first ram region
-    let first_ram_region = domain
-        .remapper
-        .remap(permission_iter.clone())
-        .filter(|v| {
-            ResourceKind::same_kind(&v.resource_kind, &ResourceKind::ram_with_all_partitions())
-        })
-        .next()
-        .expect("no ram regions");
-    while let Some(nb) = next_blocked.as_ref() {
-        if nb.hpa > first_ram_region.hpa {
-            break;
-        }
-        next_ram_gpa += nb.size;
-        next_blocked = next_blocked_iter.next();
-    }
-
-    let mut _mapped_ram_bytes = 0;
-    let mut _mapped_device_bytes = 0;
-    //total number of contig phys ranges that we used to back the GPA RAM space
-    let mut total_ram_range_count = 0;
-    for (_, range) in domain.remapper.remap(permission_iter).enumerate() {
-        
-        let flags = permission_builder(&range.ops, &range.resource_kind).expect("failed to build flags");
-        /* Observations/Assumptions:
-         * The results of the iterator are sorted, i.e. we go through the address space "left to right".
-         * With partititions, a memory range might be smaller that its actually physical bounds, however
-         * it cannot be larger. Thus, we cannot end up in the situation where we want to map an identity
-         * mapped device but have already used that part of the address space for one of the preceedign
-         * mappings
-         *
-         * TODO: preserve order when adding new colors later on
-         */
-        let resource_kind = range.resource_kind;
-        match resource_kind {
-            capa_engine::ResourceKind::RAM(partitions_ids) => {
-                let color_to_phys = ColorToPhys::new(
-                    MemoryRegionDescription::BootMemory(get_manifest().get_boot_mem_regions()),
-                    ActiveMemoryColoring {},
-                    partitions_ids,
-                    Some((range.hpa, range.hpa + range.size)),
-                );
-
-                let mut chunk_idx = 0;
-
-                //TODO: luca: have not yet implemented support for multiple repeat
-                assert!(range.repeat == 1);
-
-                color_to_phys.visit_all_as_ranges(|partition_chunk| {
-                 //figure out amout of bytes we can map before hitting the next range blocked for a device
-                 let mut remaining_chunk_bytes = partition_chunk.size();
-                 while remaining_chunk_bytes > 0 {
-                     let map_size;
-                     let mut advance_next_blocked = false;
-                     match &next_blocked {
-                         Some(next_blocked) => {
-                             //for device mem we need to compare gour gpa with hpa, because we will passtrhough/identity map them
-                             assert!(next_ram_gpa <= next_blocked.hpa);
-                             let bytes_until_blocked = next_blocked.hpa - next_ram_gpa;
-                             assert!(bytes_until_blocked > 0, "bytes untill blocked was 0. next_blocked.hpa = 0x{:x}, next_ram_gpa 0x{:x}", next_blocked.hpa, next_ram_gpa);
-                             if remaining_chunk_bytes < bytes_until_blocked {
-                                 map_size = remaining_chunk_bytes;
-                             } else {
-                                 advance_next_blocked = true;
-                                 map_size = bytes_until_blocked;
-                             }
-                         }
-                         None => {
-                             //No more blocked ranges -> can map everything
-                             map_size = remaining_chunk_bytes;
-                         }
-                     }
-
-                     assert_eq!(next_ram_gpa % PAGE_SIZE, 0, "next_ram_gpa is not aligned");
-                     assert_eq!(map_size % PAGE_SIZE, 0, "map_size ist not aligned");
-                     assert!(map_size > 0);
-                     mapper.map_range(
-                         allocator,
-                         &GuestPhysAddr::new(next_ram_gpa),
-                         &HostPhysAddr::new(partition_chunk.end - remaining_chunk_bytes),
-                         map_size,
-                         flags,
-                     );
-                     _mapped_ram_bytes += map_size;
-                     remaining_chunk_bytes -= map_size;
-                     next_ram_gpa += map_size;
-                     if advance_next_blocked {
-                         let mut cur_blocked = next_blocked
-                         .expect("advance_next_blocked true but next block was None");
-
-
-                         assert_eq!(next_ram_gpa, cur_blocked.hpa);
-                         next_ram_gpa += cur_blocked
-                             .size;
-
-                         next_blocked = next_blocked_iter.next();
-                        
-                        //next blocked might by contiguous -> skip over next until there is a gap
-                         while let Some(nb) = next_blocked {
-                            if nb.hpa == (cur_blocked.hpa + cur_blocked.size) {
-                                assert_eq!(next_ram_gpa,nb.hpa);
-                                next_ram_gpa += nb.size;
-                                cur_blocked = nb;
-                                next_blocked = next_blocked_iter.next();
-                            } else {
-                                break
-                            }
-                         }
-                     }
-                 } // end of "while remaining_chunk_bytes > 0"
-                 chunk_idx += 1;
-                total_ram_range_count += 1;
-
-             });
-            }
-            // Device memory must be identity mapped, to pass through the access to the pyhsical HW
-            ResourceKind::Device => {
-                mapper.map_range(
-                    allocator,
-                    &GuestPhysAddr::new(range.hpa),
-                    &HostPhysAddr::new(range.hpa),
-                    range.size,
-                    flags,
-                );
-
-                _mapped_device_bytes += range.size;
-            }
-        } // end of "match resource_kind"
-    }
-}
-
 impl StateX86 {
     pub unsafe fn free_ept(ept: HostPhysAddr, allocator: &impl FrameAllocator) {
         let mapper = EptMapper::new(allocator.get_physical_offset().as_usize(), ept);
@@ -248,10 +91,11 @@ impl StateX86 {
         domain_handle: Handle<Domain>,
         engine: &mut MutexGuard<CapaEngine>,
     ) -> bool {
-        let mut domain: MutexGuard<'_, DataX86> = Self::get_domain(domain_handle);
+        let mut domain = Self::get_domain(domain_handle);
         let allocator = allocator();
         if let Some(iopt) = domain.iopt {
             unsafe { Self::free_iopt(iopt, allocator) };
+            // TODO: global invalidate context cache, PASID cache, and flush the IOTLB
         }
 
         let iopt_root = allocator
@@ -262,22 +106,22 @@ impl StateX86 {
             allocator.get_physical_offset().as_usize(),
             iopt_root.phys_addr,
         );
-
-      
-        let permission_cb = |ops:& MemOps, _ : &ResourceKind| {
-            let mut flags = IoPtFlag::empty();
-
-            if ops.contains(MemOps::READ) {
-                flags |= IoPtFlag::READ;
+        let permission_iter = engine
+            .get_domain_permissions(domain_handle, ActiveMemoryColoring {}, None, true)
+            .unwrap();
+        for range in domain.remapper.remap(permission_iter) {
+            if !range.ops.contains(MemOps::READ) {
+                log::error!("there is a region without read permission: {}", range);
+                continue;
             }
-            if ops.contains(MemOps::WRITE) {
-                flags |= IoPtFlag::WRITE;
-            }
-
-            Ok(flags.bits())
-        };
-        let permission_iter = engine.get_domain_permissions(domain_handle, ActiveMemoryColoring{}).unwrap();
-        color_aware_mapper(&mut iopt_mapper, permission_iter, &domain, permission_cb);
+            iopt_mapper.map_range(
+                allocator,
+                &GuestPhysAddr::new(range.gpa),
+                &HostPhysAddr::new(range.hpa),
+                range.size,
+                (IoPtFlag::READ | IoPtFlag::WRITE).bits(),
+            )
+        }
 
         domain.iopt = Some(iopt_root.phys_addr);
 
@@ -288,9 +132,11 @@ impl StateX86 {
         let mut iommu = IOMMU.lock();
         //will only be != 0 if we have initialized the IOMUU. Could be more elegant with an option
         if iommu.as_ptr_mut() as usize != 0 {
-
             //Enable queued invalidation if it is not already enabled
-            if !iommu.get_global_status().contains(Command::QUEUED_INVALIDATION) {
+            if !iommu
+                .get_global_status()
+                .contains(Command::QUEUED_INVALIDATION)
+            {
                 if let Err(e) = iommu.enable_quid_invalidation(allocator) {
                     log::error!("Failed to enable queued invalidation: {}", e);
                     panic!("IOMMU setup failed");
@@ -318,11 +164,10 @@ impl StateX86 {
 
             log::info!("IOMMU: flushing");
             if let Err(e) = iommu.full_flush_sync() {
-                log::error!("IOMMU: flush failed: {}",e);
+                log::error!("IOMMU: flush failed: {}", e);
                 panic!("IOMMU flush failed");
             }
             log::warn!("I/O MMU Fault: {:?}", iommu.get_fault_status());
-
         }
         false
     }
@@ -344,46 +189,37 @@ impl StateX86 {
             allocator.get_physical_offset().as_usize(),
             ept_root.phys_addr,
         );
-
-        log::info!("\n #### Updating EPTs ####\n");
-        let permission_cb = |ops:& MemOps, kind: &ResourceKind| {
-            let mut flags = EptEntryFlags::empty();
-            if !ops.contains(MemOps::READ) {
-                match kind {
-                    ResourceKind::RAM(_) => {
-                        log::error!("there is a region without read permission: ");
-                        return Err(());
-                    }
-                    //device region can have no access permissions to repreent that a device is blocked
-                    //without changing the GPA layout
-                    ResourceKind::Device => (),
-                }
+        let permission_iter = engine
+            .get_domain_permissions(domain_handle, ActiveMemoryColoring {}, None, true)
+            .unwrap();
+        for range in domain.remapper.remap(permission_iter) {
+            if !range.ops.contains(MemOps::READ) {
+                log::error!("there is a region without read permission: {}", range);
+                continue;
             }
-            if ops.contains(MemOps::READ) {
-                flags |= EptEntryFlags::READ;
-            }
-            if ops.contains(MemOps::WRITE) {
+            let mut flags = EptEntryFlags::READ;
+            if range.ops.contains(MemOps::WRITE) {
                 flags |= EptEntryFlags::WRITE;
             }
-    
-            if ops.contains(MemOps::EXEC) {
-                if ops.contains(MemOps::SUPER) {
+            if range.ops.contains(MemOps::EXEC) {
+                if range.ops.contains(MemOps::SUPER) {
                     flags |= EptEntryFlags::SUPERVISOR_EXECUTE;
                 } else {
                     flags |= EptEntryFlags::USER_EXECUTE;
                 }
             }
-            let mut flags = flags.bits();
-            match kind {
-                ResourceKind::RAM(_) => flags |= EptMemoryType::WB.bits(),
-                ResourceKind::Device => flags |= EptMemoryType::UC.bits(),
-            }
-            Ok(flags)
-        };
-
-        //luca: iterator over ranges with same memory access permissions
-        let permission_iter = engine.get_domain_permissions(domain_handle,ActiveMemoryColoring{}, ).unwrap();
-        color_aware_mapper(&mut mapper, permission_iter, &domain,permission_cb);
+            let mem_type = match &range.resource_kind {
+                ResourceKind::RAM(_) => EptMemoryType::WB,
+                ResourceKind::Device => EptMemoryType::UC,
+            };
+            mapper.map_range(
+                allocator,
+                &GuestPhysAddr::new(range.gpa),
+                &HostPhysAddr::new(range.hpa),
+                range.size,
+                flags.bits() | mem_type.bits(),
+            );
+        }
 
         loop {
             match TLB_FLUSH[domain_handle.idx()].compare_exchange(

@@ -789,9 +789,10 @@ impl PlatformState for StateRiscv {
         &mut self,
         engine: &mut MutexGuard<CapaEngine>,
         domain: Handle<Domain>,
-        alias: usize,
+        gpa: GuestPhysAddr,
+        hpa: HostPhysAddr,
+        size: usize,
         repeat: usize,
-        region: &AccessRights,
     ) -> Result<(), CapaError> {
         //TODO(aghosn): Apparently nothing to do.
         Ok(())

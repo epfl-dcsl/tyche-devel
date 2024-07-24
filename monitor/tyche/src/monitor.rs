@@ -5,14 +5,16 @@ use capa_engine::config::NB_CORES;
 use capa_engine::utils::BitmapIterator;
 use capa_engine::{
     permission, AccessRights, Buffer, CapaEngine, CapaError, CapaInfo, Domain, Handle, LocalCapa,
-    MemOps, NextCapaToken, ResourceKind, MEMOPS_ALL, MEMOPS_EXTRAS,
+    MemOps, NextCapaToken, PermissionIterator, ResourceKind, MEMOPS_ALL, MEMOPS_EXTRAS,
 };
 use mmu::ioptmapper::PAGE_SIZE;
 use mmu::memory_coloring::color_to_phys::MemoryRegionKind;
-use mmu::memory_coloring::{MemoryRange, PartitionBitmap};
+use mmu::memory_coloring::{
+    ActiveMemoryColoring, ColorBitmap, MemoryColoring, MemoryRange, PartitionBitmap,
+};
 use spin::{Mutex, MutexGuard};
 use stage_two_abi::Manifest;
-use vmx::HostVirtAddr;
+use vmx::{GuestPhysAddr, HostPhysAddr, HostVirtAddr};
 
 use crate::arch::cpuid;
 use crate::attestation_domain::calculate_attestation_hash;
@@ -47,6 +49,7 @@ const EMPTY_UPDATE_BUFFER: Mutex<Buffer<CoreUpdate>> = Mutex::new(Buffer::new())
 
 // —————————————————————————— Trying to generalize —————————————————————————— //
 
+//trait for platform specific behaviour
 pub trait PlatformState {
     type DomainData;
     type Context;
@@ -138,13 +141,21 @@ pub trait PlatformState {
         region: &AccessRights,
     ) -> bool;
 
+    fn create_initial_mappings<T: MemoryColoring + Clone>(
+        &mut self,
+        domain: Handle<Domain>,
+        core_partitions: PermissionIterator<T>,
+        additional_partitions: PermissionIterator<T>,
+    ) -> Result<(), CapaError>;
+
     fn map_region(
         &mut self,
         engine: &mut MutexGuard<CapaEngine>,
         domain: Handle<Domain>,
-        alias: usize,
+        gpa: GuestPhysAddr,
+        hpa: HostPhysAddr,
+        size: usize,
         repeat: usize,
-        region: &AccessRights,
     ) -> Result<(), CapaError>;
 
     fn unmap_region(
@@ -186,7 +197,6 @@ pub trait Monitor<T: PlatformState + 'static> {
      */
     fn do_init(state: &mut T, manifest: &'static Manifest) -> Handle<Domain> {
         log::info!("do_init");
-
         if manifest.iommu_hva != 0 {
             log::info!(
                 "Initializing IOMMU in tyche using HVA 0x{:013x}",
@@ -201,7 +211,9 @@ pub trait Monitor<T: PlatformState + 'static> {
             .create_manager_domain(permission::monitor_inter_perm::ALL)
             .unwrap();
         Self::apply_updates(state, &mut engine);
+        //colors that should be used by Linux in dom0
         let mut dom0_partititons = PartitionBitmap::new();
+        //parse manifset to configure colors that should be used by Linux in dom0
         match manifest.dom0_memory {
             MemoryRange::ColoredRange(cr) => {
                 log::info!(
@@ -221,6 +233,8 @@ pub trait Monitor<T: PlatformState + 'static> {
                 dom0_partititons.set_all(true);
             }
         }
+        //create CAPAs for dom0
+        //TODO: we can again create root regions for all memory. The remapper will take care of differentiating between core memory and additional memory
         for mr in manifest.get_boot_mem_regions() {
             match mr.kind {
                 MemoryRegionKind::UseableRAM => match manifest.dom0_memory {
@@ -382,6 +396,45 @@ pub trait Monitor<T: PlatformState + 'static> {
 
             prev = cur;
         }
+
+        //if we are here, we have created all capas for the core memory that should get used by dom0
+        //now we can create the remappings
+
+        //create mappings for dom0 core memory
+        let dom0_core_memory = engine
+            .get_domain_permissions(
+                domain,
+                ActiveMemoryColoring {},
+                Some(dom0_partititons),
+                true,
+            )
+            .expect("failed to instantiate permission iterator over dom0 core memory");
+
+        let dom0_additional_colors = match &manifest.remaining_dom_memory {
+            MemoryRange::ColoredRange(cr) => {
+                let mut bm = PartitionBitmap::new();
+                for color_id in cr.first_color..(cr.first_color + cr.color_count) {
+                    bm.set(color_id as usize, true);
+                }
+                bm
+            }
+            MemoryRange::SinglePhysContigRange(_) => todo!(),
+            MemoryRange::AllRamRegionInRange(_) => todo!(),
+        };
+
+        let dom0_additional_memory = engine
+            .get_domain_permissions(
+                domain,
+                ActiveMemoryColoring {},
+                Some(dom0_additional_colors),
+                false,
+            )
+            .expect("failed to instantiate permission iterator over additional dom0 memory");
+
+        state
+            .create_initial_mappings(domain, dom0_core_memory, dom0_additional_memory)
+            .expect("failed to create initial memory mappings");
+
         log::info!("Created all regions. Calling apply_updates...");
         //TODO: call the platform?
         Self::apply_updates(state, &mut engine);
@@ -687,7 +740,14 @@ pub trait Monitor<T: PlatformState + 'static> {
         }
         {
             let target = engine.get_domain_capa(*current, to)?;
-            state.map_region(&mut engine, target, alias, repeat, &region_info)?;
+            state.map_region(
+                &mut engine,
+                target,
+                GuestPhysAddr::new(alias),
+                HostPhysAddr::new(region_info.start),
+                region_info.end - region_info.start,
+                repeat,
+            )?;
         }
         Self::apply_updates(state, &mut engine);
         Ok(())

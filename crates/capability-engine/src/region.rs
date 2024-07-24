@@ -253,6 +253,7 @@ enum RegionResourceKind {
 
 impl RegionResourceKind {
     /// Convenience function to create a RAM resource with all zero refcount
+    #[allow(dead_code)]
     const fn new_ram() -> RegionResourceKind {
         RegionResourceKind::RAM(PartitionRefCount::<{ ActiveMemoryColoring::COLOR_COUNT }>::new())
     }
@@ -926,10 +927,18 @@ impl RegionTracker {
         RegionIterator { pool, next: start }
     }
 
+    /// Transform granted CAPAs into deduplicated ranges of accessible
+    /// HPA ranges
+    /// # Arguments
+    /// - `additional_color_restrictions`: If Some, restrict allowed colors to only these. Must be
+    /// a subset of the colors granted in the CAPAs. Useful to distingiush between "core" memory and "future TD" memory
+    /// - `allow_devices` : If false, exclude device memory ranges
     pub fn permissions<'a, T: MemoryColoring + Clone>(
         &'a self,
         pool: &'a TrackerPool,
         memory_coloring: T,
+        additional_color_restrictions: Option<PartitionBitmap>,
+        allow_devices: bool,
     ) -> PermissionIterator<'a, T> {
         PermissionIterator {
             tracker: self,
@@ -937,6 +946,8 @@ impl RegionTracker {
             next: self.head,
             memory_coloring,
             current_subranges: None,
+            additional_color_restrictions,
+            allow_devices,
         }
     }
 }
@@ -971,6 +982,10 @@ pub struct PermissionIterator<'a, T: MemoryColoring + Clone> {
     memory_coloring: T,
     //If Some, we are still processing the colored subranges from the current region
     current_subranges: Option<(ColorToPhysIter<T>, MemOps, ResourceKind)>,
+    //further restrict the colors that we use from the ranges
+    additional_color_restrictions: Option<PartitionBitmap>,
+    //If false, don't use device memory
+    allow_devices: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -1067,7 +1082,12 @@ impl<'a, T: MemoryColoring + Clone> Iterator for PermissionIterator<'a, T> {
                         need_dimensions.1
                     );
                     for idx in 0..allowed_colors.get_payload_bits_len() {
-                        bm.set(idx, allowed_colors.get(idx));
+                        let allowed_in_capa = allowed_colors.get(idx);
+                        let allowed_in_add_restrict = match self.additional_color_restrictions {
+                            Some(v) => v.get(idx),
+                            None => true,
+                        };
+                        bm.set(idx, allowed_in_capa && allowed_in_add_restrict);
                     }
 
                     let ctp = ColorToPhys::new(
@@ -1091,19 +1111,21 @@ impl<'a, T: MemoryColoring + Clone> Iterator for PermissionIterator<'a, T> {
                         //we will "fall trhough" to the next iteration of the outer loop and continue
                         //with the next region
                         None => {
-                            log::error!("Empty Region: Region [0x{:013x}-0x{:013x}[, does not have any subranges with color {:x?}", start,end, allowed_colors);
+                            log::warn!("Warning: Empty Region: [0x{:013x}-0x{:013x}[, does not have any subranges with color {:x?}", start,end, allowed_colors);
                             self.current_subranges = None;
                         }
                     }
                 }
                 //Device mem is not subject to coloring, simply return range
                 ResourceKind::Device => {
-                    return Some(MemoryPermission {
-                        start,
-                        end,
-                        ops,
-                        resource_kind,
-                    })
+                    if self.allow_devices {
+                        return Some(MemoryPermission {
+                            start,
+                            end,
+                            ops,
+                            resource_kind,
+                        });
+                    }
                 }
             }
         }
@@ -1242,7 +1264,7 @@ mod tests {
         //Only sub range with colors 0 and 2 is returned, 0x1_000 - 0x2_000
         snap(
             "{[0x0, 0x1000 | RWXS] -> [0x2000, 0x3000 | RWXS]}",
-            tracker.permissions(&pool, coloring),
+            tracker.permissions(&pool, coloring, None, true),
         );
     }
 

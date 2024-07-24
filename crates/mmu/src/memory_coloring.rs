@@ -233,11 +233,13 @@ impl DummyMemoryColoring {
     pub const COLOR_ORDER: usize = 5;
     //mask to apply to page bits (after shifting) to get color id for address
     pub const COLOR_MASK: u64 = (1 << Self::COLOR_ORDER) - 1;
+
+    const SHIFT: usize = 20;
 }
 
 impl MemoryColoring for DummyMemoryColoring {
     fn compute_color(&self, frame: HostPhysAddr) -> u64 {
-        let color = (frame.as_u64() >> 12) & Self::COLOR_MASK;
+        let color = (frame.as_u64() >> Self::SHIFT) & Self::COLOR_MASK;
         color
     }
 
