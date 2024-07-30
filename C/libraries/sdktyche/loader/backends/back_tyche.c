@@ -117,6 +117,10 @@ int backend_td_alloc_mem(tyche_domain_t* domain)
   }
 
   dll_foreach(&(domain->mmaps), slot, list) {
+  // Quick fix for platforms that do not support this flag.
+#ifndef MAP_POPULATE
+#define MAP_POPULATE 0
+#endif
     slot->virtoffset = (usize) mmap(NULL, (size_t) (slot->size),
       PROT_READ|PROT_WRITE, MAP_SHARED|MAP_POPULATE, domain->handle, 0);
     if (slot->virtoffset == (usize) MAP_FAILED) {
