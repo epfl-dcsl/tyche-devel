@@ -1,6 +1,8 @@
 #pragma once
 
+#ifndef TYCHE_NO_ELF
 #include "elf64.h"
+#endif
 #include "tyche_capabilities_types.h"
 #ifdef RUN_WITH_KVM
 #include <linux/kvm.h>
@@ -9,9 +11,9 @@
 #endif
 
 #ifdef RUN_WITH_KVM
-#include "../loader/backends/back_kvm.h"
+#include "back_kvm.h"
 #else
-#include "../loader/backends/back_tyche.h"
+#include "back_tyche.h"
 #endif
 
 #include <elf.h>
@@ -66,8 +68,10 @@ typedef int handle_t;
 
 /// Encapsulates the parser state for a domain.
 typedef struct {
+#ifndef TYCHE_NO_ELF
   /// The ELF parser.
   elf_parser_t elf;
+#endif
 
   /// ELF header.
   Elf64_Ehdr header;

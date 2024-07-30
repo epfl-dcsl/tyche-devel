@@ -1,7 +1,7 @@
 #include "back_kvm.h"
 #include "common.h"
 #include "common_log.h"
-#include "../backend.h"
+#include "backend.h"
 #include "contalloc_driver.h"
 #include "sdk_tyche.h"
 #include "tyche_driver.h"
@@ -174,6 +174,10 @@ int backend_td_alloc_mem(tyche_domain_t* domain)
     close(domain->handle);
     goto failure;
   }
+  // Quick fix for platforms that do not support this flag.
+#ifndef MAP_POPULATE
+#define MAP_POPULATE 0
+#endif
   dll_foreach(&(domain->mmaps), slot, list) {
     slot->virtoffset = (usize) mmap(NULL, (size_t) slot->size,
       PROT_READ|PROT_WRITE, MAP_SHARED|MAP_POPULATE, domain->backend.memfd, 0);
