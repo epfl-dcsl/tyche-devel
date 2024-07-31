@@ -323,6 +323,49 @@ failure:
   return FAILURE;
 }
 
+int backend_td_config_vcpu(tyche_domain_t* domain, usize core_idx, usize field, usize value)
+{
+  msg_set_perm_t msg = {0};
+  struct backend_vcpu_info_t* vcpu = NULL;
+  if (domain == NULL) {
+    ERROR("Nul argument.");
+    goto failure;
+  }
+  dll_foreach(&(domain->vcpus), vcpu, list) {
+    if (vcpu->core_id == core_idx) {
+      break;
+    }
+  }
+  // Unable to find it.
+  if (vcpu == NULL) {
+    ERROR("Unable to find vcpu for core %lld. Call create_vcpu first!", core_idx);
+    goto failure;
+  }
+
+  // propagate the info.
+  switch(field) {
+    case GUEST_RIP:
+      vcpu->rip = value;
+      break;
+    case GUEST_RSP:
+      vcpu->stack = value;
+      break;
+    case GUEST_CR3:
+      vcpu->cr3 = value;
+      break;
+  }
+  msg.core = vcpu->core_id;
+  msg.idx = field;
+  msg.value = value;
+  if (ioctl(domain->handle, TYCHE_SET_DOMAIN_CORE_CONFIG, &msg) != SUCCESS) {
+    ERROR("Unable to set the field %llx for the vcpu.", field);
+    goto failure;
+  }
+  return SUCCESS;
+failure:
+  return FAILURE;
+}
+
 
 int backend_td_commit(tyche_domain_t* domain)
 {

@@ -62,7 +62,7 @@ int backend_td_delete(tyche_domain_t* domain);
 int backend_td_config(tyche_domain_t* domain, usize config, usize value);
 int backend_td_create_vcpu(tyche_domain_t* domain, usize core_idx);
 int backend_td_init_vcpu(tyche_domain_t* domain, usize core_idx);
-// int backend_td_config_vcpu(tyche_domain_t* domain, usize field, usize value);
+int backend_td_config_vcpu(tyche_domain_t* domain, usize core_idx, usize field, usize value);
 int backend_td_vcpu_run(tyche_domain_t* domain, usize core, uint32_t delta);
 int backend_create_pipe(tyche_domain_t* domain, usize* id, usize physoffset,
     usize size, memory_access_right_t flags, usize width);

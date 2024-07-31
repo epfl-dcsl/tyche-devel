@@ -5,6 +5,7 @@
 #include "contalloc_driver.h"
 #include "sdk_tyche.h"
 #include "tyche_driver.h"
+#include "tyche_register_map.h"
 
 #include <fcntl.h>
 #include <sys/mman.h>
@@ -423,6 +424,65 @@ int backend_td_init_vcpu(tyche_domain_t* domain, usize core_idx)
     goto failure;
   }
   // All done!
+  return SUCCESS;
+failure:
+  return FAILURE;
+}
+
+int backend_td_config_vcpu(tyche_domain_t* domain, usize core_idx, usize field, usize value)
+{
+  struct backend_vcpu_info_t* vcpu = NULL;
+  if (domain == NULL) {
+    ERROR("Nul argument.");
+    goto failure;
+  }
+  dll_foreach(&(domain->vcpus), vcpu, list) {
+    if (vcpu->core_id == core_idx) {
+      break;
+    }
+  }
+  // Unable to find it.
+  if (vcpu == NULL) {
+    ERROR("Unable to find vcpu for core %lld. Call create_vcpu first!", core_idx);
+    goto failure;
+  }
+
+  switch(field) {
+    case GUEST_RIP:
+      vcpu->regs.rip = value;
+      break;
+    case GUEST_RSP:
+      vcpu->regs.rsp = value;
+      break;
+    case GUEST_CR3:
+      vcpu->sregs.cr3 = value;
+      break;
+    case GUEST_FS_BASE:
+      vcpu->sregs.fs.base = value;
+      break;
+    case GUEST_FS_LIMIT:
+      vcpu->sregs.fs.limit = value;
+      break;
+    case GUEST_GS_BASE:
+      vcpu->sregs.gs.base = value;
+      break;
+    case GUEST_GS_LIMIT:
+      vcpu->sregs.gs.limit = value;
+      break;
+    default:
+      ERROR("Unkown field %llx", field);
+      goto failure;
+  }
+
+  // Register it with kvm.
+  if (ioctl(vcpu->fd, KVM_SET_SREGS, &(vcpu->sregs)) < 0) {
+    ERROR("Unable to set the sregs for core %lld", core_idx);
+    goto failure;
+  }
+  if (ioctl(vcpu->fd, KVM_SET_REGS, &(vcpu->regs)) < 0) {
+    ERROR("Unable to set the regs for core %lld", core_idx);
+    goto failure;
+  }
   return SUCCESS;
 failure:
   return FAILURE;
