@@ -140,6 +140,50 @@ failure:
   return FAILURE;
 }
 
+int backend_td_mmap(tyche_domain_t* domain, void* addr, size_t len,
+    int prot, int flags)
+{
+  msg_info_t info = {0};
+  domain_mslot_t *slot = NULL;
+  if (domain == NULL) {
+    ERROR("Nul argument.");
+    goto failure;
+  }
+  slot = malloc(sizeof(domain_mslot_t));
+  if (slot == NULL) {
+    ERROR("Unable to allocate the mslot");
+    goto failure;
+  }
+  memset(slot, 0, sizeof(domain_mslot_t));
+  // Quick fix for platforms that do not support this flag.
+#ifndef MAP_POPULATE
+#define MAP_POPULATE 0
+#endif
+  slot->size = len;
+  slot->id = domain->mslot_id++;
+  slot->virtoffset = (usize) mmap(addr, (size_t) slot->size, prot,
+      flags|MAP_SHARED|MAP_POPULATE, domain->handle, 0);
+  if (((void*)(slot->virtoffset)) == MAP_FAILED) {
+     ERROR("Unable to allocate memory for the domain.");
+     goto failure_dealloc;
+  }
+  info.virtaddr = slot->id;
+  if (ioctl(domain->handle, TYCHE_GET_PHYSOFFSET, &info) != SUCCESS) {
+     ERROR("Getting physoffset failed!");
+     close(domain->handle);
+     //TODO: munmap?
+     goto failure_dealloc;
+  }
+  slot->physoffset = info.physoffset;
+  dll_add(&(domain->mmaps), slot, list);
+  return SUCCESS;
+failure_dealloc:
+  free(slot);
+failure:
+  return FAILURE;
+}
+
+//TODO check if the driver handles the overflow.
 int backend_td_register_region(
     tyche_domain_t* domain,
     usize vstart,

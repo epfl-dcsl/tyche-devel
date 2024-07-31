@@ -4,6 +4,7 @@
  * This is the API for the backends: KVM and the Tyche driver.
  */
 #include "sdk_tyche_types.h"
+#include <stddef.h>
 
 // —————————————————————— Backend specific attributes ——————————————————————— //
 
@@ -46,6 +47,9 @@ typedef struct backend_info_t backend_info_t;
 int backend_td_create(tyche_domain_t* domain);
 /// Allocate memory for the domain.
 int backend_td_alloc_mem(tyche_domain_t* domain);
+/// Allocate memory and leave control to the caller; adds a slot.
+int backend_td_mmap(tyche_domain_t* domain, void* addr, size_t len,
+    int prot, int flags);
 /// Register a region for the domain.
 int backend_td_register_region(
     tyche_domain_t* domain,

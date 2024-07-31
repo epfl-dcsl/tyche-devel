@@ -16,7 +16,9 @@
 #include "back_tyche.h"
 #endif
 
+#ifndef TYCHE_NO_ELF
 #include <elf.h>
+#endif
 #include <stdint.h>
 
 // ——————————————————————————————— Constants ———————————————————————————————— //
@@ -27,6 +29,9 @@
 #define ALL_TRAPS (~(usize)(0))
 #define NO_TRAPS ((usize)(0))
 #define DEFAULT_PERM ((usize)0)
+
+/// KVM imposes a limit on the size of a contiguous memory segment.
+#define MAX_SLOT_SIZE (0x400000)
 
 // ————————————————————————————— Tychools Phdrs ————————————————————————————— //
 /// OS-specific Phdr (Segments) types.
@@ -71,7 +76,6 @@ typedef struct {
 #ifndef TYCHE_NO_ELF
   /// The ELF parser.
   elf_parser_t elf;
-#endif
 
   /// ELF header.
   Elf64_Ehdr header;
@@ -84,6 +88,8 @@ typedef struct {
 
   /// ELF strings.
   char* strings;
+
+#endif
 
 } parser_t;
 
@@ -103,7 +109,9 @@ typedef struct domain_mslot_t {
 
 /// Quick access to shared sections.
 typedef struct domain_shared_memory_t {
+#ifndef TYCHE_NO_ELF
   Elf64_Phdr* segment;
+#endif
   /// The address in the untrusted user space.
   usize untrusted_vaddr;
   /// Stored as a list.
