@@ -22,3 +22,6 @@ regression:
 	sudo ./programs/sdk_tyche/application_with_sandbox
 	sudo ./programs/sdk_kvm/app_selector
 	sudo ./programs/sdk_kvm/application_with_sandbox
+
+gramine:
+	cd /home/dev/Documents/gramine/CI-Examples/helloworld && sudo /gramine-install/gramine-tyche helloworld
