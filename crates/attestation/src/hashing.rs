@@ -57,3 +57,7 @@ pub fn hash_region(region: &[u8]) -> [u8; 32] {
         .try_into()
         .expect("Failed to convert hash slice into array: wrong size")
 }
+
+pub fn hash_resource_kind(hasher: &mut TycheHasher, serialized_rk: &[u8]) {
+    hasher.input(serialized_rk);
+}

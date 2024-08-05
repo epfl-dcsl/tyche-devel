@@ -1,3 +1,4 @@
+use core::fmt::Display;
 use core::ops::BitOrAssign;
 
 use utils::HostPhysAddr;
@@ -58,10 +59,12 @@ pub trait ColorBitmap {
     fn get(&self, bit_idx: usize) -> bool;
     ///Returns ("number of bytes for the internal bitmap", "number of things bitmap can track")
     fn dimensions(&self) -> (usize, usize);
+    //get raw underlying array
+    fn get_raw(&self) -> &[u8];
 }
 
 //TODO: add unit tests
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 /// Bitmap to represent `K`  different things. `N`` represents the number
 /// of bytes required for the bit map (i.e. align_up(K,8)). The is an extra
 /// param, so that we can keep everything const as const prevserving computations are not yet
@@ -128,6 +131,10 @@ impl<const N: usize, const K: usize> ColorBitmap for MyBitmap<N, K> {
     fn dimensions(&self) -> (usize, usize) {
         (N, K)
     }
+
+    fn get_raw(&self) -> &[u8] {
+        &self.data
+    }
 }
 
 impl<const N: usize, const K: usize> MyBitmap<N, K> {
@@ -138,6 +145,14 @@ impl<const N: usize, const K: usize> MyBitmap<N, K> {
             bits_count: K,
         }
     }
+
+    pub fn new_from(data: [u8; N]) -> Self {
+        Self {
+            data,
+            bits_count: K,
+        }
+    }
+
     /// Length of "virtual" array that covers only the payload bits
     /// Use this if you wan to iterate over all bits via `set` or `get`
     pub fn get_payload_bits_len(&self) -> usize {
@@ -215,6 +230,18 @@ impl<const N: usize, const K: usize> BitOrAssign for MyBitmap<N, K> {
         for idx in 0..N {
             self.data[idx] |= rhs.data[idx]
         }
+    }
+}
+
+impl<const N: usize, const K: usize> Display for MyBitmap<N, K> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "MyBitmap(allowed color id(s): ")?;
+        for color_id in 0..self.get_payload_bits_len() {
+            if self.get(color_id) {
+                write!(f, "{} ", color_id)?;
+            }
+        }
+        write!(f, ")")
     }
 }
 

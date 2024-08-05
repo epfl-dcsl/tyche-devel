@@ -13,7 +13,7 @@ use acpi::AcpiTables;
 use bootloader::boot_info::{MemoryRegion, MemoryRegionKind};
 use bootloader::{entry_point, BootInfo};
 use log::LevelFilter;
-use mmu::memory_coloring::MemoryColoring;
+use mmu::memory_coloring::{ActiveMemoryColoring, MemoryColoring};
 use mmu::{PtMapper, RangeAllocator};
 use s1::acpi::AcpiInfo;
 use s1::acpi_handler::TycheACPIHandler;
@@ -77,6 +77,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         s1::init_memory(physical_memory_offset, &mut boot_info.memory_regions)
             .expect("Failed to initialize memory")
     };
+    log::info!("Color Count {}", ActiveMemoryColoring::COLOR_COUNT);
     memory_map.print_layout();
     // Initialize kernel structures
     s1::init();

@@ -5,10 +5,7 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 
 use bootloader::boot_info::{MemoryRegion, MemoryRegionKind};
 use mmu::frame_allocator::PhysRange;
-use mmu::memory_coloring::{
-    ActiveMemoryColoring, ColorRange, MemoryColoring, MemoryColoringType, MemoryRange,
-    RamRegionsInRange,
-};
+use mmu::memory_coloring::{ColorRange, MemoryColoring, MemoryColoringType, MemoryRange};
 use mmu::ptmapper::PtMapper;
 use mmu::{FrameAllocator, RangeAllocator};
 use spin::Mutex;
@@ -99,10 +96,10 @@ pub struct PartitionedMemoryMap<T: MemoryColoring + Clone> {
 
 impl<T: MemoryColoring + Clone> PartitionedMemoryMap<T> {
     pub fn print_layout(&self) {
-        log::info!("guest memory range  : {:x?}", self.guest);
-        log::info!("stage1 memory range : {:x?}", self.stage1);
-        log::info!("stage2 memory range : {:x?}", self.stage2);
-        log::info!("unused memory       : {:x?}", self.unused);
+        log::info!("guest memory range  : 0x{:x?}", self.guest);
+        log::info!("stage1 memory range : 0x{:x?}", self.stage1);
+        log::info!("stage2 memory range : 0x{:x?}", self.stage2);
+        log::info!("unused memory       : 0x{:x?}", self.unused);
     }
 
     pub fn print_mem_regions(&self) {
@@ -136,7 +133,8 @@ impl<T: MemoryColoring + Clone> PartitionedMemoryMap<T> {
     /// Build memory regions for the GPA space that we will construct for the guest in stage2
     /// We need to construct them here, because we have to load them into memory and we want to avoid
     /// doing that from stage2
-    pub fn build_guest_memory_regions(&self) -> Vec<E820Entry> {
+    /// Returns the E820 entries as well as the start addr where we put the additional mem, followed by the size of each color
+    pub fn build_guest_memory_regions(&self) -> (Vec<E820Entry>, Option<Vec<usize>>) {
         /* 1) Keep Memory holes where they are (gaps between entry)
            2) Keep everything that is marked as reserved where it is (UnknownUefi(_) and UnknownBios(_))
            3) Out of caution, also Keep "Bootloader" where it is
@@ -157,7 +155,10 @@ impl<T: MemoryColoring + Clone> PartitionedMemoryMap<T> {
         let mut ram_bytes = 0;
         let mut device_bytes = 0;
 
+        let mut highest_region_end = 0;
+
         for bl_mr in self.all_regions {
+            highest_region_end = bl_mr.end;
             let bl_mr_bytes = bl_mr.end - bl_mr.start;
             assert_eq!(remaining_guest_mem_bytes % PAGE_SIZE as u64, 0);
             match bl_mr.kind {
@@ -237,6 +238,44 @@ impl<T: MemoryColoring + Clone> PartitionedMemoryMap<T> {
             mem_type: E820Types::Reserved,
         });
 
+        //we pass this up to stage
+
+        let mut additional_mem_info: Option<Vec<usize>> = None;
+        //If we use memory coloring, add E820 entries for all the memory of all additional colors add the end
+        //TODO: it looks like linux merges them adjacent entries of the same type, we we could probably just create
+        //one region with the size of the unused memory partition instead of recomputing the sizes of the individual colors
+        match self.unused {
+            MemoryRange::ColoredRange(cr) => {
+                assert_ne!(highest_region_end, 0);
+                assert_eq!(highest_region_end as usize % PAGE_SIZE, 0);
+                //leave nice gap to make this easier to manage
+                let mut start_gpa =
+                    GuestPhysAddr::new(highest_region_end as usize).align_up(1 << 30);
+                log::info!("Start GPA for additional mem: 0x{:013x?}", start_gpa);
+                let mut mem_info = Vec::new();
+                mem_info.push(start_gpa.as_usize());
+
+                for color_id in cr.first_color..(cr.first_color + cr.color_count) {
+                    let size = compute_color_partition_size(
+                        self.all_regions,
+                        self.coloring.as_ref().unwrap(),
+                        color_id,
+                    ) as u64;
+                    let entry = E820Entry {
+                        addr: start_gpa,
+                        size,
+                        mem_type: E820Types::Reserved,
+                    };
+                    log::info!("E820 entry for color id {:02} : {:x?}", color_id, entry);
+                    result.push(entry);
+                    mem_info.push(size as usize);
+                    start_gpa = start_gpa + size as usize;
+                }
+                additional_mem_info = Some(mem_info);
+            }
+            _ => (),
+        };
+
         log::info!(
             "RAM: {:0.2} GiB (0x{:x} bytes). Device {:0.2} GiB (0x{:x} bytes)",
             ram_bytes as f64 / (1 << 30) as f64,
@@ -245,7 +284,7 @@ impl<T: MemoryColoring + Clone> PartitionedMemoryMap<T> {
             device_bytes
         );
 
-        result
+        (result, additional_mem_info)
     }
 
     ///Create phys ranges for all useable RAM memory in the specified range.

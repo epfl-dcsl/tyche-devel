@@ -1,5 +1,6 @@
 use core::cell::Cell;
 use core::iter::Iterator;
+use core::usize;
 
 use attestation::hashing::HashEnclave;
 use attestation::signature::EnclaveReport;

@@ -50,7 +50,7 @@ pub mod config {
     pub const NB_TRACKER: usize = 1024;
     pub const NB_UPDATES: usize = 128;
     pub const NB_CORES: usize = 32; // NOTE: Can't be greater than 64 as we use 64 bits bitmaps.
-    pub const NB_REMAP_REGIONS: usize = 2 << 15; //luca: this changes the remapping pool size
+    pub const NB_REMAP_REGIONS: usize = 2 << 12; //luca: this changes the remapping pool size
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -80,6 +80,7 @@ pub enum CapaError {
     PlatformError,
     CapaOperationOnDifferentResourceKinds,
     InternalMappingError,
+    AccessToUnfinishedDataTransferEntry,
 }
 
 pub struct CapaEngine {

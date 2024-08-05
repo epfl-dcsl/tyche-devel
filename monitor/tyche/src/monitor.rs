@@ -1,4 +1,4 @@
-use core::panic;
+use core::{mem, panic, slice};
 
 use attestation::hashing::hash_region;
 use capa_engine::config::NB_CORES;
@@ -19,6 +19,9 @@ use vmx::{GuestPhysAddr, HostPhysAddr, HostVirtAddr};
 use crate::arch::cpuid;
 use crate::attestation_domain::calculate_attestation_hash;
 use crate::calls;
+use crate::data_transfer::{
+    DataPoolDirection, DataPoolEntry, DataTransferPool, DataTransferPoolHandle,
+};
 
 // ———————————————————————————————— Updates ————————————————————————————————— //
 /// Per-core updates
@@ -69,6 +72,34 @@ pub trait PlatformState {
         domain: Handle<Domain>,
         core: usize,
     ) -> Result<(), CapaError>;
+
+    fn create_new_domain_data_entry(
+        &self,
+        domain_handle: &mut Handle<Domain>,
+        direction: DataPoolDirection,
+    ) -> Result<DataTransferPoolHandle, CapaError>;
+
+    fn store_domain_data(
+        &self,
+        domain_handle: &mut Handle<Domain>,
+        data_handle: DataTransferPoolHandle,
+        data: &[u8],
+        mark_finished: bool,
+    ) -> Result<(), CapaError>;
+
+    fn consume_data_from_domain(
+        &self,
+        domain_handle: &mut Handle<Domain>,
+        data_handle: DataTransferPoolHandle,
+    ) -> Result<DataPoolEntry, CapaError>;
+
+    fn copy_data_to_domain(
+        &self,
+        domain_handle: &mut Handle<Domain>,
+        data_handle: DataTransferPoolHandle,
+    ) -> Result<([u8; DataTransferPool::TO_DOMAIN_CHUNCK_SIZE], usize, usize), CapaError>;
+
+    fn get_hpa(&self, domain_handle: Handle<Domain>, gpa: GuestPhysAddr) -> Option<HostPhysAddr>;
 
     fn platform_init_io_mmu(&self, addr: HostVirtAddr);
 
@@ -146,6 +177,7 @@ pub trait PlatformState {
         domain: Handle<Domain>,
         core_partitions: PermissionIterator<T>,
         additional_partitions: PermissionIterator<T>,
+        start_gpa_additional_partitions: Option<GuestPhysAddr>,
     ) -> Result<(), CapaError>;
 
     fn map_region(
@@ -245,7 +277,7 @@ pub trait Monitor<T: PlatformState + 'static> {
                                 AccessRights {
                                     start: mr.start as usize,
                                     end: mr.end as usize,
-                                    resource: ResourceKind::RAM(dom0_partititons),
+                                    resource: ResourceKind::ram_with_all_partitions(),
                                     ops: MEMOPS_ALL,
                                 },
                             )
@@ -261,7 +293,7 @@ pub trait Monitor<T: PlatformState + 'static> {
                                     AccessRights {
                                         start: mr.start as usize,
                                         end: mr.end as usize,
-                                        resource: ResourceKind::RAM(dom0_partititons),
+                                        resource: ResourceKind::ram_with_all_partitions(),
                                         ops: MEMOPS_ALL,
                                     },
                                 )
@@ -275,7 +307,7 @@ pub trait Monitor<T: PlatformState + 'static> {
                                     AccessRights {
                                         start: mr.start as usize,
                                         end: pr.range.end.as_usize(),
-                                        resource: ResourceKind::RAM(dom0_partititons),
+                                        resource: ResourceKind::ram_with_all_partitions(),
                                         ops: MEMOPS_ALL,
                                     },
                                 )
@@ -431,8 +463,24 @@ pub trait Monitor<T: PlatformState + 'static> {
             )
             .expect("failed to instantiate permission iterator over additional dom0 memory");
 
+        log::info!("dom0 core mem colors: {:x?}", dom0_partititons);
+        log::info!("dom0 additional colors: {:x?}", dom0_additional_colors);
+        let start_gpa_additional_mem = if manifest.dom0_gpa_additional_mem != 0 {
+            log::info!(
+                "Manifest specifies start GPA for additional mem: 0x{:013x}",
+                manifest.dom0_gpa_additional_mem
+            );
+            Some(GuestPhysAddr::new(manifest.dom0_gpa_additional_mem))
+        } else {
+            None
+        };
         state
-            .create_initial_mappings(domain, dom0_core_memory, dom0_additional_memory)
+            .create_initial_mappings(
+                domain,
+                dom0_core_memory,
+                dom0_additional_memory,
+                start_gpa_additional_mem,
+            )
             .expect("failed to create initial memory mappings");
 
         log::info!("Created all regions. Calling apply_updates...");
@@ -636,27 +684,60 @@ pub trait Monitor<T: PlatformState + 'static> {
         is_shared: bool,
         start: usize,
         end: usize,
-        prot: usize,
+        serialized_mem_ops: usize,
+        raw_data_handle: usize,
     ) -> Result<(LocalCapa, LocalCapa), CapaError> {
-        let prot = MemOps::from_usize(prot)?;
+        //Get Access to additional payload data
+        let data_handle = DataTransferPoolHandle::deserialize(raw_data_handle)?;
+        let data = state.consume_data_from_domain(current, data_handle)?;
+        let serialized_rk_data = &data.get_data()[..ResourceKind::SERIALIZED_SIZE];
+
+        //deserialize additional payload data
+        let resource_kind = ResourceKind::dom0_deserialization(serialized_rk_data)?;
+
+        let prot = MemOps::from_usize(serialized_mem_ops)?;
         if prot.intersects(MEMOPS_EXTRAS) {
             log::error!("Invalid prots for segment region {:?}", prot);
             return Err(CapaError::InvalidOperation);
         }
+
+        //process data
         let mut engine = Self::lock_engine(state, current);
         let access = AccessRights {
             start,
             end,
-            //TODO: luca: use new arguments to determine this
-            resource: ResourceKind::ram_with_all_partitions(),
+            resource: resource_kind,
             ops: prot,
         };
+        log::info!(
+            "do_segment_region: is_shared?: {}, access: {:x?}",
+            is_shared,
+            access
+        );
         let to_send = if is_shared {
-            engine.alias_region(*current, capa, access)?
+            match engine.alias_region(*current, capa, access) {
+                Ok(v) => v,
+                Err(e) => {
+                    log::error!("do_segment_region: alias_region failed with {:?}", e);
+                    return Err(e);
+                }
+            }
         } else {
-            engine.carve_region(*current, capa, access)?
+            match engine.carve_region(*current, capa, access) {
+                Ok(v) => v,
+                Err(e) => {
+                    log::error!("do_segment_region: carve_region failed with {:?}", e);
+                    return Err(e);
+                }
+            }
         };
-        let to_revoke = engine.create_revoke_capa(*current, to_send)?;
+        let to_revoke = match engine.create_revoke_capa(*current, to_send) {
+            Ok(v) => v,
+            Err(e) => {
+                log::error!("do_segment_region: create_revoke_capa failed with {:?}", e);
+                return Err(e);
+            }
+        };
         Self::apply_updates(state, &mut engine);
         Ok((to_send, to_revoke))
     }
@@ -687,10 +768,22 @@ pub trait Monitor<T: PlatformState + 'static> {
         alias: usize,
         is_repeat: bool,
         size: usize,
-        extra_rights: usize,
+        serialized_flags: usize,
+        raw_data_handle: usize,
     ) -> Result<(), CapaError> {
+        //access additional data
+        //Get Access to additional payload data
+        let data_handle = DataTransferPoolHandle::deserialize(raw_data_handle)?;
+        let data = state.consume_data_from_domain(current, data_handle)?;
+
+        /* TODO: lucaintegrate resource kind logic. It seems like the we only uses sth like hash etc from the flags
+         * and not RWX etc. We have the region from the LocalCapa anyways.
+         * Tclarify this with @aghosn
+         */
+        let serialized_rk_data = &data.get_data()[0..ResourceKind::SERIALIZED_SIZE];
+
         let mut engine = Self::lock_engine(state, current);
-        let flags = MemOps::from_usize(extra_rights)?;
+        let flags = MemOps::from_usize(serialized_flags)?;
         if !flags.is_empty() && !flags.is_only_hcv() {
             log::error!("Invalid send region flags received: {:?}", flags);
             return Err(CapaError::InvalidPermissions);
@@ -854,6 +947,8 @@ pub trait Monitor<T: PlatformState + 'static> {
         return Ok(());
     }
 
+    //this handles the vmcalls
+    //at some point all of the exchanged data needs to fit into registers
     fn do_monitor_call(
         state: &mut T,
         domain: &mut Handle<Domain>,
@@ -884,7 +979,7 @@ pub trait Monitor<T: PlatformState + 'static> {
                 )?;
                 return Ok(true);
             }
-            calls::SEND_REGION => {
+            calls::SEND_REGION_REPEAT | calls::SEND_REGION => {
                 log::trace!("Send region on core {}", cpuid());
                 Self::do_send_region(
                     state,
@@ -892,7 +987,8 @@ pub trait Monitor<T: PlatformState + 'static> {
                     LocalCapa::new(args[0]),
                     LocalCapa::new(args[1]),
                     args[2],
-                    args[3] != 0,
+                    call == calls::SEND_REGION_REPEAT,
+                    args[3],
                     args[4],
                     args[5],
                 )?;
@@ -910,6 +1006,7 @@ pub trait Monitor<T: PlatformState + 'static> {
                     args[2],
                     args[3],
                     args[4],
+                    args[5],
                 )?;
                 res[0] = to_send.as_usize();
                 res[1] = to_revoke.as_usize();
@@ -932,13 +1029,28 @@ pub trait Monitor<T: PlatformState + 'static> {
                 if let Some((info, next)) =
                     Self::do_enumerate(state, domain, NextCapaToken::from_usize(args[0]))
                 {
-                    let (v1, v2, v3) = info.serialize();
+                    let (v1, v2, v3, serialized_rk) = info.serialize();
                     res[0] = v1;
                     res[1] = v2;
                     res[2] = v3 as usize;
-                    res[3] = next.as_usize();
+                    res[5] = next.as_usize();
+                    match &info {
+                        CapaInfo::Region { .. } | CapaInfo::RegionRevoke { .. } => {
+                            let data_handle = Self::do_create_domain_data_to_domain(
+                                state,
+                                domain,
+                                &serialized_rk,
+                            )?;
+                            res[3] = data_handle.serialize() as usize;
+                        }
+                        CapaInfo::Management { .. }
+                        | CapaInfo::Channel { .. }
+                        | CapaInfo::Switch { .. } => {
+                            res[3] = DataTransferPoolHandle::invalid().serialize() as usize
+                        }
+                    }
                 } else {
-                    res[3] = 0;
+                    res[5] = 0;
                 }
                 return Ok(true);
             }
@@ -1056,8 +1168,92 @@ pub trait Monitor<T: PlatformState + 'static> {
                 res[0] = written;
                 return Ok(true);
             }
+            calls::GET_HPAS => {
+                let start_gpa = GuestPhysAddr::new(args[0]);
+                let size = args[1];
+                let (start_hpa, end_hpa) = Self::do_get_hpas(state, domain, start_gpa, size)?;
+                match (start_hpa, end_hpa) {
+                    (Some(start_hpa), Some(end_hpa)) => {
+                        res[0] = start_hpa.as_usize();
+                        res[1] = end_hpa.as_usize();
+                        Ok(true)
+                    }
+                    _ => {
+                        log::info!(
+                            "GET_HPAS: failed to translate both GPAs: {:x?} {:x?}",
+                            start_hpa,
+                            end_hpa
+                        );
+                        Err(CapaError::InvalidValue)
+                    }
+                }
+            }
+            calls::SEND_DATA => {
+                let raw_handle = args[0];
+                let specified_payload_bytes = args[1];
+                let mark_finished = args[2];
+                let raw_data = &args[3..6];
+                let raw_max_size = raw_data.len() * mem::size_of::<usize>();
+                /*log::info!(
+                    "SEND_DATA: raw_data 0x{:x?} size {}, value at idx 0 is {:x}",
+                    raw_data,
+                    specified_payload_bytes,
+                    raw_data[0],
+                );*/
+                if specified_payload_bytes > raw_max_size {
+                    //TODO: better error value
+                    return Err(CapaError::InvalidOperation);
+                }
+                //TODO: stuff breaks here
+                let data: &[u8] = unsafe {
+                    slice::from_raw_parts(raw_data.as_ptr() as *const u8, specified_payload_bytes)
+                };
+                /*log::info!(
+                    "SEND_DATA tyche call handler: raw_handle {}, mark_finished? {}, data as u8 0x{:x?}",
+                    raw_handle,
+                    mark_finished,
+                    data,
+                );*/
+                match Self::do_store_domain_data(state, domain, raw_handle, data, mark_finished) {
+                    Ok(handle) => {
+                        res[0] = handle.serialize() as usize;
+                        //log::info!("SEND_DATA: returning handle {}", res[0]);
+                        return Ok(true);
+                    }
+                    Err(e) => {
+                        log::error!("SEND_DATA: failed");
+                        return Err(e);
+                    }
+                }
+            }
+            calls::GET_DATA => {
+                let raw_handle = args[0];
+                let (chunck, actual_size, remaining) =
+                    Self::do_copy_data_to_domain(state, domain, raw_handle)?;
+                /*log::info!(
+                    "GET DATA : raw_handle {:?} , data_chunck {:x?}, remaining {}, actual_size {}",
+                    raw_handle,
+                    chunck,
+                    remaining,
+                    actual_size
+                );*/
+
+                res[0] = remaining;
+                res[1] = actual_size;
+                assert!(chunck.len() % mem::size_of::<usize>() == 0);
+                let data_as_usize = unsafe {
+                    slice::from_raw_parts(
+                        chunck.as_ptr() as *const usize,
+                        chunck.len() / mem::size_of::<usize>(),
+                    )
+                };
+                res[2] = data_as_usize[0];
+                res[3] = data_as_usize[1];
+                res[4] = data_as_usize[2];
+                Ok(true)
+            }
             _ => {
-                log::info!("The invalid operation: {}", call);
+                log::info!("do_monitor_call : operation failed : call number {}", call);
                 return Err(CapaError::InvalidOperation);
             }
         }
@@ -1070,6 +1266,74 @@ pub trait Monitor<T: PlatformState + 'static> {
         engine.handle_violation(*current, core)?;
         Self::apply_updates(state, &mut engine);
         Ok(())
+    }
+
+    /// Look up the HPAs for `start` and `start+length`
+    /// With coloring the HPA space is not contiguous but combined with the allowed
+    /// colors a start and end hpa uniquely identify a memory range. This is also
+    /// the representation that we use in the CPA engine
+    fn do_get_hpas(
+        state: &mut T,
+        current: &mut Handle<Domain>,
+        start: GuestPhysAddr,
+        length: usize,
+    ) -> Result<(Option<HostPhysAddr>, Option<HostPhysAddr>), CapaError> {
+        let start_hpa = state.get_hpa(*current, start);
+        let end_hpa = state.get_hpa(*current, start + length);
+        Ok((start_hpa, end_hpa))
+    }
+
+    fn consume_domain_data(
+        state: &mut T,
+        current: &mut Handle<Domain>,
+        handle: DataTransferPoolHandle,
+    ) -> Result<DataPoolEntry, CapaError> {
+        state.consume_data_from_domain(current, handle)
+    }
+
+    fn do_create_domain_data_to_domain(
+        state: &mut T,
+        current: &mut Handle<Domain>,
+        data: &[u8],
+    ) -> Result<DataTransferPoolHandle, CapaError> {
+        state.create_new_domain_data_entry(current, DataPoolDirection::ToDomain(data))
+    }
+
+    fn do_copy_data_to_domain(
+        state: &mut T,
+        current: &mut Handle<Domain>,
+        raw_data_handle: usize,
+    ) -> Result<([u8; DataTransferPool::TO_DOMAIN_CHUNCK_SIZE], usize, usize), CapaError> {
+        let data_handle = DataTransferPoolHandle::deserialize(raw_data_handle)?;
+        state.copy_data_to_domain(current, data_handle)
+    }
+
+    /// If called with invalid handle we will create a new one, otherwise we append to
+    /// the corresponding entry
+    fn do_store_domain_data(
+        state: &mut T,
+        current: &mut Handle<Domain>,
+        raw_data_handle: usize,
+        data: &[u8],
+        mark_finished: usize,
+    ) -> Result<DataTransferPoolHandle, CapaError> {
+        //either create new handle or deserialize the existing one
+        let data_handle =
+            if raw_data_handle == DataTransferPoolHandle::invalid().serialize() as usize {
+                state.create_new_domain_data_entry(current, DataPoolDirection::FromDomain)?
+            } else {
+                DataTransferPoolHandle::deserialize(raw_data_handle).map_err(|e| {
+                    log::error!(
+                        "Failed to build data handle from value {} : {:?}",
+                        raw_data_handle,
+                        e
+                    );
+                    CapaError::CouldNotDeserializeInfo
+                })?
+            };
+        //store
+        state.store_domain_data(current, data_handle, data, mark_finished != 0)?;
+        Ok(data_handle)
     }
 
     fn apply_updates(state: &mut T, engine: &mut MutexGuard<CapaEngine>) {

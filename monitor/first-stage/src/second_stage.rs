@@ -311,6 +311,7 @@ pub fn load<T: MemoryColoring + Clone>(
     //manifest.cr3 = stage2_loaded_elf.pt_root_spa.as_u64();
     println!("setting manifset.cr3 to 0x{:x}", manifest.cr3);
     manifest.info = info.guest_info.clone();
+    manifest.dom0_gpa_additional_mem = info.dom0_gpa_additional_mem;
 
     manifest.iommu_hva = stage2_iommu_hva.as_u64();
     manifest.iommu_hpa = iommu_hpa.as_u64();

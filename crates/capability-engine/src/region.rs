@@ -70,7 +70,7 @@ impl MemOps {
 
 /// Describes the kind of ressource that an access right grants access to
 ///
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ResourceKind {
     /// Access to RAM memory, which may be suspect to further sub partitioning
     RAM(PartitionBitmap),
@@ -79,6 +79,8 @@ pub enum ResourceKind {
 }
 
 impl ResourceKind {
+    //TODO: calculcate
+    pub const SERIALIZED_SIZE: usize = ActiveMemoryColoring::BYTES_FOR_COLOR_BITMAP + 1;
     ///Convenience function that creates a RessourceKind::RAM with all partitions/colors enabled
     pub fn ram_with_all_partitions() -> ResourceKind {
         let mut partitions = PartitionBitmap::new();
@@ -101,6 +103,48 @@ impl ResourceKind {
             (ResourceKind::RAM(_), ResourceKind::RAM(_)) => true,
             (ResourceKind::Device, ResourceKind::Device) => true,
             _ => false,
+        }
+    }
+
+    pub fn dom0_serialization(&self) -> [u8; Self::SERIALIZED_SIZE] {
+        /*Format
+           byte[0]: type id
+           byte[1:] color bitmap
+        */
+        let mut buf = [0; Self::SERIALIZED_SIZE];
+        match self {
+            ResourceKind::RAM(bm) => {
+                //set type id
+                buf[0] = 0;
+
+                //copy bitmap
+                for (idx, v) in bm.get_raw().iter().enumerate() {
+                    buf[idx + 1] = *v;
+                }
+            }
+            ResourceKind::Device => {
+                //only need to set type id, no additional data
+                buf[0] = 1
+            }
+        }
+        buf
+    }
+
+    pub fn dom0_deserialization(data: &[u8]) -> Result<Self, CapaError> {
+        if data.len() < Self::SERIALIZED_SIZE {
+            return Err(CapaError::CouldNotDeserializeInfo);
+        }
+
+        let type_id = data[0];
+        match type_id {
+            0 => {
+                let bitmap_data: [u8; ActiveMemoryColoring::BYTES_FOR_COLOR_BITMAP] =
+                    data[1..].try_into().unwrap();
+                let cbm = PartitionBitmap::new_from(bitmap_data);
+                Ok(ResourceKind::RAM(cbm))
+            }
+            1 => Ok(ResourceKind::Device),
+            _ => Err(CapaError::CouldNotDeserializeInfo),
         }
     }
 }
@@ -1059,9 +1103,9 @@ impl<'a, T: MemoryColoring + Clone> Iterator for PermissionIterator<'a, T> {
             self.next = next;
 
             match resource_kind {
-                //RAM memory is subject to coloring, iterate over sub ranges create by the coloring before moving to the next region
+                //RAM memory is subject to coloring, iterate over sub ranges induced by the coloring before moving to the next region
                 ResourceKind::RAM(allowed_colors) => {
-                    /* Akward type conversion :( . For testing, we want memory coloring to be configurable and
+                    /* Awkward type conversion :( . For testing, we want memory coloring to be configurable and
                      * Thus encode in in generic param. However, using the generic in the widely used type ResourceKind would
                      * mean that it spreads everywhere making the codebase akward to use. Thus we also have a global constant with
                      * The "currently active memory coloring". Here, we need to convert between these two types
@@ -1089,6 +1133,7 @@ impl<'a, T: MemoryColoring + Clone> Iterator for PermissionIterator<'a, T> {
                         };
                         bm.set(idx, allowed_in_capa && allowed_in_add_restrict);
                     }
+                    //end of awkward type conversion
 
                     let ctp = ColorToPhys::new(
                         MemoryRegionDescription::SingleRange(PhysRange { start, end }),
@@ -1098,6 +1143,9 @@ impl<'a, T: MemoryColoring + Clone> Iterator for PermissionIterator<'a, T> {
                     );
                     let mut iter = ctp.into_iter();
                     match iter.next() {
+                        //Return first element of iterator now, then store iterator.
+                        //Subsequent next calls will first "drain" this iterator before moving
+                        //to the next region
                         Some(v) => {
                             self.current_subranges = Some((iter, ops, resource_kind));
                             return Some(MemoryPermission {
@@ -1108,10 +1156,14 @@ impl<'a, T: MemoryColoring + Clone> Iterator for PermissionIterator<'a, T> {
                             });
                         }
                         //region does not contain any entries with correct color
-                        //we will "fall trhough" to the next iteration of the outer loop and continue
+                        //we will "fall through" to the next iteration of the outer loop and continue
                         //with the next region
                         None => {
-                            log::warn!("Warning: Empty Region: [0x{:013x}-0x{:013x}[, does not have any subranges with color {:x?}", start,end, allowed_colors);
+                            //luca: allowed colors is from the capa, additional restrictions is from the
+                            match self.additional_color_restrictions {
+                                Some(restrictions) => log::warn!("Warning: Empty Region: [0x{:013x}-0x{:013x}[, does not have any subranges with color {}, additional color restrictions {}", start,end, allowed_colors,restrictions),
+                                None => log::warn!("Warning: Empty Region: [0x{:013x}-0x{:013x}[, does not have any subranges with color {}", start,end, allowed_colors),
+                            }
                             self.current_subranges = None;
                         }
                     }
@@ -1572,6 +1624,38 @@ mod tests {
         assert!(!access.overlap(&dummy_access(22, 28)));
         assert!(!access.overlap(&dummy_access(2, 10)));
         assert!(!access.overlap(&dummy_access(20, 28)));
+    }
+
+    #[test]
+    fn serialize_deserialize_resource_kind_device() {
+        let want_device = ResourceKind::Device;
+
+        let serialized = want_device.dom0_serialization();
+
+        let got_device = ResourceKind::dom0_deserialization(&serialized).unwrap();
+
+        assert_eq!(want_device, got_device)
+    }
+
+    #[test]
+    fn serialize_deserialize_resource_kind_ram() {
+        let want = &[
+            ResourceKind::ram_with_all_partitions(),
+            ResourceKind::ram_with_partitions(&[0]),
+            ResourceKind::ram_with_partitions(&[ActiveMemoryColoring::COLOR_COUNT - 1]),
+        ];
+
+        for (idx, want_ram) in want.iter().enumerate() {
+            let serialized = want_ram.dom0_serialization();
+
+            let got = ResourceKind::dom0_deserialization(&serialized).expect("deserialize failed");
+
+            assert_eq!(
+                *want_ram, got,
+                "Input idx {:02}, expected {:?}, got {:?}",
+                idx, want_ram, got
+            )
+        }
     }
 }
 

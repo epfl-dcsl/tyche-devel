@@ -38,8 +38,8 @@ mount_ubuntu() {
   fi
  
   modprobe nbd max_part=8
-  
   qemu-nbd --connect=/dev/nbd0 $DISK
+  sleep 2
   
   LOC=`fdisk /dev/nbd0 -l | grep Linux | awk '{print $1}'`
   
@@ -54,6 +54,7 @@ umount_unbuntu() {
   fi
   umount $MOUNT_POINT
   qemu-nbd --disconnect /dev/nbd0
+  sleep 2
   rmmod nbd
 }
 

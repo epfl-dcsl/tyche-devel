@@ -1,4 +1,4 @@
-use attestation::hashing::{self, TycheHasher};
+use attestation::hashing::{self, hash_resource_kind, TycheHasher};
 use attestation::signature::{self, get_attestation_keys, EnclaveReport, ATTESTATION_DATA_SZ};
 use capa_engine::{CapaEngine, CapaInfo, Domain, Handle, MemOps, NextCapaToken};
 use spin::MutexGuard;
@@ -28,6 +28,7 @@ fn hash_capa_info(
                 unique,
                 children: _,
                 ops,
+                resource_kind,
             } => {
                 if ops.contains(MemOps::HASH) {
                     // Hashing start - end of region
@@ -40,6 +41,9 @@ fn hash_capa_info(
                     hash_access_right(hasher, access_rights, MemOps::EXEC.bits());
                     hash_access_right(hasher, access_rights, MemOps::WRITE.bits());
                     hash_access_right(hasher, access_rights, MemOps::READ.bits());
+
+                    //Hash region kind
+                    hash_resource_kind(hasher, &resource_kind.dom0_serialization());
 
                     // Hash conf/shared info
                     let conf_info = if unique { 1 as u8 } else { 0 as u8 };

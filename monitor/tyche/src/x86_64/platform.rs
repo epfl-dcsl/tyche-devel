@@ -8,7 +8,7 @@ use capa_engine::utils::BitmapIterator;
 use capa_engine::{compactify_colors_in_gpa_space, AccessRights, CapaEngine, CapaError, Domain, Handle, MemOps, PermissionIterator};
 use mmu::eptmapper::EPT_ROOT_FLAGS;
 use mmu::memory_coloring::{ActiveMemoryColoring, MemoryColoring};
-use mmu::FrameAllocator;
+use mmu::{EptMapper, FrameAllocator};
 use spin::MutexGuard;
 use stage_two_abi::{GuestInfo, Manifest};
 use utils::HostPhysAddr;
@@ -24,6 +24,7 @@ use super::vmx_helper::{dump_host_state, load_host_state};
 use super::{cpuid, vmx_helper};
 use crate::allocator::{self, allocator};
 use crate::calls;
+use crate::data_transfer::{DataPoolDirection, DataPoolEntry, DataTransferPool, DataTransferPoolHandle};
 use crate::monitor::{CoreUpdate, Monitor, PlatformState};
 use crate::rcframe::{drop_rc, RCFrame};
 use crate::x86_64::state::TLB_FLUSH_BARRIERS;
@@ -70,6 +71,50 @@ pub fn remap_core_bitmap(bitmap: u64) -> u64 {
 impl PlatformState for StateX86 {
     type DomainData = DataX86;
     type Context = Contextx86;
+
+    ///Get the HPA for the given GPA
+    fn get_hpa(&self, domain_handle: Handle<Domain>, gpa: GuestPhysAddr) -> Option<HostPhysAddr> {
+        let domain = Self::get_domain(domain_handle);
+        let mut ept_mapper = match domain.ept {
+            Some(ept_root) => EptMapper::new(allocator().get_physical_offset().as_usize(),ept_root),
+            None => return None,
+        };
+        ept_mapper.lookup(gpa)
+    }
+
+    fn create_new_domain_data_entry(
+        &self,
+        domain_handle: &mut Handle<Domain>,
+        direction: DataPoolDirection,
+    ) -> Result<DataTransferPoolHandle, CapaError> {
+        let domain = &mut Self::get_domain(*domain_handle);
+        domain.data_transfer_pool.alloc_entry(direction)
+    }
+
+    fn store_domain_data(
+        &self,
+        domain_handle: &mut Handle<Domain>,
+        data_handle: DataTransferPoolHandle,
+        data: &[u8],
+        mark_finished: bool,
+    ) -> Result<(), CapaError> {
+        let domain = &mut Self::get_domain(*domain_handle);
+        domain.data_transfer_pool.append_to_entry(data_handle, data, mark_finished)        
+    }
+
+    fn consume_data_from_domain(
+        &self,
+        domain_handle: &mut Handle<Domain>,
+        data_handle: DataTransferPoolHandle,
+    ) -> Result<DataPoolEntry, CapaError> {
+        let domain = &mut Self::get_domain(*domain_handle);
+        domain.data_transfer_pool.consume_data_from_domain(data_handle)
+    }
+
+    fn copy_data_to_domain(&self, domain_handle: &mut Handle<Domain>, data_handle :DataTransferPoolHandle) -> Result<([u8; DataTransferPool::TO_DOMAIN_CHUNCK_SIZE], usize, usize), CapaError> {
+        let domain = &mut Self::get_domain(*domain_handle);
+        domain.data_transfer_pool.take_chunk_to_send_to_domain(data_handle)
+    }
 
     fn find_buff(
         engine: &MutexGuard<CapaEngine>,
@@ -387,16 +432,18 @@ impl PlatformState for StateX86 {
         &mut self,
         domain: Handle<Domain>,
         core_partitions: PermissionIterator<T>,
-        additional_partitions: PermissionIterator<T>
+        additional_partitions: PermissionIterator<T>,
+        start_gpa_additional_partitions: Option<GuestPhysAddr>,
     ) -> Result<(), CapaError> {
-        log::info!("Creating Initial domain remappings");
+        log::info!("Creating Initial domain remappings.");
         let mut dom_dat: MutexGuard<'_, DataX86> = Self::get_domain(domain);
-        log::info!("Creating remappings for core memory");
+        log::info!("\n##\nCreating remappings for core memory\n##\n");
         let (core_end_ram, core_end_device) = compactify_colors_in_gpa_space(&mut dom_dat.remapper, core_partitions , GuestPhysAddr::new(0)).map_err(|e| {
             log::error!("compactified mappings for core memory failed: {:?}",&e);
             e
         })?;
-        /*let additional_colors_start_gpa = match core_end_device {
+        log::info!("core_end_ram = 0x{:013x?}, core_end_device = 0x{:013x?}", core_end_ram,core_end_device);
+        let end_for_core_mappings = match core_end_device {
             Some(end_device) => {
                 if end_device > core_end_ram {
                     end_device
@@ -406,11 +453,21 @@ impl PlatformState for StateX86 {
             }
             None => core_end_ram,
         };
-        log::info!("Mapping additional colors starting at GPA 0x{:013x}", additional_colors_start_gpa.as_u64());
+        let additional_colors_start_gpa = match start_gpa_additional_partitions {
+            Some(v) => {
+                assert!(v > end_for_core_mappings,"Requested start GPA 0x{:013x} for additional mem collides with existing mappings which only end at 0x{:013x}",
+            v.as_u64(),end_for_core_mappings.as_u64());
+            v
+            },
+            None => {
+                end_for_core_mappings
+            },
+        };
+        log::info!("\n##\nMapping additional colors starting at GPA 0x{:013x?}\n##\n", additional_colors_start_gpa);
         let _ = compactify_colors_in_gpa_space(&mut dom_dat.remapper, additional_partitions, additional_colors_start_gpa).map_err(|e| {
             log::error!("compactified mappings for additional memory failed: {:?}",&e);
             e
-        })?;*/
+        })?;
         Ok(())
     }
 
@@ -465,10 +522,17 @@ impl PlatformState for StateX86 {
     fn finish_notify(domain: &Handle<Domain>) {
         let mut dom = Self::get_domain(*domain);
         let allocator = allocator();
+
         if let Some(ept) = dom.ept_old {
             unsafe { Self::free_ept(ept, allocator) };
         }
         dom.ept_old = None;
+
+        if let Some(iopt_old) = dom.iopt_old {
+            unsafe{ Self::free_iopt(iopt_old, allocator)};
+        }
+        dom.iopt_old = None;
+        
         TLB_FLUSH[domain.idx()].store(false, Ordering::SeqCst);
     }
 

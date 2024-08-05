@@ -1,5 +1,6 @@
 //! Linux Guest
 
+use alloc::format;
 use alloc::vec::Vec;
 
 use mmu::memory_coloring::MemoryColoring;
@@ -109,13 +110,53 @@ impl Guest for Linux {
         // Build the boot params
 
         // Step1: load values contained in BootParams into memory
-        let mut boot_params = build_bootparams(&memory_map);
-        let command_line = loaded_linux.add_payload(COMMAND_LINE, guest_allocator);
-        let command_line_addr_low = (command_line.as_usize() & 0xFFFF_FFFF) as u32;
-        let command_line_addr_high = (command_line.as_usize() >> 32) as u32;
-        boot_params.ext_cmd_line_ptr = command_line_addr_high;
-        boot_params.hdr.cmd_line_ptr = command_line_addr_low;
-        boot_params.hdr.cmdline_size = COMMAND_LINE.len() as u32;
+        let (mut boot_params, additional_mem_info) = build_bootparams(&memory_map);
+        match additional_mem_info {
+            Some(mem_info) => {
+                let mut v = Vec::new();
+                //take all but the last element
+                for x in COMMAND_LINE.iter().take(COMMAND_LINE.len() - 1) {
+                    v.push(*x);
+                }
+
+                v.extend_from_slice(" additional_mem=".as_bytes());
+                let first_color_id = match memory_map.unused {
+                    mmu::memory_coloring::MemoryRange::ColoredRange(cr) => cr.first_color,
+                    mmu::memory_coloring::MemoryRange::SinglePhysContigRange(_)
+                    | mmu::memory_coloring::MemoryRange::AllRamRegionInRange(_) => panic!(
+                        "dom0 configured for colors but memmap slot for unused mem not ColorRange"
+                    ),
+                };
+                v.extend_from_slice(format!("{},", first_color_id).as_bytes());
+
+                for (idx, x) in mem_info.iter().enumerate() {
+                    if idx == mem_info.len() - 1 {
+                        v.extend_from_slice(format!("0x{:x}", x).as_bytes());
+                    } else {
+                        v.extend_from_slice(format!("0x{:x},", x).as_bytes())
+                    }
+                }
+
+                v.extend_from_slice("\0".as_bytes());
+                let command_line = loaded_linux.add_payload(&v, guest_allocator);
+                let command_line_addr_low = (command_line.as_usize() & 0xFFFF_FFFF) as u32;
+                let command_line_addr_high = (command_line.as_usize() >> 32) as u32;
+                boot_params.ext_cmd_line_ptr = command_line_addr_high;
+                boot_params.hdr.cmd_line_ptr = command_line_addr_low;
+                boot_params.hdr.cmdline_size = v.len() as u32;
+                //first addr is start of mapping
+                manifest.dom0_gpa_additional_mem = mem_info[0];
+            }
+            None => {
+                let command_line = loaded_linux.add_payload(COMMAND_LINE, guest_allocator);
+                let command_line_addr_low = (command_line.as_usize() & 0xFFFF_FFFF) as u32;
+                let command_line_addr_high = (command_line.as_usize() >> 32) as u32;
+                boot_params.ext_cmd_line_ptr = command_line_addr_high;
+                boot_params.hdr.cmd_line_ptr = command_line_addr_low;
+                boot_params.hdr.cmdline_size = COMMAND_LINE.len() as u32;
+            }
+        };
+
         boot_params.acpi_rsdp_addr = rsdp;
 
         //Step2 load the BootParams "struct" itself into memory
@@ -138,7 +179,9 @@ impl Guest for Linux {
     }
 }
 
-fn build_bootparams<T: MemoryColoring + Clone>(memory_map: &PartitionedMemoryMap<T>) -> BootParams {
+fn build_bootparams<T: MemoryColoring + Clone>(
+    memory_map: &PartitionedMemoryMap<T>,
+) -> (BootParams, Option<Vec<usize>>) {
     let mut boot_params = BootParams::default();
     boot_params.hdr.type_of_loader = KERNEL_LOADER_OTHER;
     boot_params.hdr.boot_flag = KERNEL_BOOT_FLAG_MAGIC;
@@ -152,7 +195,7 @@ fn build_bootparams<T: MemoryColoring + Clone>(memory_map: &PartitionedMemoryMap
     //We use this to gather data for some debug output
     let mut ram_regions = Vec::new();
 
-    let guest_memory_regions = memory_map.build_guest_memory_regions();
+    let (guest_memory_regions, additional_mem_info) = memory_map.build_guest_memory_regions();
     for mr in guest_memory_regions {
         match mr.mem_type {
             E820Types::Ram => {
@@ -185,5 +228,5 @@ fn build_bootparams<T: MemoryColoring + Clone>(memory_map: &PartitionedMemoryMap
         log::info!("[mem 0x{:016x}-0x{:016x}]", start, end - 1);
     }
 
-    boot_params
+    (boot_params, additional_mem_info)
 }

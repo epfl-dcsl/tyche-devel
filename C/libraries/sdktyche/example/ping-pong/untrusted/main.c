@@ -226,6 +226,9 @@ int main(int argc, char *argv[]) {
 	ping_info->msg_size = strlen(default_message) +1;
 	memcpy(ping_info->msg_buffer, default_message, strlen(default_message) + 1);
 
+	//luca: I guess in the manifest we specified some shared region.
+	//The create step "created" this shared region and now we just get the addr
+	//TODO: Understand mapping in our current addr space
 	pong_info = (info_t*) find_default_shared(pong);
 	if (pong_info == NULL) {
 		ERROR("Unable to find the default shared region for pong");

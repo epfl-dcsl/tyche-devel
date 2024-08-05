@@ -167,6 +167,7 @@ int backend_td_alloc_mem(tyche_domain_t* domain)
     ERROR("Nul argument.");
     goto failure;
   }
+  //luca: sdk talks to contalloc driver
   // Call contalloc driver to get contiguous memory.
   domain->backend.memfd = open(CONTALLOC_DRIVER, O_RDWR);
   if (domain->backend.memfd < 0) {
@@ -174,6 +175,8 @@ int backend_td_alloc_mem(tyche_domain_t* domain)
     close(domain->handle);
     goto failure;
   }
+  //luca: sdk uses mmap of contalloc driver to mmap memory of TD
+  //luca: where do we create the CAPA that allows this access?
   dll_foreach(&(domain->mmaps), slot, list) {
     slot->virtoffset = (usize) mmap(NULL, (size_t) slot->size,
       PROT_READ|PROT_WRITE, MAP_SHARED|MAP_POPULATE, domain->backend.memfd, 0);
@@ -461,7 +464,8 @@ int backend_create_pipe(tyche_domain_t* domain, usize* id, usize physoffset,
   pipe.id = 0;
   pipe.phys_addr = physoffset;
   pipe.size = size;
-  pipe.flags = flags;
+  //TODO: add colors
+  pipe.rights.flags = flags;
   pipe.width = width;
   if (ioctl(fd, TYCHE_CREATE_PIPE, &pipe) != SUCCESS) {
     ERROR("Driver create pipe failed");

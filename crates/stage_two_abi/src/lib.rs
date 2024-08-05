@@ -101,6 +101,8 @@ pub struct Manifest {
     pub dom0_memory: MemoryRange,
     /// Memory to use for other domains
     pub remaining_dom_memory: MemoryRange,
+    /// If != 0, dom0 has the additional mem for usage with TDs mapped at this addr
+    pub dom0_gpa_additional_mem: usize,
 }
 
 /// Suport for x86_64 SMP
@@ -188,6 +190,7 @@ macro_rules! make_manifest {
                     color_count: 0,
                     mem_bytes: 0,
                 }),
+                dom0_gpa_additional_mem: 0,
             };
             static TAKEN: AtomicBool = AtomicBool::new(false);
 

@@ -4,6 +4,8 @@
 // Remove this once the Risc-V version is implemented.
 #![cfg_attr(target_arch = "riscv64", allow(dead_code))]
 
+//luca: definition of "vmcalls" from dom0 to tyche
+
 pub const CREATE_DOMAIN: usize = 1;
 pub const SEAL_DOMAIN: usize = 2;
 pub const SEND: usize = 3;
@@ -29,3 +31,9 @@ pub const REVOKE_ALIASED_REGION: usize = 21;
 pub const SERIALIZE_ATTESTATION: usize = 22;
 /// For benchmarks to measure the cost of communication with tyche.
 pub const _TEST_CALL: usize = 30;
+pub const GET_HPAS: usize = 31;
+pub const SEND_REGION_REPEAT: usize = 32;
+/// dom0 sends data to tyche
+pub const SEND_DATA: usize = 33;
+/// don1 polls data from tyche
+pub const GET_DATA: usize = 34;

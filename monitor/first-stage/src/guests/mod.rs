@@ -22,6 +22,7 @@ pub struct ManifestInfo {
     pub guest_info: GuestInfo,
     pub vga_info: VgaInfo,
     pub iommu: Option<IommuInfo>,
+    pub dom0_gpa_additional_mem: usize,
 }
 
 impl Default for ManifestInfo {
@@ -30,6 +31,7 @@ impl Default for ManifestInfo {
             guest_info: Default::default(),
             vga_info: VgaInfo::no_vga(),
             iommu: Default::default(),
+            dom0_gpa_additional_mem: Default::default(),
         }
     }
 }

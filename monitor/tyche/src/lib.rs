@@ -6,6 +6,7 @@
 pub mod allocator;
 pub mod attestation_domain;
 mod calls;
+pub mod data_transfer;
 pub mod debug;
 pub mod error;
 pub mod monitor;

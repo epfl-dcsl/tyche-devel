@@ -3,7 +3,8 @@ use core::sync::atomic::{AtomicBool, Ordering};
 use capa_engine::config::{NB_CORES, NB_DOMAINS, NB_REMAP_REGIONS};
 use capa_engine::context::{RegisterContext, RegisterState};
 use capa_engine::{
-    CapaEngine, CapaError, Domain, GenArena, Handle, LocalCapa, MemOps, Remapper, ResourceKind,
+    CapaEngine, CapaError, Domain, GenArena, Handle, LocalCapa, MemOps, NextCapaToken, Remapper,
+    ResourceKind,
 };
 use mmu::eptmapper::EPT_ROOT_FLAGS;
 use mmu::mapper::Mapper;
@@ -20,6 +21,7 @@ use vtd::{Command, Iommu};
 use super::context::Contextx86;
 use super::vmx_helper::{dump_host_state, load_host_state};
 use crate::allocator::allocator;
+use crate::data_transfer::DataTransferPool;
 use crate::monitor::PlatformState;
 use crate::rcframe::{RCFrame, RCFramePool, EMPTY_RCFRAME};
 use crate::sync::Barrier;
@@ -63,7 +65,9 @@ const EMPTY_DOMAIN: Mutex<DataX86> = Mutex::new(DataX86 {
     ept: None,
     ept_old: None,
     iopt: None,
+    iopt_old: None,
     remapper: Remapper::new(),
+    data_transfer_pool: DataTransferPool::new(),
 });
 
 /// Domain data on x86
@@ -71,7 +75,9 @@ pub struct DataX86 {
     pub ept: Option<HostPhysAddr>,
     pub ept_old: Option<HostPhysAddr>,
     pub iopt: Option<HostPhysAddr>,
+    pub iopt_old: Option<HostPhysAddr>,
     pub remapper: Remapper<NB_REMAP_REGIONS>,
+    pub data_transfer_pool: DataTransferPool,
 }
 
 pub type StateX86 = VmxState;
@@ -92,11 +98,24 @@ impl StateX86 {
         engine: &mut MutexGuard<CapaEngine>,
     ) -> bool {
         let mut domain = Self::get_domain(domain_handle);
-        let allocator = allocator();
-        if let Some(iopt) = domain.iopt {
-            unsafe { Self::free_iopt(iopt, allocator) };
-            // TODO: global invalidate context cache, PASID cache, and flush the IOTLB
+
+        // luca: to my understanding IOPTs are global and not per VM. Only update sth here if we want to
+        // give a device to a VM/TD. In that case, only update that devices entry. If we have given device
+        // to another TD, keep the 2nd level entries for that device in sync with the TD
+        // TODO: how to encode who own which device?
+        // Right now, we assume all devices belong to dom0
+        if domain_handle.idx() != 0 {
+            return false;
         }
+
+        /*log::info!(
+            "Updating IOMMU PTs for domain at idx {}",
+            domain_handle.idx()
+        );*/
+        if domain.iopt_old.is_some() {
+            panic!("Updating IOPTs while previous one's have not been freed yet");
+        }
+        let allocator = allocator();
 
         let iopt_root = allocator
             .allocate_frame()
@@ -123,8 +142,6 @@ impl StateX86 {
             )
         }
 
-        domain.iopt = Some(iopt_root.phys_addr);
-
         // Update the IOMMU (i.e. the actual hardware device)
         // TODO: @yuchen ideally we only need to change the 2nd stage page translation pointer on the
         //               context table, instead of reallocating the whole root table
@@ -144,11 +161,8 @@ impl StateX86 {
                 log::info!("IOMMU: enabled queued invalidation");
             }
 
-            log::info!("Updating IOMMU!!!");
             let root_addr: HostPhysAddr =
                 vtd::setup_iommu_context(iopt_mapper.get_root(), allocator);
-            log::info!("created iommu context");
-            log::info!("root_addr 0x{:016x}", root_addr.as_u64());
             /*11.4.5 in vtd spec:
              * 4KiB aligned paddr of root page table. Bits [11:0] are used for config
              * we want [11:10] set to zero to enable legacy translation mode. Qemu does not seem
@@ -158,7 +172,6 @@ impl StateX86 {
             iommu.set_root_table_addr(rtar_val);
             iommu.update_root_table_addr();
             iommu.enable_translation();
-            log::info!("enabled translation");
             log::info!("I/O MMU: {:?}", iommu.get_global_status());
             log::warn!("I/O MMU Fault: {:?}", iommu.get_fault_status());
 
@@ -168,8 +181,11 @@ impl StateX86 {
                 panic!("IOMMU flush failed");
             }
             log::warn!("I/O MMU Fault: {:?}", iommu.get_fault_status());
+
+            domain.iopt_old = domain.iopt;
+            domain.iopt = Some(iopt_root.phys_addr);
         }
-        false
+        true
     }
 
     fn update_ept_tables(
@@ -177,6 +193,25 @@ impl StateX86 {
         engine: &mut MutexGuard<CapaEngine>,
     ) -> bool {
         let mut domain = Self::get_domain(domain_handle);
+        //log::info!("Updating EPTs for domain at idx {}", domain_handle.idx());
+
+        /*if domain_handle.idx() != 0 {
+            log::info!("Dumping domain at idx {}", domain_handle.idx());
+
+            log::info!("Domain {}", domain_handle.idx());
+            let mut next_capa = NextCapaToken::new();
+            while let Some((info, next_next_capa)) = engine.enumerate(domain_handle, next_capa) {
+                next_capa = next_next_capa;
+                log::info!(" - {}", info);
+            }
+            log::info!(
+                "tracker: {}",
+                engine
+                    .get_domain_regions(domain_handle)
+                    .expect("Invalid domain")
+            );
+        }*/
+
         let allocator = allocator();
         if domain.ept_old.is_some() {
             panic!("We will replace an ept old that's not empty");
@@ -192,6 +227,7 @@ impl StateX86 {
         let permission_iter = engine
             .get_domain_permissions(domain_handle, ActiveMemoryColoring {}, None, true)
             .unwrap();
+        let mut map_count = 0;
         for range in domain.remapper.remap(permission_iter) {
             if !range.ops.contains(MemOps::READ) {
                 log::error!("there is a region without read permission: {}", range);
@@ -219,6 +255,10 @@ impl StateX86 {
                 range.size,
                 flags.bits() | mem_type.bits(),
             );
+            map_count += 1;
+            if (map_count % 100) == 0 {
+                log::info!("ept: processed {:06} mappings", map_count);
+            }
         }
 
         loop {
@@ -254,11 +294,11 @@ impl StateX86 {
         domain_handle: Handle<Domain>,
         engine: &mut MutexGuard<CapaEngine>,
     ) -> bool {
-        log::info!("\n ### entering update_domain_ept ###\n");
+        //log::info!("\n ### entering update_domain_ept ###\n");
 
         let ept_res = Self::update_ept_tables(domain_handle, engine);
 
-        log::info!("\n #### Updating IOPTs ####\n");
+        //log::info!("\n #### Updating IOPTs ####\n");
         let iommu_res = Self::update_iommu_page_tables(domain_handle, engine);
 
         ept_res || iommu_res

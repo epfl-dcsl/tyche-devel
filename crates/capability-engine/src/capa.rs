@@ -5,7 +5,7 @@ use core::fmt;
 use crate::domain::{Domain, DomainPool};
 use crate::gen_arena::Handle;
 use crate::segment::{RegionCapa, RegionPool};
-use crate::{CapaError, MemOps};
+use crate::{CapaError, MemOps, ResourceKind};
 
 #[derive(Clone, Copy, Debug)]
 pub enum Capa {
@@ -29,12 +29,14 @@ pub enum CapaInfo {
         unique: bool,
         children: bool,
         ops: MemOps,
+        resource_kind: ResourceKind,
     },
     RegionRevoke {
         start: usize,
         end: usize,
         confidential: bool,
         ops: MemOps,
+        resource_kind: ResourceKind,
     },
     Management {
         domain_id: usize,
@@ -49,11 +51,14 @@ pub enum CapaInfo {
 }
 
 impl CapaInfo {
-    pub fn serialize(&self) -> (usize, usize, u16) {
-        let v1;
+    /// returns (start, end, 8 bit flags (high) || 8 bit capa type (low) , serialized resource kind)
+    pub fn serialize(&self) -> (usize, usize, u16, [u8; ResourceKind::SERIALIZED_SIZE]) {
+        let v1: usize;
         let mut v2 = 0;
         let capa_type: u8;
         let mut flags: u8 = 0;
+
+        let mut resource_kind_serialized = [0; ResourceKind::SERIALIZED_SIZE];
 
         match self {
             CapaInfo::Region {
@@ -62,6 +67,7 @@ impl CapaInfo {
                 unique,
                 children: _,
                 ops,
+                resource_kind,
             } => {
                 v1 = *start;
                 v2 = *end;
@@ -72,12 +78,15 @@ impl CapaInfo {
                 }
                 flags |= ops.bits() << 2;
                 capa_type = capa_type::REGION;
+
+                resource_kind_serialized = resource_kind.dom0_serialization();
             }
             CapaInfo::RegionRevoke {
                 start,
                 end,
                 confidential,
                 ops,
+                resource_kind,
             } => {
                 v1 = *start;
                 v2 = *end;
@@ -86,6 +95,7 @@ impl CapaInfo {
                 }
                 flags |= ops.bits() << 2;
                 capa_type = capa_type::REGION_REVOKE;
+                resource_kind_serialized = resource_kind.dom0_serialization();
             }
             CapaInfo::Management { domain_id, sealed } => {
                 v1 = *domain_id;
@@ -107,11 +117,16 @@ impl CapaInfo {
         }
 
         let v3 = capa_type as u16 + ((flags as u16) << 8);
-        (v1, v2, v3)
+        (v1, v2, v3, resource_kind_serialized)
     }
 
     // TODO: write some tests
-    pub fn deserialize(v1: usize, v2: usize, v3: u16) -> Result<Self, CapaError> {
+    pub fn deserialize(
+        v1: usize,
+        v2: usize,
+        v3: u16,
+        resource_kind_serialized: &[u8; ResourceKind::SERIALIZED_SIZE],
+    ) -> Result<Self, CapaError> {
         let capa_type = (v3 & 0xFF) as u8;
         let flags = v3 >> 8;
         let capa_info = match capa_type {
@@ -130,6 +145,7 @@ impl CapaInfo {
                     unique: unique,
                     children: false, // TODO: we do not track children in serialization
                     ops: ops,
+                    resource_kind: ResourceKind::dom0_deserialization(resource_kind_serialized)?,
                 }
             }
             _ => {
@@ -202,6 +218,7 @@ impl Capa {
                     unique: region.is_confidential,
                     children: region.child_list_head.is_some(),
                     ops: region.access.ops,
+                    resource_kind: region.access.resource,
                 })
             }
             Capa::RegionRevoke(h) => {
@@ -211,6 +228,7 @@ impl Capa {
                     end: region.access.end,
                     confidential: region.is_confidential,
                     ops: region.access.ops,
+                    resource_kind: region.access.resource,
                 })
             }
             Capa::Management(h) => {
@@ -264,13 +282,14 @@ impl fmt::Display for CapaInfo {
                 unique,
                 children,
                 ops,
+                resource_kind,
             } => {
                 let c = if *unique { 'U' } else { '_' };
                 let p = if *children { 'P' } else { '_' };
                 write!(
                     f,
-                    "Region([0x{:x}, 0x{:x} | {}{}{}])",
-                    start, end, p, c, ops
+                    "Region([0x{:x}, 0x{:x} | {}{}{}{:?}])",
+                    start, end, p, c, ops, resource_kind
                 )
             }
             CapaInfo::RegionRevoke {
@@ -278,12 +297,13 @@ impl fmt::Display for CapaInfo {
                 end,
                 confidential,
                 ops,
+                resource_kind,
             } => {
                 let c = if *confidential { 'C' } else { '_' };
                 write!(
                     f,
-                    "RegionRevoke([0x{:x}, 0x{:x} | {}{}])",
-                    start, end, c, ops
+                    "RegionRevoke([0x{:x}, 0x{:x} | {}{}{:?}])",
+                    start, end, c, ops, resource_kind
                 )
             }
             CapaInfo::Management { domain_id, sealed } => {

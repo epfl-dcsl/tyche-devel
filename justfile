@@ -175,6 +175,7 @@ build-linux-riscv:
 _build-linux-common ARCH CROSS_COMPILE=extra_arg:
 	@just _setup-linux-config {{ARCH}}
 	bear --output ./linux/compile_commands.json -- make -C ./linux ARCH={{ARCH}} O=../builds/linux-{{ARCH}} {{CROSS_COMPILE}} -j `nproc`
+	cd builds/linux-x86 && ../../linux/scripts/clang-tools/gen_compile_commands.py
 	@just _clean-linux-config {{ARCH}}
 
 build-linux-x86-nested:
@@ -354,15 +355,15 @@ setup_lab_x86:
   ARCH=x86 make -C C/ update_disk
   # Copy all the necessary files
   mkdir -p /tmp/mount/tyche/vms
-  sudo cp builds/linux-x86-nested/arch/x86_64/boot/bzImage /tmp/mount/tyche/vms/bzImage
-  sudo cp configs/Makefile_td0 /tmp/mount/tyche/Makefile
+  cp builds/linux-x86-nested/arch/x86_64/boot/bzImage /tmp/mount/tyche/vms/bzImage
+  cp configs/Makefile_td0 /tmp/mount/tyche/Makefile
   mkdir -p /tmp/mount/tyche/scripts
   mkdir -p /tmp/mount/tyche/chardev/
-  sudo chmod 777 /tmp/mount/tyche/chardev
-  sudo cp scripts/mod_switch.sh /tmp/mount/tyche/scripts/mod_switch.sh
-  sudo cp configs/README_td0.md /tmp/mount/tyche/README.md
-  sudo chmod +x /tmp/mount/tyche/scripts/mod_switch.sh
-  sudo cp /tmp/seabios_tmp/out/bios.bin /tmp/mount/tyche/vms/bios.bin
+  chmod 777 /tmp/mount/tyche/chardev
+  cp scripts/mod_switch.sh /tmp/mount/tyche/scripts/mod_switch.sh
+  cp configs/README_td0.md /tmp/mount/tyche/README.md
+  chmod +x /tmp/mount/tyche/scripts/mod_switch.sh
+  cp /tmp/seabios_tmp/out/bios.bin /tmp/mount/tyche/vms/bios.bin
   rm -rf /tmp/seabios_tmp/
   ARCH=x86 make -C C/ ubuntu_umount
 

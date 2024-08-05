@@ -19,6 +19,8 @@
 #include <asm/vmx.h>
 #endif
 
+//luca:
+
 // ————————————————————————— Local helper functions ————————————————————————— //
 
 static int ioctl_mprotect(handle_t handle, usize vstart, usize size, 
@@ -123,6 +125,7 @@ int backend_td_alloc_mem(tyche_domain_t* domain)
       ERROR("Unable to map the slot");
       goto failure;
     }
+    //luca: according to adrian physoffset is only used for pipes, we can ignore it for now
     // Get the physoffset now.
     info.virtaddr = slot->id;
     if (ioctl(domain->handle, TYCHE_GET_PHYSOFFSET, &info) != SUCCESS) {
@@ -353,7 +356,8 @@ int backend_create_pipe(tyche_domain_t* domain, usize* id, usize physoffset,
   pipe.id = 0;
   pipe.phys_addr = physoffset;
   pipe.size = size;
-  pipe.flags = flags;
+  //TODO:luca introduce colors? or handle in driver?
+  pipe.rights.flags = flags;
   pipe.width = width;
   if (ioctl(domain->handle, TYCHE_CREATE_PIPE, &pipe) != SUCCESS) {
     ERROR("Driver create pipe failed");

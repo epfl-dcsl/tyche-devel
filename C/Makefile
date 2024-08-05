@@ -17,6 +17,8 @@ ubuntu_mount:
 	sudo ./scripts/mount_ubuntu.sh mount $(DISK) $(MOUNT_DIR) $(ARCH)
 
 ubuntu_umount:
+# NBD driver is async and needs some time to finish. Without 
+	sleep 2
 	sudo ./scripts/mount_ubuntu.sh umount $(DISK) $(MOUNT_DIR) $(ARCH)
 
 ifeq ($(ARCH), x86)

@@ -194,6 +194,12 @@ impl Iommu {
         let tail_reg = InvalidationQueueTail::new_from_bits(self.get_invalidation_queue_tail());
         let head_reg = InvalidationQueueHead::new_from_bits(self.get_invalidation_queue_head());
 
+        log::info!(
+            "starting flush with tail_reg_idx {:?}, head_reg_idx {:?}, queue size {}",
+            tail_reg.get_queue_tail() * 2,
+            head_reg.get_queue_head() * 2,
+            inv_queue.len(),
+        );
         assert_eq!(
             tail_reg.get_queue_tail(),
             head_reg.get_queue_head(),
@@ -209,19 +215,19 @@ impl Iommu {
         - Global Device-TLB invalidation to all affected functions. : TODO
          */
 
-        //tail_reg is logical index, each desciptor is 128 bit and we have &[u64], so *2 to goe from logical index to slice index
+        //tail_reg is logical index, each desciptor is 128 bit and we have &[u64], so *2 to go from logical index to slice index
         let mut inv_queue_tail_idx = (tail_reg.get_queue_tail() * 2) as usize;
 
         let iotlb_flush_desc = IOTLBInvalidateDescriptor::new_flush_all();
         inv_queue[inv_queue_tail_idx] = iotlb_flush_desc.bits().low;
         inv_queue[inv_queue_tail_idx + 1] = iotlb_flush_desc.bits().high;
-        inv_queue_tail_idx += 2;
+        inv_queue_tail_idx = (inv_queue_tail_idx + 2) % inv_queue.len();
 
         let context_flush_desc =
             ContextCacheInvalidateDescriptor::new(FlushGranularity::GlobalInvalidation);
         inv_queue[inv_queue_tail_idx] = context_flush_desc.bits().low;
         inv_queue[inv_queue_tail_idx + 1] = context_flush_desc.bits().high;
-        inv_queue_tail_idx += 2;
+        inv_queue_tail_idx = (inv_queue_tail_idx + 2) % inv_queue.len();
 
         let inv_ack_data: u32 = 0xdeadbeef;
         //reset value stored in writeback location
@@ -229,10 +235,15 @@ impl Iommu {
         let wait_desc = InvalidationWaitDescriptor::new(inv_wb_frame, inv_ack_data);
         inv_queue[inv_queue_tail_idx] = wait_desc.bits().low;
         inv_queue[inv_queue_tail_idx + 1] = wait_desc.bits().high;
-        inv_queue_tail_idx += 2;
+        inv_queue_tail_idx = (inv_queue_tail_idx + 2) % inv_queue.len();
 
         //set tail register, this informs hw that there are new entries
         let tail_reg = InvalidationQueueTail::new(inv_queue_tail_idx as u64 / 2)?;
+        log::info!(
+            "new tail_reg {}, queue_len {}",
+            tail_reg.get_queue_tail() * 2,
+            inv_queue.len()
+        );
         self.set_invalidation_queue_tail(tail_reg.bits());
 
         //poll for completion

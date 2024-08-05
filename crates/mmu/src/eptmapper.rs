@@ -117,8 +117,36 @@ impl Mapper for EptMapper {
 }
 
 impl EptMapper {
+    pub fn lookup(&mut self, gpa: GuestPhysAddr) -> Option<HostPhysAddr> {
+        let mut result_hpa = None;
+        let walk_result = unsafe {
+            self.walk_range(
+                gpa,
+                GuestPhysAddr::new(gpa.as_usize() + PAGE_SIZE),
+                &mut |_, entry, level| {
+                    if (*entry & EPT_PRESENT.bits()) == 0 {
+                        return WalkNext::Leaf;
+                    }
+                    if level == Level::L1 || *entry & EptEntryFlags::PAGE.bits() != 0 {
+                        result_hpa = Some(Self::get_hpa(*entry));
+                        return WalkNext::Abort;
+                    }
+                    return WalkNext::Continue;
+                },
+            )
+        };
+        //When we find the translation, we abort walk with WalkNext::Abort, this will cause the walker to reutrn an error
+        //Thus, we check if we have Some result_hpa to distinguish a failed walk from the deliberate abort
+        match (result_hpa, walk_result) {
+            //Walk succeeded but GPA is not mapped
+            (None, Ok(_)) => return None,
+            //Walk succeeded and GPA is mapped
+            (Some(hpa), _) => return Some(HostPhysAddr::from_u64(hpa)),
+            //Walk failed, mapping status unknown, should not happen if PTs are well formed
+            _ => panic!("EPT walk failed"),
+        }
+    }
     /// Creates a new EPT mapper.
-
     //#[cfg(not(features = "visionfive2"))]
     pub fn new(host_offset: usize, root: HostPhysAddr) -> Self {
         Self {
