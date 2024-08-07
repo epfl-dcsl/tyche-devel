@@ -200,3 +200,24 @@ impl<T> core::fmt::Display for Handle<T> {
         write!(f, "H({}, gen {})", self.idx, self.gen)
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::GenArena;
+
+    #[test]
+    fn arena_iter() {
+        //check that arena iter only returns allocated elements
+        let mut arena = GenArena::new([0, 10]);
+        let handle = arena.allocate(42).expect("failed to allocate entry");
+        for x in &arena {
+            assert_eq!(handle, x);
+        }
+        drop(handle);
+        let mut got_entries = 0;
+        for x in &arena {
+            got_entries += 1;
+        }
+        assert_eq!(got_entries, 1);
+    }
+}

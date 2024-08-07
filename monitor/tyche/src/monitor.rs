@@ -1,3 +1,4 @@
+use core::arch::asm;
 use core::{mem, panic, slice};
 
 use attestation::hashing::hash_region;
@@ -5,13 +6,12 @@ use capa_engine::config::NB_CORES;
 use capa_engine::utils::BitmapIterator;
 use capa_engine::{
     permission, AccessRights, Buffer, CapaEngine, CapaError, CapaInfo, Domain, Handle, LocalCapa,
-    MemOps, NextCapaToken, PermissionIterator, ResourceKind, MEMOPS_ALL, MEMOPS_EXTRAS,
+    MemOps, NextCapaToken, PermissionIterator, RegionIterator, ResourceKind, MEMOPS_ALL,
+    MEMOPS_EXTRAS,
 };
 use mmu::ioptmapper::PAGE_SIZE;
 use mmu::memory_coloring::color_to_phys::MemoryRegionKind;
-use mmu::memory_coloring::{
-    ActiveMemoryColoring, ColorBitmap, MemoryColoring, MemoryRange, PartitionBitmap,
-};
+use mmu::memory_coloring::{ColorBitmap, MemoryColoring, MemoryRange, PartitionBitmap};
 use spin::{Mutex, MutexGuard};
 use stage_two_abi::Manifest;
 use vmx::{GuestPhysAddr, HostPhysAddr, HostVirtAddr};
@@ -172,12 +172,21 @@ pub trait PlatformState {
         region: &AccessRights,
     ) -> bool;
 
-    fn create_initial_mappings<T: MemoryColoring + Clone>(
+    fn create_initial_mappings<T: MemoryColoring + Clone + Default>(
         &mut self,
         domain: Handle<Domain>,
         core_partitions: PermissionIterator<T>,
         additional_partitions: PermissionIterator<T>,
         start_gpa_additional_partitions: Option<GuestPhysAddr>,
+    ) -> Result<(), CapaError>;
+
+    fn map_compactified_range(
+        &mut self,
+        domain: Handle<Domain>,
+        color_range: (usize, usize),
+        include_devices: bool,
+        start_gpa: usize,
+        regions_iter: RegionIterator,
     ) -> Result<(), CapaError>;
 
     fn map_region(
@@ -433,14 +442,6 @@ pub trait Monitor<T: PlatformState + 'static> {
         //now we can create the remappings
 
         //create mappings for dom0 core memory
-        let dom0_core_memory = engine
-            .get_domain_permissions(
-                domain,
-                ActiveMemoryColoring {},
-                Some(dom0_partititons),
-                true,
-            )
-            .expect("failed to instantiate permission iterator over dom0 core memory");
 
         let dom0_additional_colors = match &manifest.remaining_dom_memory {
             MemoryRange::ColoredRange(cr) => {
@@ -454,6 +455,15 @@ pub trait Monitor<T: PlatformState + 'static> {
             MemoryRange::AllRamRegionInRange(_) => todo!(),
         };
 
+        /*let dom0_core_memory = engine
+            .get_domain_permissions(
+                domain,
+                ActiveMemoryColoring {},
+                Some(dom0_partititons),
+                true,
+            )
+            .expect("failed to instantiate permission iterator over dom0 core memory");
+
         let dom0_additional_memory = engine
             .get_domain_permissions(
                 domain,
@@ -465,15 +475,7 @@ pub trait Monitor<T: PlatformState + 'static> {
 
         log::info!("dom0 core mem colors: {:x?}", dom0_partititons);
         log::info!("dom0 additional colors: {:x?}", dom0_additional_colors);
-        let start_gpa_additional_mem = if manifest.dom0_gpa_additional_mem != 0 {
-            log::info!(
-                "Manifest specifies start GPA for additional mem: 0x{:013x}",
-                manifest.dom0_gpa_additional_mem
-            );
-            Some(GuestPhysAddr::new(manifest.dom0_gpa_additional_mem))
-        } else {
-            None
-        };
+
         state
             .create_initial_mappings(
                 domain,
@@ -481,7 +483,53 @@ pub trait Monitor<T: PlatformState + 'static> {
                 dom0_additional_memory,
                 start_gpa_additional_mem,
             )
-            .expect("failed to create initial memory mappings");
+            .expect("failed to create initial memory mappings");*/
+
+        //luca: using are contig range makes stuff easier here. This is not a hard requirement,
+        //just some implementation effort
+        let dom0_core_colors: (usize, usize) = dom0_partititons
+            .try_into()
+            .expect("dom0 core colors not contiguous");
+
+        log::info!(
+            "calling map compactified for dom0 core colors {:#?}",
+            dom0_core_colors
+        );
+        let region_iter = engine
+            .get_domain_regions(domain)
+            .expect("failed to get domain regions");
+        for (_, x) in region_iter.clone() {
+            log::info!("{:#?}", x);
+        }
+        log::info!("done printing regions in monitor");
+        //panic!("after printing regions in monitr"); //we get here
+        state
+            .map_compactified_range(domain, dom0_core_colors, true, 0, region_iter.clone())
+            .expect("map compactified for core mem failed");
+
+        if manifest.dom0_gpa_additional_mem != 0 {
+            let additional_mem_start_gpa = manifest.dom0_gpa_additional_mem;
+            log::info!(
+                "Manifest specifies start GPA for additional mem: 0x{:013x}",
+                manifest.dom0_gpa_additional_mem
+            );
+            let dom0_additional_colors: (usize, usize) = dom0_additional_colors
+                .try_into()
+                .expect("dom0 additional colors not contiguous");
+            log::info!(
+                "calling map compactified for dom0 additional_colors {:#?}",
+                dom0_additional_colors
+            );
+            state
+                .map_compactified_range(
+                    domain,
+                    dom0_additional_colors,
+                    false,
+                    additional_mem_start_gpa,
+                    engine.get_domain_regions(domain).unwrap(),
+                )
+                .expect("map compactified for additional mem failed");
+        };
 
         log::info!("Created all regions. Calling apply_updates...");
         //TODO: call the platform?
@@ -1338,7 +1386,7 @@ pub trait Monitor<T: PlatformState + 'static> {
 
     fn apply_updates(state: &mut T, engine: &mut MutexGuard<CapaEngine>) {
         while let Some(update) = engine.pop_update() {
-            log::trace!("Update: {}", update);
+            log::info!("Update: {}", update);
             match update {
                 capa_engine::Update::PermissionUpdate { domain, core_map } => {
                     let core_id = cpuid();
@@ -1348,7 +1396,14 @@ pub trait Monitor<T: PlatformState + 'static> {
                         core_map
                     );
                     // Do we have to process updates
+                    //unsafe { asm!("ud2") };
+                    log::info!(
+                        "monitor: calling update_permission on state ptr {:x?}, domain {:?}",
+                        state as *const T,
+                        domain
+                    );
                     if T::update_permission(domain, engine) {
+                        log::info!("after update_permission, preparing for state switch");
                         let mut core_count = core_map.count_ones() as usize;
                         if (1 << core_id) & core_map != 0 {
                             state.platform_shootdown(&domain, core_id, true);

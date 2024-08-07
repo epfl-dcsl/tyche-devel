@@ -13,10 +13,12 @@ pub trait MemoryColoring {
     ///Number of bytes required for the color bitmap to represent the COLOR_COUNT many colors
     const BYTES_FOR_COLOR_BITMAP: usize;
 
-    type Bitmap: ColorBitmap + Clone;
+    type Bitmap: ColorBitmap + Clone + Default;
 
     /// Computes the memory color for the given address
     fn compute_color(&self, frame: HostPhysAddr) -> u64;
+
+    fn new() -> Self;
 }
 
 //for akward tpye conversion in test code for capa engine
@@ -39,6 +41,10 @@ impl MemoryColoring for AllSameColor {
 
     fn compute_color(&self, _frame: HostPhysAddr) -> u64 {
         0
+    }
+
+    fn new() -> Self {
+        Self {}
     }
 }
 
@@ -76,6 +82,15 @@ pub struct MyBitmap<const N: usize, const K: usize> {
     //number of "payload" bits in `data`. The remaining bits are overhang/unused
     bits_count: usize,
     data: [u8; N],
+}
+
+impl<const N: usize, const K: usize> Default for MyBitmap<N, K> {
+    fn default() -> Self {
+        Self {
+            bits_count: K,
+            data: [0; N],
+        }
+    }
 }
 
 impl<const N: usize, const K: usize> ColorBitmap for MyBitmap<N, K> {
@@ -250,9 +265,68 @@ pub type PartitionBitmap = MyBitmap<
     { ActiveMemoryColoring::COLOR_COUNT },
 >;
 
+//from contiguous color range
+impl TryFrom<(usize, usize)> for PartitionBitmap {
+    type Error = &'static str;
+
+    fn try_from(range: (usize, usize)) -> Result<Self, Self::Error> {
+        let (start, end) = range;
+        let mut bm = PartitionBitmap::new();
+        if start > bm.get_payload_bits_len() {
+            return Err("start color is to large");
+        }
+        if end > bm.get_payload_bits_len() {
+            return Err("end color is to large");
+        }
+        for color_id in start..end {
+            bm.set(color_id, true)
+        }
+        Ok(bm)
+    }
+}
+
+//convert to contiguous color range
+impl TryInto<(usize, usize)> for PartitionBitmap {
+    type Error = &'static str;
+
+    fn try_into(self) -> Result<(usize, usize), Self::Error> {
+        let mut first_color: Option<usize> = None;
+        //inclusive
+        let mut last_color = 0;
+        for color_id in 0..self.get_payload_bits_len() {
+            match first_color {
+                Some(_) => {
+                    //first bit is some -> already encountered first 1
+                    //advance range until we get first unset bit
+                    if self.get(color_id) {
+                        last_color = color_id
+                    } else {
+                        break;
+                    }
+                }
+                None => {
+                    if self.get(color_id) {
+                        first_color = Some(color_id);
+                        last_color = color_id;
+                    }
+                }
+            }
+        }
+
+        //check that all remaining bits are not set
+        let first_color = first_color.ok_or("empty partition map")?;
+        for color_id in last_color + 1..self.get_payload_bits_len() {
+            if self.get(color_id) {
+                return Err("colors in bitmap are not contiguous");
+            }
+        }
+        Ok((first_color, last_color))
+    }
+}
+
 /// This memory coloring is only intended as an example and does not give
 /// You any isolation guarantees
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct DummyMemoryColoring {}
 
 impl DummyMemoryColoring {
@@ -261,7 +335,7 @@ impl DummyMemoryColoring {
     //mask to apply to page bits (after shifting) to get color id for address
     pub const COLOR_MASK: u64 = (1 << Self::COLOR_ORDER) - 1;
 
-    const SHIFT: usize = 20;
+    pub const SHIFT: usize = 20;
 }
 
 impl MemoryColoring for DummyMemoryColoring {
@@ -274,6 +348,10 @@ impl MemoryColoring for DummyMemoryColoring {
     const BYTES_FOR_COLOR_BITMAP: usize = Self::COLOR_COUNT / 8;
 
     type Bitmap = MyBitmap<{ Self::BYTES_FOR_COLOR_BITMAP }, { Self::COLOR_COUNT }>;
+
+    fn new() -> Self {
+        Self {}
+    }
 }
 
 //TODO: add feature flags to switch this

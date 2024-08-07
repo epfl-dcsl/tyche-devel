@@ -53,7 +53,7 @@ pub enum MemoryRegionDescription {
 }
 
 #[derive(Clone)]
-pub struct ColorToPhysIter<T: MemoryColoring + Clone> {
+pub struct ColorToPhysIter<T: MemoryColoring + Clone + Default> {
     memory_regions: MemoryRegionDescription,
     memory_coloring: T,
     allowed_colors: T::Bitmap,
@@ -68,7 +68,24 @@ pub struct ColorToPhysIter<T: MemoryColoring + Clone> {
     next_paddr: Option<usize>,
 }
 
-impl<T: MemoryColoring + Clone> ColorToPhysIter<T> {
+impl<T: MemoryColoring + Clone + Default> Default for ColorToPhysIter<T> {
+    fn default() -> Self {
+        Self {
+            memory_regions: MemoryRegionDescription::SingleRange(PhysRange { start: 0, end: 0 }),
+            memory_coloring: Default::default(),
+            allowed_colors: T::Bitmap::default(),
+            additional_range_filter: Default::default(),
+            cur_region: Cell::new(CurrentRegion {
+                idx: 0,
+                aligned_end: 0,
+            }),
+            inside_cur_region_cursor: Default::default(),
+            next_paddr: Default::default(),
+        }
+    }
+}
+
+impl<T: MemoryColoring + Clone + Default> ColorToPhysIter<T> {
     //advance internal state to next useable region, returns error if we ran out of regions
     fn advance_to_next_region(&self) -> Result<(), ()> {
         match self.memory_regions {
@@ -149,7 +166,7 @@ impl<T: MemoryColoring + Clone> ColorToPhysIter<T> {
     }
 }
 
-impl<T: MemoryColoring + Clone> Iterator for ColorToPhysIter<T> {
+impl<T: MemoryColoring + Clone + Default> Iterator for ColorToPhysIter<T> {
     type Item = PhysRange;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -203,7 +220,7 @@ pub struct ColorToPhys<T: MemoryColoring> {
     additional_range_filter: Option<(usize, usize)>,
 }
 
-impl<T: MemoryColoring + Clone> IntoIterator for ColorToPhys<T> {
+impl<T: MemoryColoring + Clone + Default> IntoIterator for ColorToPhys<T> {
     type Item = PhysRange;
 
     type IntoIter = ColorToPhysIter<T>;

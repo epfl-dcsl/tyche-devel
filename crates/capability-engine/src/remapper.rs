@@ -3,18 +3,49 @@
 //! The remapper is not part of the capa-engine, but a wrapper that can be used to keep trap of
 //! virtual addresses for platform such as x86 that needs to emulate second-level page tables.
 
-use core::{cmp, fmt};
+use core::{array, cmp, fmt};
 
+use kmerge_iter::{new_compactified_mapping_iter, CompatifiedMappingIter, MergedRemapIter};
 use mmu::ioptmapper::PAGE_SIZE;
-use mmu::memory_coloring::MemoryColoring;
+use mmu::memory_coloring::{MemoryColoring, PartitionBitmap};
 use utils::{GuestPhysAddr, HostPhysAddr};
 
-use crate::region::{MemoryPermission, PermissionIterator};
-use crate::{CapaError, GenArena, Handle, MemOps, ResourceKind};
+use crate::config::NB_TRACKER;
+use crate::region::{
+    MemoryPermission, PermissionIterator, RegionResourceKind, TrackerPool, EMPTY_REGION,
+};
+use crate::{CapaError, GenArena, Handle, MemOps, RegionIterator, RegionTracker, ResourceKind};
+
+mod kmerge_iter;
 
 pub struct Remapper<const N: usize> {
+    //simple remappings
     segments: GenArena<Segment, N>,
+    //complex, compactifier remappings
+    compact_remaps: GenArena<CompactRemap, N>,
+    //TODO: store memory coloring
     head: Option<Handle<Segment>>,
+    //store regions referenced by CompactRemap here
+    remapper_region_pool: TrackerPool,
+}
+
+#[derive(Clone, Copy)]
+pub struct CompactRemap {
+    color_range: (usize, usize),
+    include_devices: bool,
+    start_gpa: usize,
+    regions: RegionTracker,
+}
+
+impl CompactRemap {
+    const fn empty() -> Self {
+        Self {
+            color_range: (0, 0),
+            include_devices: false,
+            start_gpa: 0,
+            regions: RegionTracker::new(),
+        }
+    }
 }
 
 /// A mapping from HPA to HPA
@@ -28,7 +59,7 @@ pub struct Mapping {
     pub size: usize,
     /// Number of repetitions
     pub repeat: usize,
-    /// Memory permissions
+    /// Memory ptracker.permissions
     pub ops: MemOps,
     /// Additional dimension of access rights that describe how this should get mapped
     /// Adds supports for resource exlusivity
@@ -36,7 +67,7 @@ pub struct Mapping {
 }
 
 ///
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Copy)]
 pub struct Segment {
     /// Host Physical Address
     hpa: usize,
@@ -69,23 +100,62 @@ impl Segment {
         false
     }
 }
-
 impl<const N: usize> Remapper<N> {
     pub const fn new() -> Self {
-        Remapper {
+        let v = Remapper {
             segments: GenArena::new([EMPTY_SEGMENT; N]),
             head: None,
-        }
+            compact_remaps: GenArena::new([CompactRemap::empty(); N]),
+            remapper_region_pool: TrackerPool::new([EMPTY_REGION; NB_TRACKER]),
+        };
+        let a = 10;
+        v
     }
 
-    pub fn remap<'a, T: MemoryColoring + Clone>(
+    pub fn new_merged_remap_iter<'a, T>(&'a self, coloring: T) -> MergedRemapIter<'a, N, T>
+    where
+        T: MemoryColoring + Clone + Default,
+    {
+        //panic!("entering new merged remap iter");
+        log::info!("creating new_merged_remap_iter");
+        let simple = &self.segments;
+        let mut compactified_iters: [CompatifiedMappingIter<'a, T>; N] =
+            array::from_fn(|_| CompatifiedMappingIter::default());
+        let mut compactified_len = 0;
+        //panic!("before loop");
+        for handle in &self.compact_remaps {
+            let cr = self
+                .compact_remaps
+                .get(handle)
+                .expect("failed to get cmapct remap from pool");
+            let bm = PartitionBitmap::try_from(cr.color_range).expect("malformed color range");
+
+            let perm_iter = cr.regions.permissions(
+                &self.remapper_region_pool,
+                coloring.clone(),
+                Some(bm),
+                cr.include_devices,
+            );
+
+            assert!(compactified_len < compactified_iters.len());
+            compactified_iters[compactified_len] =
+                new_compactified_mapping_iter(perm_iter, cr.start_gpa);
+            compactified_len += 1;
+        }
+        //panic!("before new call");
+        MergedRemapIter::new(simple, compactified_iters, compactified_len)
+    }
+
+    pub fn new_remap_iter<'a, T: MemoryColoring + Clone + Default>(
         &'a self,
+        coloring: T,
         regions: PermissionIterator<'a, T>,
     ) -> RemapIterator<'a, N, T> {
+        log::info!("remapper:new_remap_iter");
         RemapIterator {
             regions,
             next_region_start: None,
-            segments: self.iter_segments(),
+            remap_commands_iter: self.new_merged_remap_iter(coloring),
             next_segment_start: None,
             cursor: 0,
             ongoing_segment: None,
@@ -98,6 +168,61 @@ impl<const N: usize> Remapper<N> {
             remapper: self,
             next_segment: self.head,
         }
+    }
+
+    pub fn map_compactified_range(
+        &mut self,
+        color_range: (usize, usize),
+        include_devices: bool,
+        start_gpa: usize,
+        regions_iter: RegionIterator,
+    ) -> Result<(), CapaError> {
+        log::info!("remapper::map_compactified_range");
+        //panic!("start of map_compactified in remapper"); // get here
+        let mut remap_region_snapshot = RegionTracker::new();
+        //panic!("allocated region tracker"); //get here
+        for (a, x) in regions_iter {
+            panic!("start of first iteration"); //if remap_region_snapshot is commented in, we don't reach this location. If we remove it, we get here
+            let is_device = match x.get_resource_kind() {
+                RegionResourceKind::Device => true,
+                _ => false,
+            };
+            if is_device && !include_devices {
+                continue;
+            }
+            log::info!(
+                "remapper::map_compactified_range : adding region start 0x{:013x}, end 0x{:013x}",
+                x.get_start(),
+                x.get_end()
+            );
+            remap_region_snapshot
+                .add_region(
+                    x.get_start(),
+                    x.get_end(),
+                    x.get_ops(),
+                    ResourceKind::from(&x.get_resource_kind()),
+                    &mut self.remapper_region_pool,
+                )
+                .expect("remapper::map_compactified_range failed to add region");
+            //panic!("end of first iteration");
+        }
+        panic!("after regions_iter loop");
+        let entry: CompactRemap = CompactRemap {
+            start_gpa,
+            color_range,
+            include_devices,
+            regions: remap_region_snapshot,
+        };
+
+        //TODO: sanity check that this does not overlap with any existing stuff:
+
+        let _handle = self
+            .compact_remaps
+            .allocate(entry)
+            .ok_or(CapaError::OutOfMemory)?;
+
+        //panic!("end of compactified mapping");
+        Ok(())
     }
 
     pub fn map_range(
@@ -321,11 +446,11 @@ impl<const N: usize> Remapper<N> {
 // ——————————————————————————————— Iterators ———————————————————————————————— //
 
 #[derive(Clone)]
-pub struct RemapIterator<'a, const N: usize, T: MemoryColoring + Clone> {
-    //luca: deduplicated view of the memory permissions for our domain
+pub struct RemapIterator<'a, const N: usize, T: MemoryColoring + Clone + Default> {
+    //luca: deduplicated view of the memory ptracker.permissions for our domain
     regions: PermissionIterator<'a, T>,
     //luca: just simple iterator over existing segments
-    segments: RemapperSegmentIterator<'a, N>,
+    remap_commands_iter: MergedRemapIter<'a, N, T>,
     cursor: usize,
     next_region_start: Option<usize>,
     next_segment_start: Option<usize>,
@@ -333,7 +458,7 @@ pub struct RemapIterator<'a, const N: usize, T: MemoryColoring + Clone> {
     ongoing_segment: Option<SingleSegmentIterator<'a, T>>,
 }
 
-impl<'a, const N: usize, T: MemoryColoring + Clone> Iterator for RemapIterator<'a, N, T> {
+impl<'a, const N: usize, T: MemoryColoring + Clone + Default> Iterator for RemapIterator<'a, N, T> {
     type Item = Mapping;
 
     /*luca: initial state
@@ -352,7 +477,7 @@ impl<'a, const N: usize, T: MemoryColoring + Clone> Iterator for RemapIterator<'
         // First, if there is an ongoing segment being remapped, continue
         if let Some(ongoing_segment) = &mut self.ongoing_segment {
             //luca: this will match the segment to the regions to create a mapping object
-            //The matching to region is required to figure out the permissions
+            //The matching to region is required to figure out the ptracker.permissions
             match ongoing_segment.next() {
                 Some(mapping) => {
                     return Some(mapping);
@@ -368,7 +493,11 @@ impl<'a, const N: usize, T: MemoryColoring + Clone> Iterator for RemapIterator<'
             self.next_region_start = self.regions.clone().next().map(|region| region.start);
         }
         if self.next_segment_start.is_none() {
-            self.next_segment_start = self.segments.clone().next().map(|segment| segment.hpa);
+            self.next_segment_start = self
+                .remap_commands_iter
+                .clone()
+                .next()
+                .map(|segment| segment.hpa);
         }
 
         match (self.next_segment_start, self.next_region_start) {
@@ -420,7 +549,7 @@ impl<'a, const N: usize, T: MemoryColoring + Clone> Iterator for RemapIterator<'
                 if next_segment <= next_region {
                     // If a segment comes first, build a segment remapper and retry
                     self.cursor = next_segment;
-                    let segment = self.segments.next().unwrap();
+                    let segment = self.remap_commands_iter.next().unwrap();
                     self.next_segment_start = None;
                     self.max_segment = Some(cmp::max(
                         self.max_segment.unwrap_or(0),
@@ -476,14 +605,14 @@ impl<'a, const N: usize, T: MemoryColoring + Clone> Iterator for RemapIterator<'
 /// Creates all mapping objects for the given Segment by matching
 /// the segment to the given regions
 #[derive(Clone)]
-struct SingleSegmentIterator<'a, T: MemoryColoring + Clone> {
+struct SingleSegmentIterator<'a, T: MemoryColoring + Clone + Default> {
     regions: PermissionIterator<'a, T>,
     next_region: Option<MemoryPermission>,
     cursor: usize,
     segment: Segment,
 }
 
-impl<'a, T: MemoryColoring + Clone> SingleSegmentIterator<'a, T> {
+impl<'a, T: MemoryColoring + Clone + Default> SingleSegmentIterator<'a, T> {
     fn next(&mut self) -> Option<Mapping> {
         // Retrieve the current region and segment
         let segment = &self.segment;
@@ -513,7 +642,7 @@ impl<'a, T: MemoryColoring + Clone> SingleSegmentIterator<'a, T> {
         /*luca: if we are here, we have a region for our segment.
          * Our segment might spand multiple regions. Thus, we next update
          * the cursor, to keep track where exactly in memory we are
-         * The purpose of the region, is to give us the permissions for the mapping
+         * The purpose of the region, is to give us the ptracker.permissions for the mapping
          * that we are about to create.
          * The logic checks are mostly based on the logic for the mapping creation at the end
          * of this function
@@ -586,7 +715,7 @@ impl<'a, const N: usize> Iterator for RemapperSegmentIterator<'a, N> {
 /// - `permission_iter` : generates the HPA memory ranges that we want to remap
 /// - `start_gpa` first GPA of the contiguous mapping
 pub fn compactify_colors_in_gpa_space_cb_mapper<
-    T: MemoryColoring + Clone,
+    T: MemoryColoring + Clone + Default,
     F: FnMut(HostPhysAddr, GuestPhysAddr, usize, usize) -> Result<(), CapaError>,
 >(
     map_cb: &mut F,
@@ -749,7 +878,7 @@ pub fn compactify_colors_in_gpa_space_cb_mapper<
 
 /// Convenience wrapper around [`compactify_colors_in_gpa_space_cb_mapper`] that directly works with
 /// the provided `remapper`
-pub fn compactify_colors_in_gpa_space<const N: usize, T: MemoryColoring + Clone>(
+pub fn compactify_colors_in_gpa_space<const N: usize, T: MemoryColoring + Clone + Default>(
     remapper: &mut Remapper<N>,
     permission_iter: PermissionIterator<T>,
     start_gpa: GuestPhysAddr,
@@ -774,7 +903,7 @@ mod tests {
     use crate::region::{TrackerPool, EMPTY_REGION};
     use crate::{RegionTracker, ResourceKind, MEMOPS_ALL};
 
-    #[derive(Clone)]
+    #[derive(Clone, Default)]
     struct RangeBasedTestColoring {
         //tuples of phys range with the corresponding color
         ranges: Vec<(PhysRange, u64)>,
@@ -800,6 +929,12 @@ mod tests {
                 }
             }
             panic!("invalid test valid coloring config")
+        }
+
+        fn new() -> Self {
+            Self {
+                ranges: todo!("not sure how to impelement for this test coloring"),
+            }
         }
     }
 
@@ -928,7 +1063,10 @@ mod tests {
                 "[0x13000, 0x14000 at 0xb000, rep 1 | RWXS]", // RAM C: stuff that did not fit before hitting device
                 "}"
             ),
-            &remapper.remap(tracker.permissions(&pool, coloring.clone(), None, true)),
+            &remapper.new_remap_iter(
+                coloring.clone(),
+                tracker.permissions(&pool, coloring.clone(), None, true),
+            ),
         );
         assert_eq!(
             WANT_END_RAM_GPA,
@@ -1028,7 +1166,10 @@ mod tests {
                 "[0xe000, 0xf000 at 0xe000, rep 1 | RWXS]", //Device B,
                 "}"
             ),
-            &remapper.remap(tracker.permissions(&pool, coloring.clone(), None, true)),
+            &remapper.new_remap_iter(
+                coloring.clone(),
+                tracker.permissions(&pool, coloring.clone(), None, true),
+            ),
         );
         assert_eq!(
             WANT_END_RAM_GPA,
@@ -1064,6 +1205,67 @@ mod tests {
     }
 
     #[test]
+    fn compactified_remap() {
+        let mut pool = TrackerPool::new([EMPTY_REGION; NB_TRACKER]);
+        let mut tracker = RegionTracker::new();
+        let mut remapper: Remapper<128> = Remapper::new();
+        let coloring = RangeBasedTestColoring::new(vec![
+            (
+                PhysRange {
+                    start: 0x0_000,
+                    end: 0x4_000,
+                },
+                0,
+            ),
+            (
+                PhysRange {
+                    start: 0x4_000,
+                    end: 0x1000_000,
+                },
+                1,
+            ),
+        ]);
+        tracker
+            .add_region(
+                0x0_000,
+                0x8_000,
+                MEMOPS_ALL,
+                ResourceKind::ram_with_all_partitions(),
+                &mut pool,
+            )
+            .unwrap();
+        for x in 1..120 {
+            tracker
+                .add_region(
+                    0x8_000 + (x * 0x1_000),
+                    0x8_000 + (x * 0x1_000) + 0x1_000,
+                    MEMOPS_ALL,
+                    ResourceKind::ram_with_all_partitions(),
+                    &mut pool,
+                )
+                .unwrap();
+        }
+
+        remapper
+            .map_compactified_range((0, 1), true, 0x10_000, tracker.iter(&pool))
+            .expect("failed to add compactified mapping");
+
+        /*println!("merged remap iter");
+        let merged_remap_iter =
+            remapper.new_merged_remap_iter::<RangeBasedTestColoring>(coloring.clone());
+        for x in merged_remap_iter {
+            println!("{:x?}", x);
+        }
+        println!("remappings");
+        for x in remapper.new_remap_iter(
+            coloring.clone(),
+            tracker.permissions(&pool, coloring.clone(), None, true),
+        ) {
+            println!("{:x?}", x);
+        }*/
+    }
+
+    #[test]
     fn remap() {
         let mut pool = TrackerPool::new([EMPTY_REGION; NB_TRACKER]);
         let mut tracker = RegionTracker::new();
@@ -1092,14 +1294,20 @@ mod tests {
         );
         snap(
             "{[0x1000, 0x2000 at 0x1000, rep 1 | RWXS]}",
-            &remapper.remap(tracker.permissions(&pool, all_same_color.clone(), None, true)),
+            &remapper.new_remap_iter(
+                all_same_color.clone(),
+                tracker.permissions(&pool, all_same_color.clone(), None, true),
+            ),
         );
 
         // Remap that region
         remapper.map_range(0x1_000, 0x10_010, 0x1000, 1).unwrap();
         snap(
             "{[0x1000, 0x2000 at 0x10010, rep 1 | RWXS]}",
-            &remapper.remap(tracker.permissions(&pool, all_same_color.clone(), None, true)),
+            &remapper.new_remap_iter(
+                all_same_color.clone(),
+                tracker.permissions(&pool, all_same_color.clone(), None, true),
+            ),
         );
 
         // Let's add a few more!
@@ -1124,36 +1332,36 @@ mod tests {
         snap("{[0x1000, 0x2000 | 1 (1 - 1 - 1 - 1)] -> [0x3000, 0x4000 | 1 (1 - 1 - 1 - 1)] -> [0x4000, 0x5000 | 1 (1 - 0 - 0 - 0)]}", &tracker.iter(&pool));
         snap(
             "{[0x1000, 0x2000 at 0x10010, rep 1 | RWXS] -> [0x3000, 0x4000 at 0x3000, rep 1 | RWXS] -> [0x4000, 0x5000 at 0x4000, rep 1 | R___]}",
-            &remapper.remap(tracker.permissions(&pool, all_same_color.clone(),None,true)),
+            &remapper.new_remap_iter(all_same_color.clone(),tracker.permissions(&pool, all_same_color.clone(),None,true)),
         );
 
         // And (partially) remap those
         remapper.map_range(0x3000, 0x13000, 0x800, 1).unwrap();
         snap(
             "{[0x1000, 0x2000 at 0x10010, rep 1 | RWXS] -> [0x3000, 0x3800 at 0x13000, rep 1 | RWXS] -> [0x3800, 0x4000 at 0x3800, rep 1 | RWXS] -> [0x4000, 0x5000 at 0x4000, rep 1 | R___]}",
-            &remapper.remap(tracker.permissions(&pool,all_same_color.clone(),None,true)),
+            &remapper.new_remap_iter(all_same_color.clone(),tracker.permissions(&pool,all_same_color.clone(),None,true)),
         );
         remapper.map_range(0x3800, 0x23800, 0x800, 1).unwrap();
         snap(
             "{[0x1000, 0x2000 at 0x10010, rep 1 | RWXS] -> [0x3000, 0x3800 at 0x13000, rep 1 | RWXS] -> [0x3800, 0x4000 at 0x23800, rep 1 | RWXS] -> [0x4000, 0x5000 at 0x4000, rep 1 | R___]}",
-            &remapper.remap(tracker.permissions(&pool, all_same_color.clone(),None,true)),
+            &remapper.new_remap_iter(all_same_color.clone(),tracker.permissions(&pool, all_same_color.clone(),None,true)),
         );
         remapper.map_range(0x4000, 0x14000, 0x1000, 3).unwrap();
         snap(
             "{[0x1000, 0x2000 at 0x10010, rep 1 | RWXS] -> [0x3000, 0x3800 at 0x13000, rep 1 | RWXS] -> [0x3800, 0x4000 at 0x23800, rep 1 | RWXS] -> [0x4000, 0x5000 at 0x14000, rep 3 | R___]}",
-            &remapper.remap(tracker.permissions(&pool, all_same_color.clone(),None,true)),
+            &remapper.new_remap_iter(all_same_color.clone(),tracker.permissions(&pool, all_same_color.clone(),None,true)),
         );
 
         // Unmap some segments
         remapper.unmap_range(0x3800, 0x800).unwrap();
         snap(
             "{[0x1000, 0x2000 at 0x10010, rep 1 | RWXS] -> [0x3000, 0x3800 at 0x13000, rep 1 | RWXS] -> [0x3800, 0x4000 at 0x3800, rep 1 | RWXS] -> [0x4000, 0x5000 at 0x14000, rep 3 | R___]}",
-            &remapper.remap(tracker.permissions(&pool, all_same_color.clone(),None,true)),
+            &remapper.new_remap_iter(all_same_color.clone(),tracker.permissions(&pool, all_same_color.clone(),None,true)),
         );
         remapper.unmap_range(0x3000, 0x800).unwrap();
         snap(
             "{[0x1000, 0x2000 at 0x10010, rep 1 | RWXS] -> [0x3000, 0x4000 at 0x3000, rep 1 | RWXS] -> [0x4000, 0x5000 at 0x14000, rep 3 | R___]}",
-            &remapper.remap(tracker.permissions(&pool, all_same_color.clone(),None,true)),
+            &remapper.new_remap_iter(all_same_color.clone(),tracker.permissions(&pool, all_same_color.clone(),None,true)),
         );
 
         // Delete regions but not the segments yet
@@ -1172,19 +1380,19 @@ mod tests {
         );
         snap(
             "{[0x1000, 0x2000 at 0x10010, rep 1 | RWXS] -> [0x3000, 0x4000 at 0x3000, rep 1 | RWXS]}",
-            &remapper.remap(tracker.permissions(&pool, all_same_color.clone(),None,true)),
+            &remapper.new_remap_iter(all_same_color.clone(),tracker.permissions(&pool, all_same_color.clone(),None,true)),
         );
 
         // Unmap more segments
         remapper.unmap_range(0x4000, 0x1000).unwrap();
         snap(
             "{[0x1000, 0x2000 at 0x10010, rep 1 | RWXS] -> [0x3000, 0x4000 at 0x3000, rep 1 | RWXS]}",
-            &remapper.remap(tracker.permissions(&pool, all_same_color.clone(),None,true)),
+            &remapper.new_remap_iter(all_same_color.clone(),tracker.permissions(&pool, all_same_color.clone(),None,true)),
         );
         remapper.unmap_range(0x1000, 0x1000).unwrap();
         snap(
             "{[0x1000, 0x2000 at 0x1000, rep 1 | RWXS] -> [0x3000, 0x4000 at 0x3000, rep 1 | RWXS]}",
-            &remapper.remap(tracker.permissions(&pool, all_same_color.clone(),None,true)),
+            &remapper.new_remap_iter(all_same_color.clone(),tracker.permissions(&pool, all_same_color.clone(),None,true)),
         );
     }
 
@@ -1226,14 +1434,14 @@ mod tests {
         );
         snap(
             "{[0x1000, 0x3000 at 0x1000, rep 1 | RWXS] -> [0x4000, 0x6000 at 0x4000, rep 1 | RWXS]}",
-            &remapper.remap(tracker.permissions(&pool, all_same_color.clone(),None,true)),
+            &remapper.new_remap_iter(all_same_color.clone(),tracker.permissions(&pool, all_same_color.clone(),None,true)),
         );
 
         // Create a mapping that cross the region boundary
         remapper.map_range(0x2000, 0x10000, 0x10000, 1).unwrap();
         snap(
             "{[0x1000, 0x2000 at 0x1000, rep 1 | RWXS] -> [0x2000, 0x3000 at 0x10000, rep 1 | RWXS] -> [0x4000, 0x6000 at 0x12000, rep 1 | RWXS]}",
-            &remapper.remap(tracker.permissions(&pool, all_same_color.clone(),None,true)),
+            &remapper.new_remap_iter(all_same_color.clone(),tracker.permissions(&pool, all_same_color.clone(),None,true)),
         );
     }
 
@@ -1283,7 +1491,7 @@ mod tests {
             // Note: here for some reason the tracker do not properly merge the two contiguous
             // regions. We should figure that out at some point and optimize the tracker.
             "{[0x1000, 0x3000 at 0x10000, rep 1 | RWXS] -> [0x3000, 0x4000 at 0x12000, rep 1 | RWXS] -> [0x3000, 0x4000 at 0x5000, rep 1 | RWXS]}",
-            &remapper.remap(tracker.permissions(&pool, all_same_color,None,true)),
+            &remapper.new_remap_iter(all_same_color.clone(),tracker.permissions(&pool, all_same_color,None,true)),
         );
     }
 
@@ -1292,6 +1500,13 @@ mod tests {
         let mut pool = TrackerPool::new([EMPTY_REGION; NB_TRACKER]);
         let mut tracker = RegionTracker::new();
         let mut remapper: Remapper<32> = Remapper::new();
+        let all_same_color = RangeBasedTestColoring::new(vec![(
+            PhysRange {
+                start: 0x0,
+                end: 0x1_000_000,
+            },
+            0,
+        )]);
 
         tracker
             .add_region(
@@ -1311,7 +1526,7 @@ mod tests {
         //strategy: everything that is not explicity remapped will be identity mapped
         snap(
             "{[0x1000, 0x1010 at 0x10000, rep 1 | RWXS] -> [0x1010, 0x4000 at 0x1010, rep 1 | RWXS]}",
-            &remapper.remap(tracker.permissions(&pool, ActiveMemoryColoring {},None,true)),
+            &remapper.new_remap_iter(all_same_color.clone(),tracker.permissions(&pool, all_same_color.clone(),None,true)),
         );
     }
 
@@ -1350,18 +1565,18 @@ mod tests {
         remapper.map_range(0x3_000, 0x20_000, 0x1000, 1).unwrap();
 
         println!(
-            "Permissions Iterator: {}",
+            "Ptracker.permissions Iterator: {}",
             tracker.permissions(&pool, all_same_color.clone(), None, true)
         );
         snap(
             "{[0x1000, 0x2000 at 0x1000, rep 1 | RWXS] -> [0x2000, 0x3000 at 0x10000, rep 1 | RWXS] -> [0x3000, 0x4000 at 0x20000, rep 1 | RWXS]}",
-            &remapper.remap(tracker.permissions(&pool, all_same_color.clone(),None,true)),
+            &remapper.new_remap_iter(all_same_color.clone(),tracker.permissions(&pool, all_same_color.clone(),None,true)),
         );
 
         remapper.map_range(0x1_000, 0x30_000, 0x3_000, 1).unwrap();
         snap(
             "{[0x1000, 0x4000 at 0x30000, rep 1 | RWXS] -> [0x2000, 0x3000 at 0x10000, rep 1 | RWXS] -> [0x3000, 0x4000 at 0x20000, rep 1 | RWXS]}",
-            &remapper.remap(tracker.permissions(&pool,all_same_color.clone(),None,true)),
+            &remapper.new_remap_iter(all_same_color.clone(),tracker.permissions(&pool,all_same_color.clone(),None,true)),
         );
     }
 
@@ -1394,14 +1609,20 @@ mod tests {
         );
         snap(
             "{[0x1000, 0x6000 at 0x1000, rep 1 | RWXS]}",
-            &remapper.remap(tracker.permissions(&pool, all_same_color.clone(), None, true)),
+            &remapper.new_remap_iter(
+                all_same_color.clone(),
+                tracker.permissions(&pool, all_same_color.clone(), None, true),
+            ),
         );
 
         // Remap the whole region
         remapper.map_range(0x1000, 0x10000, 0x5000, 1).unwrap();
         snap(
             "{[0x1000, 0x6000 at 0x10000, rep 1 | RWXS]}",
-            &remapper.remap(tracker.permissions(&pool, all_same_color.clone(), None, true)),
+            &remapper.new_remap_iter(
+                all_same_color.clone(),
+                tracker.permissions(&pool, all_same_color.clone(), None, true),
+            ),
         );
 
         // Split the region in two
@@ -1447,7 +1668,10 @@ mod tests {
         );
         snap(
             "{[0x1000, 0x6000 at 0x10000, rep 1 | RWXS]}",
-            &remapper.remap(tracker.permissions(&pool, all_same_color.clone(), None, true)),
+            &remapper.new_remap_iter(
+                all_same_color.clone(),
+                tracker.permissions(&pool, all_same_color.clone(), None, true),
+            ),
         );
     }
 
@@ -1518,7 +1742,10 @@ mod tests {
         );
         snap(
             "{[0x2000, 0x8000 at 0x20000, rep 1 | RWXS]}",
-            &remapper.remap(tracker.permissions(&pool, all_same_color.clone(), None, true)),
+            &remapper.new_remap_iter(
+                all_same_color.clone(),
+                tracker.permissions(&pool, all_same_color.clone(), None, true),
+            ),
         );
 
         tracker
@@ -1672,7 +1899,9 @@ impl fmt::Display for Mapping {
     }
 }
 
-impl<'a, const N: usize, T: MemoryColoring + Clone> fmt::Display for RemapIterator<'a, N, T> {
+impl<'a, const N: usize, T: MemoryColoring + Clone + Default> fmt::Display
+    for RemapIterator<'a, N, T>
+{
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut first = true;
         write!(f, "{{")?;
@@ -1711,7 +1940,7 @@ impl<'a, const N: usize> fmt::Display for RemapperSegmentIterator<'a, N> {
     }
 }
 
-impl<'a, T: MemoryColoring + Clone> fmt::Display for SingleSegmentIterator<'a, T> {
+impl<'a, T: MemoryColoring + Clone + Default> fmt::Display for SingleSegmentIterator<'a, T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut first = true;
         let mut iter = self.clone();

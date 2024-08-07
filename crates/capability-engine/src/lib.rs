@@ -47,10 +47,10 @@ pub mod config {
     pub const NB_DOMAINS: usize = 32;
     pub const NB_CAPAS_PER_DOMAIN: usize = 128;
     pub const NB_REGIONS: usize = 1024;
-    pub const NB_TRACKER: usize = 1024;
+    pub const NB_TRACKER: usize = 256; //1024;
     pub const NB_UPDATES: usize = 128;
     pub const NB_CORES: usize = 32; // NOTE: Can't be greater than 64 as we use 64 bits bitmaps.
-    pub const NB_REMAP_REGIONS: usize = 2 << 12; //luca: this changes the remapping pool size
+    pub const NB_REMAP_REGIONS: usize = 128; //2 << 12; //luca: this changes the remapping pool size
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -645,7 +645,7 @@ impl CapaEngine {
         Ok(domain.regions().iter(&self.tracker))
     }
 
-    pub fn get_domain_permissions<'a, T: MemoryColoring + Clone>(
+    pub fn get_domain_permissions<'a, T: MemoryColoring + Clone + Default>(
         &'a self,
         domain: Handle<Domain>,
         memory_coloring: T,

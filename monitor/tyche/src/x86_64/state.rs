@@ -3,8 +3,7 @@ use core::sync::atomic::{AtomicBool, Ordering};
 use capa_engine::config::{NB_CORES, NB_DOMAINS, NB_REMAP_REGIONS};
 use capa_engine::context::{RegisterContext, RegisterState};
 use capa_engine::{
-    CapaEngine, CapaError, Domain, GenArena, Handle, LocalCapa, MemOps, NextCapaToken, Remapper,
-    ResourceKind,
+    CapaEngine, CapaError, Domain, GenArena, Handle, LocalCapa, MemOps, Remapper, ResourceKind,
 };
 use mmu::eptmapper::EPT_ROOT_FLAGS;
 use mmu::mapper::Mapper;
@@ -128,7 +127,10 @@ impl StateX86 {
         let permission_iter = engine
             .get_domain_permissions(domain_handle, ActiveMemoryColoring {}, None, true)
             .unwrap();
-        for range in domain.remapper.remap(permission_iter) {
+        for range in domain
+            .remapper
+            .new_remap_iter(ActiveMemoryColoring {}, permission_iter)
+        {
             if !range.ops.contains(MemOps::READ) {
                 log::error!("there is a region without read permission: {}", range);
                 continue;
@@ -193,7 +195,7 @@ impl StateX86 {
         engine: &mut MutexGuard<CapaEngine>,
     ) -> bool {
         let mut domain = Self::get_domain(domain_handle);
-        //log::info!("Updating EPTs for domain at idx {}", domain_handle.idx());
+        log::info!("Updating EPTs for domain at idx {}", domain_handle.idx());
 
         /*if domain_handle.idx() != 0 {
             log::info!("Dumping domain at idx {}", domain_handle.idx());
@@ -228,7 +230,10 @@ impl StateX86 {
             .get_domain_permissions(domain_handle, ActiveMemoryColoring {}, None, true)
             .unwrap();
         let mut map_count = 0;
-        for range in domain.remapper.remap(permission_iter) {
+        for range in domain
+            .remapper
+            .new_remap_iter(ActiveMemoryColoring {}, permission_iter)
+        {
             if !range.ops.contains(MemOps::READ) {
                 log::error!("there is a region without read permission: {}", range);
                 continue;
@@ -294,7 +299,7 @@ impl StateX86 {
         domain_handle: Handle<Domain>,
         engine: &mut MutexGuard<CapaEngine>,
     ) -> bool {
-        //log::info!("\n ### entering update_domain_ept ###\n");
+        log::info!("\n ### entering update_domain_ept ###\n");
 
         let ept_res = Self::update_ept_tables(domain_handle, engine);
 

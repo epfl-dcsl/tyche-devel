@@ -214,7 +214,7 @@ impl PermissionChange {
 ///`K` is the partition count
 // be careful to not mix up with type parameters from bitmap
 #[derive(Debug, Clone, Copy)]
-struct PartitionRefCount<const N: usize> {
+pub struct PartitionRefCount<const N: usize> {
     data: [usize; N],
 }
 
@@ -290,7 +290,7 @@ impl<const N: usize, const K: usize> From<&MyBitmap<N, K>> for PartitionRefCount
 /// just a bitmap. Changing the other type would add some memory overhead, as we only need
 /// the refcount information here
 #[derive(Debug, Clone, Copy)]
-enum RegionResourceKind {
+pub enum RegionResourceKind {
     RAM(PartitionRefCount<{ ActiveMemoryColoring::COLOR_COUNT }>),
     Device,
 }
@@ -394,6 +394,9 @@ impl Region {
                 _ => false,
             }
     }
+    pub fn get_resource_kind(&self) -> RegionResourceKind {
+        self.resource_kind
+    }
 
     pub fn get_ops(&self) -> MemOps {
         let mut ops = MemOps::NONE;
@@ -423,6 +426,7 @@ impl Region {
 
 // ————————————————————————————— RegionTracker —————————————————————————————— //
 
+#[derive(Clone, Copy)]
 pub struct RegionTracker {
     head: Option<Handle<Region>>,
 }
@@ -977,7 +981,7 @@ impl RegionTracker {
     /// - `additional_color_restrictions`: If Some, restrict allowed colors to only these. Must be
     /// a subset of the colors granted in the CAPAs. Useful to distingiush between "core" memory and "future TD" memory
     /// - `allow_devices` : If false, exclude device memory ranges
-    pub fn permissions<'a, T: MemoryColoring + Clone>(
+    pub fn permissions<'a, T: MemoryColoring + Clone + Default>(
         &'a self,
         pool: &'a TrackerPool,
         memory_coloring: T,
@@ -1019,7 +1023,7 @@ impl<'a> Iterator for RegionIterator<'a> {
 /// An iterator over a domain's memory access permissions. They are created based
 /// on the domains memory regions
 #[derive(Clone)]
-pub struct PermissionIterator<'a, T: MemoryColoring + Clone> {
+pub struct PermissionIterator<'a, T: MemoryColoring + Clone + Default> {
     tracker: &'a RegionTracker,
     pool: &'a TrackerPool,
     next: Option<Handle<Region>>,
@@ -1030,6 +1034,23 @@ pub struct PermissionIterator<'a, T: MemoryColoring + Clone> {
     additional_color_restrictions: Option<PartitionBitmap>,
     //If false, don't use device memory
     allow_devices: bool,
+}
+
+const DUMMY_DEFAULT_REGION_TRACKER: RegionTracker = RegionTracker::new();
+const DUMMY_DEFAULT_TACKER_POOL: TrackerPool = TrackerPool::new([EMPTY_REGION; NB_TRACKER]);
+
+impl<'a, T: MemoryColoring + Clone + Default> Default for PermissionIterator<'a, T> {
+    fn default() -> Self {
+        Self {
+            tracker: &DUMMY_DEFAULT_REGION_TRACKER,
+            pool: &DUMMY_DEFAULT_TACKER_POOL,
+            next: None,
+            memory_coloring: Default::default(),
+            current_subranges: Default::default(),
+            additional_color_restrictions: Default::default(),
+            allow_devices: Default::default(),
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -1046,7 +1067,7 @@ impl MemoryPermission {
     }
 }
 
-impl<'a, T: MemoryColoring + Clone> Iterator for PermissionIterator<'a, T> {
+impl<'a, T: MemoryColoring + Clone + Default> Iterator for PermissionIterator<'a, T> {
     type Item = MemoryPermission;
 
     //luca: region tracker is a linked list over regions. Regions are a deduplicated view of all resources that are described
@@ -1195,7 +1216,7 @@ mod tests {
     use super::*;
     use crate::debug::snap;
 
-    #[derive(Clone)]
+    #[derive(Clone, Default)]
     struct RangeBasedTestColoring {
         //tuples of phys range with the corresponding color
         ranges: Vec<(PhysRange, u64)>,
@@ -1225,6 +1246,10 @@ mod tests {
                 }
             }
             panic!("invalid test valid coloring config")
+        }
+
+        fn new() -> Self {
+            todo!("new is not implemented for range based memory coloring")
         }
     }
 
@@ -1690,7 +1715,7 @@ impl<'a> fmt::Display for RegionIterator<'a> {
     }
 }
 
-impl<'a, T: MemoryColoring + Clone> fmt::Display for PermissionIterator<'a, T> {
+impl<'a, T: MemoryColoring + Clone + Default> fmt::Display for PermissionIterator<'a, T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut is_first = true;
         write!(f, "{{")?;

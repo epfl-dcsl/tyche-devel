@@ -5,7 +5,7 @@ use core::sync::atomic::Ordering;
 
 use capa_engine::context::RegisterGroup;
 use capa_engine::utils::BitmapIterator;
-use capa_engine::{compactify_colors_in_gpa_space, AccessRights, CapaEngine, CapaError, Domain, Handle, MemOps, PermissionIterator};
+use capa_engine::{compactify_colors_in_gpa_space, AccessRights, CapaEngine, CapaError, Domain, Handle, MemOps, PermissionIterator, RegionIterator};
 use mmu::eptmapper::EPT_ROOT_FLAGS;
 use mmu::memory_coloring::{ActiveMemoryColoring, MemoryColoring};
 use mmu::{EptMapper, FrameAllocator};
@@ -124,7 +124,7 @@ impl PlatformState for StateX86 {
     ) -> Option<usize> {
         let domain = Self::get_domain(domain_handle);
         let permission_iter = engine.get_domain_permissions(domain_handle, ActiveMemoryColoring{},None,true).unwrap();
-        for range in domain.remapper.remap(permission_iter) {
+        for range in domain.remapper.new_remap_iter(ActiveMemoryColoring{}, permission_iter) {
             let range_start = range.gpa;
             let range_end = range_start + range.size;
             if range_start <= addr
@@ -215,9 +215,11 @@ impl PlatformState for StateX86 {
     }
 
     fn update_permission(domain: Handle<Domain>, engine: &mut MutexGuard<CapaEngine>) -> bool {
+        log::info!("x86_update_permissions");
         if engine[domain].is_io() {
             Self::update_domain_iopt(domain, engine)
         } else {
+            log::info!("x86_update_permissions: about to call update_domain_ept");
             Self::update_domain_ept(domain, engine)
         }
     }
@@ -428,7 +430,40 @@ impl PlatformState for StateX86 {
             .overlaps(alias, repeat * (region.end - region.start))
     }
 
-    fn create_initial_mappings<T: MemoryColoring + Clone>(
+    //TODO: double check if color range is inclusive or exclusive end
+    fn map_compactified_range(
+        &mut self,
+        domain: Handle<Domain>,
+        color_range: (usize, usize),
+        include_devices: bool,
+        start_gpa: usize,
+        regions_iter: RegionIterator) -> Result<(), CapaError>{
+            log::info!("x86_64_platform::map_compatified_range : domain {:?}",domain);
+            log::info!("dumping provided regions");
+            for x in regions_iter.clone() {
+                log::info!("{:x?}",x);
+            }
+            let mut dom_dat = Self::get_domain(domain); //si on call to this fails?
+            log::info!("calling into remapper");
+            //panic!("before creating mapping"); //we get here
+            dom_dat.remapper.map_compactified_range(color_range, 
+                include_devices, start_gpa, regions_iter)?;
+
+        
+        
+         log::info!("x86_64_platform::map_compatified_range : dumping iter");
+        let iter = dom_dat.remapper.new_merged_remap_iter(ActiveMemoryColoring{});
+        for x in  iter {
+            log::info!("{:x?}", x);
+        }
+        panic!("panic after mapping");
+
+        Ok(())
+
+        }
+  
+
+    fn create_initial_mappings<T: MemoryColoring + Clone + Default>(
         &mut self,
         domain: Handle<Domain>,
         core_partitions: PermissionIterator<T>,
@@ -438,6 +473,7 @@ impl PlatformState for StateX86 {
         log::info!("Creating Initial domain remappings.");
         let mut dom_dat: MutexGuard<'_, DataX86> = Self::get_domain(domain);
         log::info!("\n##\nCreating remappings for core memory\n##\n");
+        //dom_dat.remapper.map_compactified_range(color_range, additional_filter, include_devices, start_gpa)
         let (core_end_ram, core_end_device) = compactify_colors_in_gpa_space(&mut dom_dat.remapper, core_partitions , GuestPhysAddr::new(0)).map_err(|e| {
             log::error!("compactified mappings for core memory failed: {:?}",&e);
             e
@@ -714,7 +750,7 @@ impl MonitorX86 {
                         let callback = |dom: Handle<Domain>, engine: &mut CapaEngine| {
                             let dom_dat = StateX86::get_domain(dom);
                             log::info!("remaps {}", dom_dat.remapper.iter_segments());
-                            let remap = dom_dat.remapper.remap(engine.get_domain_permissions(dom, ActiveMemoryColoring{},None,true).unwrap());
+                            let remap = dom_dat.remapper.new_remap_iter(ActiveMemoryColoring{},engine.get_domain_permissions(dom, ActiveMemoryColoring{},None,true).unwrap());
                             log::info!("remapped: {}", remap);
                         };
                         Self::do_debug(vs, domain, callback);
