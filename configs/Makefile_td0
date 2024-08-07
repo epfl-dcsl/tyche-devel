@@ -25,3 +25,6 @@ regression:
 
 gramine:
 	cd /home/dev/Documents/gramine/CI-Examples/helloworld && sudo /gramine-install/gramine-tyche helloworld
+
+gramine-dbg:
+	cd /home/dev/Documents/gramine/CI-Examples/helloworld && sudo GDB=1 /gramine-install/gramine-tyche helloworld

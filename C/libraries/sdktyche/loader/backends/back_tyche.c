@@ -128,7 +128,7 @@ int backend_td_alloc_mem(tyche_domain_t* domain)
       goto failure;
     }
     // Get the physoffset now.
-    info.virtaddr = slot->id;
+    info.virtaddr = slot->virtoffset;
     if (ioctl(domain->handle, TYCHE_GET_PHYSOFFSET, &info) != SUCCESS) {
       ERROR("Failed to read the physoffset for domain %d", domain->handle);
       goto failure;
@@ -167,7 +167,7 @@ int backend_td_mmap(tyche_domain_t* domain, void* addr, size_t len,
      ERROR("Unable to allocate memory for the domain.");
      goto failure_dealloc;
   }
-  info.virtaddr = slot->id;
+  info.virtaddr = slot->virtoffset;
   if (ioctl(domain->handle, TYCHE_GET_PHYSOFFSET, &info) != SUCCESS) {
      ERROR("Getting physoffset failed!");
      close(domain->handle);
