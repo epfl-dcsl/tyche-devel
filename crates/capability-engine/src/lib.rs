@@ -46,11 +46,11 @@ use crate::permission::{core_bits, trap_bits};
 pub mod config {
     pub const NB_DOMAINS: usize = 32;
     pub const NB_CAPAS_PER_DOMAIN: usize = 128;
-    pub const NB_REGIONS: usize = 1024;
-    pub const NB_TRACKER: usize = 256; //1024;
+    pub const NB_REGIONS: usize = 128;
+    pub const NB_TRACKER: usize = 128; //1024;
     pub const NB_UPDATES: usize = 128;
     pub const NB_CORES: usize = 32; // NOTE: Can't be greater than 64 as we use 64 bits bitmaps.
-    pub const NB_REMAP_REGIONS: usize = 128; //2 << 12; //luca: this changes the remapping pool size
+    pub const NB_REMAP_REGIONS: usize = 8; //2 << 12; //luca: this changes the remapping pool size
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

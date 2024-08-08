@@ -182,7 +182,7 @@ impl<const N: usize> Remapper<N> {
         let mut remap_region_snapshot = RegionTracker::new();
         //panic!("allocated region tracker"); //get here
         for (a, x) in regions_iter {
-            panic!("start of first iteration"); //if remap_region_snapshot is commented in, we don't reach this location. If we remove it, we get here
+            //panic!("start of first iteration"); //if remap_region_snapshot is commented in, we don't reach this location. If we remove it, we get here
             let is_device = match x.get_resource_kind() {
                 RegionResourceKind::Device => true,
                 _ => false,
@@ -206,7 +206,7 @@ impl<const N: usize> Remapper<N> {
                 .expect("remapper::map_compactified_range failed to add region");
             //panic!("end of first iteration");
         }
-        panic!("after regions_iter loop");
+        //panic!("after regions_iter loop");
         let entry: CompactRemap = CompactRemap {
             start_gpa,
             color_range,

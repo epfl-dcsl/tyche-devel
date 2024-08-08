@@ -345,7 +345,8 @@ pub fn new_compactified_mapping_iter<'a, T: MemoryColoring + Clone + Default>(
         ResourceKind::Device => true,
     });*/
     let mut next_blocked_iter = permission_iter.clone();
-    let mut next_blocked = next_blocked_iter.next();
+
+    let mut next_blocked = next_device(&mut next_blocked_iter);
     let first_ram_region = permission_iter
         .clone()
         .filter(|v| {

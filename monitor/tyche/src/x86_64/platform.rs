@@ -456,7 +456,7 @@ impl PlatformState for StateX86 {
         for x in  iter {
             log::info!("{:x?}", x);
         }
-        panic!("panic after mapping");
+        //panic!("panic after mapping");
 
         Ok(())
 
