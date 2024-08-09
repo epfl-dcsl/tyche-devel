@@ -108,10 +108,6 @@ impl StateX86 {
             return false;
         }
 
-        log::info!(
-            "Updating IOMMU PTs for domain at idx {}",
-            domain_handle.idx()
-        );
         if domain.iopt_old.is_some() {
             panic!("Updating IOPTs while previous one's have not been freed yet");
         }
@@ -125,7 +121,6 @@ impl StateX86 {
             allocator.get_physical_offset().as_usize(),
             iopt_root.phys_addr,
         );
-        let mut map_count = 0;
         let permission_iter = engine
             .get_domain_permissions(domain_handle, ActiveMemoryColoring {}, None, true)
             .unwrap();
@@ -144,10 +139,6 @@ impl StateX86 {
                 range.size,
                 (IoPtFlag::READ | IoPtFlag::WRITE).bits(),
             );
-            map_count += 1;
-            if (map_count % 100) == 0 {
-                log::info!("iopt: processed {:06} mappings", map_count);
-            }
         }
 
         // Update the IOMMU (i.e. the actual hardware device)
@@ -180,16 +171,20 @@ impl StateX86 {
             iommu.set_root_table_addr(rtar_val);
             iommu.update_root_table_addr();
             iommu.enable_translation();
-            log::info!("I/O MMU: {:?}", iommu.get_global_status());
-            log::warn!("I/O MMU Fault: {:?}", iommu.get_fault_status());
+            if iommu.get_fault_status().have_fault() {
+                log::info!("I/O MMU: {:?}", iommu.get_global_status());
+                log::warn!("I/O MMU Fault: {:?}", iommu.get_fault_status());
+            }
 
-            log::info!("IOMMU: flushing");
+            //log::info!("IOMMU: flushing");
             if let Err(e) = iommu.full_flush_sync() {
                 log::error!("IOMMU: flush failed: {}", e);
                 panic!("IOMMU flush failed");
             }
-            log::warn!("I/O MMU Fault: {:?}", iommu.get_fault_status());
-
+            if iommu.get_fault_status().have_fault() {
+                log::info!("I/O MMU: {:?}", iommu.get_global_status());
+                log::warn!("I/O MMU Fault: {:?}", iommu.get_fault_status());
+            }
             domain.iopt_old = domain.iopt;
             domain.iopt = Some(iopt_root.phys_addr);
         }
@@ -201,24 +196,6 @@ impl StateX86 {
         engine: &mut MutexGuard<CapaEngine>,
     ) -> bool {
         let mut domain = Self::get_domain(domain_handle);
-        log::info!("Updating EPTs for domain at idx {}", domain_handle.idx());
-
-        /*if domain_handle.idx() != 0 {
-            log::info!("Dumping domain at idx {}", domain_handle.idx());
-
-            log::info!("Domain {}", domain_handle.idx());
-            let mut next_capa = NextCapaToken::new();
-            while let Some((info, next_next_capa)) = engine.enumerate(domain_handle, next_capa) {
-                next_capa = next_next_capa;
-                log::info!(" - {}", info);
-            }
-            log::info!(
-                "tracker: {}",
-                engine
-                    .get_domain_regions(domain_handle)
-                    .expect("Invalid domain")
-            );
-        }*/
 
         let allocator = allocator();
         if domain.ept_old.is_some() {
@@ -241,7 +218,7 @@ impl StateX86 {
         let mut map_count = 0;
         for range in remap_iter {
             if !range.ops.contains(MemOps::READ) {
-                log::error!("there is a region without read permission: {}", range);
+                //log::error!("there is a region without read permission: {}", range);
                 continue;
             }
             let mut flags = EptEntryFlags::READ;
@@ -296,7 +273,6 @@ impl StateX86 {
         domain_handle: Handle<Domain>,
         engine: &mut MutexGuard<CapaEngine>,
     ) -> bool {
-        log::info!("Inside update_domain_iopt");
         Self::update_iommu_page_tables(domain_handle, engine);
         false
     }
@@ -305,7 +281,8 @@ impl StateX86 {
         domain_handle: Handle<Domain>,
         engine: &mut MutexGuard<CapaEngine>,
     ) -> bool {
-        log::info!("\n ### entering update_domain_ept ###\n");
+        log::info!("Updating PTs of domain {:?}", domain_handle);
+        //log::info!("\n ### entering update_domain_ept ###\n");
 
         let ept_res = Self::update_ept_tables(domain_handle, engine);
 

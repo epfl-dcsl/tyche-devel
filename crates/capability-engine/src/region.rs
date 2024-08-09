@@ -1036,23 +1036,6 @@ pub struct PermissionIterator<'a, T: MemoryColoring + Clone + Default> {
     allow_devices: bool,
 }
 
-const DUMMY_DEFAULT_REGION_TRACKER: RegionTracker = RegionTracker::new();
-const DUMMY_DEFAULT_TACKER_POOL: TrackerPool = TrackerPool::new([EMPTY_REGION; NB_TRACKER]);
-
-impl<'a, T: MemoryColoring + Clone + Default> Default for PermissionIterator<'a, T> {
-    fn default() -> Self {
-        Self {
-            tracker: &DUMMY_DEFAULT_REGION_TRACKER,
-            pool: &DUMMY_DEFAULT_TACKER_POOL,
-            next: None,
-            memory_coloring: Default::default(),
-            current_subranges: Default::default(),
-            additional_color_restrictions: Default::default(),
-            allow_devices: Default::default(),
-        }
-    }
-}
-
 #[derive(Clone, Copy)]
 pub struct MemoryPermission {
     pub start: usize,
@@ -1181,10 +1164,10 @@ impl<'a, T: MemoryColoring + Clone + Default> Iterator for PermissionIterator<'a
                         //with the next region
                         None => {
                             //luca: allowed colors is from the capa, additional restrictions is from the
-                            match self.additional_color_restrictions {
+                            /*match self.additional_color_restrictions {
                                 Some(restrictions) => log::warn!("Warning: Empty Region: [0x{:013x}-0x{:013x}[, does not have any subranges with color {}, additional color restrictions {}", start,end, allowed_colors,restrictions),
                                 None => log::warn!("Warning: Empty Region: [0x{:013x}-0x{:013x}[, does not have any subranges with color {}", start,end, allowed_colors),
-                            }
+                            }*/
                             self.current_subranges = None;
                         }
                     }

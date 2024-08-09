@@ -194,12 +194,6 @@ impl Iommu {
         let tail_reg = InvalidationQueueTail::new_from_bits(self.get_invalidation_queue_tail());
         let head_reg = InvalidationQueueHead::new_from_bits(self.get_invalidation_queue_head());
 
-        log::info!(
-            "starting flush with tail_reg_idx {:?}, head_reg_idx {:?}, queue size {}",
-            tail_reg.get_queue_tail() * 2,
-            head_reg.get_queue_head() * 2,
-            inv_queue.len(),
-        );
         assert_eq!(
             tail_reg.get_queue_tail(),
             head_reg.get_queue_head(),
@@ -239,15 +233,9 @@ impl Iommu {
 
         //set tail register, this informs hw that there are new entries
         let tail_reg = InvalidationQueueTail::new(inv_queue_tail_idx as u64 / 2)?;
-        log::info!(
-            "new tail_reg {}, queue_len {}",
-            tail_reg.get_queue_tail() * 2,
-            inv_queue.len()
-        );
         self.set_invalidation_queue_tail(tail_reg.bits());
 
         //poll for completion
-        log::info!("Waiting for invalidation completion...");
         loop {
             let raw_ack_data: [u8; 4] = inv_wb_frame.as_ref()[..4].try_into().unwrap();
             let got_ack_data = u32::from_le_bytes(raw_ack_data);
@@ -255,8 +243,6 @@ impl Iommu {
                 break;
             }
         }
-        log::info!("invalidation was acked");
-
         Ok(())
     }
 
@@ -581,6 +567,7 @@ bitflags! {
         const FAULT_RECORD_INDEX            = 0b11111111 << 8;
     }
 
+
     pub struct FaultRecording: u64 {
         const SOURCE_ID           = 0b111111111111111;
         const T2                  = 1 << 28;
@@ -594,6 +581,12 @@ bitflags! {
         const FAULT               = 1 << 63;
     }
 
+}
+
+impl FaultStatus {
+    pub fn have_fault(&self) -> bool {
+        self.contains(Self::PRIMARY_PENDING_FAULT) || self.contains(Self::INVALIDATION_QUEUE_ERROR)
+    }
 }
 
 impl FaultRecording {

@@ -1348,7 +1348,6 @@ pub trait Monitor<T: PlatformState + 'static> {
 
     fn apply_updates(state: &mut T, engine: &mut MutexGuard<CapaEngine>) {
         while let Some(update) = engine.pop_update() {
-            log::info!("Update: {}", update);
             match update {
                 capa_engine::Update::PermissionUpdate { domain, core_map } => {
                     let core_id = cpuid();
@@ -1359,13 +1358,7 @@ pub trait Monitor<T: PlatformState + 'static> {
                     );
                     // Do we have to process updates
                     //unsafe { asm!("ud2") };
-                    log::info!(
-                        "monitor: calling update_permission on state ptr {:x?}, domain {:?}",
-                        state as *const T,
-                        domain
-                    );
                     if T::update_permission(domain, engine) {
-                        log::info!("after update_permission, preparing for state switch");
                         let mut core_count = core_map.count_ones() as usize;
                         if (1 << core_id) & core_map != 0 {
                             state.platform_shootdown(&domain, core_id, true);
