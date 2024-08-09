@@ -29,8 +29,9 @@ use mmu::memory_coloring::{MemoryColoring, PartitionBitmap};
 pub use region::ResourceKind::*;
 pub use region::{
     AccessRights, MemOps, MemoryPermission, PermissionIterator, Region, RegionIterator,
-    RegionTracker, ResourceKind, TrackerPool, EMPTY_REGION, MEMOPS_ALL, MEMOPS_EXTRAS,
+    RegionTracker, ResourceKind, MEMOPS_ALL, MEMOPS_EXTRAS,
 };
+use region::{TrackerPool, EMPTY_REGION};
 pub use remapper::Remapper;
 pub use segment::EffectiveRegionIterator;
 use segment::{RegionCapa, RegionHash, RegionPool, EMPTY_REGION_CAPA};
