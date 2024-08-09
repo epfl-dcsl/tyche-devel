@@ -4,6 +4,7 @@
 //! virtual addresses for platform such as x86 that needs to emulate second-level page tables.
 
 use core::arch::asm;
+use core::iter::Peekable;
 use core::{array, cmp, fmt, mem};
 
 use kmerge_iter::{new_compactified_mapping_iter, CompatifiedMappingIter, MergedRemapIter};
@@ -154,9 +155,9 @@ impl<const SIMPLE: usize, const COMPACT: usize> Remapper<SIMPLE, COMPACT> {
         let merged_remap_iter: MergedRemapIter<SIMPLE, COMPACT, T> =
             self.new_merged_remap_iter(coloring);
         RemapIterator {
-            regions,
+            regions: regions.peekable(),
             next_region_start: None,
-            remap_commands_iter: merged_remap_iter,
+            remap_commands_iter: merged_remap_iter.peekable(),
             next_segment_start: None,
             cursor: 0,
             ongoing_segment: None,
@@ -445,9 +446,9 @@ pub struct RemapIterator<
     T: MemoryColoring + Clone + Default,
 > {
     //luca: deduplicated view of the memory ptracker.permissions for our domain
-    regions: PermissionIterator<'a, T>,
+    regions: Peekable<PermissionIterator<'a, T>>,
     //luca: just simple iterator over existing segments
-    remap_commands_iter: MergedRemapIter<'a, SIMPLE, COMPACT, T>,
+    remap_commands_iter: Peekable<MergedRemapIter<'a, SIMPLE, COMPACT, T>>,
     cursor: usize,
     next_region_start: Option<usize>,
     next_segment_start: Option<usize>,
@@ -480,137 +481,139 @@ impl<'a, const SIMPLE: usize, const COMPACT: usize, T: MemoryColoring + Clone + 
     }
     */
     fn next(&mut self) -> Option<Self::Item> {
-        // First, if there is an ongoing segment being remapped, continue
-        if let Some(ongoing_segment) = &mut self.ongoing_segment {
-            //luca: this will match the segment to the regions to create a mapping object
-            //The matching to region is required to figure out the ptracker.permissions
-            match ongoing_segment.next() {
-                Some(mapping) => {
-                    return Some(mapping);
-                }
-                None => {
-                    self.ongoing_segment = None;
+        loop {
+            // First, if there is an ongoing segment being remapped, continue
+            if let Some(ongoing_segment) = &mut self.ongoing_segment {
+                //luca: this will match the segment to the regions to create a mapping object
+                //The matching to region is required to figure out the ptracker.permissions
+                match ongoing_segment.next() {
+                    Some(mapping) => {
+                        return Some(mapping);
+                    }
+                    None => {
+                        self.ongoing_segment = None;
+                    }
                 }
             }
-        }
 
-        // Update next region and segment start, if needed
-        if self.next_region_start.is_none() {
-            //luca: we do clone+next as a way to get a peek without changing the state
-            self.next_region_start = self.regions.clone().next().map(|region| region.start);
-        }
-        if self.next_segment_start.is_none() {
-            self.next_segment_start = self
-                .remap_commands_iter
-                .clone()
-                .next()
-                .map(|segment| segment.hpa);
-        }
-
-        //luca: Terminology:
-        // - Segment: chunck of contig mem that we want to map
-        // - region: phys mem that we have access to
-        match (self.next_segment_start, self.next_region_start) {
-            (None, None) => {
-                // Nothing more to process
-                return None;
+            // Update next region and segment start, if needed
+            if self.next_region_start.is_none() {
+                //luca: we do clone+next as a way to get a peek without changing the state
+                self.next_region_start = self.regions.peek().map(|region| region.start);
             }
-            (Some(_), None) => {
-                // There are more segments but no more regions
-                //luca: I guess this shoudl not happen, it basically means that
-                //some of our remapping requests do not match the available physical mem
-                panic!("should not happen");
-                return None;
+            if self.next_segment_start.is_none() {
+                self.next_segment_start =
+                    self.remap_commands_iter.peek().map(|segment| segment.hpa);
             }
-            (None, Some(next_region)) => {
-                // There are only regions left
-                //luca: we identity map all of this, as we don't have any segments/remappings
 
-                let region = self.regions.next().unwrap();
-                //luca: largest start addr of a segment?
-                let max_segment = self.max_segment.unwrap_or(0);
-                self.next_region_start = None;
-
-                // Skip empty regions
-                if self.cursor == region.end {
-                    //luca:: recursion!!!, that looks dangerous
-                    return self.next();
+            //luca: Terminology:
+            // - Segment: chunck of contig mem that we want to map
+            // - region: phys mem that we have access to
+            match (self.next_segment_start, self.next_region_start) {
+                (None, None) => {
+                    // Nothing more to process
+                    return None;
                 }
-
-                assert!(self.cursor <= next_region);
-                assert!(self.cursor < region.end);
-                let cursor = cmp::max(self.cursor, region.start);
-                self.cursor = region.end;
-
-                if max_segment >= region.end {
-                    // Skip this region, already covered
-                    return self.next();
+                (Some(_), None) => {
+                    // There are more segments but no more regions
+                    //luca: I guess this shoudl not happen, it basically means that
+                    //some of our remapping requests do not match the available physical mem
+                    return None;
                 }
-                let start = cmp::max(cursor, max_segment);
+                (None, Some(next_region)) => {
+                    // There are only regions left
+                    //luca: we identity map all of this, as we don't have any segments/remappings
 
-                let mapping = Mapping {
-                    hpa: start,
-                    gpa: start,
-                    size: region.end - start,
-                    repeat: 1,
-                    ops: region.ops,
-                    resource_kind: region.resource_kind,
-                };
-                return Some(mapping);
-            }
-            (Some(next_segment), Some(next_region)) => {
-                assert!(self.cursor <= next_region);
-                assert!(self.cursor <= next_segment);
-
-                if next_segment <= next_region {
-                    // If a segment comes first, build a segment remapper and retry
-                    self.cursor = next_segment;
-                    let segment = self.remap_commands_iter.next().unwrap();
-                    self.next_segment_start = None;
-                    self.max_segment = Some(cmp::max(
-                        self.max_segment.unwrap_or(0),
-                        segment.hpa + segment.size,
-                    ));
-                    self.ongoing_segment = Some(SingleSegmentIterator {
-                        regions: self.regions.clone(),
-                        next_region: None,
-                        cursor: self.cursor,
-                        segment: segment.clone(),
-                    });
-                    return self.next();
-                } else {
-                    // A region comes first, we emit a mapping if no segment covered it
-                    let region = self.regions.clone().next().unwrap();
+                    let region = self.regions.next().unwrap();
+                    //luca: largest start addr of a segment?
                     let max_segment = self.max_segment.unwrap_or(0);
-                    let mapping_end = cmp::min(region.end, next_segment);
-                    let cursor = cmp::max(region.start, self.cursor);
-                    let cursor = cmp::min(mapping_end, cmp::max(max_segment, cursor));
+                    self.next_region_start = None;
 
-                    // Move cursor and consume region if needed
-                    self.cursor = mapping_end;
-                    if mapping_end == region.end {
-                        self.next_region_start = None;
-                        self.regions.next();
-                    } else {
-                        self.next_region_start = Some(mapping_end);
+                    // Skip empty regions
+                    if self.cursor == region.end {
+                        //luca:: recursion!!!, that looks dangerous
+                        //return self.next();
+                        continue;
                     }
 
-                    if cursor >= max_segment && cursor < mapping_end {
-                        // Emit a mapping
-                        assert_ne!(cursor, mapping_end);
-                        let mapping = Mapping {
-                            hpa: cursor,
-                            gpa: cursor,
-                            size: mapping_end - cursor,
-                            repeat: 1,
-                            ops: region.ops,
-                            resource_kind: region.resource_kind,
-                        };
+                    assert!(self.cursor <= next_region);
+                    assert!(self.cursor < region.end);
+                    let cursor = cmp::max(self.cursor, region.start);
+                    self.cursor = region.end;
 
-                        return Some(mapping);
+                    if max_segment >= region.end {
+                        // Skip this region, already covered
+                        //return self.next();
+                        continue;
+                    }
+                    let start = cmp::max(cursor, max_segment);
+
+                    let mapping = Mapping {
+                        hpa: start,
+                        gpa: start,
+                        size: region.end - start,
+                        repeat: 1,
+                        ops: region.ops,
+                        resource_kind: region.resource_kind,
+                    };
+                    return Some(mapping);
+                }
+                (Some(next_segment), Some(next_region)) => {
+                    assert!(self.cursor <= next_region);
+                    assert!(self.cursor <= next_segment);
+
+                    if next_segment <= next_region {
+                        // If a segment comes first, build a segment remapper and retry
+                        self.cursor = next_segment;
+                        let segment = self.remap_commands_iter.next().unwrap();
+                        self.next_segment_start = None;
+                        self.max_segment = Some(cmp::max(
+                            self.max_segment.unwrap_or(0),
+                            segment.hpa + segment.size,
+                        ));
+                        self.ongoing_segment = Some(SingleSegmentIterator {
+                            regions: self.regions.clone(),
+                            next_region: None,
+                            cursor: self.cursor,
+                            segment: segment.clone(),
+                        });
+                        //return self.next();
+                        continue;
                     } else {
-                        // Otherwise move on to next iteration
-                        return self.next();
+                        // A region comes first, we emit a mapping if no segment covered it
+                        let region = self.regions.peek().copied().unwrap();
+                        let max_segment = self.max_segment.unwrap_or(0);
+                        let mapping_end = cmp::min(region.end, next_segment);
+                        let cursor = cmp::max(region.start, self.cursor);
+                        let cursor = cmp::min(mapping_end, cmp::max(max_segment, cursor));
+
+                        // Move cursor and consume region if needed
+                        self.cursor = mapping_end;
+                        if mapping_end == region.end {
+                            self.next_region_start = None;
+                            self.regions.next();
+                        } else {
+                            self.next_region_start = Some(mapping_end);
+                        }
+
+                        if cursor >= max_segment && cursor < mapping_end {
+                            // Emit a mapping
+                            assert_ne!(cursor, mapping_end);
+                            let mapping = Mapping {
+                                hpa: cursor,
+                                gpa: cursor,
+                                size: mapping_end - cursor,
+                                repeat: 1,
+                                ops: region.ops,
+                                resource_kind: region.resource_kind,
+                            };
+
+                            return Some(mapping);
+                        } else {
+                            // Otherwise move on to next iteration
+                            //return self.next();
+                            continue;
+                        }
                     }
                 }
             }
@@ -622,7 +625,7 @@ impl<'a, const SIMPLE: usize, const COMPACT: usize, T: MemoryColoring + Clone + 
 /// the segment to the given regions
 #[derive(Clone)]
 struct SingleSegmentIterator<'a, T: MemoryColoring + Clone + Default> {
-    regions: PermissionIterator<'a, T>,
+    regions: Peekable<PermissionIterator<'a, T>>,
     next_region: Option<MemoryPermission>,
     cursor: usize,
     segment: Segment,
