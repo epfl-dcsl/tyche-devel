@@ -51,7 +51,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     logger::init(LOG_LEVEL);
     println!("============= First Stage =============");
 
-    //for some reason there is an unsorted entry in there. This makes the mem whole detection logic much harder
+    //for some reason there is an unsorted entry in there. This makes the mem hole detection logic much harder
     sort_memregions(&mut boot_info.memory_regions);
     /*log::info!("Unmodified boot memory regions");
     for (mr_idx, mr) in boot_info.memory_regions.iter().enumerate() {
