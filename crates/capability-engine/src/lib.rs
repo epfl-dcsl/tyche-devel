@@ -29,12 +29,9 @@ use mmu::memory_coloring::{MemoryColoring, PartitionBitmap};
 pub use region::ResourceKind::*;
 pub use region::{
     AccessRights, MemOps, MemoryPermission, PermissionIterator, Region, RegionIterator,
-    RegionTracker, ResourceKind, MEMOPS_ALL, MEMOPS_EXTRAS,
+    RegionTracker, ResourceKind, TrackerPool, EMPTY_REGION, MEMOPS_ALL, MEMOPS_EXTRAS,
 };
-use region::{TrackerPool, EMPTY_REGION};
-pub use remapper::{
-    compactify_colors_in_gpa_space, compactify_colors_in_gpa_space_cb_mapper, Remapper,
-};
+pub use remapper::Remapper;
 pub use segment::EffectiveRegionIterator;
 use segment::{RegionCapa, RegionHash, RegionPool, EMPTY_REGION_CAPA};
 use update::UpdateBuffer;
@@ -46,11 +43,12 @@ use crate::permission::{core_bits, trap_bits};
 pub mod config {
     pub const NB_DOMAINS: usize = 32;
     pub const NB_CAPAS_PER_DOMAIN: usize = 128;
-    pub const NB_REGIONS: usize = 128;
-    pub const NB_TRACKER: usize = 128; //1024;
+    pub const NB_REGIONS: usize = 1024;
+    pub const NB_TRACKER: usize = 1024;
     pub const NB_UPDATES: usize = 128;
     pub const NB_CORES: usize = 32; // NOTE: Can't be greater than 64 as we use 64 bits bitmaps.
-    pub const NB_REMAP_REGIONS: usize = 8; //2 << 12; //luca: this changes the remapping pool size
+    pub const NB_SIMPLE_REMAPS: usize = 128; //2 << 12; //luca: this changes the remapping pool size
+    pub const NB_COMPACT_REMAPS: usize = 8;
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

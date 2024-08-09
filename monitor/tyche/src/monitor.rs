@@ -172,14 +172,6 @@ pub trait PlatformState {
         region: &AccessRights,
     ) -> bool;
 
-    fn create_initial_mappings<T: MemoryColoring + Clone + Default>(
-        &mut self,
-        domain: Handle<Domain>,
-        core_partitions: PermissionIterator<T>,
-        additional_partitions: PermissionIterator<T>,
-        start_gpa_additional_partitions: Option<GuestPhysAddr>,
-    ) -> Result<(), CapaError>;
-
     fn map_compactified_range(
         &mut self,
         domain: Handle<Domain>,
@@ -455,38 +447,8 @@ pub trait Monitor<T: PlatformState + 'static> {
             MemoryRange::AllRamRegionInRange(_) => todo!(),
         };
 
-        /*let dom0_core_memory = engine
-            .get_domain_permissions(
-                domain,
-                ActiveMemoryColoring {},
-                Some(dom0_partititons),
-                true,
-            )
-            .expect("failed to instantiate permission iterator over dom0 core memory");
-
-        let dom0_additional_memory = engine
-            .get_domain_permissions(
-                domain,
-                ActiveMemoryColoring {},
-                Some(dom0_additional_colors),
-                false,
-            )
-            .expect("failed to instantiate permission iterator over additional dom0 memory");
-
-        log::info!("dom0 core mem colors: {:x?}", dom0_partititons);
-        log::info!("dom0 additional colors: {:x?}", dom0_additional_colors);
-
-        state
-            .create_initial_mappings(
-                domain,
-                dom0_core_memory,
-                dom0_additional_memory,
-                start_gpa_additional_mem,
-            )
-            .expect("failed to create initial memory mappings");*/
-
         //luca: using are contig range makes stuff easier here. This is not a hard requirement,
-        //just some implementation effort
+        //just saves some implementation effort
         let dom0_core_colors: (usize, usize) = dom0_partititons
             .try_into()
             .expect("dom0 core colors not contiguous");
@@ -495,16 +457,16 @@ pub trait Monitor<T: PlatformState + 'static> {
             "calling map compactified for dom0 core colors {:#?}",
             dom0_core_colors
         );
-        let region_iter = engine
-            .get_domain_regions(domain)
-            .expect("failed to get domain regions");
-        for (_, x) in region_iter.clone() {
-            log::info!("{:#?}", x);
-        }
-        log::info!("done printing regions in monitor");
-        //panic!("after printing regions in monitr"); //we get here
         state
-            .map_compactified_range(domain, dom0_core_colors, true, 0, region_iter.clone())
+            .map_compactified_range(
+                domain,
+                dom0_core_colors,
+                true,
+                0,
+                engine
+                    .get_domain_regions(domain)
+                    .expect("failed to get domain regions"),
+            )
             .expect("map compactified for core mem failed");
 
         if manifest.dom0_gpa_additional_mem != 0 {

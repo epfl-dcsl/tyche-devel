@@ -79,6 +79,7 @@ impl<const N: usize> FreeList<N> {
 
 // ———————————————————————————————— Iterator ———————————————————————————————— //
 
+#[derive(Clone)]
 pub(crate) struct FreeListIterator<'a, const N: usize> {
     free_list: &'a FreeList<N>,
     next: usize,

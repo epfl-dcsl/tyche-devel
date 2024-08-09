@@ -69,7 +69,6 @@ pub trait ColorBitmap {
     fn get_raw(&self) -> &[u8];
 }
 
-//TODO: add unit tests
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 /// Bitmap to represent `K`  different things. `N`` represents the number
 /// of bytes required for the bit map (i.e. align_up(K,8)). The is an extra
@@ -265,13 +264,13 @@ pub type PartitionBitmap = MyBitmap<
     { ActiveMemoryColoring::COLOR_COUNT },
 >;
 
-//from contiguous color range
-impl TryFrom<(usize, usize)> for PartitionBitmap {
+/// From contiguous color range. Start is inclusive, end is exclusive
+impl<const N: usize, const K: usize> TryFrom<(usize, usize)> for MyBitmap<N, K> {
     type Error = &'static str;
 
     fn try_from(range: (usize, usize)) -> Result<Self, Self::Error> {
         let (start, end) = range;
-        let mut bm = PartitionBitmap::new();
+        let mut bm = MyBitmap::new();
         if start > bm.get_payload_bits_len() {
             return Err("start color is to large");
         }
@@ -285,10 +284,10 @@ impl TryFrom<(usize, usize)> for PartitionBitmap {
     }
 }
 
-//convert to contiguous color range
-impl TryInto<(usize, usize)> for PartitionBitmap {
+impl<const N: usize, const K: usize> TryInto<(usize, usize)> for MyBitmap<N, K> {
     type Error = &'static str;
 
+    /// Convert to contiguous color range. Start inclusive, end exclusive
     fn try_into(self) -> Result<(usize, usize), Self::Error> {
         let mut first_color: Option<usize> = None;
         //inclusive
@@ -320,7 +319,7 @@ impl TryInto<(usize, usize)> for PartitionBitmap {
                 return Err("colors in bitmap are not contiguous");
             }
         }
-        Ok((first_color, last_color))
+        Ok((first_color, last_color + 1))
     }
 }
 
@@ -330,12 +329,18 @@ impl TryInto<(usize, usize)> for PartitionBitmap {
 pub struct DummyMemoryColoring {}
 
 impl DummyMemoryColoring {
+    //USER CONFIGURED VALUES
+
     //use 2 to the power of COLOR_ORDER many colors
     pub const COLOR_ORDER: usize = 5;
+
+    //shift out this many bits of the HPA; then interpret the lowest log2(COLOR_ORDER)
+    //bits as the color
+    pub const SHIFT: usize = 20;
+
+    //DERVICED VALUES
     //mask to apply to page bits (after shifting) to get color id for address
     pub const COLOR_MASK: u64 = (1 << Self::COLOR_ORDER) - 1;
-
-    pub const SHIFT: usize = 20;
 }
 
 impl MemoryColoring for DummyMemoryColoring {

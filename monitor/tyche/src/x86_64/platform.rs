@@ -5,7 +5,7 @@ use core::sync::atomic::Ordering;
 
 use capa_engine::context::RegisterGroup;
 use capa_engine::utils::BitmapIterator;
-use capa_engine::{compactify_colors_in_gpa_space, AccessRights, CapaEngine, CapaError, Domain, Handle, MemOps, PermissionIterator, RegionIterator};
+use capa_engine::{AccessRights, CapaEngine, CapaError, Domain, Handle, MemOps, PermissionIterator, RegionIterator};
 use mmu::eptmapper::EPT_ROOT_FLAGS;
 use mmu::memory_coloring::{ActiveMemoryColoring, MemoryColoring};
 use mmu::{EptMapper, FrameAllocator};
@@ -430,7 +430,7 @@ impl PlatformState for StateX86 {
             .overlaps(alias, repeat * (region.end - region.start))
     }
 
-    //TODO: double check if color range is inclusive or exclusive end
+    /// Wrapper that calls `remapper.map_compactified_range` for the domain
     fn map_compactified_range(
         &mut self,
         domain: Handle<Domain>,
@@ -438,75 +438,16 @@ impl PlatformState for StateX86 {
         include_devices: bool,
         start_gpa: usize,
         regions_iter: RegionIterator) -> Result<(), CapaError>{
-            log::info!("x86_64_platform::map_compatified_range : domain {:?}",domain);
-            log::info!("dumping provided regions");
-            for x in regions_iter.clone() {
-                log::info!("{:x?}",x);
-            }
-            let mut dom_dat = Self::get_domain(domain); //si on call to this fails?
-            log::info!("calling into remapper");
-            //panic!("before creating mapping"); //we get here
+            let mut dom_dat = Self::get_domain(domain);
             dom_dat.remapper.map_compactified_range(color_range, 
                 include_devices, start_gpa, regions_iter)?;
-
-        
-        
-         log::info!("x86_64_platform::map_compatified_range : dumping iter");
-        let iter = dom_dat.remapper.new_merged_remap_iter(ActiveMemoryColoring{});
-        for x in  iter {
-            log::info!("{:x?}", x);
-        }
-        //panic!("panic after mapping");
 
         Ok(())
 
         }
   
 
-    fn create_initial_mappings<T: MemoryColoring + Clone + Default>(
-        &mut self,
-        domain: Handle<Domain>,
-        core_partitions: PermissionIterator<T>,
-        additional_partitions: PermissionIterator<T>,
-        start_gpa_additional_partitions: Option<GuestPhysAddr>,
-    ) -> Result<(), CapaError> {
-        log::info!("Creating Initial domain remappings.");
-        let mut dom_dat: MutexGuard<'_, DataX86> = Self::get_domain(domain);
-        log::info!("\n##\nCreating remappings for core memory\n##\n");
-        //dom_dat.remapper.map_compactified_range(color_range, additional_filter, include_devices, start_gpa)
-        let (core_end_ram, core_end_device) = compactify_colors_in_gpa_space(&mut dom_dat.remapper, core_partitions , GuestPhysAddr::new(0)).map_err(|e| {
-            log::error!("compactified mappings for core memory failed: {:?}",&e);
-            e
-        })?;
-        log::info!("core_end_ram = 0x{:013x?}, core_end_device = 0x{:013x?}", core_end_ram,core_end_device);
-        let end_for_core_mappings = match core_end_device {
-            Some(end_device) => {
-                if end_device > core_end_ram {
-                    end_device
-                } else {
-                    core_end_ram
-                }
-            }
-            None => core_end_ram,
-        };
-        let additional_colors_start_gpa = match start_gpa_additional_partitions {
-            Some(v) => {
-                assert!(v > end_for_core_mappings,"Requested start GPA 0x{:013x} for additional mem collides with existing mappings which only end at 0x{:013x}",
-            v.as_u64(),end_for_core_mappings.as_u64());
-            v
-            },
-            None => {
-                end_for_core_mappings
-            },
-        };
-        log::info!("\n##\nMapping additional colors starting at GPA 0x{:013x?}\n##\n", additional_colors_start_gpa);
-        let _ = compactify_colors_in_gpa_space(&mut dom_dat.remapper, additional_partitions, additional_colors_start_gpa).map_err(|e| {
-            log::error!("compactified mappings for additional memory failed: {:?}",&e);
-            e
-        })?;
-        Ok(())
-    }
-
+   
     //luca: this is keeps track of hpa to gpa mapping and will queue and update
     fn map_region(
         &mut self,

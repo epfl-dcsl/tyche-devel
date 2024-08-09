@@ -3,8 +3,9 @@ use mmu::memory_coloring::MemoryColoring;
 use utils::GuestPhysAddr;
 
 use super::Segment;
+use crate::gen_arena::ArenaIterator;
 use crate::remapper::EMPTY_SEGMENT;
-use crate::{GenArena, MemoryPermission, PermissionIterator, ResourceKind};
+use crate::{GenArena, Handle, MemoryPermission, PermissionIterator, ResourceKind};
 
 /// Unified representation of remappings
 /*#[derive(Debug, Clone, Copy, Default)]
@@ -16,65 +17,42 @@ pub struct RemapDirective {
 }*/
 
 #[derive(Clone)]
-pub struct MergedRemapIter<'a, const N: usize, T: MemoryColoring + Clone + Default> {
-    simple: [Segment; N],
-    simple_len: usize,
-    simple_idx: usize,
-    simple_next: Option<Segment>,
-    compactified_iters: [CompatifiedMappingIter<'a, T>; N],
-    compactified_next: [Option<Segment>; N],
+pub struct MergedRemapIter<
+    'a,
+    const SIMPLE: usize,
+    const COMPACT: usize,
+    T: MemoryColoring + Clone + Default,
+> {
+    simple: &'a GenArena<Segment, SIMPLE>,
+    simple_iter: ArenaIterator<'a, Segment, SIMPLE>,
+    simple_next_buf: Option<Handle<Segment>>,
+    compactified_iters: [CompatifiedMappingIter<'a, T>; COMPACT],
+    //this buffers the values we read from next from the individual iterators
+    compactified_next: [Option<Segment>; COMPACT],
     compactified_len: usize,
 }
 
-impl<'a, const N: usize, T: MemoryColoring + Clone + Default> MergedRemapIter<'a, N, T> {
+impl<'a, const SIMPLE: usize, const COMPACT: usize, T: MemoryColoring + Clone + Default>
+    MergedRemapIter<'a, SIMPLE, COMPACT, T>
+{
     pub fn new(
-        simple_arena: &GenArena<Segment, N>,
-        mut compact_remaps: [CompatifiedMappingIter<'a, T>; N],
+        simple_arena: &'a GenArena<Segment, SIMPLE>,
+        mut compact_remaps: [CompatifiedMappingIter<'a, T>; COMPACT],
         compactified_remaps_len: usize,
     ) -> Self {
-        let mut simple = [EMPTY_SEGMENT; N];
-        let mut simple_len = 0;
-        for v in simple_arena {
-            let v = simple_arena.get(v).unwrap();
-            simple[simple_len] = Segment {
-                hpa: v.hpa,
-                gpa: v.gpa,
-                size: v.size,
-                repeat: v.repeat,
-                next: None,
-            };
-            simple_len += 1;
-        }
-        let simple_next = if simple_len == 0 {
-            None
-        } else {
-            Some(simple[0])
-        };
+        let mut simple_iter = simple_arena.into_iter();
+        let simple_next_buf = simple_iter.next();
 
-        /*let mut compactified_iters = [ColorToPhysIter::default(); N].map(|v| v.clone());
-        let mut compactified_len = 0;
-        for v in compact_remaps {
-            let v = compact_remaps.get(v).unwrap();
-            let mut cbm = T::Bitmap::default();
-            for x in v.color_range.0..v.color_range.1 {
-                cbm.set(x, true);
-            }
-            let ctp =
-                ColorToPhys::new(v.memory_regions, coloring.clone(), cbm, v.additional_filter);
-            compactified_iters[compactified_len] = ctp.into_iter();
-            compactified_len += 1;
-        }*/
-        let mut compactified_next = [None; N];
+        let mut compactified_next = [None; COMPACT];
         for idx in 0..compactified_remaps_len {
             let iter = &mut compact_remaps[idx];
             compactified_next[idx] = iter.next();
         }
 
         Self {
-            simple,
-            simple_len,
-            simple_next,
-            simple_idx: 0,
+            simple: &simple_arena,
+            simple_iter,
+            simple_next_buf,
             compactified_iters: compact_remaps,
             compactified_next,
             compactified_len: compactified_remaps_len,
@@ -82,12 +60,12 @@ impl<'a, const N: usize, T: MemoryColoring + Clone + Default> MergedRemapIter<'a
     }
 }
 
-impl<'a, const N: usize, T: MemoryColoring + Clone + Default> Iterator
-    for MergedRemapIter<'a, N, T>
+impl<'a, const SIMPLE: usize, const COMPACT: usize, T: MemoryColoring + Clone + Default> Iterator
+    for MergedRemapIter<'a, SIMPLE, COMPACT, T>
 {
     type Item = Segment;
 
-    /// Fuse all internate iterators an return the remapping instructions sorted by the next HPA (ascending)
+    /// Fuse all internal iterators an return the remapping instructions sorted by the next HPA (ascending)
     fn next(&mut self) -> Option<Self::Item> {
         //Search for smallest entry in compactified
         let mut next_compactified: Option<(usize, Segment)> = None;
@@ -107,41 +85,48 @@ impl<'a, const N: usize, T: MemoryColoring + Clone + Default> Iterator
             }
         }
 
-        //fuse simple nex with compactified next, returning the one with the smaller hpa
-        match (self.simple_next, next_compactified) {
+        //fuse simple next with compactified next, returning the one with the smaller hpa
+        match (self.simple_next_buf, next_compactified) {
             (None, None) => None,
             //only next_compactified
             (None, Some((idx, v))) => {
+                assert!(idx < self.compactified_len);
                 self.compactified_next[idx] = self.compactified_iters[idx].next();
                 Some(v)
             }
             //only simple_next
-            (Some(v), None) => {
-                self.simple_next = if self.simple_idx < self.simple_len {
+            (Some(handle), None) => {
+                //advance to next if there is any
+                /*self.simple.self.simple_next = if self.simple_idx < self.simple_len {
                     let v = self.simple[self.simple_idx];
                     self.simple_idx += 1;
                     Some(v)
                 } else {
                     None
-                };
+                };*/
+                self.simple_next_buf = self.simple_iter.next();
+                //return current
+                let data = self.simple.get(handle).unwrap();
                 Some(Segment {
-                    hpa: v.hpa,
-                    gpa: v.gpa,
-                    size: v.size,
-                    repeat: v.repeat,
+                    hpa: data.hpa,
+                    gpa: data.gpa,
+                    size: data.size,
+                    repeat: data.repeat,
                     next: None,
                 })
             }
-            (Some(simple), Some((compactified_idx, compactified))) => {
+            (Some(simple_handle), Some((compactified_idx, compactified))) => {
+                let simple = self.simple.get(simple_handle).unwrap();
                 //TODO: advance to next entry
                 if simple.hpa > compactified.hpa {
-                    self.simple_next = if self.simple_idx < self.simple_len {
+                    /*self.simple_next = if self.simple_idx < self.simple_len {
                         let v = self.simple[self.simple_idx];
                         self.simple_idx += 1;
                         Some(v)
                     } else {
                         None
-                    };
+                    };*/
+                    self.simple_next_buf = self.simple_iter.next();
                     Some(Segment {
                         hpa: simple.hpa,
                         gpa: simple.gpa,
@@ -150,6 +135,7 @@ impl<'a, const N: usize, T: MemoryColoring + Clone + Default> Iterator
                         next: None,
                     })
                 } else {
+                    assert!(compactified_idx < self.compactified_len);
                     self.compactified_next[compactified_idx] =
                         self.compactified_iters[compactified_idx].next();
                     Some(Segment {
@@ -179,8 +165,8 @@ fn next_device<'a, T: MemoryColoring + Clone + Default>(
 
 #[derive(Clone)]
 pub struct CompatifiedMappingIter<'a, T: MemoryColoring + Clone + Default> {
-    permission_iter: PermissionIterator<'a, T>,
-    next_blocked_iter: PermissionIterator<'a, T>,
+    permission_iter: Option<PermissionIterator<'a, T>>,
+    next_blocked_iter: Option<PermissionIterator<'a, T>>,
     next_blocked: Option<MemoryPermission>,
     next_ram_gpa: usize,
     highest_device_gpa: Option<GuestPhysAddr>,
@@ -201,7 +187,7 @@ impl<'a, T: MemoryColoring + Clone + Default> Iterator for CompatifiedMappingIte
         // Case 1: Still have chuncks in memory permission from previous call
         // Case 2: fetch next memory permission from permission iterator
         if self.active_ram_range.is_none() {
-            self.active_ram_range = match self.permission_iter.next() {
+            self.active_ram_range = match self.permission_iter.as_mut().unwrap().next() {
                 Some(r) => Some((r, r.size())),
                 None => return None,
             };
@@ -211,9 +197,6 @@ impl<'a, T: MemoryColoring + Clone + Default> Iterator for CompatifiedMappingIte
             None => panic!("should not happen by construction"),
         };
 
-        if self.mapping_count > 0 && self.mapping_count % 10000 == 0 {
-            log::info!("Used {:08} remappings so far", self.mapping_count);
-        }
         /* Observations/Assumptions:
          * The results of the iterator are sorted, i.e. we go through the address space "left to right".
          * With partititions, a memory range might be smaller that its actually physical bounds, however
@@ -278,7 +261,7 @@ impl<'a, T: MemoryColoring + Clone + Default> Iterator for CompatifiedMappingIte
                     cur_blocked.start, self.next_ram_gpa);
                     self.next_ram_gpa += cur_blocked.size();
 
-                    self.next_blocked = next_device(&mut self.next_blocked_iter);
+                    self.next_blocked = next_device(self.next_blocked_iter.as_mut().unwrap());
 
                     //next blocked might by contiguous -> skip over next until there is a gap
                     while let Some(nb) = self.next_blocked {
@@ -293,7 +276,8 @@ impl<'a, T: MemoryColoring + Clone + Default> Iterator for CompatifiedMappingIte
                              */
                             self.next_ram_gpa += nb.size();
                             cur_blocked = nb;
-                            self.next_blocked = next_device(&mut self.next_blocked_iter);
+                            self.next_blocked =
+                                next_device(self.next_blocked_iter.as_mut().unwrap());
                         } else {
                             break;
                         }
@@ -365,8 +349,8 @@ pub fn new_compactified_mapping_iter<'a, T: MemoryColoring + Clone + Default>(
     }
 
     CompatifiedMappingIter {
-        permission_iter,
-        next_blocked_iter,
+        permission_iter: Some(permission_iter),
+        next_blocked_iter: Some(next_blocked_iter),
         next_blocked,
         next_ram_gpa,
         highest_device_gpa: None,

@@ -157,6 +157,7 @@ impl<T> Eq for Handle<T> {}
 
 // ———————————————————————————————— Iterator ———————————————————————————————— //
 
+#[derive(Clone)]
 pub struct ArenaIterator<'a, T, const N: usize> {
     arena: &'a GenArena<T, N>,
     iterator: FreeListIterator<'a, N>,

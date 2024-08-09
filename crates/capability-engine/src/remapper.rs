@@ -3,7 +3,8 @@
 //! The remapper is not part of the capa-engine, but a wrapper that can be used to keep trap of
 //! virtual addresses for platform such as x86 that needs to emulate second-level page tables.
 
-use core::{array, cmp, fmt};
+use core::arch::asm;
+use core::{array, cmp, fmt, mem};
 
 use kmerge_iter::{new_compactified_mapping_iter, CompatifiedMappingIter, MergedRemapIter};
 use mmu::ioptmapper::PAGE_SIZE;
@@ -18,12 +19,12 @@ use crate::{CapaError, GenArena, Handle, MemOps, RegionIterator, RegionTracker, 
 
 mod kmerge_iter;
 
-pub struct Remapper<const N: usize> {
+pub struct Remapper<const SIMPLE: usize, const COMPACT: usize> {
     //simple remappings
-    segments: GenArena<Segment, N>,
+    segments: GenArena<Segment, SIMPLE>,
     //complex, compactifier remappings
-    compact_remaps: GenArena<CompactRemap, N>,
-    //TODO: store memory coloring
+    compact_remaps: GenArena<CompactRemap, COMPACT>,
+    //TODO: remove?
     head: Option<Handle<Segment>>,
     //store regions referenced by CompactRemap here
     remapper_region_pool: TrackerPool,
@@ -100,29 +101,29 @@ impl Segment {
         false
     }
 }
-impl<const N: usize> Remapper<N> {
+impl<const SIMPLE: usize, const COMPACT: usize> Remapper<SIMPLE, COMPACT> {
     pub const fn new() -> Self {
         let v = Remapper {
-            segments: GenArena::new([EMPTY_SEGMENT; N]),
+            segments: GenArena::new([EMPTY_SEGMENT; SIMPLE]),
             head: None,
-            compact_remaps: GenArena::new([CompactRemap::empty(); N]),
+            compact_remaps: GenArena::new([CompactRemap::empty(); COMPACT]),
             remapper_region_pool: TrackerPool::new([EMPTY_REGION; NB_TRACKER]),
         };
-        let a = 10;
         v
     }
 
-    pub fn new_merged_remap_iter<'a, T>(&'a self, coloring: T) -> MergedRemapIter<'a, N, T>
+    pub fn new_merged_remap_iter<'a, T>(
+        &'a self,
+        coloring: T,
+    ) -> MergedRemapIter<'a, SIMPLE, COMPACT, T>
     where
         T: MemoryColoring + Clone + Default,
     {
-        //panic!("entering new merged remap iter");
-        log::info!("creating new_merged_remap_iter");
         let simple = &self.segments;
-        let mut compactified_iters: [CompatifiedMappingIter<'a, T>; N] =
+
+        let mut compactified_iters: [CompatifiedMappingIter<'a, T>; COMPACT] =
             array::from_fn(|_| CompatifiedMappingIter::default());
         let mut compactified_len = 0;
-        //panic!("before loop");
         for handle in &self.compact_remaps {
             let cr = self
                 .compact_remaps
@@ -142,7 +143,6 @@ impl<const N: usize> Remapper<N> {
                 new_compactified_mapping_iter(perm_iter, cr.start_gpa);
             compactified_len += 1;
         }
-        //panic!("before new call");
         MergedRemapIter::new(simple, compactified_iters, compactified_len)
     }
 
@@ -150,12 +150,13 @@ impl<const N: usize> Remapper<N> {
         &'a self,
         coloring: T,
         regions: PermissionIterator<'a, T>,
-    ) -> RemapIterator<'a, N, T> {
-        log::info!("remapper:new_remap_iter");
+    ) -> RemapIterator<'a, SIMPLE, COMPACT, T> {
+        let merged_remap_iter: MergedRemapIter<SIMPLE, COMPACT, T> =
+            self.new_merged_remap_iter(coloring);
         RemapIterator {
             regions,
             next_region_start: None,
-            remap_commands_iter: self.new_merged_remap_iter(coloring),
+            remap_commands_iter: merged_remap_iter,
             next_segment_start: None,
             cursor: 0,
             ongoing_segment: None,
@@ -163,13 +164,16 @@ impl<const N: usize> Remapper<N> {
         }
     }
 
-    pub fn iter_segments(&self) -> RemapperSegmentIterator<'_, N> {
+    pub fn iter_segments(&self) -> RemapperSegmentIterator<'_, SIMPLE, COMPACT> {
         RemapperSegmentIterator {
             remapper: self,
             next_segment: self.head,
         }
     }
 
+    ///
+    /// # Arguments
+    /// - `color_range` : start inclusive, end exclusive
     pub fn map_compactified_range(
         &mut self,
         color_range: (usize, usize),
@@ -177,12 +181,8 @@ impl<const N: usize> Remapper<N> {
         start_gpa: usize,
         regions_iter: RegionIterator,
     ) -> Result<(), CapaError> {
-        log::info!("remapper::map_compactified_range");
-        //panic!("start of map_compactified in remapper"); // get here
         let mut remap_region_snapshot = RegionTracker::new();
-        //panic!("allocated region tracker"); //get here
         for (a, x) in regions_iter {
-            //panic!("start of first iteration"); //if remap_region_snapshot is commented in, we don't reach this location. If we remove it, we get here
             let is_device = match x.get_resource_kind() {
                 RegionResourceKind::Device => true,
                 _ => false,
@@ -190,11 +190,6 @@ impl<const N: usize> Remapper<N> {
             if is_device && !include_devices {
                 continue;
             }
-            log::info!(
-                "remapper::map_compactified_range : adding region start 0x{:013x}, end 0x{:013x}",
-                x.get_start(),
-                x.get_end()
-            );
             remap_region_snapshot
                 .add_region(
                     x.get_start(),
@@ -204,9 +199,7 @@ impl<const N: usize> Remapper<N> {
                     &mut self.remapper_region_pool,
                 )
                 .expect("remapper::map_compactified_range failed to add region");
-            //panic!("end of first iteration");
         }
-        //panic!("after regions_iter loop");
         let entry: CompactRemap = CompactRemap {
             start_gpa,
             color_range,
@@ -221,7 +214,6 @@ impl<const N: usize> Remapper<N> {
             .allocate(entry)
             .ok_or(CapaError::OutOfMemory)?;
 
-        //panic!("end of compactified mapping");
         Ok(())
     }
 
@@ -446,11 +438,16 @@ impl<const N: usize> Remapper<N> {
 // ——————————————————————————————— Iterators ———————————————————————————————— //
 
 #[derive(Clone)]
-pub struct RemapIterator<'a, const N: usize, T: MemoryColoring + Clone + Default> {
+pub struct RemapIterator<
+    'a,
+    const SIMPLE: usize,
+    const COMPACT: usize,
+    T: MemoryColoring + Clone + Default,
+> {
     //luca: deduplicated view of the memory ptracker.permissions for our domain
     regions: PermissionIterator<'a, T>,
     //luca: just simple iterator over existing segments
-    remap_commands_iter: MergedRemapIter<'a, N, T>,
+    remap_commands_iter: MergedRemapIter<'a, SIMPLE, COMPACT, T>,
     cursor: usize,
     next_region_start: Option<usize>,
     next_segment_start: Option<usize>,
@@ -458,20 +455,29 @@ pub struct RemapIterator<'a, const N: usize, T: MemoryColoring + Clone + Default
     ongoing_segment: Option<SingleSegmentIterator<'a, T>>,
 }
 
-impl<'a, const N: usize, T: MemoryColoring + Clone + Default> Iterator for RemapIterator<'a, N, T> {
+impl<'a, const SIMPLE: usize, const COMPACT: usize, T: MemoryColoring + Clone + Default> Iterator
+    for RemapIterator<'a, SIMPLE, COMPACT, T>
+{
     type Item = Mapping;
 
-    /*luca: initial state
-    RemapIterator {
-           regions,
-           next_region_start: None,
-           //luca: from prior runs
-           segments: self.iter_segments(),
-           next_segment_start: None,
-           cursor: 0,
-           ongoing_segment: None,
-           max_segment: None,
-       }
+    /*Initial state
+       pub fn new_remap_iter<'a, T: MemoryColoring + Clone + Default>(
+        &'a self,
+        coloring: T,
+        regions: PermissionIterator<'a, T>,
+    ) -> RemapIterator<'a, SIMPLE, COMPACT, T> {
+        let merged_remap_iter: MergedRemapIter<SIMPLE, COMPACT, T> =
+            self.new_merged_remap_iter(coloring);
+        RemapIterator {
+            regions,
+            next_region_start: None,
+            remap_commands_iter: merged_remap_iter,
+            next_segment_start: None,
+            cursor: 0,
+            ongoing_segment: None,
+            max_segment: None,
+        }
+    }
     */
     fn next(&mut self) -> Option<Self::Item> {
         // First, if there is an ongoing segment being remapped, continue
@@ -490,6 +496,7 @@ impl<'a, const N: usize, T: MemoryColoring + Clone + Default> Iterator for Remap
 
         // Update next region and segment start, if needed
         if self.next_region_start.is_none() {
+            //luca: we do clone+next as a way to get a peek without changing the state
             self.next_region_start = self.regions.clone().next().map(|region| region.start);
         }
         if self.next_segment_start.is_none() {
@@ -500,6 +507,9 @@ impl<'a, const N: usize, T: MemoryColoring + Clone + Default> Iterator for Remap
                 .map(|segment| segment.hpa);
         }
 
+        //luca: Terminology:
+        // - Segment: chunck of contig mem that we want to map
+        // - region: phys mem that we have access to
         match (self.next_segment_start, self.next_region_start) {
             (None, None) => {
                 // Nothing more to process
@@ -507,10 +517,15 @@ impl<'a, const N: usize, T: MemoryColoring + Clone + Default> Iterator for Remap
             }
             (Some(_), None) => {
                 // There are more segments but no more regions
+                //luca: I guess this shoudl not happen, it basically means that
+                //some of our remapping requests do not match the available physical mem
+                panic!("should not happen");
                 return None;
             }
             (None, Some(next_region)) => {
                 // There are only regions left
+                //luca: we identity map all of this, as we don't have any segments/remappings
+
                 let region = self.regions.next().unwrap();
                 //luca: largest start addr of a segment?
                 let max_segment = self.max_segment.unwrap_or(0);
@@ -518,6 +533,7 @@ impl<'a, const N: usize, T: MemoryColoring + Clone + Default> Iterator for Remap
 
                 // Skip empty regions
                 if self.cursor == region.end {
+                    //luca:: recursion!!!, that looks dangerous
                     return self.next();
                 }
 
@@ -687,12 +703,14 @@ impl<'a, T: MemoryColoring + Clone + Default> SingleSegmentIterator<'a, T> {
 
 /// A simple iterator over the remapper segments without any hidden logic
 #[derive(Clone)]
-pub struct RemapperSegmentIterator<'a, const N: usize> {
-    remapper: &'a Remapper<N>,
+pub struct RemapperSegmentIterator<'a, const SIMPLE: usize, const COMPACT: usize> {
+    remapper: &'a Remapper<SIMPLE, COMPACT>,
     next_segment: Option<Handle<Segment>>,
 }
 
-impl<'a, const N: usize> Iterator for RemapperSegmentIterator<'a, N> {
+impl<'a, const SIMPLE: usize, const COMPACT: usize> Iterator
+    for RemapperSegmentIterator<'a, SIMPLE, COMPACT>
+{
     type Item = &'a Segment;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -706,6 +724,7 @@ impl<'a, const N: usize> Iterator for RemapperSegmentIterator<'a, N> {
     }
 }
 
+/*
 /// This will create create a contiguous GPA space mappings for the possibly scattered
 /// HPA memory range produced by the PermissionIterator (due to coloring).
 /// The strategy is to keep device memory identity. The RAM memory is remapped contiguously starting at
@@ -887,14 +906,14 @@ pub fn compactify_colors_in_gpa_space<const N: usize, T: MemoryColoring + Clone 
         remapper.map_range(hpa.as_usize(), gpa.as_usize(), size, repeat)
     };
     compactify_colors_in_gpa_space_cb_mapper(&mut cb, permission_iter, start_gpa)
-}
+}*/
 
 // ————————————————————————————————— Tests —————————————————————————————————— //
 
 #[cfg(test)]
 mod tests {
     use mmu::memory_coloring::color_to_phys::PhysRange;
-    use mmu::memory_coloring::{self, ActiveMemoryColoring, MyBitmap};
+    use mmu::memory_coloring::{self, ActiveMemoryColoring, DummyMemoryColoring, MyBitmap};
     use utils::HostPhysAddr;
 
     use super::*;
@@ -949,10 +968,66 @@ mod tests {
     }
 
     #[test]
+    fn performance_debugging() {
+        let mut pool = TrackerPool::new([EMPTY_REGION; NB_TRACKER]);
+        let mut tracker = RegionTracker::new();
+        let mut remapper: Remapper<4, 4> = Remapper::new();
+        let coloring = DummyMemoryColoring {};
+
+        let allowed_colors = (0, DummyMemoryColoring::COLOR_COUNT - 8);
+
+        //copy of the regions for actual memory config where performance is slow
+        let regions: Vec<(usize, usize, bool)> = vec![
+            (0x0000000000000, 0x0000000001000, false),
+            (0x0000000001000, 0x00000001c6000, true),
+            (0x00000001c6000, 0x0000000800000, false),
+            (0x0000000800000, 0x0000000808000, true),
+            (0x0000000808000, 0x000000080b000, false),
+            (0x000000080b000, 0x000000080c000, true),
+            (0x000000080c000, 0x0000000810000, false),
+            (0x0000000810000, 0x0000000900000, true),
+            (0x0000000900000, 0x000007faef000, false),
+            (0x000007faef000, 0x000007fbff000, true),
+            (0x000007fbff000, 0x000007ff78000, false),
+            (0x000007ff78000, 0x00000fed90000, true),
+            (0x00000fed90000, 0x00000fed91000, true),
+            (0x00000fed91000, 0x0000100000000, true),
+            (0x0000100000000, 0x000023b600000, false),
+            (0x000023b600000, 0x0000240000000, true),
+        ];
+        let start_hpa = regions[0].0;
+        let end_hpa = regions.last().unwrap().1;
+        //add regions to tracker
+        for (start, end, is_device) in regions {
+            let rk = if is_device {
+                ResourceKind::Device
+            } else {
+                ResourceKind::ram_with_all_partitions()
+            };
+            tracker
+                .add_region(start, end, MEMOPS_ALL, rk, &mut pool)
+                .unwrap();
+        }
+        //create compact remapping
+        remapper
+            .map_compactified_range(allowed_colors, true, 0, tracker.iter(&pool))
+            .unwrap();
+
+        //fast until here
+
+        let remap_iter = remapper.new_remap_iter(
+            coloring.clone(),
+            tracker.permissions(&pool, coloring.clone(), None, true),
+        );
+        let remap_count = remap_iter.count();
+        println!("Have {} remaps", remap_count);
+    }
+
+    #[test]
     fn simple_compactify() {
         let mut pool = TrackerPool::new([EMPTY_REGION; NB_TRACKER]);
         let mut tracker = RegionTracker::new();
-        let mut remapper: Remapper<32> = Remapper::new();
+        let mut remapper: Remapper<32, 8> = Remapper::new();
         let coloring = RangeBasedTestColoring::new(vec![
             (
                 PhysRange {
@@ -1043,12 +1118,15 @@ mod tests {
             .unwrap();
 
         //program remapper to compactify
-        let (end_ram_gpa, end_device_gpa) = compactify_colors_in_gpa_space(
+        /*let (end_ram_gpa, end_device_gpa) = compactify_colors_in_gpa_space(
             &mut remapper,
             tracker.permissions(&pool, coloring.clone(), None, true),
             GuestPhysAddr::new(0),
         )
-        .expect("compactify failed");
+        .expect("compactify failed");*/
+        remapper
+            .map_compactified_range((0, 1), true, 0, tracker.iter(&pool))
+            .unwrap();
 
         /*HPA_{start}, HPA_{end}, GPA_{start}, results are entered into the rempapper
          * ordered by their HPA_{start} not by their GPA_{start}
@@ -1068,7 +1146,7 @@ mod tests {
                 tracker.permissions(&pool, coloring.clone(), None, true),
             ),
         );
-        assert_eq!(
+        /*assert_eq!(
             WANT_END_RAM_GPA,
             end_ram_gpa,
             "RAM, wanted last GPA 0x{:013x}, got last GPA 0x{:013x}",
@@ -1082,14 +1160,14 @@ mod tests {
             "Device, wanted last GPA 0x{:013x}, got last GPA 0x{:013x}",
             WANT_END_RAM_GPA.as_u64(),
             end_device_gpa.as_u64()
-        );
+        );*/
     }
 
     #[test]
     fn compactify_with_gap_to_last_device() {
         let mut pool = TrackerPool::new([EMPTY_REGION; NB_TRACKER]);
         let mut tracker = RegionTracker::new();
-        let mut remapper: Remapper<32> = Remapper::new();
+        let mut remapper: Remapper<32, 8> = Remapper::new();
         let coloring = RangeBasedTestColoring::new(vec![
             (
                 PhysRange {
@@ -1148,12 +1226,15 @@ mod tests {
             .unwrap();
 
         //program remapper to compactify
-        let (end_ram_gpa, end_device_gpa) = compactify_colors_in_gpa_space(
+        /*let (end_ram_gpa, end_device_gpa) = compactify_colors_in_gpa_space(
             &mut remapper,
             tracker.permissions(&pool, coloring.clone(), None, true),
             GuestPhysAddr::new(0),
         )
-        .expect("compactify failed");
+        .expect("compactify failed");*/
+        remapper
+            .map_compactified_range((0, 1), true, 0, tracker.iter(&pool))
+            .unwrap();
 
         /*HPA_{start}, HPA_{end}, GPA_{start}, results are entered into the rempapper
          * ordered by their HPA_{start} not by their GPA_{start}
@@ -1171,7 +1252,7 @@ mod tests {
                 tracker.permissions(&pool, coloring.clone(), None, true),
             ),
         );
-        assert_eq!(
+        /*assert_eq!(
             WANT_END_RAM_GPA,
             end_ram_gpa,
             "RAM, wanted last GPA 0x{:013x}, got last GPA 0x{:013x}",
@@ -1185,7 +1266,7 @@ mod tests {
             "Device, wanted last GPA 0x{:013x}, got last GPA 0x{:013x}",
             WANT_END_RAM_GPA.as_u64(),
             end_device_gpa.as_u64()
-        );
+        );*/
     }
 
     #[test]
@@ -1208,14 +1289,35 @@ mod tests {
     fn compactified_remap() {
         let mut pool = TrackerPool::new([EMPTY_REGION; NB_TRACKER]);
         let mut tracker = RegionTracker::new();
-        let mut remapper: Remapper<128> = Remapper::new();
+        let mut remapper: Remapper<32, 8> = Remapper::new();
         let coloring = RangeBasedTestColoring::new(vec![
             (
                 PhysRange {
                     start: 0x0_000,
-                    end: 0x4_000,
+                    end: 0x1_000,
                 },
                 0,
+            ),
+            (
+                PhysRange {
+                    start: 0x0_000,
+                    end: 0x2_000,
+                },
+                1,
+            ),
+            (
+                PhysRange {
+                    start: 0x2_000,
+                    end: 0x3_000,
+                },
+                0,
+            ),
+            (
+                PhysRange {
+                    start: 0x3_000,
+                    end: 0x4_000,
+                },
+                1,
             ),
             (
                 PhysRange {
@@ -1234,7 +1336,7 @@ mod tests {
                 &mut pool,
             )
             .unwrap();
-        for x in 1..120 {
+        /*for x in 1..120 {
             tracker
                 .add_region(
                     0x8_000 + (x * 0x1_000),
@@ -1244,13 +1346,16 @@ mod tests {
                     &mut pool,
                 )
                 .unwrap();
-        }
+        }*/
 
         remapper
             .map_compactified_range((0, 1), true, 0x10_000, tracker.iter(&pool))
             .expect("failed to add compactified mapping");
+        remapper
+            .map_compactified_range((1, 2), true, 0x20_000, tracker.iter(&pool))
+            .expect("failed to add compactified mapping");
 
-        /*println!("merged remap iter");
+        println!("merged remap iter");
         let merged_remap_iter =
             remapper.new_merged_remap_iter::<RangeBasedTestColoring>(coloring.clone());
         for x in merged_remap_iter {
@@ -1261,15 +1366,15 @@ mod tests {
             coloring.clone(),
             tracker.permissions(&pool, coloring.clone(), None, true),
         ) {
-            println!("{:x?}", x);
-        }*/
+            println!("\n{:x?}\n", x);
+        }
     }
 
     #[test]
     fn remap() {
         let mut pool = TrackerPool::new([EMPTY_REGION; NB_TRACKER]);
         let mut tracker = RegionTracker::new();
-        let mut remapper: Remapper<32> = Remapper::new();
+        let mut remapper: Remapper<32, 8> = Remapper::new();
         let all_same_color = RangeBasedTestColoring::new(vec![(
             PhysRange {
                 start: 0x0,
@@ -1400,7 +1505,7 @@ mod tests {
     fn cross_regions() {
         let mut pool = TrackerPool::new([EMPTY_REGION; NB_TRACKER]);
         let mut tracker = RegionTracker::new();
-        let mut remapper: Remapper<32> = Remapper::new();
+        let mut remapper: Remapper<32, 8> = Remapper::new();
         let all_same_color = RangeBasedTestColoring::new(vec![(
             PhysRange {
                 start: 0x0,
@@ -1449,7 +1554,7 @@ mod tests {
     fn backward_overlap() {
         let mut pool = TrackerPool::new([EMPTY_REGION; NB_TRACKER]);
         let mut tracker = RegionTracker::new();
-        let mut remapper: Remapper<32> = Remapper::new();
+        let mut remapper: Remapper<32, 8> = Remapper::new();
         let all_same_color = RangeBasedTestColoring::new(vec![(
             PhysRange {
                 start: 0x0,
@@ -1499,7 +1604,7 @@ mod tests {
     fn remapper_wip_coloring_test_simple() {
         let mut pool = TrackerPool::new([EMPTY_REGION; NB_TRACKER]);
         let mut tracker = RegionTracker::new();
-        let mut remapper: Remapper<32> = Remapper::new();
+        let mut remapper: Remapper<32, 8> = Remapper::new();
         let all_same_color = RangeBasedTestColoring::new(vec![(
             PhysRange {
                 start: 0x0,
@@ -1534,7 +1639,7 @@ mod tests {
     fn forward_overlap() {
         let mut pool = TrackerPool::new([EMPTY_REGION; NB_TRACKER]);
         let mut tracker = RegionTracker::new();
-        let mut remapper: Remapper<32> = Remapper::new();
+        let mut remapper: Remapper<32, 8> = Remapper::new();
         let all_same_color = RangeBasedTestColoring::new(vec![(
             PhysRange {
                 start: 0x0,
@@ -1584,7 +1689,7 @@ mod tests {
     fn update_region() {
         let mut pool = TrackerPool::new([EMPTY_REGION; NB_TRACKER]);
         let mut tracker = RegionTracker::new();
-        let mut remapper: Remapper<32> = Remapper::new();
+        let mut remapper: Remapper<32, 8> = Remapper::new();
         let all_same_color = RangeBasedTestColoring::new(vec![(
             PhysRange {
                 start: 0x0,
@@ -1679,7 +1784,7 @@ mod tests {
     fn split_region() {
         let mut pool = TrackerPool::new([EMPTY_REGION; NB_TRACKER]);
         let mut tracker = RegionTracker::new();
-        let mut remapper: Remapper<32> = Remapper::new();
+        let mut remapper: Remapper<32, 8> = Remapper::new();
 
         tracker
             .add_region(
@@ -1713,7 +1818,7 @@ mod tests {
     fn gpa_overlap() {
         let mut pool = TrackerPool::new([EMPTY_REGION; NB_TRACKER]);
         let mut tracker = RegionTracker::new();
-        let mut remapper: Remapper<32> = Remapper::new();
+        let mut remapper: Remapper<32, 8> = Remapper::new();
         let all_same_color = RangeBasedTestColoring::new(vec![(
             PhysRange {
                 start: 0x0,
@@ -1768,7 +1873,7 @@ mod tests {
 
     #[test]
     fn debug_iterator() {
-        let mut remapper: Remapper<32> = Remapper::new();
+        let mut remapper: Remapper<32, 8> = Remapper::new();
 
         remapper.map_range(0x10, 0x100, 0x20, 2).unwrap();
         snap("{[0x10, 0x30 at 0x100, rep 2]}", &remapper.iter_segments());
@@ -1899,8 +2004,8 @@ impl fmt::Display for Mapping {
     }
 }
 
-impl<'a, const N: usize, T: MemoryColoring + Clone + Default> fmt::Display
-    for RemapIterator<'a, N, T>
+impl<'a, const SIMPLE: usize, const COMPACT: usize, T: MemoryColoring + Clone + Default>
+    fmt::Display for RemapIterator<'a, SIMPLE, COMPACT, T>
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut first = true;
@@ -1917,7 +2022,9 @@ impl<'a, const N: usize, T: MemoryColoring + Clone + Default> fmt::Display
     }
 }
 
-impl<'a, const N: usize> fmt::Display for RemapperSegmentIterator<'a, N> {
+impl<'a, const SIMPLE: usize, const COMPACT: usize> fmt::Display
+    for RemapperSegmentIterator<'a, SIMPLE, COMPACT>
+{
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut first = true;
         write!(f, "{{")?;

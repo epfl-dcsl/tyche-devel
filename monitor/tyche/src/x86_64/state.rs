@@ -1,6 +1,7 @@
+use core::arch::asm;
 use core::sync::atomic::{AtomicBool, Ordering};
 
-use capa_engine::config::{NB_CORES, NB_DOMAINS, NB_REMAP_REGIONS};
+use capa_engine::config::{NB_COMPACT_REMAPS, NB_CORES, NB_DOMAINS, NB_SIMPLE_REMAPS};
 use capa_engine::context::{RegisterContext, RegisterState};
 use capa_engine::{
     CapaEngine, CapaError, Domain, GenArena, Handle, LocalCapa, MemOps, Remapper, ResourceKind,
@@ -75,7 +76,7 @@ pub struct DataX86 {
     pub ept_old: Option<HostPhysAddr>,
     pub iopt: Option<HostPhysAddr>,
     pub iopt_old: Option<HostPhysAddr>,
-    pub remapper: Remapper<NB_REMAP_REGIONS>,
+    pub remapper: Remapper<NB_SIMPLE_REMAPS, NB_COMPACT_REMAPS>,
     pub data_transfer_pool: DataTransferPool,
 }
 
@@ -107,10 +108,10 @@ impl StateX86 {
             return false;
         }
 
-        /*log::info!(
+        log::info!(
             "Updating IOMMU PTs for domain at idx {}",
             domain_handle.idx()
-        );*/
+        );
         if domain.iopt_old.is_some() {
             panic!("Updating IOPTs while previous one's have not been freed yet");
         }
@@ -124,6 +125,7 @@ impl StateX86 {
             allocator.get_physical_offset().as_usize(),
             iopt_root.phys_addr,
         );
+        let mut map_count = 0;
         let permission_iter = engine
             .get_domain_permissions(domain_handle, ActiveMemoryColoring {}, None, true)
             .unwrap();
@@ -141,7 +143,11 @@ impl StateX86 {
                 &HostPhysAddr::new(range.hpa),
                 range.size,
                 (IoPtFlag::READ | IoPtFlag::WRITE).bits(),
-            )
+            );
+            map_count += 1;
+            if (map_count % 100) == 0 {
+                log::info!("iopt: processed {:06} mappings", map_count);
+            }
         }
 
         // Update the IOMMU (i.e. the actual hardware device)
@@ -229,11 +235,11 @@ impl StateX86 {
         let permission_iter = engine
             .get_domain_permissions(domain_handle, ActiveMemoryColoring {}, None, true)
             .unwrap();
-        let mut map_count = 0;
-        for range in domain
+        let remap_iter = domain
             .remapper
-            .new_remap_iter(ActiveMemoryColoring {}, permission_iter)
-        {
+            .new_remap_iter(ActiveMemoryColoring {}, permission_iter);
+        let mut map_count = 0;
+        for range in remap_iter {
             if !range.ops.contains(MemOps::READ) {
                 log::error!("there is a region without read permission: {}", range);
                 continue;
