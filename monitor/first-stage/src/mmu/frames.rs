@@ -255,12 +255,10 @@ impl<T: MemoryColoring + Clone> PartitionedMemoryMap<T> {
                 let mut mem_info = Vec::new();
                 mem_info.push(start_gpa.as_usize());
 
+                let bytes_per_color =
+                    compute_color_sizes(self.all_regions, self.coloring.as_ref().unwrap());
                 for color_id in cr.first_color..(cr.first_color + cr.color_count) {
-                    let size = compute_color_partition_size(
-                        self.all_regions,
-                        self.coloring.as_ref().unwrap(),
-                        color_id,
-                    ) as u64;
+                    let size = bytes_per_color[color_id as usize];
                     let entry = E820Entry {
                         addr: start_gpa,
                         size,
@@ -407,10 +405,10 @@ pub fn create_guest_allocator<T: MemoryColoring + Clone>(
             mem_bytes: guest_mem_bytes,
         });
         let first_unused_color = first_guest_color + guest_color_count;
+        let bytes_per_color = compute_color_sizes(regions, &mem_painter);
         let mut unused_mem_bytes = 0;
         for color_id in (first_unused_color as usize)..MemoryColoringType::COLOR_COUNT {
-            unused_mem_bytes +=
-                compute_color_partition_size(regions, &mem_painter, color_id as u64);
+            unused_mem_bytes += bytes_per_color[color_id] as usize;
         }
         let unused_memory_partition = MemoryRange::ColoredRange(ColorRange {
             first_color: first_unused_color,
@@ -989,14 +987,14 @@ fn contig_color_range<T: MemoryColoring + Clone>(
 ) -> Result<(u64, u64, usize), ()> {
     let first_used_color = first_usable_color_id;
     let mut color_count = 1;
-    let mut mem_bytes = compute_color_partition_size(all_regions, coloring, first_used_color);
+    let bytes_per_color = compute_color_sizes(all_regions, coloring);
+    //let mut mem_bytes = compute_color_partition_size(all_regions, coloring, first_used_color);
+    let mut mem_bytes = bytes_per_color[first_usable_color_id as usize] as usize;
     for new_color in first_usable_color_id + 1..total_color_count {
         if mem_bytes > required_bytes {
             break;
         }
-        let new_color_bytes =
-            compute_color_partition_size(all_regions.as_ref(), coloring, new_color as u64);
-        mem_bytes += new_color_bytes;
+        mem_bytes += bytes_per_color[new_color as usize] as usize;
         color_count += 1;
     }
     if mem_bytes < required_bytes {
@@ -1012,33 +1010,25 @@ fn contig_color_range<T: MemoryColoring + Clone>(
     return Ok((first_used_color, color_count, mem_bytes));
 }
 
-/// Computes the size of the memory partition with the given color_id in bytes
+/// Computes the amount for memory for each color
 #[cfg(feature = "color-dom0")]
-fn compute_color_partition_size<T: MemoryColoring + Clone>(
+fn compute_color_sizes<T: MemoryColoring + Clone>(
     all_regions: &'static [MemoryRegion],
     coloring: &T,
-    color_id: u64,
-) -> usize {
-    let mut frame_count = 0;
-    /* hacky use of allocator. This allocator does not "do anyhting" to the pages,
-     * but simply iterates over them, adhering to the coloring and alignment requirements.
-     * Here, we just use it to get the count of all frames with this color;
-     * The value of the `physical_memory_offset` argument is not important here
-     */
-    let allocator = ColoringRangeFrameAllocator::new(
-        color_id,
-        1,
-        HostVirtAddr::new(0),
-        all_regions,
-        coloring,
-        None,
-    );
-    let mut frame_opt = allocator.allocate_frame();
-    while let Some(_frame) = frame_opt {
-        frame_count += 1;
-        frame_opt = allocator.allocate_frame();
+) -> [u64; MemoryColoringType::COLOR_COUNT] {
+    use mmu::walker::Address;
+
+    let mut bma = BootInfoFrameAllocator::init(all_regions);
+    let mut bytes_per_color = [0; MemoryColoringType::COLOR_COUNT];
+    let mut next_frame = bma.allocate_frame();
+    while let Some(frame) = next_frame {
+        next_frame = bma.allocate_frame();
+        let color_id =
+            coloring.compute_color(HostPhysAddr::from_u64(frame.start_address().as_u64()));
+        assert_eq!(frame.size(), PAGE_SIZE as u64);
+        bytes_per_color[color_id as usize] += frame.size();
     }
-    return frame_count * PAGE_SIZE;
+    return bytes_per_color;
 }
 
 // ———————————————————————————— Frame Allocator ————————————————————————————— //
@@ -1056,7 +1046,7 @@ impl BootInfoFrameAllocator {
     /// This function is unsafe because the caller must guarantee that the passed
     /// memory map is valid. The main requirement is that all frames that are marked
     /// as `USABLE` in it are really unused.
-    pub unsafe fn init(memory_map: &'static [MemoryRegion]) -> Self {
+    pub fn init(memory_map: &'static [MemoryRegion]) -> Self {
         let region_idx = 0;
         let next_frame = memory_map[region_idx].start;
         let mut allocator = BootInfoFrameAllocator {
