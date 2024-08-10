@@ -288,9 +288,11 @@ impl fmt::Display for CapaInfo {
                 let p = if *children { 'P' } else { '_' };
                 write!(
                     f,
-                    "Region([0x{:x}, 0x{:x} | {}{}{}{:?}])",
-                    start, end, p, c, ops, resource_kind
-                )
+                    "Region([0x{:x}, 0x{:x} | {}{}{} | ",
+                    start, end, p, c, ops,
+                )?;
+                resource_kind.succinct_display(f)?;
+                write!(f, "])")
             }
             CapaInfo::RegionRevoke {
                 start,
@@ -302,9 +304,11 @@ impl fmt::Display for CapaInfo {
                 let c = if *confidential { 'C' } else { '_' };
                 write!(
                     f,
-                    "RegionRevoke([0x{:x}, 0x{:x} | {}{}{:?}])",
-                    start, end, c, ops, resource_kind
-                )
+                    "RegionRevoke([0x{:x}, 0x{:x} | {}{} | ",
+                    start, end, c, ops,
+                )?;
+                resource_kind.succinct_display(f)?;
+                write!(f, "])")
             }
             CapaInfo::Management { domain_id, sealed } => {
                 let s = if *sealed { 'S' } else { '_' };

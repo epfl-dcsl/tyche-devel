@@ -147,6 +147,33 @@ impl ResourceKind {
             _ => Err(CapaError::CouldNotDeserializeInfo),
         }
     }
+
+    /// Succinct string representation suiteable for usage with e.g. the snap! macro in test cases
+    pub fn succinct_display(&self, f: &mut fmt::Formatter<'_>) -> Result<(), core::fmt::Error> {
+        match self {
+            ResourceKind::RAM(bm) => {
+                if bm.all_bits_unset() {
+                    write!(f, "RAM.(NONE)")?;
+                } else if bm.all_bits_set() {
+                    write!(f, "RAM.(ALL)")?;
+                } else {
+                    write!(f, "RAM.(")?;
+                    for color_id in 0..bm.get_payload_bits_len() {
+                        if bm.get(color_id) {
+                            if color_id == bm.get_payload_bits_len() - 1 {
+                                write!(f, "{}", color_id)?
+                            } else {
+                                write!(f, "{},", color_id)?
+                            }
+                        }
+                    }
+                    write!(f, ")")?;
+                }
+                Ok(())
+            }
+            ResourceKind::Device => write!(f, "DEVICE"),
+        }
+    }
 }
 
 impl From<&RegionResourceKind> for ResourceKind {
@@ -382,6 +409,7 @@ impl Region {
     }
 
     /// Returns true if read,write,exec,super and partition id refcounts are equal
+    /// If resource_kind does not match we always return false
     pub fn same_counts(&self, other: &Self) -> bool {
         self.ref_count == other.ref_count
             && self.read_count == other.read_count
@@ -391,7 +419,8 @@ impl Region {
             && match (self.resource_kind, other.resource_kind) {
                 (RegionResourceKind::RAM(ours), RegionResourceKind::RAM(others)) => ours == others,
                 (RegionResourceKind::Device, RegionResourceKind::Device) => true,
-                _ => false,
+                (RegionResourceKind::RAM(_), RegionResourceKind::Device)
+                | (RegionResourceKind::Device, RegionResourceKind::RAM(_)) => false,
             }
     }
     pub fn get_resource_kind(&self) -> RegionResourceKind {
@@ -705,6 +734,9 @@ impl RegionTracker {
         at: usize,
         tracker: &mut TrackerPool,
     ) -> Result<Handle<Region>, CapaError> {
+        /*
+         * `handle` is the <= "old" region and `at` is the start of the new region which is inside the old one
+         */
         let region = &tracker[handle];
         assert!(
             region.contains(at),
@@ -936,7 +968,7 @@ impl RegionTracker {
         while curr != None {
             let current = curr.unwrap();
             /*
-               Case 1: adjacent regions with same refcounts for permissions + colors
+               Case 1: adjacent regions with same resource kind and same refcounts for permissions + (if RAM, same refcounts for colors)
                Case 2: Current region is empty
                Case 3: prev region is empty
             */

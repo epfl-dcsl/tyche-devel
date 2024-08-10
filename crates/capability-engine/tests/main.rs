@@ -194,7 +194,7 @@ fn start_carve_eri_direct() {
         )
         .unwrap();
     snap!(
-        "{Region([0x0, 0x1000 | PURWXS]), Region([0x0, 0x500 | _URWXS])}",
+        "{Region([0x0, 0x1000 | PURWXS | RAM.(ALL)]), Region([0x0, 0x500 | _URWXS | RAM.(ALL)])}",
         capas(d0, engine)
     );
     let mut iter = engine.get_effective_regions(d0, r0).unwrap();
@@ -245,7 +245,7 @@ fn middle_carve_eri_direct() {
         )
         .unwrap();
     snap!(
-        "{Region([0x0, 0x1000 | PURWXS]), Region([0x200, 0x300 | _URWXS])}",
+        "{Region([0x0, 0x1000 | PURWXS | RAM.(ALL)]), Region([0x200, 0x300 | _URWXS | RAM.(ALL)])}",
         capas(d0, engine)
     );
     let mut iter = engine.get_effective_regions(d0, r0).unwrap();
@@ -297,7 +297,7 @@ fn end_carve_eri_direct() {
         )
         .unwrap();
     snap!(
-        "{Region([0x0, 0x1000 | PURWXS]), Region([0x500, 0x1000 | _URWXS])}",
+        "{Region([0x0, 0x1000 | PURWXS | RAM.(ALL)]), Region([0x500, 0x1000 | _URWXS | RAM.(ALL)])}",
         capas(d0, engine)
     );
     let mut iter = engine.get_effective_regions(d0, r0).unwrap();
@@ -557,7 +557,7 @@ fn simple_carve() {
 
     snap!("{[0x0, 0x1000 | 1 (1 - 1 - 1 - 1)]}", regions(d0, engine));
     snap!(
-        "{Region([0x0, 0x1000 | PURWXS]), Region([0x0, 0x500 | _URWXS])}",
+        "{Region([0x0, 0x1000 | PURWXS | RAM.(ALL)]), Region([0x0, 0x500 | _URWXS | RAM.(ALL)])}",
         capas(d0, engine)
     );
     // The carve does not change the regions so it should work.
@@ -566,7 +566,10 @@ fn simple_carve() {
     // Undo the carve and check the regions and capas.
     engine.revoke(d0, r1).unwrap();
     snap!("{[0x0, 0x1000 | 1 (1 - 1 - 1 - 1)]}", regions(d0, engine));
-    snap!("{Region([0x0, 0x1000 | _URWXS])}", capas(d0, engine));
+    snap!(
+        "{Region([0x0, 0x1000 | _URWXS | RAM.(ALL)])}",
+        capas(d0, engine)
+    );
 }
 
 #[test]
@@ -616,7 +619,7 @@ fn carve_lose_permissions() {
         regions(d0, engine)
     );
     snap!(
-        "{Region([0x0, 0x1000 | PURWXS]), Region([0x0, 0x500 | _UR___])}",
+        "{Region([0x0, 0x1000 | PURWXS | RAM.(ALL)]), Region([0x0, 0x500 | _UR___ | RAM.(ALL)])}",
         capas(d0, engine)
     );
     // The carve changes the permissions but there should be only one.
@@ -625,7 +628,10 @@ fn carve_lose_permissions() {
     // Undo the carve and check the regions and capas.
     engine.revoke(d0, r1).unwrap();
     snap!("{[0x0, 0x1000 | 1 (1 - 1 - 1 - 1)]}", regions(d0, engine));
-    snap!("{Region([0x0, 0x1000 | _URWXS])}", capas(d0, engine));
+    snap!(
+        "{Region([0x0, 0x1000 | _URWXS | RAM.(ALL)])}",
+        capas(d0, engine)
+    );
 }
 
 #[test]
@@ -733,14 +739,20 @@ fn carve_send() {
     //TODO(Charly): this is not gonna be useful for the attestation.
     //It still says confidential.
     snap!(
-        "{Region([0x0, 0x1000 | PURWXS]), Management(2 | _)}",
+        "{Region([0x0, 0x1000 | PURWXS | RAM.(ALL)]), Management(2 | _)}",
         capas(d0, engine)
     );
     snap!("{[0x0, 0x500 | 1 (1 - 1 - 1 - 1)]}", regions(d1, engine));
-    snap!("{Region([0x0, 0x500 | _URWXS])}", capas(d1, engine));
+    snap!(
+        "{Region([0x0, 0x500 | _URWXS | RAM.(ALL)])}",
+        capas(d1, engine)
+    );
 
     engine.revoke_domain(d1).unwrap();
-    snap!("{Region([0x0, 0x1000 | _URWXS])}", capas(d0, engine));
+    snap!(
+        "{Region([0x0, 0x1000 | _URWXS | RAM.(ALL)])}",
+        capas(d0, engine)
+    );
     snap!("{[0x0, 0x1000 | 1 (1 - 1 - 1 - 1)]}", regions(d0, engine));
 }
 
@@ -784,7 +796,7 @@ fn carve_chop_chop() {
             .unwrap();
     }
     snap!("{[0x0, 0x5 | 1 (1 - 1 - 1 - 1)]}", regions(d0, engine));
-    snap!("{Region([0x0, 0x5 | PURWXS]), Region([0x0, 0x1 | _URWXS]), Region([0x1, 0x2 | _URWXS]), Region([0x2, 0x3 | _URWXS]), Region([0x3, 0x4 | _URWXS]), Region([0x4, 0x5 | _URWXS])}", capas(d0, engine));
+    snap!("{Region([0x0, 0x5 | PURWXS | RAM.(ALL)]), Region([0x0, 0x1 | _URWXS | RAM.(ALL)]), Region([0x1, 0x2 | _URWXS | RAM.(ALL)]), Region([0x2, 0x3 | _URWXS | RAM.(ALL)]), Region([0x3, 0x4 | _URWXS | RAM.(ALL)]), Region([0x4, 0x5 | _URWXS | RAM.(ALL)])}", capas(d0, engine));
 }
 
 #[test]
@@ -828,7 +840,7 @@ fn carve_recursive_chop() {
     }
     snap!("{[0x0, 0x5 | 1 (1 - 1 - 1 - 1)]}", regions(d0, engine));
     // TODO(Charly): that's not a lot of useful information really.
-    snap!("{Region([0x0, 0x5 | PURWXS]), Region([0x0, 0x4 | PURWXS]), Region([0x0, 0x3 | PURWXS]), Region([0x0, 0x2 | PURWXS]), Region([0x0, 0x1 | _URWXS])}", capas(d0, engine));
+    snap!("{Region([0x0, 0x5 | PURWXS | RAM.(ALL)]), Region([0x0, 0x4 | PURWXS | RAM.(ALL)]), Region([0x0, 0x3 | PURWXS | RAM.(ALL)]), Region([0x0, 0x2 | PURWXS | RAM.(ALL)]), Region([0x0, 0x1 | _URWXS | RAM.(ALL)])}", capas(d0, engine));
 }
 
 #[test]
@@ -874,7 +886,7 @@ fn carve_access_rights() {
         regions(d0, engine)
     );
     snap!(
-        "{Region([0x0, 0x5 | PURWXS]), Region([0x0, 0x1 | _URW__])}",
+        "{Region([0x0, 0x5 | PURWXS | RAM.(ALL)]), Region([0x0, 0x1 | _URW__ | RAM.(ALL)])}",
         capas(d0, engine)
     );
     // Try to cheat and get access to bigger region.
@@ -958,7 +970,7 @@ fn simple_alias() {
     );
     //TODO(charly): is the first one not confusing?
     snap!(
-        "{Region([0x0, 0x1000 | PURWXS]), Region([0x0, 0x500 | __RWXS])}",
+        "{Region([0x0, 0x1000 | PURWXS | RAM.(ALL)]), Region([0x0, 0x500 | __RWXS | RAM.(ALL)])}",
         capas(d0, engine)
     );
     // The alias does not change the regions so it should work.
@@ -967,7 +979,10 @@ fn simple_alias() {
     // Undo the alias and check the regions and capas.
     engine.revoke(d0, r1).unwrap();
     snap!("{[0x0, 0x1000 | 1 (1 - 1 - 1 - 1)]}", regions(d0, engine));
-    snap!("{Region([0x0, 0x1000 | _URWXS])}", capas(d0, engine));
+    snap!(
+        "{Region([0x0, 0x1000 | _URWXS | RAM.(ALL)])}",
+        capas(d0, engine)
+    );
 }
 
 #[test]
@@ -1023,7 +1038,7 @@ fn double_alias() {
             },
         )
         .unwrap();
-    snap!("{Region([0x0, 0x1000 | PURWXS]), Region([0x0, 0x500 | __RWXS]), Region([0x0, 0x500 | __RWXS])}", capas(d0, engine));
+    snap!("{Region([0x0, 0x1000 | PURWXS | RAM.(ALL)]), Region([0x0, 0x500 | __RWXS | RAM.(ALL)]), Region([0x0, 0x500 | __RWXS | RAM.(ALL)])}", capas(d0, engine));
     snap!(
         "{[0x0, 0x500 | 3 (3 - 3 - 3 - 3)] -> [0x500, 0x1000 | 1 (1 - 1 - 1 - 1)]}",
         regions(d0, engine)
@@ -1080,14 +1095,20 @@ fn alias_send() {
     //TODO(Charly): this is not gonna be useful for the attestation.
     //It still says confidential.
     snap!(
-        "{Region([0x0, 0x1000 | PURWXS]), Management(2 | _)}",
+        "{Region([0x0, 0x1000 | PURWXS | RAM.(ALL)]), Management(2 | _)}",
         capas(d0, engine)
     );
     snap!("{[0x0, 0x500 | 1 (1 - 1 - 1 - 1)]}", regions(d1, engine));
-    snap!("{Region([0x0, 0x500 | __RWXS])}", capas(d1, engine));
+    snap!(
+        "{Region([0x0, 0x500 | __RWXS | RAM.(ALL)])}",
+        capas(d1, engine)
+    );
 
     engine.revoke_domain(d1).unwrap();
-    snap!("{Region([0x0, 0x1000 | _URWXS])}", capas(d0, engine));
+    snap!(
+        "{Region([0x0, 0x1000 | _URWXS | RAM.(ALL)])}",
+        capas(d0, engine)
+    );
     snap!("{[0x0, 0x1000 | 1 (1 - 1 - 1 - 1)]}", regions(d0, engine));
 }
 
@@ -1131,7 +1152,7 @@ fn alias_chop_chop() {
             .unwrap();
     }
     snap!("{[0x0, 0x5 | 2 (2 - 2 - 2 - 2)]}", regions(d0, engine));
-    snap!("{Region([0x0, 0x5 | PURWXS]), Region([0x0, 0x1 | __RWXS]), Region([0x1, 0x2 | __RWXS]), Region([0x2, 0x3 | __RWXS]), Region([0x3, 0x4 | __RWXS]), Region([0x4, 0x5 | __RWXS])}", capas(d0, engine));
+    snap!("{Region([0x0, 0x5 | PURWXS | RAM.(ALL)]), Region([0x0, 0x1 | __RWXS | RAM.(ALL)]), Region([0x1, 0x2 | __RWXS | RAM.(ALL)]), Region([0x2, 0x3 | __RWXS | RAM.(ALL)]), Region([0x3, 0x4 | __RWXS | RAM.(ALL)]), Region([0x4, 0x5 | __RWXS | RAM.(ALL)])}", capas(d0, engine));
 }
 
 #[test]
@@ -1175,7 +1196,7 @@ fn alias_recursive_chop() {
     }
     snap!("{[0x0, 0x1 | 5 (5 - 5 - 5 - 5)] -> [0x1, 0x2 | 4 (4 - 4 - 4 - 4)] -> [0x2, 0x3 | 3 (3 - 3 - 3 - 3)] -> [0x3, 0x4 | 2 (2 - 2 - 2 - 2)] -> [0x4, 0x5 | 1 (1 - 1 - 1 - 1)]}", regions(d0, engine));
     // TODO(Charly): that's not a lot of useful information really.
-    snap!("{Region([0x0, 0x5 | PURWXS]), Region([0x0, 0x4 | P_RWXS]), Region([0x0, 0x3 | P_RWXS]), Region([0x0, 0x2 | P_RWXS]), Region([0x0, 0x1 | __RWXS])}", capas(d0, engine));
+    snap!("{Region([0x0, 0x5 | PURWXS | RAM.(ALL)]), Region([0x0, 0x4 | P_RWXS | RAM.(ALL)]), Region([0x0, 0x3 | P_RWXS | RAM.(ALL)]), Region([0x0, 0x2 | P_RWXS | RAM.(ALL)]), Region([0x0, 0x1 | __RWXS | RAM.(ALL)])}", capas(d0, engine));
 }
 
 #[test]
@@ -1221,7 +1242,7 @@ fn alias_access_rights() {
         regions(d0, engine)
     );
     snap!(
-        "{Region([0x0, 0x5 | PURWXS]), Region([0x0, 0x1 | __RW__])}",
+        "{Region([0x0, 0x5 | PURWXS | RAM.(ALL)]), Region([0x0, 0x1 | __RW__ | RAM.(ALL)])}",
         capas(d0, engine)
     );
     // Try to cheat and get access to bigger region.
@@ -1318,7 +1339,7 @@ fn counter_alias_carve_bug() {
     engine.send(d0, r2, d1_mgmt).unwrap();
 
     snap!(
-        "{Region([0x0, 0x5 | P_RWXS]), Region([0x0, 0x5 | __RWXS])}",
+        "{Region([0x0, 0x5 | P_RWXS | RAM.(ALL)]), Region([0x0, 0x5 | __RWXS | RAM.(ALL)])}",
         capas(d1, engine)
     );
     snap!("{[0x0, 0x5 | 1 (1 - 1 - 1 - 1)]}", regions(d1, engine));
@@ -1385,7 +1406,7 @@ fn alias_then_carve() {
 
     // Check the state is untouched.
     snap!(
-        "{Region([0x0, 0xa | PURWXS]), Region([0x0, 0x5 | __R___])}",
+        "{Region([0x0, 0xa | PURWXS | RAM.(ALL)]), Region([0x0, 0x5 | __R___ | RAM.(ALL)])}",
         capas(d0, engine)
     );
     snap!(
@@ -1438,7 +1459,7 @@ fn alias_then_carve() {
         )
         .unwrap();
     snap!(
-        "{Region([0x0, 0xa | PURWXS]), Region([0x0, 0x5 | P_R___]), Region([0x0, 0x5 | __R___])}",
+        "{Region([0x0, 0xa | PURWXS | RAM.(ALL)]), Region([0x0, 0x5 | P_R___ | RAM.(ALL)]), Region([0x0, 0x5 | __R___ | RAM.(ALL)])}",
         capas(d0, engine)
     );
     snap!(
@@ -1485,17 +1506,20 @@ fn alias_then_carve() {
     engine.send(d0, r2, d1_mgmt).unwrap();
 
     snap!(
-        "{Region([0x0, 0xa | PURWXS]), Region([0x0, 0x5 | P_R___]), Management(2 | _)}",
+        "{Region([0x0, 0xa | PURWXS | RAM.(ALL)]), Region([0x0, 0x5 | P_R___ | RAM.(ALL)]), Management(2 | _)}",
         capas(d0, engine)
     );
     snap!("{[0x0, 0xa | 1 (1 - 1 - 1 - 1)]}", regions(d0, engine));
-    snap!("{Region([0x0, 0x5 | __R___])}", capas(d1, engine));
+    snap!(
+        "{Region([0x0, 0x5 | __R___ | RAM.(ALL)])}",
+        capas(d1, engine)
+    );
     snap!("{[0x0, 0x5 | 1 (1 - 0 - 0 - 0)]}", regions(d1, engine));
 
     // We started with an alias so d0 should still have it.
     engine.send(d0, r1, d1_mgmt).unwrap();
     snap!(
-        "{Region([0x0, 0xa | PURWXS]), Management(2 | _)}",
+        "{Region([0x0, 0xa | PURWXS | RAM.(ALL)]), Management(2 | _)}",
         capas(d0, engine)
     );
     // All counters are at 1 because the carve was made from the alias and sent.
@@ -1503,7 +1527,7 @@ fn alias_then_carve() {
     // One region that's carved from and alias and the carved one.
     // TODO(Charly) veryyyyy confusing though.
     snap!(
-        "{Region([0x0, 0x5 | __R___]), Region([0x0, 0x5 | P_R___])}",
+        "{Region([0x0, 0x5 | __R___ | RAM.(ALL)]), Region([0x0, 0x5 | P_R___ | RAM.(ALL)])}",
         capas(d1, engine)
     );
     snap!("{[0x0, 0x5 | 1 (1 - 0 - 0 - 0)]}", regions(d1, engine));
@@ -1546,7 +1570,7 @@ fn cleanup() {
         )
         .unwrap();
     snap!(
-        "{Region([0x0, 0x1000 | PURWXS]), Region([0x200, 0x300 | _URWXS])}",
+        "{Region([0x0, 0x1000 | PURWXS | RAM.(ALL)]), Region([0x200, 0x300 | _URWXS | RAM.(ALL)])}",
         capas(d0, engine)
     );
 
@@ -1598,7 +1622,7 @@ fn vital_regions() {
         )
         .unwrap();
     snap!(
-        "{Region([0x0, 0x1000 | PURWXS]), Region([0x200, 0x300 | _URWXS])}",
+        "{Region([0x0, 0x1000 | PURWXS | RAM.(ALL)]), Region([0x200, 0x300 | _URWXS | RAM.(ALL)])}",
         capas(d0, engine)
     );
 
@@ -1607,16 +1631,16 @@ fn vital_regions() {
     let revok = engine.create_revoke_capa(d0, r1).unwrap();
     engine.send(d0, r1, d1).unwrap();
     let d1_capa = engine.get_domain_capa(d0, d1).unwrap();
-    snap!("{Region([0x200, 0x300 | _URWXS])}", capas(d1_capa, engine));
+    snap!("{Region([0x200, 0x300 | _URWXS | RAM.(ALL)])}", capas(d1_capa, engine));
 
     snap!(
-        "{Region([0x0, 0x1000 | PURWXS]), Management(2 | _), RegionRevoke([0x200, 0x300 | CRWXS])}",
+        "{Region([0x0, 0x1000 | PURWXS | RAM.(ALL)]), Management(2 | _), RegionRevoke([0x200, 0x300 | CRWXS | RAM.(ALL)])}",
         capas(d0, engine)
     );
     engine.revoke(d0, revok).unwrap();
     let d1_capa = engine.get_domain_capa(d0, d1).unwrap();
     snap!("{}", capas(d1_capa, engine));
-    snap!("{Region([0x0, 0x1000 | _URWXS])}", capas(d0, engine));
+    snap!("{Region([0x0, 0x1000 | _URWXS | RAM.(ALL)])}", capas(d0, engine));
 }*/
 
 /// Test if the capa-engine frees resources appropriately.
@@ -1787,13 +1811,13 @@ fn enclave_steal_via_alias() {
         .unwrap();
 
     snap!(
-        "{Region([0x0, 0x5 | PURWXS]), Region([0x1, 0x2 | __RWXS])}",
+        "{Region([0x0, 0x5 | PURWXS | RAM.(ALL)]), Region([0x1, 0x2 | __RWXS | RAM.(ALL)])}",
         capas(d1, engine)
     );
     snap!("{[0x0, 0x1 | 1 (1 - 1 - 1 - 1)] -> [0x1, 0x2 | 2 (2 - 2 - 2 - 2)] -> [0x2, 0x5 | 1 (1 - 1 - 1 - 1)]}", regions(d1, engine));
     // Check the parent only has the second part of the address space.
     snap!(
-        "{Region([0x0, 0xa | PURWXS]), Management(2 | _), RegionRevoke([0x0, 0x5 | CRWXS])}",
+        "{Region([0x0, 0xa | PURWXS | RAM.(ALL)]), Management(2 | _), RegionRevoke([0x0, 0x5 | CRWXS | RAM.(ALL)])}",
         capas(d0, engine)
     );
     snap!("{[0x5, 0xa | 1 (1 - 1 - 1 - 1)]}", regions(d0, engine));
@@ -1807,7 +1831,7 @@ fn enclave_steal_via_alias() {
     snap!("{}", regions(d1, engine));
     // The parent should have access to the entire address space.
     snap!(
-        "{Region([0x0, 0xa | _URWXS]), Management(2 | _)}",
+        "{Region([0x0, 0xa | _URWXS | RAM.(ALL)]), Management(2 | _)}",
         capas(d0, engine)
     );
     snap!("{[0x0, 0xa | 1 (1 - 1 - 1 - 1)]}", regions(d0, engine));
@@ -1888,13 +1912,13 @@ fn enclave_steal_via_carve() {
         .unwrap();
 
     snap!(
-        "{Region([0x0, 0x5 | PURWXS]), Region([0x1, 0x2 | _UR___])}",
+        "{Region([0x0, 0x5 | PURWXS | RAM.(ALL)]), Region([0x1, 0x2 | _UR___ | RAM.(ALL)])}",
         capas(d1, engine)
     );
     snap!("{[0x0, 0x1 | 1 (1 - 1 - 1 - 1)] -> [0x1, 0x2 | 1 (1 - 0 - 0 - 0)] -> [0x2, 0x5 | 1 (1 - 1 - 1 - 1)]}", regions(d1, engine));
     // Check the parent only has the second part of the address space.
     snap!(
-        "{Region([0x0, 0xa | PURWXS]), Management(2 | _), RegionRevoke([0x0, 0x5 | CRWXS])}",
+        "{Region([0x0, 0xa | PURWXS | RAM.(ALL)]), Management(2 | _), RegionRevoke([0x0, 0x5 | CRWXS | RAM.(ALL)])}",
         capas(d0, engine)
     );
     snap!("{[0x5, 0xa | 1 (1 - 1 - 1 - 1)]}", regions(d0, engine));
@@ -1908,7 +1932,7 @@ fn enclave_steal_via_carve() {
     snap!("{}", regions(d1, engine));
     // The parent should have access to the entire address space.
     snap!(
-        "{Region([0x0, 0xa | _URWXS]), Management(2 | _)}",
+        "{Region([0x0, 0xa | _URWXS | RAM.(ALL)]), Management(2 | _)}",
         capas(d0, engine)
     );
     snap!("{[0x0, 0xa | 1 (1 - 1 - 1 - 1)]}", regions(d0, engine));
@@ -1999,7 +2023,7 @@ fn enclave_enclave_steal() {
     engine.send(d1, e_e_r1, d2_mgmt).unwrap();
 
     snap!(
-        "{Region([0x0, 0x5 | PURWXS]), Management(3 | _)}",
+        "{Region([0x0, 0x5 | PURWXS | RAM.(ALL)]), Management(3 | _)}",
         capas(d1, engine)
     );
     snap!(
@@ -2008,13 +2032,16 @@ fn enclave_enclave_steal() {
     );
     // Check the parent only has the second part of the address space.
     snap!(
-        "{Region([0x0, 0xa | PURWXS]), Management(2 | _), RegionRevoke([0x0, 0x5 | CRWXS])}",
+        "{Region([0x0, 0xa | PURWXS | RAM.(ALL)]), Management(2 | _), RegionRevoke([0x0, 0x5 | CRWXS | RAM.(ALL)])}",
         capas(d0, engine)
     );
     snap!("{[0x5, 0xa | 1 (1 - 1 - 1 - 1)]}", regions(d0, engine));
 
     // Check dom2
-    snap!("{Region([0x1, 0x2 | _UR___])}", capas(d2, engine));
+    snap!(
+        "{Region([0x1, 0x2 | _UR___ | RAM.(ALL)])}",
+        capas(d2, engine)
+    );
     snap!("{[0x1, 0x2 | 1 (1 - 0 - 0 - 0)]}", regions(d2, engine));
 
     // Now revoke with the handle we have.
@@ -2029,7 +2056,7 @@ fn enclave_enclave_steal() {
     snap!("{}", regions(d2, engine));
     // The parent should have access to the entire address space.
     snap!(
-        "{Region([0x0, 0xa | _URWXS]), Management(2 | _)}",
+        "{Region([0x0, 0xa | _URWXS | RAM.(ALL)]), Management(2 | _)}",
         capas(d0, engine)
     );
     snap!("{[0x0, 0xa | 1 (1 - 1 - 1 - 1)]}", regions(d0, engine));
@@ -2148,7 +2175,7 @@ fn new_capa() {
         )
         .unwrap();
     snap!(
-        "{Management(2 | _), Management(3 | _), Region([0x0, 0x100 | _URWXS])}",
+        "{Management(2 | _), Management(3 | _), Region([0x0, 0x100 | _URWXS | RAM.(ALL)])}",
         capas(d0, engine)
     );
     snap!("{[0x0, 0x100 | 1 (1 - 1 - 1 - 1)]}", regions(d0, engine));
@@ -2158,7 +2185,7 @@ fn new_capa() {
         .alias_region(d0, r0, dummy_access(0x10, 0x20))
         .unwrap();
     snap!(
-        "{Management(2 | _), Management(3 | _), Region([0x0, 0x100 | PURWXS]), Region([0x10, 0x20 | __RWXS])}",
+        "{Management(2 | _), Management(3 | _), Region([0x0, 0x100 | PURWXS | RAM.(ALL)]), Region([0x10, 0x20 | __RWXS | RAM.(ALL)])}",
         capas(d0, engine)
     );
     snap!("{[0x0, 0x10 | 1 (1 - 1 - 1 - 1)] -> [0x10, 0x20 | 2 (2 - 2 - 2 - 2)] -> [0x20, 0x100 | 1 (1 - 1 - 1 - 1)]}", regions(d0, engine));
@@ -2173,7 +2200,7 @@ fn new_capa() {
         .carve_region(d0, r0, dummy_access(0x60, 0x80))
         .unwrap();
     snap!(
-        "{Management(2 | _), Management(3 | _), Region([0x0, 0x100 | PURWXS]), Region([0x10, 0x20 | __RWXS]), Region([0x30, 0x50 | PURWXS]), Region([0x40, 0x50 | __RWXS]), Region([0x60, 0x80 | _URWXS])}",
+        "{Management(2 | _), Management(3 | _), Region([0x0, 0x100 | PURWXS | RAM.(ALL)]), Region([0x10, 0x20 | __RWXS | RAM.(ALL)]), Region([0x30, 0x50 | PURWXS | RAM.(ALL)]), Region([0x40, 0x50 | __RWXS | RAM.(ALL)]), Region([0x60, 0x80 | _URWXS | RAM.(ALL)])}",
         capas(d0, engine)
     );
     snap!("{[0x0, 0x10 | 1 (1 - 1 - 1 - 1)] -> [0x10, 0x20 | 2 (2 - 2 - 2 - 2)] -> [0x20, 0x40 | 1 (1 - 1 - 1 - 1)] -> [0x40, 0x50 | 2 (2 - 2 - 2 - 2)] -> [0x50, 0x100 | 1 (1 - 1 - 1 - 1)]}", regions(d0, engine));
@@ -2181,25 +2208,28 @@ fn new_capa() {
     // Create a revok capa
     let revoke_r1_capa = engine.create_revoke_capa(d0, r1).unwrap();
     snap!(
-        "{Management(2 | _), Management(3 | _), Region([0x0, 0x100 | PURWXS]), Region([0x10, 0x20 | __RWXS]), Region([0x30, 0x50 | PURWXS]), Region([0x40, 0x50 | __RWXS]), Region([0x60, 0x80 | _URWXS]), RegionRevoke([0x10, 0x20 | _RWXS])}",
+        "{Management(2 | _), Management(3 | _), Region([0x0, 0x100 | PURWXS | RAM.(ALL)]), Region([0x10, 0x20 | __RWXS | RAM.(ALL)]), Region([0x30, 0x50 | PURWXS | RAM.(ALL)]), Region([0x40, 0x50 | __RWXS | RAM.(ALL)]), Region([0x60, 0x80 | _URWXS | RAM.(ALL)]), RegionRevoke([0x10, 0x20 | _RWXS | RAM.(ALL)])}",
         capas(d0, engine)
     );
 
     // Send some of the regions
     engine.send(d0, r1, d1).unwrap();
     snap!(
-        "{Management(2 | _), Management(3 | _), Region([0x0, 0x100 | PURWXS]), Region([0x30, 0x50 | PURWXS]), Region([0x40, 0x50 | __RWXS]), Region([0x60, 0x80 | _URWXS]), RegionRevoke([0x10, 0x20 | _RWXS])}",
+        "{Management(2 | _), Management(3 | _), Region([0x0, 0x100 | PURWXS | RAM.(ALL)]), Region([0x30, 0x50 | PURWXS | RAM.(ALL)]), Region([0x40, 0x50 | __RWXS | RAM.(ALL)]), Region([0x60, 0x80 | _URWXS | RAM.(ALL)]), RegionRevoke([0x10, 0x20 | _RWXS | RAM.(ALL)])}",
         capas(d0, engine)
     );
     snap!("{[0x0, 0x40 | 1 (1 - 1 - 1 - 1)] -> [0x40, 0x50 | 2 (2 - 2 - 2 - 2)] -> [0x50, 0x100 | 1 (1 - 1 - 1 - 1)]}", regions(d0, engine));
-    snap!("{Region([0x10, 0x20 | __RWXS])}", capas(d1_capa, engine));
+    snap!(
+        "{Region([0x10, 0x20 | __RWXS | RAM.(ALL)])}",
+        capas(d1_capa, engine)
+    );
     snap!(
         "{[0x10, 0x20 | 1 (1 - 1 - 1 - 1)]}",
         regions(d1_capa, engine)
     );
     engine.send(d0, r2, d1).unwrap();
     snap!(
-        "{Management(2 | _), Management(3 | _), Region([0x0, 0x100 | PURWXS]), Region([0x40, 0x50 | __RWXS]), Region([0x60, 0x80 | _URWXS]), RegionRevoke([0x10, 0x20 | _RWXS])}",
+        "{Management(2 | _), Management(3 | _), Region([0x0, 0x100 | PURWXS | RAM.(ALL)]), Region([0x40, 0x50 | __RWXS | RAM.(ALL)]), Region([0x60, 0x80 | _URWXS | RAM.(ALL)]), RegionRevoke([0x10, 0x20 | _RWXS | RAM.(ALL)])}",
         capas(d0, engine)
     );
     snap!(
@@ -2207,7 +2237,7 @@ fn new_capa() {
         regions(d0, engine)
     );
     snap!(
-        "{Region([0x10, 0x20 | __RWXS]), Region([0x30, 0x50 | PURWXS])}",
+        "{Region([0x10, 0x20 | __RWXS | RAM.(ALL)]), Region([0x30, 0x50 | PURWXS | RAM.(ALL)])}",
         capas(d1_capa, engine)
     );
     snap!(
@@ -2216,21 +2246,24 @@ fn new_capa() {
     );
     engine.send(d0, r3, d2).unwrap();
     snap!(
-        "{Management(2 | _), Management(3 | _), Region([0x0, 0x100 | PURWXS]), Region([0x60, 0x80 | _URWXS]), RegionRevoke([0x10, 0x20 | _RWXS])}",
+        "{Management(2 | _), Management(3 | _), Region([0x0, 0x100 | PURWXS | RAM.(ALL)]), Region([0x60, 0x80 | _URWXS | RAM.(ALL)]), RegionRevoke([0x10, 0x20 | _RWXS | RAM.(ALL)])}",
         capas(d0, engine)
     );
     snap!(
         "{[0x0, 0x30 | 1 (1 - 1 - 1 - 1)] -> [0x50, 0x100 | 1 (1 - 1 - 1 - 1)]}",
         regions(d0, engine)
     );
-    snap!("{Region([0x40, 0x50 | __RWXS])}", capas(d2_capa, engine));
+    snap!(
+        "{Region([0x40, 0x50 | __RWXS | RAM.(ALL)])}",
+        capas(d2_capa, engine)
+    );
     snap!(
         "{[0x40, 0x50 | 1 (1 - 1 - 1 - 1)]}",
         regions(d2_capa, engine)
     );
     engine.send(d0, r4, d2).unwrap();
     snap!(
-        "{Management(2 | _), Management(3 | _), Region([0x0, 0x100 | PURWXS]), RegionRevoke([0x10, 0x20 | _RWXS])}",
+        "{Management(2 | _), Management(3 | _), Region([0x0, 0x100 | PURWXS | RAM.(ALL)]), RegionRevoke([0x10, 0x20 | _RWXS | RAM.(ALL)])}",
         capas(d0, engine)
     );
     snap!(
@@ -2238,7 +2271,7 @@ fn new_capa() {
         regions(d0, engine)
     );
     snap!(
-        "{Region([0x40, 0x50 | __RWXS]), Region([0x60, 0x80 | _URWXS])}",
+        "{Region([0x40, 0x50 | __RWXS | RAM.(ALL)]), Region([0x60, 0x80 | _URWXS | RAM.(ALL)])}",
         capas(d2_capa, engine)
     );
     snap!(
@@ -2249,10 +2282,13 @@ fn new_capa() {
     // Revoke some regions
     engine.revoke(d0, revoke_r1_capa).unwrap();
     snap!(
-        "{Management(2 | _), Management(3 | _), Region([0x0, 0x100 | PURWXS])}",
+        "{Management(2 | _), Management(3 | _), Region([0x0, 0x100 | PURWXS | RAM.(ALL)])}",
         capas(d0, engine)
     );
-    snap!("{Region([0x30, 0x50 | PURWXS])}", capas(d1_capa, engine));
+    snap!(
+        "{Region([0x30, 0x50 | PURWXS | RAM.(ALL)])}",
+        capas(d1_capa, engine)
+    );
     snap!(
         "{[0x30, 0x50 | 1 (1 - 1 - 1 - 1)]}",
         regions(d1_capa, engine)
@@ -2264,7 +2300,10 @@ fn new_capa() {
     engine.revoke(d1_capa, LocalCapa::new(1)).unwrap();
     snap!("{}", capas(d1_capa, engine));
     snap!("{}", regions(d1_capa, engine));
-    snap!("{Region([0x60, 0x80 | _URWXS])}", capas(d2_capa, engine));
+    snap!(
+        "{Region([0x60, 0x80 | _URWXS | RAM.(ALL)])}",
+        capas(d2_capa, engine)
+    );
     snap!(
         "{[0x60, 0x80 | 1 (1 - 1 - 1 - 1)]}",
         regions(d2_capa, engine)
