@@ -267,15 +267,18 @@ impl<const K: usize> PartitionRefCount<K> {
     }
 
     /// Decreases the refcount for all partitions that are set in `leaving`
-    /// If this changes the refcount of any currently nonzero value to zero
     /// Returns the number of partitions whoose refcount dropped to zero by this update
     fn decrease_refcount<const N: usize>(&mut self, leaving: &MyBitmap<N, K>) -> usize {
         let mut dropped_to_zero_count = 0;
         for idx in 0..leaving.get_payload_bits_len() {
             if leaving.get(idx) {
-                self.data[idx].checked_sub(1).unwrap();
-                if self.data[idx] == 0 {
-                    dropped_to_zero_count += 1;
+                match self.data[idx] {
+                    0 => panic!("color refcount underflow"),
+                    1 => {
+                        self.data[idx] = 0;
+                        dropped_to_zero_count += 1
+                    }
+                    _ => self.data[idx] -= 1,
                 }
             }
         }
@@ -878,8 +881,8 @@ impl RegionTracker {
             return Err(CapaError::CapaOperationOnDifferentResourceKinds);
         }
 
-        match (region.resource_kind, resource_kind) {
-            (RegionResourceKind::RAM(mut refcount), ResourceKind::RAM(incoming_partitions)) => {
+        match (&mut region.resource_kind, resource_kind) {
+            (RegionResourceKind::RAM(refcount), ResourceKind::RAM(incoming_partitions)) => {
                 if refcount.increase_count(&incoming_partitions) > 0 {
                     change = PermissionChange::Some
                 }
@@ -943,8 +946,8 @@ impl RegionTracker {
             return Err(CapaError::CapaOperationOnDifferentResourceKinds);
         }
 
-        match (region.resource_kind, resource_kind) {
-            (RegionResourceKind::RAM(mut refcount), ResourceKind::RAM(leaving_partitions)) => {
+        match (&mut region.resource_kind, resource_kind) {
+            (RegionResourceKind::RAM(refcount), ResourceKind::RAM(leaving_partitions)) => {
                 if refcount.decrease_refcount(&leaving_partitions) > 0 {
                     change = PermissionChange::Some;
                 }
