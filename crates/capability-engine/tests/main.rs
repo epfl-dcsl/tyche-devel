@@ -5,6 +5,8 @@ use capa_engine::{
     permission, AccessRights, Buffer, CapaEngine, CapaError, Domain, Handle, LocalCapa, MemOps,
     NextCapaToken, RegionIterator, ResourceKind, MEMOPS_ALL,
 };
+#[cfg(test)]
+use pretty_assertions::assert_eq;
 
 /// Snapshot testing
 ///

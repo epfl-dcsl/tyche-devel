@@ -10,6 +10,8 @@ log = { workspace = true }
 attestation = { path = "../../crates/attestation/" }
 utils = { version = "0.1.0", path = "../utils" }
 
+[dev-dependencies]
+pretty_assertions = "1.4.0"
 
 [dev-dependencies.simple_logger]
 default-features = false
