@@ -1,20 +1,11 @@
+use core::iter::Peekable;
+
 use mmu::ioptmapper::PAGE_SIZE;
 use mmu::memory_coloring::MemoryColoring;
 use utils::GuestPhysAddr;
 
-use super::Segment;
-use crate::gen_arena::ArenaIterator;
-use crate::remapper::EMPTY_SEGMENT;
-use crate::{GenArena, Handle, MemoryPermission, PermissionIterator, ResourceKind};
-
-/// Unified representation of remappings
-/*#[derive(Debug, Clone, Copy, Default)]
-pub struct RemapDirective {
-    pub hpa: usize,
-    pub gpa: usize,
-    pub size: usize,
-    pub repeat: usize,
-}*/
+use super::{RemapperSegmentIterator, Segment};
+use crate::{MemoryPermission, PermissionIterator, ResourceKind};
 
 #[derive(Clone)]
 pub struct MergedRemapIter<
@@ -23,9 +14,7 @@ pub struct MergedRemapIter<
     const COMPACT: usize,
     T: MemoryColoring + Clone + Default,
 > {
-    simple: &'a GenArena<Segment, SIMPLE>,
-    simple_iter: ArenaIterator<'a, Segment, SIMPLE>,
-    simple_next_buf: Option<Handle<Segment>>,
+    simple_remaps: Peekable<RemapperSegmentIterator<'a, SIMPLE, COMPACT>>,
     compactified_iters: [CompatifiedMappingIter<'a, T>; COMPACT],
     //this buffers the values we read from next from the individual iterators
     compactified_next: [Option<Segment>; COMPACT],
@@ -36,13 +25,10 @@ impl<'a, const SIMPLE: usize, const COMPACT: usize, T: MemoryColoring + Clone + 
     MergedRemapIter<'a, SIMPLE, COMPACT, T>
 {
     pub fn new(
-        simple_arena: &'a GenArena<Segment, SIMPLE>,
+        simple_remaps: Peekable<RemapperSegmentIterator<'a, SIMPLE, COMPACT>>,
         mut compact_remaps: [CompatifiedMappingIter<'a, T>; COMPACT],
         compactified_remaps_len: usize,
     ) -> Self {
-        let mut simple_iter = simple_arena.into_iter();
-        let simple_next_buf = simple_iter.next();
-
         let mut compactified_next = [None; COMPACT];
         for idx in 0..compactified_remaps_len {
             let iter = &mut compact_remaps[idx];
@@ -50,9 +36,7 @@ impl<'a, const SIMPLE: usize, const COMPACT: usize, T: MemoryColoring + Clone + 
         }
 
         Self {
-            simple: &simple_arena,
-            simple_iter,
-            simple_next_buf,
+            simple_remaps,
             compactified_iters: compact_remaps,
             compactified_next,
             compactified_len: compactified_remaps_len,
@@ -86,7 +70,7 @@ impl<'a, const SIMPLE: usize, const COMPACT: usize, T: MemoryColoring + Clone + 
         }
 
         //fuse simple next with compactified next, returning the one with the smaller hpa
-        match (self.simple_next_buf, next_compactified) {
+        match (self.simple_remaps.peek(), next_compactified) {
             (None, None) => None,
             //only next_compactified
             (None, Some((idx, v))) => {
@@ -95,18 +79,9 @@ impl<'a, const SIMPLE: usize, const COMPACT: usize, T: MemoryColoring + Clone + 
                 Some(v)
             }
             //only simple_next
-            (Some(handle), None) => {
-                //advance to next if there is any
-                /*self.simple.self.simple_next = if self.simple_idx < self.simple_len {
-                    let v = self.simple[self.simple_idx];
-                    self.simple_idx += 1;
-                    Some(v)
-                } else {
-                    None
-                };*/
-                self.simple_next_buf = self.simple_iter.next();
-                //return current
-                let data = self.simple.get(handle).unwrap();
+            (Some(_), None) => {
+                //unwrap ok,because by construction we only get here if the preceedign .peek returned Some
+                let data = self.simple_remaps.next().unwrap();
                 Some(Segment {
                     hpa: data.hpa,
                     gpa: data.gpa,
@@ -115,18 +90,12 @@ impl<'a, const SIMPLE: usize, const COMPACT: usize, T: MemoryColoring + Clone + 
                     next: None,
                 })
             }
-            (Some(simple_handle), Some((compactified_idx, compactified))) => {
-                let simple = self.simple.get(simple_handle).unwrap();
-                //TODO: advance to next entry
+            (Some(_), Some((compactified_idx, compactified))) => {
+                //by construction, entry will be Some
+                let simple = self.simple_remaps.peek().copied().unwrap();
                 if simple.hpa > compactified.hpa {
-                    /*self.simple_next = if self.simple_idx < self.simple_len {
-                        let v = self.simple[self.simple_idx];
-                        self.simple_idx += 1;
-                        Some(v)
-                    } else {
-                        None
-                    };*/
-                    self.simple_next_buf = self.simple_iter.next();
+                    //advance iter
+                    let _ = self.simple_remaps.next();
                     Some(Segment {
                         hpa: simple.hpa,
                         gpa: simple.gpa,
