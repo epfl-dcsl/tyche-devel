@@ -197,8 +197,18 @@ impl<const N: usize, const K: usize> MyBitmap<N, K> {
 
     /// Return true if all bits are set to zero
     pub fn all_bits_unset(&self) -> bool {
-        for v in self.data {
-            if v != 0 {
+        for idx in 0..self.get_payload_bits_len() {
+            if self.get(idx) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /// Return true if all bits are set to 1
+    pub fn all_bits_set(&self) -> bool {
+        for idx in 0..self.get_payload_bits_len() {
+            if !self.get(idx) {
                 return false;
             }
         }

@@ -251,6 +251,16 @@ impl<const K: usize> PartitionRefCount<K> {
         Self { data: [0_usize; K] }
     }
 
+    /// Get refcount for a particular color/partition
+    fn get_refcount(&self, color_id: usize) -> usize {
+        self.data[color_id]
+    }
+
+    /// Get number of partitions
+    fn get_partition_count(&self) -> usize {
+        self.data.len()
+    }
+
     /// Increases the refcount for all partitions for which `incoming` contains a 1
     /// Returns the number of partitions whoose refcount increased from 0 to 1 by this update
     fn increase_count<const N: usize>(&mut self, incoming: &MyBitmap<N, K>) -> usize {
@@ -1377,7 +1387,10 @@ mod tests {
                 &mut pool,
             )
             .unwrap();
-        snap("{[0x300, 0x400 | 1 (1 - 1 - 1 - 1)]}", &tracker.iter(&pool));
+        snap(
+            "{[0x300, 0x400 | 1 (1 - 1 - 1 - 1 - RAM.(ALL 1))]}",
+            &tracker.iter(&pool),
+        );
         tracker
             .add_region(
                 0x100,
@@ -1388,7 +1401,7 @@ mod tests {
             )
             .unwrap();
         snap(
-            "{[0x100, 0x200 | 1 (1 - 1 - 1 - 1)] -> [0x300, 0x400 | 1 (1 - 1 - 1 - 1)]}",
+            "{[0x100, 0x200 | 1 (1 - 1 - 1 - 1 - RAM.(ALL 1))] -> [0x300, 0x400 | 1 (1 - 1 - 1 - 1 - RAM.(ALL 1))]}",
             &tracker.iter(&pool),
         );
 
@@ -1403,7 +1416,10 @@ mod tests {
                 &mut pool,
             )
             .unwrap();
-        snap("{[0x200, 0x400 | 1 (1 - 1 - 1 - 1)]}", &tracker.iter(&pool));
+        snap(
+            "{[0x200, 0x400 | 1 (1 - 1 - 1 - 1 - RAM.(ALL 1))]}",
+            &tracker.iter(&pool),
+        );
         tracker
             .add_region(
                 0x100,
@@ -1414,7 +1430,7 @@ mod tests {
             )
             .unwrap();
         snap(
-            "{[0x100, 0x200 | 1 (1 - 1 - 1 - 1)] -> [0x200, 0x300 | 2 (2 - 2 - 2 - 2)] -> [0x300, 0x400 | 1 (1 - 1 - 1 - 1)]}",
+            "{[0x100, 0x200 | 1 (1 - 1 - 1 - 1 - RAM.(ALL 1))] -> [0x200, 0x300 | 2 (2 - 2 - 2 - 2 - RAM.(ALL 2))] -> [0x300, 0x400 | 1 (1 - 1 - 1 - 1 - RAM.(ALL 1))]}",
             &tracker.iter(&pool),
         );
 
@@ -1429,7 +1445,10 @@ mod tests {
                 &mut pool,
             )
             .unwrap();
-        snap("{[0x100, 0x400 | 1 (1 - 1 - 1 - 1)]}", &tracker.iter(&pool));
+        snap(
+            "{[0x100, 0x400 | 1 (1 - 1 - 1 - 1 - RAM.(ALL 1))]}",
+            &tracker.iter(&pool),
+        );
         tracker
             .add_region(
                 0x200,
@@ -1440,7 +1459,7 @@ mod tests {
             )
             .unwrap();
         snap(
-            "{[0x100, 0x200 | 1 (1 - 1 - 1 - 1)] -> [0x200, 0x300 | 2 (2 - 2 - 2 - 2)] -> [0x300, 0x400 | 1 (1 - 1 - 1 - 1)]}",
+            "{[0x100, 0x200 | 1 (1 - 1 - 1 - 1 - RAM.(ALL 1))] -> [0x200, 0x300 | 2 (2 - 2 - 2 - 2 - RAM.(ALL 2))] -> [0x300, 0x400 | 1 (1 - 1 - 1 - 1 - RAM.(ALL 1))]}",
             &tracker.iter(&pool),
         );
 
@@ -1455,7 +1474,10 @@ mod tests {
                 &mut pool,
             )
             .unwrap();
-        snap("{[0x100, 0x400 | 1 (1 - 1 - 1 - 1)]}", &tracker.iter(&pool));
+        snap(
+            "{[0x100, 0x400 | 1 (1 - 1 - 1 - 1 - RAM.(ALL 1))]}",
+            &tracker.iter(&pool),
+        );
         tracker
             .add_region(
                 0x500,
@@ -1466,7 +1488,7 @@ mod tests {
             )
             .unwrap();
         snap(
-            "{[0x100, 0x400 | 1 (1 - 1 - 1 - 1)] -> [0x500, 0x1000 | 1 (1 - 1 - 1 - 1)]}",
+            "{[0x100, 0x400 | 1 (1 - 1 - 1 - 1 - RAM.(ALL 1))] -> [0x500, 0x1000 | 1 (1 - 1 - 1 - 1 - RAM.(ALL 1))]}",
             &tracker.iter(&pool),
         );
         tracker
@@ -1478,7 +1500,7 @@ mod tests {
                 &mut pool,
             )
             .unwrap();
-        snap("{[0x100, 0x200 | 1 (1 - 1 - 1 - 1)] -> [0x200, 0x400 | 2 (2 - 2 - 2 - 2)] -> [0x400, 0x500 | 1 (1 - 1 - 1 - 1)] -> [0x500, 0x600 | 2 (2 - 2 - 2 - 2)] -> [0x600, 0x1000 | 1 (1 - 1 - 1 - 1)]}", &tracker.iter(&pool));
+        snap("{[0x100, 0x200 | 1 (1 - 1 - 1 - 1 - RAM.(ALL 1))] -> [0x200, 0x400 | 2 (2 - 2 - 2 - 2 - RAM.(ALL 2))] -> [0x400, 0x500 | 1 (1 - 1 - 1 - 1 - RAM.(ALL 1))] -> [0x500, 0x600 | 2 (2 - 2 - 2 - 2 - RAM.(ALL 2))] -> [0x600, 0x1000 | 1 (1 - 1 - 1 - 1 - RAM.(ALL 1))]}", &tracker.iter(&pool));
 
         // Region is overlapping two adjacent regions
         let mut tracker = RegionTracker::new();
@@ -1491,7 +1513,10 @@ mod tests {
                 &mut pool,
             )
             .unwrap();
-        snap("{[0x200, 0x300 | 1 (1 - 1 - 1 - 1)]}", &tracker.iter(&pool));
+        snap(
+            "{[0x200, 0x300 | 1 (1 - 1 - 1 - 1 - RAM.(ALL 1))]}",
+            &tracker.iter(&pool),
+        );
         tracker
             .add_region(
                 0x300,
@@ -1501,7 +1526,10 @@ mod tests {
                 &mut pool,
             )
             .unwrap();
-        snap("{[0x200, 0x400 | 1 (1 - 1 - 1 - 1)]}", &tracker.iter(&pool));
+        snap(
+            "{[0x200, 0x400 | 1 (1 - 1 - 1 - 1 - RAM.(ALL 1))]}",
+            &tracker.iter(&pool),
+        );
         tracker
             .add_region(
                 0x100,
@@ -1512,7 +1540,7 @@ mod tests {
             )
             .unwrap();
         snap(
-            "{[0x100, 0x200 | 1 (1 - 1 - 1 - 1)] -> [0x200, 0x400 | 2 (2 - 2 - 2 - 2)] -> [0x400, 0x500 | 1 (1 - 1 - 1 - 1)]}",
+            "{[0x100, 0x200 | 1 (1 - 1 - 1 - 1 - RAM.(ALL 1))] -> [0x200, 0x400 | 2 (2 - 2 - 2 - 2 - RAM.(ALL 2))] -> [0x400, 0x500 | 1 (1 - 1 - 1 - 1 - RAM.(ALL 1))]}",
             &tracker.iter(&pool),
         );
 
@@ -1527,7 +1555,10 @@ mod tests {
                 &mut pool,
             )
             .unwrap();
-        snap("{[0x100, 0x200 | 1 (1 - 1 - 1 - 1)]}", &tracker.iter(&pool));
+        snap(
+            "{[0x100, 0x200 | 1 (1 - 1 - 1 - 1 - RAM.(ALL 1))]}",
+            &tracker.iter(&pool),
+        );
         tracker
             .add_region(
                 0x100,
@@ -1537,7 +1568,10 @@ mod tests {
                 &mut pool,
             )
             .unwrap();
-        snap("{[0x100, 0x200 | 2 (2 - 2 - 2 - 2)]}", &tracker.iter(&pool));
+        snap(
+            "{[0x100, 0x200 | 2 (2 - 2 - 2 - 2 - RAM.(ALL 2))]}",
+            &tracker.iter(&pool),
+        );
 
         // Regions have the same end
         let mut tracker = RegionTracker::new();
@@ -1550,7 +1584,10 @@ mod tests {
                 &mut pool,
             )
             .unwrap();
-        snap("{[0x200, 0x300 | 1 (1 - 1 - 1 - 1)]}", &tracker.iter(&pool));
+        snap(
+            "{[0x200, 0x300 | 1 (1 - 1 - 1 - 1 - RAM.(ALL 1))]}",
+            &tracker.iter(&pool),
+        );
         tracker
             .add_region(
                 0x100,
@@ -1561,7 +1598,7 @@ mod tests {
             )
             .unwrap();
         snap(
-            "{[0x100, 0x200 | 1 (1 - 1 - 1 - 1)] -> [0x200, 0x300 | 2 (2 - 2 - 2 - 2)]}",
+            "{[0x100, 0x200 | 1 (1 - 1 - 1 - 1 - RAM.(ALL 1))] -> [0x200, 0x300 | 2 (2 - 2 - 2 - 2 - RAM.(ALL 2))]}",
             &tracker.iter(&pool),
         );
     }
@@ -1581,7 +1618,7 @@ mod tests {
                 &mut pool,
             )
             .unwrap();
-        snap("{[0x300, 0x400 | 1 (1 - 1 - 1 - 1)]}", &tracker.iter(&pool));
+        snap("{[0x300, 0x400 | 1 (1 - 1 - 1 - 1 - RAM.(ALL 1))]}", &tracker.iter(&pool));
         tracker
             .add_region(
                 0x300,
@@ -1592,7 +1629,7 @@ mod tests {
             )
             .unwrap();
         snap(
-            "{[0x300, 0x400 | 1 (1 - 1 - 1 - 1)] -> [0x300, 0x400 | 1 (1 - 1 - 1 - 1)]}",
+            "{[0x300, 0x400 | 1 (1 - 1 - 1 - 1 - RAM.(ALL 1))] -> [0x300, 0x400 | 1 (1 - 1 - 1 - 1 - RAM.(ALL 1))]}",
             &tracker.iter(&pool),
         );
     }*/
@@ -1628,7 +1665,7 @@ mod tests {
                 &mut pool,
             )
             .unwrap();
-        snap("{[0x100, 0x200 | 1 (1 - 1 - 1 - 1)] -> [0x200, 0x300 | 2 (2 - 2 - 2 - 2)] -> [0x300, 0x400 | 1 (1 - 1 - 1 - 1)] -> [0x600, 0x1000 | 1 (1 - 1 - 1 - 1)]}", &tracler.iter(&pool));
+        snap("{[0x100, 0x200 | 1 (1 - 1 - 1 - 1 - RAM.(ALL 1))] -> [0x200, 0x300 | 2 (2 - 2 - 2 - 2 - RAM.(ALL 2))] -> [0x300, 0x400 | 1 (1 - 1 - 1 - 1 - RAM.(ALL 1))] -> [0x600, 0x1000 | 1 (1 - 1 - 1 - 1 - RAM.(ALL 1))]}", &tracler.iter(&pool));
 
         assert_eq!(tracler.get_refcount(0x0, 0x50, &pool), 0);
         assert_eq!(tracler.get_refcount(0x0, 0x100, &pool), 0);
@@ -1710,13 +1747,48 @@ impl fmt::Display for AccessRights {
     }
 }
 
+/// Helper for formatting. Returns true if resource kind is ram with all partitions set
+/// and same refcount for all partitions
+fn ram_refcount_all_set_and_equal(r: &Region) -> bool {
+    match r.resource_kind {
+        RegionResourceKind::RAM(rc) => {
+            let first = rc.get_refcount(0);
+            if first == 0 {
+                return false;
+            }
+            for idx in 1..rc.get_partition_count() {
+                if rc.get_refcount(idx) != first {
+                    return false;
+                }
+            }
+            return true;
+        }
+        RegionResourceKind::Device => false,
+    }
+}
+
+/// Helper for formatting. Returns true if resource kind is ram with no partitions set
+fn ram_refcount_none(r: &Region) -> bool {
+    match r.resource_kind {
+        RegionResourceKind::RAM(rc) => {
+            for idx in 0..rc.get_partition_count() {
+                if rc.get_refcount(idx) > 0 {
+                    return false;
+                }
+            }
+            return true;
+        }
+        RegionResourceKind::Device => false,
+    }
+}
+
 impl<'a> fmt::Display for RegionIterator<'a> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{{")?;
         for (_, region) in self.clone() {
             write!(
                 f,
-                "[0x{:x}, 0x{:x} | {} ({} - {} - {} - {})]",
+                "[0x{:x}, 0x{:x} | {} ({} - {} - {} - {} - ",
                 region.start,
                 region.end,
                 region.ref_count,
@@ -1725,6 +1797,30 @@ impl<'a> fmt::Display for RegionIterator<'a> {
                 region.exec_count,
                 region.super_count
             )?;
+            match region.resource_kind {
+                RegionResourceKind::RAM(rc) => {
+                    if ram_refcount_none(&region) {
+                        write!(f, "RAM.(NONE)")?
+                    } else if ram_refcount_all_set_and_equal(&region) {
+                        write!(f, "RAM.(ALL {})", rc.get_refcount(0))?
+                    } else {
+                        write!(f, "RAM.(")?;
+                        for color_id in 0..rc.get_partition_count() {
+                            let c = rc.get_refcount(color_id);
+                            if c > 0 {
+                                if color_id == rc.get_partition_count() - 1 {
+                                    write!(f, "({}{})", color_id, c)?
+                                } else {
+                                    write!(f, "({}{}),", color_id, c)?
+                                }
+                            }
+                        }
+                        write!(f, ")")?
+                    }
+                }
+                RegionResourceKind::Device => write!(f, "DEVICE")?,
+            }
+            write!(f, ")]")?;
             if region.next.is_some() {
                 write!(f, " -> ")?;
             }

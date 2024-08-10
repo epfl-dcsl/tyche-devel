@@ -1191,7 +1191,7 @@ mod tests {
             )
             .unwrap();
         snap(
-            "{[0x1000, 0x2000 | 1 (1 - 1 - 1 - 1)]}",
+            "{[0x1000, 0x2000 | 1 (1 - 1 - 1 - 1 - RAM.(ALL 1))]}",
             &tracker.iter(&pool),
         );
         snap(
@@ -1231,7 +1231,7 @@ mod tests {
                 &mut pool,
             )
             .unwrap();
-        snap("{[0x1000, 0x2000 | 1 (1 - 1 - 1 - 1)] -> [0x3000, 0x4000 | 1 (1 - 1 - 1 - 1)] -> [0x4000, 0x5000 | 1 (1 - 0 - 0 - 0)]}", &tracker.iter(&pool));
+        snap("{[0x1000, 0x2000 | 1 (1 - 1 - 1 - 1 - RAM.(ALL 1))] -> [0x3000, 0x4000 | 1 (1 - 1 - 1 - 1 - RAM.(ALL 1))] -> [0x4000, 0x5000 | 1 (1 - 0 - 0 - 0 - RAM.(ALL 1))]}", &tracker.iter(&pool));
         snap(
             "{[0x1000, 0x2000 at 0x10010, rep 1 | RWXS] -> [0x3000, 0x4000 at 0x3000, rep 1 | RWXS] -> [0x4000, 0x5000 at 0x4000, rep 1 | R___]}",
             &remapper.new_remap_iter(all_same_color.clone(),tracker.permissions(&pool, all_same_color.clone(),None,true)),
@@ -1277,7 +1277,7 @@ mod tests {
             )
             .unwrap();
         snap(
-            "{[0x1000, 0x2000 | 1 (1 - 1 - 1 - 1)] -> [0x3000, 0x4000 | 1 (1 - 1 - 1 - 1)]}",
+            "{[0x1000, 0x2000 | 1 (1 - 1 - 1 - 1 - RAM.(ALL 1))] -> [0x3000, 0x4000 | 1 (1 - 1 - 1 - 1 - RAM.(ALL 1))]}",
             &tracker.iter(&pool),
         );
         snap(
@@ -1331,7 +1331,7 @@ mod tests {
             )
             .unwrap();
         snap(
-            "{[0x1000, 0x3000 | 1 (1 - 1 - 1 - 1)] -> [0x4000, 0x6000 | 1 (1 - 1 - 1 - 1)]}",
+            "{[0x1000, 0x3000 | 1 (1 - 1 - 1 - 1 - RAM.(ALL 1))] -> [0x4000, 0x6000 | 1 (1 - 1 - 1 - 1 - RAM.(ALL 1))]}",
             &tracker.iter(&pool),
         );
         snap(
@@ -1379,7 +1379,7 @@ mod tests {
             )
             .unwrap();
         snap(
-            "{[0x1000, 0x3000 | 1 (1 - 1 - 1 - 1)] -> [0x3000, 0x4000 | 2 (2 - 2 - 2 - 2)]}",
+            "{[0x1000, 0x3000 | 1 (1 - 1 - 1 - 1 - RAM.(ALL 1))] -> [0x3000, 0x4000 | 2 (2 - 2 - 2 - 2 - RAM.(ALL 2))]}",
             &tracker.iter(&pool),
         );
 
@@ -1420,7 +1420,7 @@ mod tests {
             )
             .unwrap();
         snap(
-            "{[0x1000, 0x4000 | 1 (1 - 1 - 1 - 1)]}",
+            "{[0x1000, 0x4000 | 1 (1 - 1 - 1 - 1 - RAM.(ALL 1))]}",
             &tracker.iter(&pool),
         );
         remapper.map_range(0x1_000, 0x10_000, 0x10, 1).unwrap();
@@ -1455,7 +1455,7 @@ mod tests {
             )
             .unwrap();
         snap(
-            "{[0x1000, 0x4000 | 1 (1 - 1 - 1 - 1)]}",
+            "{[0x1000, 0x4000 | 1 (1 - 1 - 1 - 1 - RAM.(ALL 1))]}",
             &tracker.iter(&pool),
         );
         snap(
@@ -1506,7 +1506,7 @@ mod tests {
             )
             .unwrap();
         snap(
-            "{[0x1000, 0x6000 | 1 (1 - 1 - 1 - 1)]}",
+            "{[0x1000, 0x6000 | 1 (1 - 1 - 1 - 1 - RAM.(ALL 1))]}",
             &tracker.iter(&pool),
         );
         snap(
@@ -1565,7 +1565,7 @@ mod tests {
             )
             .unwrap();
         snap(
-            "{[0x1000, 0x6000 | 1 (1 - 1 - 1 - 1)]}",
+            "{[0x1000, 0x6000 | 1 (1 - 1 - 1 - 1 - RAM.(ALL 1))]}",
             &tracker.iter(&pool),
         );
         snap(
@@ -1607,7 +1607,7 @@ mod tests {
         remapper
             .map_range(0x12fcd6000, 0xe0000, 0x20000, 1)
             .unwrap();
-        snap("{[0x12fcb6000, 0x12fcd6000 | 1 (1 - 1 - 1 - 1)] -> [0x12fcd6000, 0x12fcf6000 | 2 (2 - 2 - 2 - 2)]}", &tracker.iter(&pool));
+        snap("{[0x12fcb6000, 0x12fcd6000 | 1 (1 - 1 - 1 - 1 - RAM.(ALL 1))] -> [0x12fcd6000, 0x12fcf6000 | 2 (2 - 2 - 2 - 2 - RAM.(ALL 2))]}", &tracker.iter(&pool));
         snap("{[0x12fcb6000, 0x12fcf6000 at 0xfffc0000, rep 1] -> [0x12fcd6000, 0x12fcf6000 at 0xe0000, rep 1]}", remapper.iter_segments());
     }
 
@@ -1634,7 +1634,7 @@ mod tests {
             )
             .unwrap();
         snap(
-            "{[0x2000, 0x8000 | 1 (1 - 1 - 1 - 1)]}",
+            "{[0x2000, 0x8000 | 1 (1 - 1 - 1 - 1 - RAM.(ALL 1))]}",
             &tracker.iter(&pool),
         );
         remapper.map_range(0x2000, 0x20000, 0x6000, 1).unwrap();
@@ -1660,7 +1660,7 @@ mod tests {
             )
             .unwrap();
         snap(
-            "{[0x2000, 0xa000 | 1 (1 - 1 - 1 - 1)]}",
+            "{[0x2000, 0xa000 | 1 (1 - 1 - 1 - 1 - RAM.(ALL 1))]}",
             &tracker.iter(&pool),
         );
         let err = remapper.map_range(0x8000, 0x22000, 0x2000, 1);
@@ -1706,7 +1706,7 @@ mod tests {
             )
             .unwrap();
         snap(
-            "{[0x3000, 0x6000 | 1 (1 - 1 - 1 - 1)]}",
+            "{[0x3000, 0x6000 | 1 (1 - 1 - 1 - 1 - RAM.(ALL 1))]}",
             &tracker.iter(&pool),
         );
         let iterator = SingleSegmentIterator {
@@ -1780,7 +1780,7 @@ mod tests {
             )
             .unwrap();
         snap(
-            "{[0x3000, 0x6000 | 1 (1 - 1 - 1 - 1)] -> [0x7000, 0x8000 | 1 (1 - 1 - 1 - 1)]}",
+            "{[0x3000, 0x6000 | 1 (1 - 1 - 1 - 1 - RAM.(ALL 1))] -> [0x7000, 0x8000 | 1 (1 - 1 - 1 - 1 - RAM.(ALL 1))]}",
             &tracker.iter(&pool),
         );
 
