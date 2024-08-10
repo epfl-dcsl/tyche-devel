@@ -17,6 +17,9 @@ pub struct FreeList<const N: usize> {
 
     /// The next free block, if any.
     head: u32,
+
+    /// Tracks the number of remaining free pages
+    free_page_count: usize,
 }
 
 impl<const N: usize> FreeList<N> {
@@ -28,7 +31,17 @@ impl<const N: usize> FreeList<N> {
             free_list[i] = NextFree::Free(next);
             i += 1;
         }
-        Self { free_list, head: 0 }
+
+        Self {
+            free_list,
+            head: 0,
+            free_page_count: N,
+        }
+    }
+
+    /// Returns the number of remaining free pages
+    pub fn available_pages(&self) -> usize {
+        self.free_page_count
     }
 
     pub fn allocate(&mut self) -> Option<usize> {
@@ -37,6 +50,7 @@ impl<const N: usize> FreeList<N> {
             NextFree::Free(next) => {
                 self.head = next;
                 self.free_list[head] = NextFree::NotFree;
+                self.free_page_count -= 1;
                 Some(head)
             }
             NextFree::NotFree => None,
@@ -52,6 +66,7 @@ impl<const N: usize> FreeList<N> {
         // Insert back into free list
         self.free_list[idx] = NextFree::Free(self.head);
         self.head = idx as u32;
+        self.free_page_count += 1;
     }
 
     pub fn is_free(&self, idx: usize) -> bool {

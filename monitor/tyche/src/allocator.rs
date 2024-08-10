@@ -26,6 +26,11 @@ pub fn allocator() -> &'static impl FrameAllocator {
     &ALLOCATOR
 }
 
+/// Return the number of remaining free pages in the allocator
+pub fn available_pages_in_allocator() -> usize {
+    ALLOCATOR.inner.lock().available_pages()
+}
+
 // ————————————————————————————————— Pages —————————————————————————————————— //
 
 /// A 4096 bytes page.
@@ -55,6 +60,11 @@ impl<const N: usize> FreeListAllocator<N> {
             virt_offset: 0, // TODO!
             pages,
         }
+    }
+
+    /// Get number of free pages
+    pub fn available_pages(&self) -> usize {
+        self.free_list.available_pages()
     }
 
     /// Initializes the allocator.

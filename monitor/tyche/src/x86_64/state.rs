@@ -20,7 +20,7 @@ use vtd::{Command, Iommu};
 
 use super::context::Contextx86;
 use super::vmx_helper::{dump_host_state, load_host_state};
-use crate::allocator::allocator;
+use crate::allocator::{allocator, available_pages_in_allocator};
 use crate::data_transfer::DataTransferPool;
 use crate::monitor::PlatformState;
 use crate::rcframe::{RCFrame, RCFramePool, EMPTY_RCFRAME};
@@ -244,8 +244,12 @@ impl StateX86 {
                 flags.bits() | mem_type.bits(),
             );
             map_count += 1;
-            if (map_count % 100) == 0 {
-                log::info!("ept: processed {:06} mappings", map_count);
+            if (map_count % 10000) == 0 {
+                log::info!(
+                    "ept: processed {:06} mappings. Available pages {}",
+                    map_count,
+                    available_pages_in_allocator()
+                );
             }
         }
 
@@ -281,7 +285,11 @@ impl StateX86 {
         domain_handle: Handle<Domain>,
         engine: &mut MutexGuard<CapaEngine>,
     ) -> bool {
-        log::info!("Updating PTs of domain {:?}", domain_handle);
+        log::info!(
+            "Updating PTs of domain {:?}. Free pages: {}",
+            domain_handle,
+            available_pages_in_allocator()
+        );
         //log::info!("\n ### entering update_domain_ept ###\n");
 
         let ept_res = Self::update_ept_tables(domain_handle, engine);
