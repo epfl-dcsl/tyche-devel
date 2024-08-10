@@ -206,7 +206,7 @@ fn build_bootparams<T: MemoryColoring + Clone>(
 
         boot_params
             .add_e820_entry(mr)
-            .expect("error adding e820 entry");
+            .expect("error adding e820 entry. Probably ran out of space");
     }
 
     //This is only for debugging. We merge contiguous regions and

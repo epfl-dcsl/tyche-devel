@@ -24,8 +24,8 @@ pub const PAGE_SIZE: usize = 0x1000;
 /// Gibibyte as bytes
 const GIB: usize = 1 << 30;
 const MIB: usize = 1 << 20;
-const GUEST_RESERVED_MEMORY: usize = 4 * GIB;
-const SECOND_STAGE_RESERVED_MEMORY: u64 = 400 * MIB as u64;
+const GUEST_RESERVED_MEMORY: usize = 8 * GIB;
+const SECOND_STAGE_RESERVED_MEMORY: u64 = 2 * GIB as u64;
 
 // ————————————————————————— Physical Memory Offset ————————————————————————— //
 
@@ -241,33 +241,34 @@ impl<T: MemoryColoring + Clone> PartitionedMemoryMap<T> {
         //we pass this up to stage
 
         let mut additional_mem_info: Option<Vec<usize>> = None;
-        //If we use memory coloring, add E820 entries for all the memory of all additional colors add the end
-        //TODO: it looks like linux merges them adjacent entries of the same type, we we could probably just create
-        //one region with the size of the unused memory partition instead of recomputing the sizes of the individual colors
+        //If we use memory coloring, one E820 entry for all the memory of all additional colors add the end
+        //This ensures that Linux configure the physical addressing subsytem accordingly
+        //Mark the memory as reserved to prevent Linux from using it. Only our custom driver will touch this memory
         match self.unused {
             MemoryRange::ColoredRange(cr) => {
                 assert_ne!(highest_region_end, 0);
                 assert_eq!(highest_region_end as usize % PAGE_SIZE, 0);
                 //leave nice gap to make this easier to manage
-                let mut start_gpa =
-                    GuestPhysAddr::new(highest_region_end as usize).align_up(1 << 30);
+                let start_gpa = GuestPhysAddr::new(highest_region_end as usize).align_up(1 << 30);
                 log::info!("Start GPA for additional mem: 0x{:013x?}", start_gpa);
                 let mut mem_info = Vec::new();
                 mem_info.push(start_gpa.as_usize());
 
                 let bytes_per_color =
                     compute_color_sizes(self.all_regions, self.coloring.as_ref().unwrap());
-                for color_id in cr.first_color..(cr.first_color + cr.color_count) {
-                    let size = bytes_per_color[color_id as usize];
-                    let entry = E820Entry {
-                        addr: start_gpa,
-                        size,
-                        mem_type: E820Types::Reserved,
-                    };
-                    log::info!("E820 entry for color id {:02} : {:x?}", color_id, entry);
-                    result.push(entry);
-                    mem_info.push(size as usize);
-                    start_gpa = start_gpa + size as usize;
+                let start_color = cr.first_color as usize;
+                let end_color = (cr.first_color + cr.color_count) as usize;
+                let total_bytes_addtitional_colors: u64 =
+                    bytes_per_color[start_color..end_color].iter().sum();
+                let entry = E820Entry {
+                    addr: start_gpa,
+                    size: total_bytes_addtitional_colors,
+                    mem_type: E820Types::Reserved,
+                };
+                log::info!("Adding E820 entry for additional colors : {:x?}", entry);
+                result.push(entry);
+                for color_id in start_color..end_color {
+                    mem_info.push(bytes_per_color[color_id as usize] as usize);
                 }
                 additional_mem_info = Some(mem_info);
             }
