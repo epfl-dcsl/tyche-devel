@@ -342,13 +342,14 @@ impl DummyMemoryColoring {
     //USER CONFIGURED VALUES
 
     //use 2 to the power of COLOR_ORDER many colors
-    pub const COLOR_ORDER: usize = 5;
+    //keep in sync with TYCHE_COLOR_COUNT in linux/drivers/tyche/libraries/capabilities/include/ecs.h
+    pub const COLOR_ORDER: usize = 6;
 
     //shift out this many bits of the HPA; then interpret the lowest log2(COLOR_ORDER)
     //bits as the color
-    pub const SHIFT: usize = 20;
+    pub const SHIFT: usize = 12;
 
-    //DERVICED VALUES
+    //DERIVED VALUES
     //mask to apply to page bits (after shifting) to get color id for address
     pub const COLOR_MASK: u64 = (1 << Self::COLOR_ORDER) - 1;
 }

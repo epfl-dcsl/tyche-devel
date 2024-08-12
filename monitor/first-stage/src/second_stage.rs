@@ -31,7 +31,7 @@ const SECOND_STAGE: &'static [u8] =
 const SECOND_STAGE: &'static [u8] = &[0; 10];
 
 /// Size of memory allocated by the second stage.
-pub const SECOND_STAGE_SIZE: usize = 0x1000 * 2048;
+pub const SECOND_STAGE_SIZE: usize = (1 << 20) * 1800;
 /// Virtual address to which the guest is loaded. Defined by our linker script.
 const LOAD_VIRT_ADDR: HostVirtAddr = HostVirtAddr::new(0x80000000000);
 //  Stack definitions
