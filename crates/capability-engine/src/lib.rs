@@ -422,11 +422,11 @@ impl CapaEngine {
         let capa = self.domains[domain].get(capa)?.as_management()?;
         self.domains[capa].seal()?;
         //TODO(aghosn)(Charly) we should create a switch capa for all cores?
-        let mut cores = domain::get_permission(
+        /*let mut cores = domain::get_permission(
             capa,
             &self.domains,
             permission::PermissionIndex::AllowedCores,
-        );
+        );*/
         let trans = self.domains[domain]
             .find_capa(|x| match x {
                 Capa::Switch { to, core: c } => {
@@ -639,18 +639,13 @@ impl CapaEngine {
         &mut self,
         domain: Handle<Domain>,
         token: NextCapaToken,
-    ) -> Option<(CapaInfo, NextCapaToken)> {
+    ) -> Option<(CapaInfo, NextCapaToken, usize)> {
         let (index, next_token) =
             domain::next_capa(domain, token, &self.regions, &mut self.domains)?;
 
-        match self.domains[domain].get(index).ok()?.as_switch() {
-            Ok(_) => log::trace!("Hello!! We are Enumerating a Switch Capa"),
-            _ => (),
-        }
-
         let capa = self.domains[domain].get(index).unwrap();
         let info = capa.info(&self.regions, &self.domains)?;
-        Some((info, next_token))
+        Some((info, next_token, index.as_usize()))
     }
 
     /// Enumerate all existing domains.

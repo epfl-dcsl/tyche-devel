@@ -19,7 +19,7 @@ fn hash_capa_info(
     domain: Handle<Domain>,
 ) {
     let mut next_capa = NextCapaToken::new();
-    while let Some((info, next_next_capa)) = engine.enumerate(domain, next_capa) {
+    while let Some((info, next_next_capa, _)) = engine.enumerate(domain, next_capa) {
         next_capa = next_next_capa;
         match info {
             CapaInfo::Region {

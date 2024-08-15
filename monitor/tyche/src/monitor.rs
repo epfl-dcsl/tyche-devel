@@ -236,9 +236,9 @@ pub trait Monitor<T: PlatformState + 'static> {
 
             log::info!("Domain {}", domain.idx());
             let mut next_capa = NextCapaToken::new();
-            while let Some((info, next_next_capa)) = engine.enumerate(domain, next_capa) {
+            while let Some((info, next_next_capa, idx)) = engine.enumerate(domain, next_capa) {
                 next_capa = next_next_capa;
-                log::info!(" - {}", info);
+                log::info!(" - {} @{}", info, idx);
             }
             log::info!(
                 "tracker: {}",
@@ -510,7 +510,7 @@ pub trait Monitor<T: PlatformState + 'static> {
         state: &mut T,
         current: &mut Handle<Domain>,
         token: NextCapaToken,
-    ) -> Option<(CapaInfo, NextCapaToken)> {
+    ) -> Option<(CapaInfo, NextCapaToken, usize)> {
         let mut engine = Self::lock_engine(state, current);
         engine.enumerate(*current, token)
     }
@@ -564,6 +564,17 @@ pub trait Monitor<T: PlatformState + 'static> {
     ) -> Result<(), CapaError> {
         let mut engine = Self::lock_engine(state, current);
         engine.switch(*current, cpuid, delta, capa)?;
+        Self::apply_updates(state, &mut engine);
+        Ok(())
+    }
+
+    fn do_return_to_manager(
+        state: &mut T,
+        current: &mut Handle<Domain>,
+        core_id: usize,
+    ) -> Result<(), CapaError> {
+        let mut engine = Self::lock_engine(state, current);
+        engine.handle_violation(*current, core_id)?;
         Self::apply_updates(state, &mut engine);
         Ok(())
     }
@@ -680,7 +691,7 @@ pub trait Monitor<T: PlatformState + 'static> {
             }
             calls::ENUMERATE => {
                 log::trace!("Enumerate on core {}", cpuid());
-                if let Some((info, next)) =
+                if let Some((info, next, _idx)) =
                     Self::do_enumerate(state, domain, NextCapaToken::from_usize(args[0]))
                 {
                     let (v1, v2, v3) = info.serialize();
@@ -702,6 +713,11 @@ pub trait Monitor<T: PlatformState + 'static> {
                     args[1],
                 );
                 Self::do_switch(state, domain, LocalCapa::new(args[0]), cpuid(), args[1])?;
+                return Ok(false);
+            }
+            calls::RETURN_TO_MANAGER => {
+                log::trace!("Return to manager from dom {}", domain.idx());
+                Self::do_return_to_manager(state, domain, cpuid())?;
                 return Ok(false);
             }
             calls::EXIT => {
