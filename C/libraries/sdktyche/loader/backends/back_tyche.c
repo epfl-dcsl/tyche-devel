@@ -7,6 +7,7 @@
 #include "sdk_tyche.h"
 #include "tyche_register_map.h"
 
+#include <asm-generic/errno-base.h>
 #include <fcntl.h>
 #include <errno.h>
 #include <string.h>
@@ -388,6 +389,7 @@ int backend_td_vcpu_run(tyche_domain_t* domain, usize core, uint32_t delta)
   msg_switch_t params = {core, delta, 0};
   if (domain == NULL) {
     ERROR("Nul argument");
+    errno = ENOMEM;
     goto failure;
   }
   dll_foreach(&(domain->vcpus), vcpu, list) {
@@ -398,13 +400,17 @@ int backend_td_vcpu_run(tyche_domain_t* domain, usize core, uint32_t delta)
   // Unable to find it.
   if (vcpu == NULL) {
     ERROR("Unable to find vcpu for core %lld. Call create_vcpu first!", core);
+    errno = -EINVAL;
     goto failure;
   }
 
   if (ioctl(domain->handle, TYCHE_TRANSITION, &params) != SUCCESS) {
     DEBUG("Failure to run on core %lld", core);
+    errno = params.error;
     goto failure;
   }
+  // Set the exit information in errno.
+  errno = params.error;
   //All done!
   return SUCCESS;
 failure:

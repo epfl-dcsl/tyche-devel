@@ -45,6 +45,7 @@ pub enum CapaInfo {
     },
     Switch {
         domain_id: usize,
+        core_id: usize,
     },
 }
 
@@ -100,8 +101,9 @@ impl CapaInfo {
                 v1 = *domain_id;
                 capa_type = capa_type::CHANNEL;
             }
-            CapaInfo::Switch { domain_id } => {
+            CapaInfo::Switch { domain_id, core_id } => {
                 v1 = *domain_id;
+                v2 = *core_id;
                 capa_type = capa_type::SWITCH;
             }
         }
@@ -120,7 +122,10 @@ impl CapaInfo {
                 sealed: v2 == 2,
             },
             capa_type::CHANNEL => Self::Channel { domain_id: v1 },
-            capa_type::SWITCH => Self::Switch { domain_id: v1 },
+            capa_type::SWITCH => Self::Switch {
+                domain_id: v1,
+                core_id: v2,
+            },
             capa_type::REGION => {
                 let unique = (flags & 0b10) != 0;
                 let ops = MemOps::from_bits(flags as u8 >> 2).unwrap_or(MemOps::NONE);
@@ -226,10 +231,11 @@ impl Capa {
                     domain_id: domain.id(),
                 })
             }
-            Capa::Switch { to, .. } => {
+            Capa::Switch { to, core } => {
                 let domain = &domains[to];
                 Some(CapaInfo::Switch {
                     domain_id: domain.id(),
+                    core_id: core,
                 })
             }
         }
@@ -293,8 +299,8 @@ impl fmt::Display for CapaInfo {
             CapaInfo::Channel { domain_id } => {
                 write!(f, "Channel({})", domain_id)
             }
-            CapaInfo::Switch { domain_id } => {
-                write!(f, "Switch({})", domain_id)
+            CapaInfo::Switch { domain_id, core_id } => {
+                write!(f, "Switch({} on core {})", domain_id, core_id)
             }
         }
     }

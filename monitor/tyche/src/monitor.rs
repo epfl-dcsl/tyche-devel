@@ -234,13 +234,13 @@ pub trait Monitor<T: PlatformState + 'static> {
         while let Some((domain, next_next)) = engine.enumerate_domains(next) {
             next = next_next;
 
-            log::debug!("Domain {}", domain.idx());
+            log::info!("Domain {}", domain.idx());
             let mut next_capa = NextCapaToken::new();
             while let Some((info, next_next_capa)) = engine.enumerate(domain, next_capa) {
                 next_capa = next_next_capa;
-                log::debug!(" - {}", info);
+                log::info!(" - {}", info);
             }
-            log::debug!(
+            log::info!(
                 "tracker: {}",
                 engine.get_domain_regions(domain).expect("Invalid domain")
             );
@@ -590,21 +590,21 @@ pub trait Monitor<T: PlatformState + 'static> {
         current: &mut Handle<Domain>,
         domain: LocalCapa,
         core: usize,
-    ) -> Result<(), CapaError> {
-        let mut engine = Self::lock_engine(state, current);
-        let domain = engine.get_domain_capa(*current, domain)?;
-        let cores = engine.get_domain_permission(domain, permission::PermissionIndex::AllowedCores);
-        if core > T::max_cpus() || (1 << core) & cores == 0 {
+    ) -> Result<LocalCapa, CapaError> {
+        if core > T::max_cpus() {
             log::error!(
-                "Attempt to set context on unallowed core {} max_cpus {} cores: 0x{:x}",
+                "Attempt to set context on unallowed core {} max_cpus {}",
                 core,
                 T::max_cpus(),
-                cores
             );
             return Err(CapaError::InvalidCore);
         }
+
+        let mut engine = Self::lock_engine(state, current);
+        let capa = engine.create_switch_on_core(*current, core, domain)?;
+        let domain = engine.get_domain_capa(*current, domain)?;
         T::create_context(state, engine, *current, domain, core)?;
-        return Ok(());
+        return Ok(capa);
     }
 
     fn do_monitor_call(
@@ -616,7 +616,6 @@ pub trait Monitor<T: PlatformState + 'static> {
     ) -> Result<bool, CapaError> {
         match call {
             calls::CREATE_DOMAIN => {
-                log::trace!("Create domain on core {}", cpuid());
                 let capa = Self::do_create_domain(state, domain)?;
                 res[0] = capa.as_usize();
                 return Ok(true);
@@ -709,7 +708,8 @@ pub trait Monitor<T: PlatformState + 'static> {
                 todo!("Exit called")
             }
             calls::DEBUG => {
-                todo!("Debug implement")
+                log::info!("Debug called with {} from dom{}", args[0], domain.idx());
+                return Ok(false);
             }
             calls::CONFIGURE => {
                 log::trace!("Configure on core {}", cpuid());
@@ -757,12 +757,13 @@ pub trait Monitor<T: PlatformState + 'static> {
                 return Ok(true);
             }
             calls::ALLOC_CORE_CONTEXT => {
-                Self::do_init_child_context(
+                let capa = Self::do_init_child_context(
                     state,
                     domain,
                     LocalCapa::new(args[0]),
                     T::remap_core(args[1]),
                 )?;
+                res[0] = capa.as_usize();
                 return Ok(true);
             }
             calls::READ_ALL_GP => {

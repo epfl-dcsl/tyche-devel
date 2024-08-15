@@ -427,23 +427,58 @@ impl CapaEngine {
             &self.domains,
             permission::PermissionIndex::AllowedCores,
         );
-        let mut idx = 0;
+        let trans = self.domains[domain]
+            .find_capa(|x| match x {
+                Capa::Switch { to, core: c } => {
+                    if *to == capa && *c == core {
+                        return true;
+                    }
+                    return false;
+                }
+                _ => return false,
+            })
+            .ok_or(CapaError::InvalidSwitch)?;
+        //TODO: reenable once we clean up the kvm backend.
+        /*let mut idx = 0;
         while cores != 0 && idx < 64 {
-            if cores & 1 != 0 && idx != core {
-                insert_capa(
-                    domain,
-                    Capa::Switch {
-                        to: capa,
-                        core: idx,
-                    },
-                    &mut self.regions,
-                    &mut self.domains,
-                )?;
+            if cores & 1 != 0 {
+                let capa = self.domains[domain]
+                    .find_capa(|x| match x {
+                        Capa::Switch { to, core } => {
+                            if *to == capa && *core == idx {
+                                return true;
+                            }
+                            return false;
+                        }
+                        _ => return false,
+                    })
+                    .ok_or(CapaError::InvalidSwitch)?;
+                if idx == core {
+                    trans = Some(capa);
+                }
             }
             cores = cores >> 1;
             idx += 1;
-        }
+        }*/
 
+        Ok(trans)
+    }
+
+    pub fn create_switch_on_core(
+        &mut self,
+        domain: Handle<Domain>,
+        core: usize,
+        capa: LocalCapa,
+    ) -> Result<LocalCapa, CapaError> {
+        let capa = self.domains[domain].get(capa)?.as_management()?;
+        let cores = domain::get_permission(
+            capa,
+            &self.domains,
+            permission::PermissionIndex::AllowedCores,
+        );
+        if (1 << core) & cores == 0 {
+            return Err(CapaError::InvalidCore);
+        }
         let capa = insert_capa(
             domain,
             Capa::Switch { to: capa, core },

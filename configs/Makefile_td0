@@ -28,3 +28,6 @@ gramine:
 
 gramine-dbg:
 	cd /home/dev/Documents/gramine/CI-Examples/helloworld && sudo GDB=1 /gramine-install/gramine-tyche helloworld
+
+gramine-strace:
+	cd /home/dev/Documents/gramine/CI-Examples/helloworld && sudo strace -o /tmp/gramout.txt /gramine-install/gramine-tyche helloworld
