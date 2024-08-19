@@ -281,6 +281,15 @@ pub trait Monitor<T: PlatformState + 'static> {
         Ok(engine.get_child_permission(*current, domain, bitmap)? as usize)
     }
 
+    fn do_get_self(
+        state: &mut T,
+        current: &mut Handle<Domain>,
+        bitmap: permission::PermissionIndex,
+    ) -> Result<usize, CapaError> {
+        let mut engine = Self::lock_engine(state, current);
+        Ok(engine.get_domain_permission(*current, bitmap) as usize)
+    }
+
     fn do_set_core(
         state: &mut T,
         current: &mut Handle<Domain>,

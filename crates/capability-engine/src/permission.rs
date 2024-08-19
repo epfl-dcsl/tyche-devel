@@ -48,9 +48,10 @@ pub mod monitor_inter_perm {
     pub const DUPLICATE: u64 = 1 << 2;
     pub const ALIAS:     u64 = 1 << 3;
     pub const CARVE:     u64 = 1 << 4;
+    pub const CPUID:     u64 = 1 << 5;
 
     /// All possible permissions
-    pub const ALL:  u64 = SPAWN | SEND | DUPLICATE | ALIAS | CARVE;
+    pub const ALL:  u64 = SPAWN | SEND | DUPLICATE | ALIAS | CARVE | CPUID;
     /// None of the existing permissions
     pub const NONE: u64 = 0;
 }

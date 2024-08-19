@@ -5,7 +5,9 @@ use core::sync::atomic::Ordering;
 
 use capa_engine::context::RegisterGroup;
 use capa_engine::utils::BitmapIterator;
-use capa_engine::{AccessRights, CapaEngine, CapaError, Domain, Handle, LocalCapa, MemOps};
+use capa_engine::{
+    permission, AccessRights, CapaEngine, CapaError, Domain, Handle, LocalCapa, MemOps,
+};
 use mmu::eptmapper::EPT_ROOT_FLAGS;
 use mmu::FrameAllocator;
 use spin::MutexGuard;
@@ -543,6 +545,49 @@ impl MonitorX86 {
         qemu::exit(qemu::ExitCode::Success);
     }
 
+    pub fn emulate_cpuid(domain: &mut Handle<Domain>) {
+        let mut context = StateX86::get_context(*domain, cpuid());
+        let input_eax = context.get(VmcsField::GuestRax, None).unwrap();
+        let input_ecx = context.get(VmcsField::GuestRcx, None).unwrap();
+        let mut eax: usize;
+        let mut ebx: usize;
+        let mut ecx: usize;
+        let mut edx: usize;
+
+        unsafe {
+            // Note: LLVM reserves %rbx for its internal use, so we need to use a scratch
+            // register for %rbx here.
+            asm!(
+                "mov {tmp}, rbx",
+                "cpuid",
+                "mov rsi, rbx",
+                "mov rbx, {tmp}",
+                tmp = out(reg) _,
+                inout("rax") input_eax => eax,
+                inout("rcx") input_ecx => ecx,
+                out("rdx") edx,
+                out("rsi") ebx
+            )
+        }
+
+        //Apply cpuid filters.
+        filter_tpause(input_eax, input_ecx, &mut eax, &mut ebx, &mut ecx, &mut edx);
+        filter_mpk(input_eax, input_ecx, &mut eax, &mut ebx, &mut ecx, &mut edx);
+
+        context
+            .set(VmcsField::GuestRax, eax as usize, None)
+            .unwrap();
+        context
+            .set(VmcsField::GuestRbx, ebx as usize, None)
+            .unwrap();
+        context
+            .set(VmcsField::GuestRcx, ecx as usize, None)
+            .unwrap();
+        context
+            .set(VmcsField::GuestRdx, edx as usize, None)
+            .unwrap();
+    }
+
     pub fn main_loop(&mut self, mut state: StateX86, mut domain: Handle<Domain>) {
         let core_id = cpuid();
         let mut result = unsafe {
@@ -635,7 +680,7 @@ impl MonitorX86 {
                     },
                     Ok(false) => {},
                     Err(e) => {
-                        log::debug!("Failure monitor call: {:?}, call: {}", e, vmcall);
+                        log::error!("Failure monitor call: {:?}, call: {} for dom {}", e, vmcall, domain.idx());
                         context.set(VmcsField::GuestRax, 1, None).unwrap();
                         log::debug!("The vcpu: {:#x?}", vs.vcpu);
                         drop(context);
@@ -658,38 +703,7 @@ impl MonitorX86 {
             Ok(HandlerResult::Resume)
         }
         VmxExitReason::Cpuid if domain.idx() == 0 => {
-            let mut context = StateX86::get_context(*domain, cpuid());
-            let input_eax = context.get(VmcsField::GuestRax, None).unwrap();
-            let input_ecx = context.get(VmcsField::GuestRcx, None).unwrap();
-            let mut eax: usize;
-            let mut ebx: usize;
-            let mut ecx: usize;
-            let mut edx: usize;
-
-            unsafe {
-                // Note: LLVM reserves %rbx for its internal use, so we need to use a scratch
-                // register for %rbx here.
-                asm!(
-                    "mov {tmp}, rbx",
-                    "cpuid",
-                    "mov rsi, rbx",
-                    "mov rbx, {tmp}",
-                    tmp = out(reg) _,
-                    inout("rax") input_eax => eax,
-                    inout("rcx") input_ecx => ecx,
-                    out("rdx") edx,
-                    out("rsi") ebx
-                )
-            }
-
-            //Apply cpuid filters.
-            filter_tpause(input_eax, input_ecx, &mut eax, &mut ebx, &mut ecx, &mut edx);
-            filter_mpk(input_eax, input_ecx, &mut eax, &mut ebx, &mut ecx, &mut edx);
-
-            context.set(VmcsField::GuestRax, eax as usize, None).unwrap();
-            context.set(VmcsField::GuestRbx, ebx as usize, None).unwrap();
-            context.set(VmcsField::GuestRcx, ecx as usize, None).unwrap();
-            context.set(VmcsField::GuestRdx, edx as usize, None).unwrap();
+            Self::emulate_cpuid(domain);
             vs.vcpu.next_instruction().or(Err(CapaError::PlatformError))?;
             Ok(HandlerResult::Resume)
         }
@@ -822,6 +836,15 @@ impl MonitorX86 {
                     *address_eoi = 0;
                 }*/
                 x2apic::send_eoi();
+            }
+            // Check if the domain can emulate cpuid.
+            if reason == VmxExitReason::Cpuid {
+                let perms = Self::do_get_self(vs, domain, permission::PermissionIndex::MonitorInterface)?;
+                if perms & permission::monitor_inter_perm::CPUID as usize != 0 {
+                    Self::emulate_cpuid(domain);
+                    vs.vcpu.next_instruction().or(Err(CapaError::PlatformError))?;
+                    return Ok(HandlerResult::Resume);
+                }
             }
             match Self::do_handle_violation(vs, domain) {
                 Ok(_) => {
