@@ -188,7 +188,7 @@ int backend_td_alloc_mem(tyche_domain_t* domain)
       close(domain->backend.memfd);
       goto failure;
     }
-    info.virtaddr = slot->id;
+    info.virtaddr = slot->virtoffset;
     if (ioctl(domain->backend.memfd, CONTALLOC_GET_PHYSOFFSET, &info) != SUCCESS) {
       ERROR("Getting physoffset failed!");
       close(domain->handle);
@@ -240,7 +240,7 @@ int backend_td_mmap(tyche_domain_t* domain, void* addr, size_t len,
      close(domain->backend.memfd);
      goto failure_dealloc;
   }
-  info.virtaddr = slot->id;
+  info.virtaddr = slot->virtoffset;
   if (ioctl(domain->backend.memfd, CONTALLOC_GET_PHYSOFFSET, &info) != SUCCESS) {
      ERROR("Getting physoffset failed!");
      close(domain->handle);

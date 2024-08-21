@@ -14,7 +14,29 @@ run_td1:
 	-enable-kvm -m 100 \
 	-bios vms/bios.bin \
 	-chardev file,path="/tyche/chardev/seabios",id=seabios -device isa-debugcon,iobase=0x402,chardev=seabios \
-	-append "noapic lpj=24000000 earlyprintk=serial,tty0 console=ttyS0" 
+	-append "noapic lpj=24000000 earlyprintk=serial,tty0 console=ttyS0"
+
+run_td1_multi:
+	sudo ./scripts/mod_switch.sh && \
+	/home/dev/Documents/qemu/build/qemu-system-x86_64 \
+	-kernel vms/bzImage \
+	-nographic \
+	-enable-kvm -m 100 \
+	-smp 2 \
+	-bios vms/bios.bin \
+	-chardev file,path="/tyche/chardev/seabios",id=seabios -device isa-debugcon,iobase=0x402,chardev=seabios \
+	-append "noapic lpj=24000000 earlyprintk=serial,tty0 console=ttyS0"
+
+run_td1_custom:
+	sudo ./scripts/mod_switch.sh && \
+	taskset $(TD1_MASK) \
+	/home/dev/Documents/qemu/build/qemu-system-x86_64 \
+	-kernel vms/bzImage \
+	-nographic \
+	-enable-kvm -m 100 \
+	-bios vms/bios.bin \
+	-chardev file,path="/tyche/chardev/seabios",id=seabios -device isa-debugcon,iobase=0x402,chardev=seabios \
+	-append "noapic lpj=24000000 earlyprintk=serial,tty0 console=ttyS0"
 
 regression:
 	sudo ./scripts/mod_switch.sh
