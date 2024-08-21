@@ -184,6 +184,22 @@ failure:
   return FAILURE;
 }
 
+int backend_td_virt_to_phys(tyche_domain_t* domain, usize vaddr, usize* paddr) {
+  msg_info_t info = {0};
+  if (domain == NULL || paddr == NULL) {
+    goto failure;
+  }
+  info.virtaddr = vaddr;
+  if (ioctl(domain->handle, TYCHE_GET_PHYSOFFSET, &info) != SUCCESS) {
+    close(domain->handle);
+    goto failure;
+  }
+  *paddr = info.physoffset;
+  return SUCCESS;
+failure:
+  return FAILURE;
+}
+
 //TODO check if the driver handles the overflow.
 int backend_td_register_region(
     tyche_domain_t* domain,

@@ -257,6 +257,23 @@ failure:
   return FAILURE;
 }
 
+int backend_td_virt_to_phys(tyche_domain_t* domain, usize vaddr, usize* paddr) {
+  msg_t info = {0};
+  if (domain == NULL || paddr == NULL) {
+    goto failure;
+  }
+  info.virtaddr = vaddr;
+  if (ioctl(domain->backend.memfd, CONTALLOC_GET_PHYSOFFSET, &info) != SUCCESS) {
+    close(domain->handle);
+    close(domain->backend.memfd);
+    goto failure;
+  }
+  *paddr = info.physoffset;
+  return SUCCESS;
+failure:
+  return FAILURE;
+}
+
 //TODO handle overlfow;
 int backend_td_register_region(
     tyche_domain_t* domain,
