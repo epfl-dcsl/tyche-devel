@@ -3,16 +3,16 @@
 #![no_std]
 
 use core::arch::x86_64;
-use core::{ptr, slice};
+use core::{mem, ptr, slice};
 
 use bitflags::bitflags;
+use mmu::frame_allocator::PhysRange;
+use mmu::ioptmapper::PAGE_SIZE;
 use mmu::FrameAllocator;
 use queue_invalidation_regs::{
-    ContextCacheInvalidateDescriptor, FlushGranularity, IOTLBInvalidateDescriptor,
-    InvalidationQueueAddressRegister, InvalidationQueueHead, InvalidationQueueTail,
-    InvalidationWaitDescriptor,
+    DescriptorSize, InvalidationQueueAddressRegister, InvalidationQueueTail, RawDescriptor,
 };
-use vmx::{Frame, HostPhysAddr, HostVirtAddr};
+use vmx::{HostPhysAddr, HostVirtAddr};
 
 pub mod queue_invalidation_regs;
 
@@ -49,11 +49,10 @@ pub struct Iommu {
     //raw pointer to IOMMU. Virt addr in HVA space of stage2/tyche
     addr: *mut u8,
     //reusable writeback buffer used to ack that invalidations requests are finished
-    invalidation_wb_frame: Option<Frame>,
-    //for now, we only suppport one pending invalidation
-    have_pending_invalidation: bool,
     //memory used for the invalidation queue
-    invalidation_queue: Option<Frame>,
+    invalidation_queue: Option<(PhysRange, HostVirtAddr)>,
+    /// Size of a descriptor in quadwords
+    desc_size: DescriptorSize,
 }
 
 macro_rules! ro_reg {
@@ -97,9 +96,8 @@ impl Iommu {
     pub const unsafe fn new(addr: HostVirtAddr) -> Self {
         Self {
             addr: addr.as_usize() as *mut u8,
-            invalidation_wb_frame: None,
-            have_pending_invalidation: false,
             invalidation_queue: None,
+            desc_size: DescriptorSize::Small,
         }
     }
 
@@ -119,131 +117,151 @@ impl Iommu {
         self.execute_toggle_command(Command::TRANSLATION_ENABLE, true);
     }
 
-    /// Initializes and enable the the Queued Invalidation interface described in
-    /// 6.5.2 of the VTD spec
-    pub fn enable_quid_invalidation(
+    pub fn enable_quid_invaliadtion_from(
         &mut self,
-        allocator: &impl FrameAllocator,
+        inv_queue_mem: PhysRange,
+        inv_queue_mapping: HostVirtAddr,
+        desc_size: DescriptorSize,
     ) -> Result<(), &'static str> {
-        self.invalidation_wb_frame = Some(match allocator.allocate_frame() {
-            Some(v) => v.zeroed(),
-            None => {
-                return Err("failed to alloc mem for writeback buffer");
-            }
-        });
-
         //initialize tail register 11.4.9.2
         //the head register is managed by HW
         let mut tail_reg = InvalidationQueueTail::default();
         tail_reg.set_queue_tail(0)?;
         self.set_invalidation_queue_tail(tail_reg.bits());
 
-        //setup interrupt queue address,  11.4.9.3
-        let inv_queue_frame = match allocator.allocate_frame() {
-            Some(v) => v,
-            None => return Err("failed to alloc mem for inv queue"),
-        }
-        .zeroed();
-        self.invalidation_queue = Some(inv_queue_frame);
-        let inv_queue_order = 0;
-
+        let order = if inv_queue_mem.size() == PAGE_SIZE {
+            0
+        } else if inv_queue_mem.size() == 2 * PAGE_SIZE {
+            1
+        } else {
+            return Err("inv queue mem must be either one or two pages");
+        };
         let mut iq_reg = InvalidationQueueAddressRegister::default();
-        iq_reg.set_iqa(inv_queue_frame.phys_addr.as_u64());
-        iq_reg.set_dw(false);
-        iq_reg.set_qs(inv_queue_order);
+        iq_reg.set_iqa(inv_queue_mem.start.as_u64());
+        iq_reg.set_dw(desc_size == DescriptorSize::Large);
+        iq_reg.set_qs(order);
         self.set_invalidation_queue_address(iq_reg.bits());
 
         //send enable command to global cmd registers (11.4.4.1)
         //this will also poll for QIES field in global status reg 11.4.4.2
         self.execute_oneshoot_command(Command::QUEUED_INVALIDATION);
 
+        self.invalidation_queue = Some((inv_queue_mem, inv_queue_mapping));
+        self.desc_size = desc_size;
+
         Ok(())
     }
 
-    /// FLush IOMMU and wait for completion.
-    /// WIP:
-    /// - Device TLB flushing  is missing (Sec 6.5.2.5, need to enumerate all devices?)
-    /// - Does only support a few flushes since head and tail register wrap around is not implemented
-    pub fn full_flush_sync(&mut self) -> Result<(), &'static str> {
-        if self.have_pending_invalidation {
-            return Err(
-                "alredy have pending invaliation request. We don't support more than one right now",
-            );
+    /// Initializes and enable the the Queued Invalidation interface described in
+    /// 6.5.2 of the VTD spec
+    /// For 256 bit descriptors, we alloc two pages, otherwise, we use just one
+    pub fn enable_quid_invalidation(
+        &mut self,
+        desc_size: DescriptorSize,
+        allocator: &impl FrameAllocator,
+    ) -> Result<(), &'static str> {
+        if self.invalidation_queue.is_some() {
+            return Err("queued invalidation interface already activated");
         }
-        let mut inv_wb_frame = match self.invalidation_wb_frame {
+        //setup interrupt queue address,  11.4.9.3
+        let frame = match allocator.allocate_frame() {
             Some(v) => v,
-            None => {
-                return Err("writeback  buffer not initialized, this should never happend");
-            }
+            None => return Err("failed to alloc mem for inv queue"),
+        }
+        .zeroed();
+        let mut queue_range = PhysRange {
+            start: frame.phys_addr,
+            end: frame.phys_addr + PAGE_SIZE,
         };
-        let mut inv_queue_frame = match self.invalidation_queue {
+        let queue_mapping = HostVirtAddr::new(frame.virt_addr);
+        if desc_size == DescriptorSize::Large {
+            let frame = match allocator.allocate_frame() {
+                Some(v) => v,
+                None => return Err("failed to alloc mem for inv queue"),
+            }
+            .zeroed();
+            if frame.phys_addr != queue_range.end {
+                return Err("our whacky mem alloc did not give contig range");
+            }
+            queue_range.end = queue_range.end + PAGE_SIZE;
+        }
+
+        self.enable_quid_invaliadtion_from(queue_range, queue_mapping, desc_size)
+    }
+
+    ///Read decriptor from the given offset in the Invalidation Queue
+    /// Assumes that Invalidation Queue feature has been initialized
+    /// #Arguments
+    /// - `offset` : offset in bytes from the start of the queue. Must be a multiple of the descritpor size
+    pub fn read_descriptor(&self, offset: usize) -> Result<RawDescriptor, &'static str> {
+        let (pr, mapping) = match &self.invalidation_queue {
             Some(v) => v,
-            None => {
-                return Err("invalidation qeue not initialized, this should never happen");
-            }
+            None => return Err("invalidation queue not initialized"),
         };
-        let inv_queue = inv_queue_frame.as_array_page();
+        if offset >= pr.size() {
+            return Err("offset out of bounds");
+        }
+        let queue_idx = if offset % (self.desc_size.in_bytes()) == 0 {
+            //queue array is of type u64, offset is in byte from start
+            offset / mem::size_of::<u64>()
+        } else {
+            return Err("offset is not aligned on descriptor boundary");
+        };
 
-        /* Queue logic
-         * - head points to the desciptor that the hardware will process next. HW will increment the register
-         * - tail points to the descriptor to be written next by SW. SW needs to increment. We can batch increment
-         * - hw interprets queue as empty when head == tail
-         * - wait descriptors can be used to synchronise with HW
-         */
+        let mut raw_desc = [0_u64; 4];
 
-        let tail_reg = InvalidationQueueTail::new_from_bits(self.get_invalidation_queue_tail());
-        let head_reg = InvalidationQueueHead::new_from_bits(self.get_invalidation_queue_head());
+        let raw_queue = unsafe { slice::from_raw_parts(mapping.as_u64() as *const u64, pr.size()) };
+        for qw_idx in 0..self.desc_size.in_qw() {
+            raw_desc[qw_idx] = raw_queue[queue_idx + qw_idx];
+        }
 
-        assert_eq!(
-            tail_reg.get_queue_tail(),
-            head_reg.get_queue_head(),
-            "We currently assume that there are no pending entries"
-        );
-
-        //create flush descriptor + wait descriptor
-
-        /*
-        For legacy mode, vtd recommends the following flushes when writing root table entry while using legacy mode
-        - Global context-cache invalidation : Implemented
-        - Global IOTLB invalidation : Implemented
-        - Global Device-TLB invalidation to all affected functions. : TODO
-         */
-
-        //tail_reg is logical index, each desciptor is 128 bit and we have &[u64], so *2 to go from logical index to slice index
-        let mut inv_queue_tail_idx = (tail_reg.get_queue_tail() * 2) as usize;
-
-        let iotlb_flush_desc = IOTLBInvalidateDescriptor::new_flush_all();
-        inv_queue[inv_queue_tail_idx] = iotlb_flush_desc.bits().low;
-        inv_queue[inv_queue_tail_idx + 1] = iotlb_flush_desc.bits().high;
-        inv_queue_tail_idx = (inv_queue_tail_idx + 2) % inv_queue.len();
-
-        let context_flush_desc =
-            ContextCacheInvalidateDescriptor::new(FlushGranularity::GlobalInvalidation);
-        inv_queue[inv_queue_tail_idx] = context_flush_desc.bits().low;
-        inv_queue[inv_queue_tail_idx + 1] = context_flush_desc.bits().high;
-        inv_queue_tail_idx = (inv_queue_tail_idx + 2) % inv_queue.len();
-
-        let inv_ack_data: u32 = 0xdeadbeef;
-        //reset value stored in writeback location
-        inv_wb_frame.as_array_page()[0] = 0;
-        let wait_desc = InvalidationWaitDescriptor::new(inv_wb_frame, inv_ack_data);
-        inv_queue[inv_queue_tail_idx] = wait_desc.bits().low;
-        inv_queue[inv_queue_tail_idx + 1] = wait_desc.bits().high;
-        inv_queue_tail_idx = (inv_queue_tail_idx + 2) % inv_queue.len();
-
-        //set tail register, this informs hw that there are new entries
-        let tail_reg = InvalidationQueueTail::new(inv_queue_tail_idx as u64 / 2)?;
-        self.set_invalidation_queue_tail(tail_reg.bits());
-
-        //poll for completion
-        loop {
-            let raw_ack_data: [u8; 4] = inv_wb_frame.as_ref()[..4].try_into().unwrap();
-            let got_ack_data = u32::from_le_bytes(raw_ack_data);
-            if got_ack_data == inv_ack_data {
-                break;
+        Ok(match self.desc_size {
+            DescriptorSize::Small => RawDescriptor::new_small(raw_desc[0], raw_desc[1]),
+            DescriptorSize::Large => {
+                RawDescriptor::new_large(raw_desc[0], raw_desc[1], raw_desc[2], raw_desc[3])
             }
+        })
+    }
+
+    /// Write decriptor to given offset in the Invalidation Queue
+    /// Assumes that Invalidation Queue feature has been initialized
+    /// #Arguments
+    /// - `offset` : offset in bytes from the start of the queue. Must be a multiple of the descritpor size
+    pub fn write_descriptor(
+        &self,
+        offset_from_queue_start: usize,
+        raw_desc: RawDescriptor,
+    ) -> Result<(), &'static str> {
+        let (pr, mapping) = match &self.invalidation_queue {
+            Some(v) => v,
+            None => return Err("invalidation queue not initialized"),
+        };
+        if offset_from_queue_start >= pr.size() {
+            return Err("offset out of bounds");
+        }
+        let queue_idx = if offset_from_queue_start % (self.desc_size.in_bytes()) == 0 {
+            //queue array is of type u64, offset is in byte from start
+            offset_from_queue_start / mem::size_of::<u64>()
+        } else {
+            return Err("offset is not aligned on descriptor boundary");
+        };
+
+        //linux also just does a memcpy here, no need for read/write volatile
+        let raw_queue =
+            unsafe { slice::from_raw_parts_mut(mapping.as_u64() as *mut u64, pr.size()) };
+        for (offset, qw) in raw_desc.as_qw().iter().enumerate() {
+            raw_queue[queue_idx + offset] = *qw;
         }
         Ok(())
+    }
+
+    /// Returns the size of an descriptor entry in the Invalidation Queue
+    pub fn get_desc_size(&self) -> Result<DescriptorSize, &'static str> {
+        if self.invalidation_queue.is_some() {
+            Ok(self.desc_size)
+        } else {
+            Err("queued invalidation not initialized")
+        }
     }
 
     pub fn iter_fault(&mut self) -> FaultIterator {

@@ -6,6 +6,8 @@
 
 use core::arch::asm;
 
+use x2apic::{dump_irr, dump_isr};
+
 use crate::bitmaps::RFlags;
 use crate::errors::{VmxError, VmxInstructionError};
 use crate::fields::{GeneralPurposeField as GPF, VmcsField, REGFILE_SIZE};
@@ -166,6 +168,21 @@ pub unsafe fn vmresume(
     _vmcs: &mut ActiveVmcs,
     regs: &mut [usize; REGFILE_SIZE],
 ) -> Result<(), VmxError> {
+    //TODO: continue here: large scale test shows that this does not work :(
+    /*
+     * Workaround for sth. that is most likely a QEMU bug: After adding the paravirtualized IOMMU Invaliadtion Queue and IOMMU Interrupt Remapping
+     * drivers, we frequently get stuck while booting Dom0 (during configuration of e1000 device).
+     * It seems like QEMU was not injecting an interrupt properly. Connecting to the qemu monitor and using sth like `info register` or
+     * `nmi` got the VM unstuck. During debugging, I found that the following also prevents the bug from ocurring.
+     * It seems like QEMU is not properly injecting an interrupt for which dom0 waits and that interacting with the apic in qemu
+     * (by e.g. reading this MSR) resolves this.
+     */
+    let isr_state = dump_isr();
+    let irr_state = dump_irr();
+    if isr_state.iter().sum::<u32>() > 0 && irr_state.iter().sum::<u32>() > 0 {
+        log::info!("before, isr {:x?}, irr {:x?}", isr_state, irr_state);
+    }
+
     let rip_field = VmcsField::HostRip as u64;
     let rsp_field = VmcsField::HostRsp as u64;
     // TODO Start by switching lstar IF needed.
@@ -231,6 +248,13 @@ pub unsafe fn vmresume(
     //regs[GPF::Lstar as usize] = msr::Msr::new(IA32_LSTAR.address()).read() as usize;
     // Restore the previous lstar.
     //msr::Msr::new(IA32_LSTAR.address()).write(lstar);
+
+    let isr_state = dump_isr();
+    let irr_state = dump_irr();
+    if isr_state.iter().sum::<u32>() > 0 && irr_state.iter().sum::<u32>() > 0 {
+        log::info!("before, isr {:x?}, irr {:x?}", isr_state, irr_state);
+    }
+
     res
 }
 

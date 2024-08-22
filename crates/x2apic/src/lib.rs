@@ -158,3 +158,27 @@ pub fn send_eoi() {
         wrmsr(IA32_X2APIC_EOI, 0);
     }
 }
+
+/// Return content of IA32_X2APIC_ISR0 to IA32_X2APIC_ISR7
+pub fn dump_isr() -> [u32; 8] {
+    let mut data = [0_u32; 8];
+    for (idx, reg) in (IA32_X2APIC_ISR0..=IA32_X2APIC_ISR7)
+        .into_iter()
+        .enumerate()
+    {
+        unsafe { data[idx] = rdmsr(reg) as u32 }
+    }
+    data
+}
+
+/// Return content of IA32_X2APIC_IRR0 to IA32_X2APIC_IRR7
+pub fn dump_irr() -> [u32; 8] {
+    let mut data = [0_u32; 8];
+    for (idx, reg) in (IA32_X2APIC_IRR0..=IA32_X2APIC_IRR7)
+        .into_iter()
+        .enumerate()
+    {
+        unsafe { data[idx] = rdmsr(reg) as u32 }
+    }
+    data
+}

@@ -1,3 +1,6 @@
+use core::fmt::Display;
+use core::slice;
+
 use vmx::Frame;
 
 /// Register Definitions for the Queued Invalidation Interface
@@ -77,9 +80,38 @@ impl InvalidationQueueTail {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
 pub struct RawDescriptor {
-    pub high: u64,
-    pub low: u64,
+    raw_data: [u64; 4],
+    width: DescriptorSize,
+}
+
+impl RawDescriptor {
+    /// New, invalid small descriptor
+    pub fn new_small(low: u64, high: u64) -> Self {
+        Self {
+            raw_data: [low, high, 0, 0],
+            width: DescriptorSize::Small,
+        }
+    }
+
+    /// New, invalid large descriptor
+    pub fn new_large(qw1: u64, qw2: u64, qw3: u64, qw4: u64) -> Self {
+        Self {
+            raw_data: [qw1, qw2, qw3, qw4],
+            width: DescriptorSize::Large,
+        }
+    }
+
+    /// Return raw data as &[u64]
+    pub fn as_qw(&self) -> &[u64] {
+        &self.raw_data[0..self.width.in_qw()]
+    }
+
+    /// Return raw data as &[u8]
+    pub fn as_bytes(&self) -> &[u8] {
+        unsafe { slice::from_raw_parts(self.raw_data.as_ptr() as *const u8, self.width.in_bytes()) }
+    }
 }
 
 /// Invalidation Queue Tail Register Section 11.4.9.2
@@ -195,10 +227,102 @@ impl IOTLBInvalidateDescriptor {
 
     /// Returns (high bits, low bits)
     pub fn bits(&self) -> RawDescriptor {
-        RawDescriptor {
-            high: self.high,
-            low: self.low,
+        RawDescriptor::new_small(self.low, self.high)
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum DescriptorSize {
+    //128 bit
+    Small,
+    //256 bit
+    Large,
+}
+
+impl DescriptorSize {
+    pub fn in_bytes(&self) -> usize {
+        match self {
+            DescriptorSize::Small => 16,
+            DescriptorSize::Large => 32,
         }
+    }
+    pub fn in_qw(&self) -> usize {
+        self.in_bytes() / 8
+    }
+
+    pub fn from_bytes(bytes: usize) -> Result<DescriptorSize, ()> {
+        match bytes {
+            16 => Ok(DescriptorSize::Small),
+            32 => Ok(DescriptorSize::Large),
+            _ => Err(()),
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub enum DescType {
+    ContextCacheInvalidate,
+    IotlbInvalidate,
+    DeviceTlbInvalidate,
+    InterruptEntryCacheInvalidate,
+    InvalidationWaitDescriptor,
+    PasidBasedIotlbInvalidate,
+    PasidCacheInvalidate,
+    PasidBasedDeviceTlbInvalidate,
+}
+
+impl DescType {
+    const MASK_HIGH: u64 = bitmask(9, 11);
+    const MASK_LOW: u64 = bitmask(0, 3);
+
+    /// Parses the type of a Invalidation descriptor from its first quad word
+    pub fn from_raw(qw1: u64) -> Result<DescType, ()> {
+        let high = qw1 & Self::MASK_HIGH;
+        let low = qw1 & Self::MASK_LOW;
+        //assemble 7 bit descriptor type value out of the two chuncks
+        let v: u64 = (high >> 3) | low;
+
+        match v {
+            0x1 => Ok(Self::ContextCacheInvalidate),
+            0x2 => Ok(Self::IotlbInvalidate),
+            0x3 => Ok(Self::DeviceTlbInvalidate),
+            0x4 => Ok(Self::InterruptEntryCacheInvalidate),
+            0x5 => Ok(Self::InvalidationWaitDescriptor),
+            0x6 => Ok(Self::PasidBasedIotlbInvalidate),
+            0x7 => Ok(Self::PasidCacheInvalidate),
+            0x8 => Ok(Self::PasidBasedDeviceTlbInvalidate),
+            _ => Err(()),
+        }
+    }
+
+    /// Or-mask to apply to first quadword of a descriptor to set this type
+    pub fn as_low_qw_mask(&self) -> u64 {
+        match self {
+            DescType::ContextCacheInvalidate => 0x1,
+            DescType::IotlbInvalidate => 0x2,
+            DescType::DeviceTlbInvalidate => 0x3,
+            DescType::InterruptEntryCacheInvalidate => 0x4,
+            DescType::InvalidationWaitDescriptor => 0x5,
+            DescType::PasidBasedIotlbInvalidate => 0x6,
+            DescType::PasidCacheInvalidate => 0x7,
+            DescType::PasidBasedDeviceTlbInvalidate => 0x8,
+        }
+    }
+}
+
+impl Display for DescType {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let v = match self {
+            DescType::ContextCacheInvalidate => "ContextCacheInvalidate",
+            DescType::IotlbInvalidate => "IotlbInvalidate",
+            DescType::DeviceTlbInvalidate => "DeviceTlbInvalidate",
+            DescType::InterruptEntryCacheInvalidate => "InterruptEntryCacheInvalidate",
+            DescType::InvalidationWaitDescriptor => "InvalidationWaitDescriptor",
+            DescType::PasidBasedIotlbInvalidate => "PasidBasedIotlbInvalidate",
+            DescType::PasidCacheInvalidate => "PasidCacheInvalidate",
+            DescType::PasidBasedDeviceTlbInvalidate => "PasidBasedDeviceTlbInvalidate",
+        };
+        write!(f, "{}", v)
     }
 }
 
@@ -213,7 +337,7 @@ pub struct InvalidationWaitDescriptor {
 impl InvalidationWaitDescriptor {
     /// Fixed value for type field that marks this as in invalidation
     /// wait descriptor
-    const DESC_TYPE: u64 = 0x5;
+    const DESC_TYPE: DescType = DescType::InvalidationWaitDescriptor;
 
     const DW_FLAG: u64 = 0x1 << 5;
 
@@ -228,17 +352,42 @@ impl InvalidationWaitDescriptor {
     pub fn new(status_wb_addr: Frame, wb_value: u32) -> Self {
         let high = status_wb_addr.phys_addr.as_u64();
         assert_eq!(high % 4, 0, "Write back address needs to be 4 byte aligned");
-        let low = Self::DESC_TYPE | Self::DW_FLAG | ((wb_value as u64) << Self::STATUS_DATA_SHIFT);
+        let low = Self::DESC_TYPE.as_low_qw_mask()
+            | Self::DW_FLAG
+            | ((wb_value as u64) << Self::STATUS_DATA_SHIFT);
 
         Self { high, low }
     }
 
+    pub fn get_status_addr(&self) -> u64 {
+        self.high & !0xfff
+    }
+
+    pub fn set_status_addr(&mut self, value: u64) {
+        //save current status bits
+        let status_buf = self.high & 0xfff;
+        self.high = (value & !0xfff) | status_buf;
+    }
+
     /// Returns (high bits, low bits)
-    pub fn bits(&self) -> RawDescriptor {
-        RawDescriptor {
-            high: self.high,
-            low: self.low,
+    pub fn bits(&self, desc_type: DescriptorSize) -> RawDescriptor {
+        match desc_type {
+            DescriptorSize::Small => RawDescriptor::new_small(self.low, self.high),
+            //256 bit just has 0 padding in upper bits
+            DescriptorSize::Large => RawDescriptor::new_large(self.low, self.high, 0, 0),
         }
+    }
+
+    pub fn from_raw(raw: &RawDescriptor) -> Result<Self, ()> {
+        let low = raw.as_qw()[0];
+        let high = raw.as_qw()[1];
+
+        let desc_type = DescType::from_raw(low)?;
+        if desc_type != Self::DESC_TYPE {
+            return Err(());
+        }
+
+        Ok(Self { high, low })
     }
 }
 
@@ -260,7 +409,7 @@ impl ContextCacheInvalidateDescriptor {
     pub fn bits(&self) -> RawDescriptor {
         let high = 0;
         let low = Self::DESC_TYPE | (self.granularity.bits() << Self::GRANULARITY_SHIFT);
-        RawDescriptor { high, low }
+        RawDescriptor::new_small(low, high)
     }
 }
 

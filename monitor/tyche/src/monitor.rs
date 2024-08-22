@@ -1,4 +1,3 @@
-use core::arch::asm;
 use core::{mem, panic, slice};
 
 use attestation::hashing::hash_region;
@@ -6,17 +5,17 @@ use capa_engine::config::NB_CORES;
 use capa_engine::utils::BitmapIterator;
 use capa_engine::{
     permission, AccessRights, Buffer, CapaEngine, CapaError, CapaInfo, Domain, Handle, LocalCapa,
-    MemOps, NextCapaToken, PermissionIterator, RegionIterator, ResourceKind, MEMOPS_ALL,
-    MEMOPS_EXTRAS,
+    MemOps, NextCapaToken, RegionIterator, ResourceKind, MEMOPS_ALL, MEMOPS_EXTRAS,
 };
 use mmu::ioptmapper::PAGE_SIZE;
 use mmu::memory_coloring::color_to_phys::MemoryRegionKind;
-use mmu::memory_coloring::{ColorBitmap, MemoryColoring, MemoryRange, PartitionBitmap};
+use mmu::memory_coloring::{ColorBitmap, MemoryRange, PartitionBitmap};
 use spin::{Mutex, MutexGuard};
 use stage_two_abi::Manifest;
 use vmx::{GuestPhysAddr, HostPhysAddr, HostVirtAddr};
 
 use crate::arch::cpuid;
+use crate::arch::paravirt_iommu::{Command as PvIOMMUCommand, PvIommuResult};
 use crate::attestation_domain::calculate_attestation_hash;
 use crate::calls;
 use crate::data_transfer::{
@@ -98,6 +97,14 @@ pub trait PlatformState {
         domain_handle: &mut Handle<Domain>,
         data_handle: DataTransferPoolHandle,
     ) -> Result<([u8; DataTransferPool::TO_DOMAIN_CHUNCK_SIZE], usize, usize), CapaError>;
+
+    /// Wrapper to execute command in paravirtualized IOMMU driver in Tyche
+    fn execute_pv_iommu_cmd(
+        &self,
+        cmd: PvIOMMUCommand,
+        raw_buf: &[u8],
+        domain_handle: &mut Handle<Domain>,
+    ) -> Result<PvIommuResult, &'static str>;
 
     fn get_hpa(&self, domain_handle: Handle<Domain>, gpa: GuestPhysAddr) -> Option<HostPhysAddr>;
 
@@ -349,6 +356,9 @@ pub trait Monitor<T: PlatformState + 'static> {
                 continue;
             }
 
+            //TODO: In the future, we just leave a whole in the addr space (right now there is a bug/issue, were creating
+            //the root region with no ops, it will just be filled with RAM in the remapper)
+            //Thus we map IOMMU as read only for now
             //Exclude IOMMU
             let device_start = prev.end;
             let device_end = cur.start;
@@ -393,7 +403,7 @@ pub trait Monitor<T: PlatformState + 'static> {
                         start: manifest.iommu_hpa as usize,
                         end: manifest.iommu_hpa as usize + PAGE_SIZE,
                         resource: ResourceKind::Device,
-                        ops: MemOps::NONE,
+                        ops: MemOps::READ,
                     },
                 ) {
                     log::error!("create_root_region for device prefix failed with {:?}", e);
@@ -786,9 +796,7 @@ pub trait Monitor<T: PlatformState + 'static> {
         let data_handle = DataTransferPoolHandle::deserialize(raw_data_handle)?;
         let data = state.consume_data_from_domain(current, data_handle)?;
 
-        /* TODO: lucaintegrate resource kind logic. It seems like the we only uses sth like hash etc from the flags
-         * and not RWX etc. We have the region from the LocalCapa anyways.
-         * Tclarify this with @aghosn
+        /* TODO: luca: don't need resouce kind here, this is already encoded in the capa
          */
         let serialized_rk_data = &data.get_data()[0..ResourceKind::SERIALIZED_SIZE];
 
@@ -1262,6 +1270,38 @@ pub trait Monitor<T: PlatformState + 'static> {
                 res[4] = data_as_usize[2];
                 Ok(true)
             }
+            calls::PV_IOMMU => {
+                if domain.idx() != 0 {
+                    log::error!("Domain {:?} tried to access IOMMU", domain);
+                    return Err(CapaError::InvalidPermissions);
+                }
+                let raw_command = args[0];
+                let cmd = PvIOMMUCommand::from_raw(raw_command).map_err(|_| {
+                    log::info!("CONFIGURE_IOMMU invalid command {}", raw_command);
+                    CapaError::CouldNotDeserializeInfo
+                })?;
+                let raw_buf = &args[1..6];
+                let raw_buf_u8 = unsafe {
+                    slice::from_raw_parts(
+                        raw_buf.as_ptr() as *const u8,
+                        raw_buf.len() * mem::size_of::<usize>(),
+                    )
+                };
+                match Self::do_pv_iommu_cmd(cmd, raw_buf_u8, state, domain) {
+                    Ok(res_data) => {
+                        //copy result data
+                        for (idx, v) in res_data.get_raw().iter().enumerate() {
+                            res[idx] = *v;
+                        }
+                    }
+                    Err(e) => {
+                        log::error!("do_pv_iommu_cmd failed with {:?}", e);
+                        return Err(e);
+                    }
+                }
+
+                Ok(true)
+            }
             _ => {
                 log::info!("do_monitor_call : operation failed : call number {}", call);
                 return Err(CapaError::InvalidOperation);
@@ -1344,6 +1384,22 @@ pub trait Monitor<T: PlatformState + 'static> {
         //store
         state.store_domain_data(current, data_handle, data, mark_finished != 0)?;
         Ok(data_handle)
+    }
+
+    /// Wrapper to execute cmd in paravirt iommu driver
+    fn do_pv_iommu_cmd(
+        cmd: PvIOMMUCommand,
+        raw_buf: &[u8],
+        state: &mut T,
+        current: &mut Handle<Domain>,
+    ) -> Result<PvIommuResult, CapaError> {
+        match state.execute_pv_iommu_cmd(cmd, raw_buf, current) {
+            Ok(v) => Ok(v),
+            Err(e) => {
+                log::error!("execute_pv_iommu_cmd for cmd {} failed: {:?}", cmd, e);
+                Err(CapaError::PvIommuError)
+            }
+        }
     }
 
     fn apply_updates(state: &mut T, engine: &mut MutexGuard<CapaEngine>) {

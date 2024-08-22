@@ -3,14 +3,11 @@
 //! The remapper is not part of the capa-engine, but a wrapper that can be used to keep trap of
 //! virtual addresses for platform such as x86 that needs to emulate second-level page tables.
 
-use core::arch::asm;
 use core::iter::Peekable;
-use core::{array, cmp, fmt, mem};
+use core::{array, cmp, fmt};
 
 use kmerge_iter::{new_compactified_mapping_iter, CompatifiedMappingIter, MergedRemapIter};
-use mmu::ioptmapper::PAGE_SIZE;
 use mmu::memory_coloring::{MemoryColoring, PartitionBitmap};
-use utils::{GuestPhysAddr, HostPhysAddr};
 
 use crate::config::NB_TRACKER;
 use crate::region::{
@@ -120,8 +117,6 @@ impl<const SIMPLE: usize, const COMPACT: usize> Remapper<SIMPLE, COMPACT> {
     where
         T: MemoryColoring + Clone + Default,
     {
-        let simple = &self.segments;
-
         let mut compactified_iters: [CompatifiedMappingIter<'a, T>; COMPACT] =
             array::from_fn(|_| CompatifiedMappingIter::default());
         let mut compactified_len = 0;
@@ -187,7 +182,7 @@ impl<const SIMPLE: usize, const COMPACT: usize> Remapper<SIMPLE, COMPACT> {
         regions_iter: RegionIterator,
     ) -> Result<(), CapaError> {
         let mut remap_region_snapshot = RegionTracker::new();
-        for (a, x) in regions_iter {
+        for (_, x) in regions_iter {
             let is_device = match x.get_resource_kind() {
                 RegionResourceKind::Device => true,
                 _ => false,

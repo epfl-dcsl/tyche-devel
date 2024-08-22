@@ -1,4 +1,3 @@
-use core::arch::asm;
 use core::sync::atomic::{AtomicBool, Ordering};
 
 use capa_engine::config::{NB_COMPACT_REMAPS, NB_CORES, NB_DOMAINS, NB_SIMPLE_REMAPS};
@@ -9,6 +8,7 @@ use capa_engine::{
 use mmu::eptmapper::EPT_ROOT_FLAGS;
 use mmu::mapper::Mapper;
 use mmu::memory_coloring::ActiveMemoryColoring;
+use mmu::walker::Address;
 use mmu::{EptMapper, FrameAllocator, IoPtFlag, IoPtMapper};
 use spin::{Mutex, MutexGuard};
 use stage_two_abi::Manifest;
@@ -16,14 +16,16 @@ use utils::{GuestPhysAddr, HostPhysAddr, HostVirtAddr};
 use vmx::bitmaps::{EptEntryFlags, EptMemoryType};
 use vmx::fields::VmcsField;
 use vmx::{ActiveVmcs, Vmxon};
-use vtd::{Command, Iommu};
+use vtd::Iommu;
 
 use super::context::Contextx86;
+use super::paravirt_iommu::{Command, ParavirtIOMMU, PvIommuResult};
 use super::vmx_helper::{dump_host_state, load_host_state};
 use crate::allocator::{allocator, available_pages_in_allocator};
 use crate::data_transfer::DataTransferPool;
 use crate::monitor::PlatformState;
 use crate::rcframe::{RCFrame, RCFramePool, EMPTY_RCFRAME};
+use crate::statics::get_manifest;
 use crate::sync::Barrier;
 
 /// VMXState encapsulates the vmxon and current vcpu.
@@ -43,6 +45,8 @@ pub static CONTEXTS: [[Mutex<Contextx86>; NB_CORES]; NB_DOMAINS] =
     [EMPTY_CONTEXT_ARRAY; NB_DOMAINS];
 pub static IOMMU: Mutex<Iommu> =
     Mutex::new(unsafe { Iommu::new(HostVirtAddr::new(usize::max_value())) });
+pub static PV_IOMMU: Mutex<ParavirtIOMMU> = Mutex::new(ParavirtIOMMU::new(&IOMMU));
+
 pub const FALSE: AtomicBool = AtomicBool::new(false);
 pub static TLB_FLUSH_BARRIERS: [Barrier; NB_DOMAINS] = [Barrier::NEW; NB_DOMAINS];
 pub static TLB_FLUSH: [AtomicBool; NB_DOMAINS] = [FALSE; NB_DOMAINS];
@@ -83,6 +87,17 @@ pub struct DataX86 {
 pub type StateX86 = VmxState;
 
 impl StateX86 {
+    /// Wrapper to execute command in paravirtualized IOMMU driver
+    pub fn execute_pv_iommu_cmd(
+        &self,
+        cmd: Command,
+        raw_buf: &[u8],
+        domain_handle: &mut Handle<Domain>,
+    ) -> Result<PvIommuResult, &'static str> {
+        let mut pv_iommu = PV_IOMMU.lock();
+        pv_iommu.execute(cmd, raw_buf, domain_handle, self)
+    }
+
     pub unsafe fn free_ept(ept: HostPhysAddr, allocator: &impl FrameAllocator) {
         let mapper = EptMapper::new(allocator.get_physical_offset().as_usize(), ept);
         mapper.free_all(allocator);
@@ -102,11 +117,12 @@ impl StateX86 {
         // luca: to my understanding IOPTs are global and not per VM. Only update sth here if we want to
         // give a device to a VM/TD. In that case, only update that devices entry. If we have given device
         // to another TD, keep the 2nd level entries for that device in sync with the TD
-        // TODO: how to encode who own which device?
+        // TODO: how to encode who owns which device?
         // Right now, we assume all devices belong to dom0
-        if domain_handle.idx() != 0 {
+        if domain_handle.idx() != 0 || domain.iopt.is_some() {
             return false;
         }
+        log::info!("updating iommu page tables");
 
         if domain.iopt_old.is_some() {
             panic!("Updating IOPTs while previous one's have not been freed yet");
@@ -132,6 +148,15 @@ impl StateX86 {
                 log::error!("there is a region without read permission: {}", range);
                 continue;
             }
+
+            //Workaround: For now, we don't have a good way to update IOMMU page tables yet
+            //Thus, don't map memory that we will later pass to VMs/TDs. As this memory
+            //is excluded from linux allocator it will never be used for dma
+            if get_manifest().dom0_gpa_additional_mem != 0
+                && range.gpa >= get_manifest().dom0_gpa_additional_mem
+            {
+                continue;
+            }
             iopt_mapper.map_range(
                 allocator,
                 &GuestPhysAddr::new(range.gpa),
@@ -148,18 +173,6 @@ impl StateX86 {
         let mut iommu = IOMMU.lock();
         //will only be != 0 if we have initialized the IOMUU. Could be more elegant with an option
         if iommu.as_ptr_mut() as usize != 0 {
-            //Enable queued invalidation if it is not already enabled
-            if !iommu
-                .get_global_status()
-                .contains(Command::QUEUED_INVALIDATION)
-            {
-                if let Err(e) = iommu.enable_quid_invalidation(allocator) {
-                    log::error!("Failed to enable queued invalidation: {}", e);
-                    panic!("IOMMU setup failed");
-                }
-                log::info!("IOMMU: enabled queued invalidation");
-            }
-
             let root_addr: HostPhysAddr =
                 vtd::setup_iommu_context(iopt_mapper.get_root(), allocator);
             /*11.4.5 in vtd spec:
@@ -171,16 +184,6 @@ impl StateX86 {
             iommu.set_root_table_addr(rtar_val);
             iommu.update_root_table_addr();
             iommu.enable_translation();
-            if iommu.get_fault_status().have_fault() {
-                log::info!("I/O MMU: {:?}", iommu.get_global_status());
-                log::warn!("I/O MMU Fault: {:?}", iommu.get_fault_status());
-            }
-
-            //log::info!("IOMMU: flushing");
-            if let Err(e) = iommu.full_flush_sync() {
-                log::error!("IOMMU: flush failed: {}", e);
-                panic!("IOMMU flush failed");
-            }
             if iommu.get_fault_status().have_fault() {
                 log::info!("I/O MMU: {:?}", iommu.get_global_status());
                 log::warn!("I/O MMU Fault: {:?}", iommu.get_fault_status());
@@ -290,11 +293,7 @@ impl StateX86 {
             domain_handle,
             available_pages_in_allocator()
         );
-        //log::info!("\n ### entering update_domain_ept ###\n");
-
         let ept_res = Self::update_ept_tables(domain_handle, engine);
-
-        //log::info!("\n #### Updating IOPTs ####\n");
         let iommu_res = Self::update_iommu_page_tables(domain_handle, engine);
 
         ept_res || iommu_res

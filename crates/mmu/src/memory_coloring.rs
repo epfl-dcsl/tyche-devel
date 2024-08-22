@@ -342,7 +342,7 @@ impl DummyMemoryColoring {
     //USER CONFIGURED VALUES
 
     //use 2 to the power of COLOR_ORDER many colors
-    //keep in sync with TYCHE_COLOR_COUNT in linux/drivers/tyche/libraries/capabilities/include/ecs.h
+    //keep in sync with TYCHE_COLOR_COUNT in linux/drivers/tyche/libraries/capabilities/include/color_bitmap.h
     pub const COLOR_ORDER: usize = 6;
 
     //shift out this many bits of the HPA; then interpret the lowest log2(COLOR_ORDER)

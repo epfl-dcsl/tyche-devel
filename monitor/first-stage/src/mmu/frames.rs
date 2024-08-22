@@ -23,7 +23,6 @@ pub const PAGE_SIZE: usize = 0x1000;
 /// How much memory to reserve for the second stage
 /// Gibibyte as bytes
 const GIB: usize = 1 << 30;
-const MIB: usize = 1 << 20;
 const GUEST_RESERVED_MEMORY: usize = 8 * GIB;
 const SECOND_STAGE_RESERVED_MEMORY: u64 = 2 * GIB as u64;
 

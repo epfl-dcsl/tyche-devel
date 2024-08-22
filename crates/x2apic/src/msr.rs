@@ -41,6 +41,12 @@ pub const IA32_X2APIC_ISR0: u32 = 0x810;
 /// x2APIC In-Service register bits \[255:224\] (R/O)
 pub const IA32_X2APIC_ISR7: u32 = 0x817;
 
+/// x2APIC Interrupt request register bits \[31:0\] (R/O)
+/// Registers for the remaining bits use contig addresses until IA32_X2APIC_IRR7
+pub const IA32_X2APIC_IRR0: u32 = 0x820;
+/// x2APIC Interrupt request register bits \[255:224\] (R/O)
+pub const IA32_X2APIC_IRR7: u32 = 0x827;
+
 /// x2APIC Interrupt Command register (R/W)
 pub const IA32_X2APIC_ICR: u32 = 0x830;
 

@@ -5,9 +5,9 @@ use core::sync::atomic::Ordering;
 
 use capa_engine::context::RegisterGroup;
 use capa_engine::utils::BitmapIterator;
-use capa_engine::{AccessRights, CapaEngine, CapaError, Domain, Handle, MemOps, PermissionIterator, RegionIterator};
+use capa_engine::{AccessRights, CapaEngine, CapaError, Domain, Handle, MemOps, RegionIterator};
 use mmu::eptmapper::EPT_ROOT_FLAGS;
-use mmu::memory_coloring::{ActiveMemoryColoring, MemoryColoring};
+use mmu::memory_coloring::ActiveMemoryColoring;
 use mmu::{EptMapper, FrameAllocator};
 use spin::MutexGuard;
 use stage_two_abi::{GuestInfo, Manifest};
@@ -516,6 +516,16 @@ impl PlatformState for StateX86 {
     fn context_interrupted(&mut self, domain: &Handle<Domain>, core: usize) {
         let mut context = Self::get_context(*domain, core);
         context.interrupted = true;
+    }
+    
+    /// Wrapper to pass command to paravirtualized IOMMU driver in tyche
+    fn execute_pv_iommu_cmd(
+        &self,
+        cmd: super::paravirt_iommu::Command,
+        raw_buf: &[u8],
+        domain_handle: &mut Handle<Domain>,
+    ) -> Result<super::paravirt_iommu::PvIommuResult, &'static str> {
+        Self::execute_pv_iommu_cmd(&self, cmd, raw_buf, domain_handle)
     }
 }
 

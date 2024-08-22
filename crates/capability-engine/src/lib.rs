@@ -80,6 +80,7 @@ pub enum CapaError {
     CapaOperationOnDifferentResourceKinds,
     InternalMappingError,
     AccessToUnfinishedDataTransferEntry,
+    PvIommuError,
 }
 
 pub struct CapaEngine {

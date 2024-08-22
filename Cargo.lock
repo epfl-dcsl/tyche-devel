@@ -1241,6 +1241,7 @@ dependencies = [
  "bitflags",
  "log",
  "utils",
+ "x2apic 0.1.0",
 ]
 
 [[package]]
