@@ -14,6 +14,8 @@ const RUN_ARGS: &[&str] = &[
     "-machine", "q35",
     "-accel", "kvm,kernel-irqchip=split",
     "-m", "6G",
+    //"-netdev", "user,id=net0,hostfwd=tcp:127.0.0.1:2222-:22",
+    //"-device", "e1000,netdev=net0",
 ];
 const TEST_ARGS: &[&str] = &[
     "--no-reboot",
