@@ -19,6 +19,7 @@ use vmx::{GuestPhysAddr, HostVirtAddr, VmxExitReason};
 use super::context::{ContextGpx86, Contextx86};
 use super::cpuid_filter::{filter_mpk, filter_tpause};
 use super::init::NB_BOOTED_CORES;
+use super::paravirt_iommu::{Command as PvIommuCommand, PvIommuResult};
 use super::state::{DataX86, StateX86, VmxState, CONTEXTS, DOMAINS, IOMMU, RC_VMCS, TLB_FLUSH};
 use super::vmx_helper::{dump_host_state, load_host_state};
 use super::{cpuid, vmx_helper};
@@ -521,10 +522,10 @@ impl PlatformState for StateX86 {
     /// Wrapper to pass command to paravirtualized IOMMU driver in tyche
     fn execute_pv_iommu_cmd(
         &self,
-        cmd: super::paravirt_iommu::Command,
+        cmd: PvIommuCommand,
         raw_buf: &[u8],
         domain_handle: &mut Handle<Domain>,
-    ) -> Result<super::paravirt_iommu::PvIommuResult, &'static str> {
+    ) -> Result<PvIommuResult, &'static str> {
         Self::execute_pv_iommu_cmd(&self, cmd, raw_buf, domain_handle)
     }
 }

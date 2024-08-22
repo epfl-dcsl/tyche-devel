@@ -8,7 +8,6 @@ use capa_engine::{
 use mmu::eptmapper::EPT_ROOT_FLAGS;
 use mmu::mapper::Mapper;
 use mmu::memory_coloring::ActiveMemoryColoring;
-use mmu::walker::Address;
 use mmu::{EptMapper, FrameAllocator, IoPtFlag, IoPtMapper};
 use spin::{Mutex, MutexGuard};
 use stage_two_abi::Manifest;
