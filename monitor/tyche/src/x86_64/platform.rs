@@ -820,6 +820,7 @@ impl MonitorX86 {
         | VmxExitReason::Exception
         | VmxExitReason::Wrmsr
         | VmxExitReason::Rdmsr
+        | VmxExitReason::Xsetbv
         | VmxExitReason::ApicWrite
         | VmxExitReason::InterruptWindow
         | VmxExitReason::Wbinvd
