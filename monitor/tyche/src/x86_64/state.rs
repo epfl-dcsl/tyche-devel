@@ -15,6 +15,7 @@ use utils::{GuestPhysAddr, HostPhysAddr, HostVirtAddr};
 use vmx::bitmaps::{EptEntryFlags, EptMemoryType};
 use vmx::fields::VmcsField;
 use vmx::{ActiveVmcs, Vmxon};
+use vtd::queue_invalidation_regs::DescriptorSize;
 use vtd::Iommu;
 
 use super::context::Contextx86;
@@ -181,6 +182,14 @@ impl StateX86 {
              */
             let rtar_val = root_addr.as_u64();
             iommu.set_root_table_addr(rtar_val);
+            if !iommu.is_quid_enabled() {
+                //TODO: get descritptor size from HW
+                log::info!("enabling quid invalidation");
+                iommu
+                    .enable_quid_invalidation(DescriptorSize::Small, allocator)
+                    .unwrap();
+            }
+            iommu.flush_for_set_root_ptr(allocator).unwrap();
             iommu.update_root_table_addr();
             iommu.enable_translation();
             if iommu.get_fault_status().have_fault() {

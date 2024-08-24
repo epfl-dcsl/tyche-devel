@@ -12,7 +12,7 @@ use mmu::{EptMapper, FrameAllocator};
 use spin::MutexGuard;
 use stage_two_abi::{GuestInfo, Manifest};
 use utils::HostPhysAddr;
-use vmx::bitmaps::exit_qualification;
+use vmx::bitmaps::{exit_qualification, ExceptionBitmap, PinbasedControls};
 use vmx::fields::VmcsField;
 use vmx::{GuestPhysAddr, HostVirtAddr, VmxExitReason};
 
@@ -73,7 +73,7 @@ impl PlatformState for StateX86 {
     type DomainData = DataX86;
     type Context = Contextx86;
 
-    ///Get the HPA for the given GPA
+    ///Get the HPA for the given GPA, preserves the offset bits
     fn get_hpa(&self, domain_handle: Handle<Domain>, gpa: GuestPhysAddr) -> Option<HostPhysAddr> {
         let domain = Self::get_domain(domain_handle);
         let mut ept_mapper = match domain.ept {
@@ -605,6 +605,16 @@ impl MonitorX86 {
 
     pub fn main_loop(&mut self, mut state: StateX86, mut domain: Handle<Domain>) {
         let core_id = cpuid();
+        state
+            .vcpu
+            .set_exception_bitmap(ExceptionBitmap::NMI)
+            .unwrap();
+        state
+            .vcpu
+            .set_pin_based_ctrls(PinbasedControls::NMI_EXITING)
+            .unwrap();
+            log::info!("vcpu at start: {:#x?}", state.vcpu);
+      
         let mut result = unsafe {
             let mut context = StateX86::get_context(domain, core_id);
             state.vcpu.run(&mut context.regs.state_gp.values)

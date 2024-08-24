@@ -9,7 +9,7 @@ use serialize_deserialize::{
     serialize_readl_result, serialize_readq_result, QiDescReadReq, QiDescWriteReq, QiInitReq,
 };
 use spin::Mutex;
-use vmx::{GuestPhysAddr, HostPhysAddr};
+use vmx::{raw, GuestPhysAddr, HostPhysAddr};
 use vtd::queue_invalidation_regs::{DescType, InvalidationWaitDescriptor};
 use vtd::Iommu;
 
@@ -59,6 +59,12 @@ impl ReverseMap {
     fn store(&mut self, hpa: HostPhysAddr, gpa: GuestPhysAddr) {
         //this is sized large enough that we should never overwrite any entry that we still need
         //TODO: better data structure, invalidate once descriptor has been processed
+        /*for (s_hpa, s_gpa) in self.reverse_map.iter_mut() {
+            if *s_hpa == hpa {
+                *s_gpa = gpa;
+                return;
+            }
+        }*/
         self.reverse_map[self.rm_next_idx] = (hpa, gpa);
         self.rm_next_idx = (self.rm_next_idx + 1) % self.reverse_map.len();
     }
@@ -150,6 +156,7 @@ impl ParavirtIOMMU {
             DmarRegister::IrtaReg => {
                 //addr is 4KiB aligned, offfset bits are used for config flags
                 let config_bits: u64 = value.into() & 0xfff;
+                assert_eq!(config_bits, (1 << 11) | 7);
                 let gpa = GuestPhysAddr::from_u64(value.into() & !0xfff);
                 let hpa = DomainAccessibleHPA::new(gpa, calling_domain, domain_state)?;
 
@@ -176,7 +183,14 @@ impl ParavirtIOMMU {
         T: Into<u64>,
     {
         let raw_value: T = Self::read(mapping, target);
-        let result_value = match target {
+        let result_value: T = match target {
+            DmarRegister::GcmdReg => {
+                let dma_remap_mask: u64 = 1 << 31;
+                //hide that dma remapping is enabled
+                (raw_value.into() & !dma_remap_mask)
+                    .try_into()
+                    .map_err(|_| "failed to coerce from u64 to type T")?
+            }
             DmarRegister::IqaReg => {
                 return Err("IqaReg used in Readl");
             }
@@ -292,6 +306,11 @@ impl ParavirtIOMMU {
                     }
                     //Wait descriptor contains writeback GPA -> replace with HPA
                     DescType::InvalidationWaitDescriptor => {
+                        if (input.raw_desc.as_qw()[0] & (1 << 4)) != 0 {
+                            return Err(
+                                "wait descriptor with IF flag, need to investigate this further",
+                            );
+                        }
                         let mut wait_desc = InvalidationWaitDescriptor::from_raw(&input.raw_desc)
                             .map_err(|_| "failed to parse wait descriptor")?;
                         let gpa = GuestPhysAddr::from_u64(wait_desc.get_status_addr());

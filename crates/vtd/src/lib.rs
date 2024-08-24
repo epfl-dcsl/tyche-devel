@@ -10,7 +10,8 @@ use mmu::frame_allocator::PhysRange;
 use mmu::ioptmapper::PAGE_SIZE;
 use mmu::FrameAllocator;
 use queue_invalidation_regs::{
-    DescriptorSize, InvalidationQueueAddressRegister, InvalidationQueueTail, RawDescriptor,
+    ContextCacheInvalidateDescriptor, DescriptorSize, FlushGranularity, IOTLBInvalidateDescriptor,
+    InvalidationQueueAddressRegister, InvalidationWaitDescriptor, RawDescriptor,
 };
 use vmx::{HostPhysAddr, HostVirtAddr};
 
@@ -125,10 +126,14 @@ impl Iommu {
     ) -> Result<(), &'static str> {
         //initialize tail register 11.4.9.2
         //the head register is managed by HW
-        let mut tail_reg = InvalidationQueueTail::default();
-        tail_reg.set_queue_tail(0)?;
-        self.set_invalidation_queue_tail(tail_reg.bits());
-
+        /*let mut tail_reg = InvalidationQueueTail::default();
+        tail_reg.set_queue_tail(0)?;*/
+        self.set_invalidation_queue_tail(0);
+        assert_eq!(
+            self.get_invalidation_queue_head(),
+            0,
+            "queue head should be zero at initialization"
+        );
         let order = if inv_queue_mem.size() == PAGE_SIZE {
             0
         } else if inv_queue_mem.size() == 2 * PAGE_SIZE {
@@ -152,6 +157,10 @@ impl Iommu {
         Ok(())
     }
 
+    pub fn is_quid_enabled(&self) -> bool {
+        self.invalidation_queue.is_some()
+    }
+
     /// Initializes and enable the the Queued Invalidation interface described in
     /// 6.5.2 of the VTD spec
     /// For 256 bit descriptors, we alloc two pages, otherwise, we use just one
@@ -160,8 +169,10 @@ impl Iommu {
         desc_size: DescriptorSize,
         allocator: &impl FrameAllocator,
     ) -> Result<(), &'static str> {
-        if self.invalidation_queue.is_some() {
-            return Err("queued invalidation interface already activated");
+        if self.invalidation_queue.is_some() && self.desc_size != desc_size {
+            return Err(
+                "queued invalidation interface already activated with different descriptor size",
+            );
         }
         //setup interrupt queue address,  11.4.9.3
         let frame = match allocator.allocate_frame() {
@@ -210,7 +221,12 @@ impl Iommu {
 
         let mut raw_desc = [0_u64; 4];
 
-        let raw_queue = unsafe { slice::from_raw_parts(mapping.as_u64() as *const u64, pr.size()) };
+        let raw_queue = unsafe {
+            slice::from_raw_parts(
+                mapping.as_u64() as *const u64,
+                pr.size() / mem::size_of::<u64>(),
+            )
+        };
         for qw_idx in 0..self.desc_size.in_qw() {
             raw_desc[qw_idx] = raw_queue[queue_idx + qw_idx];
         }
@@ -247,11 +263,53 @@ impl Iommu {
         };
 
         //linux also just does a memcpy here, no need for read/write volatile
-        let raw_queue =
-            unsafe { slice::from_raw_parts_mut(mapping.as_u64() as *mut u64, pr.size()) };
+        let raw_queue = unsafe {
+            slice::from_raw_parts_mut(
+                mapping.as_u64() as *mut u64,
+                pr.size() / mem::size_of::<u64>(),
+            )
+        };
         for (offset, qw) in raw_desc.as_qw().iter().enumerate() {
             raw_queue[queue_idx + offset] = *qw;
         }
+        Ok(())
+    }
+
+    pub fn flush_for_set_root_ptr(
+        &mut self,
+        allocator: &impl FrameAllocator,
+    ) -> Result<(), &'static str> {
+        if self.invalidation_queue.is_none() {
+            return Err("invalidation queue interface not initialized");
+        };
+
+        let mut tail = self.get_invalidation_queue_tail() as usize;
+
+        self.write_descriptor(
+            tail,
+            ContextCacheInvalidateDescriptor::new(FlushGranularity::GlobalInvalidation).bits(),
+        )?;
+        tail += self.desc_size.in_bytes();
+        self.write_descriptor(tail, IOTLBInvalidateDescriptor::new_flush_all().bits())?;
+        tail += self.desc_size.in_bytes();
+
+        let mut wait_wb_buf = allocator.allocate_frame().unwrap();
+        let wb_value = 42;
+        self.write_descriptor(
+            tail,
+            InvalidationWaitDescriptor::new_sw_fence(wait_wb_buf.phys_addr, wb_value)
+                .bits(self.desc_size),
+        )?;
+        tail += self.desc_size.in_bytes();
+
+        log::info!("updating tail reg");
+        self.set_invalidation_queue_tail(tail as u64);
+        log::info!("waiting for writeback");
+
+        while wait_wb_buf.as_array_page()[0] != wb_value {}
+        log::info!("done");
+        unsafe { allocator.free_frame(wait_wb_buf.phys_addr).unwrap() };
+
         Ok(())
     }
 

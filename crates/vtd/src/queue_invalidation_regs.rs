@@ -1,7 +1,7 @@
 use core::fmt::Display;
 use core::slice;
 
-use vmx::Frame;
+use vmx::{Frame, HostPhysAddr};
 
 /// Register Definitions for the Queued Invalidation Interface
 /// Specified in 6.5.2 of the VTD spec
@@ -15,7 +15,7 @@ const fn bitmask(start: u32, end: u32) -> u64 {
     ((1u64 << (end - start + 1)) - 1) << start
 }
 
-///Invalidation Queue Head Register
+/*///Invalidation Queue Head Register
 /// 11.4.9 Invalidation Queue Interface
 #[derive(Debug, Default, Clone, Copy)]
 pub struct InvalidationQueueHead {
@@ -37,10 +37,10 @@ impl InvalidationQueueHead {
     pub fn get_queue_head(&self) -> u64 {
         self.queue_head
     }
-}
+}*/
 
 //11.4.9.2 Invalidation Queue Tail Register in VTD spec
-#[derive(Debug, Default, Clone, Copy)]
+/*#[derive(Debug, Default, Clone, Copy)]
 pub struct InvalidationQueueTail {
     state: u64,
 }
@@ -78,7 +78,7 @@ impl InvalidationQueueTail {
         v.set_queue_tail(tail_value)?;
         Ok(v)
     }
-}
+}*/
 
 #[derive(Clone, Copy, Debug)]
 pub struct RawDescriptor {
@@ -126,8 +126,6 @@ pub struct InvalidationQueueAddressRegister {
 }
 
 impl InvalidationQueueAddressRegister {
-    const IQA_MASK: u64 = bitmask(12, 63);
-
     const DW_SHIFT: u64 = 11;
     const DW_MASK: u64 = (1 << Self::DW_SHIFT);
 
@@ -135,12 +133,12 @@ impl InvalidationQueueAddressRegister {
     const QS_MASK: u64 = bitmask(Self::QS_SHIFT as u32, 2);
 
     pub fn bits(&self) -> u64 {
-        (self.iqa & Self::IQA_MASK) | (self.dw << Self::DW_SHIFT) | (self.qs << Self::QS_SHIFT)
+        (self.iqa) | (self.dw << Self::DW_SHIFT) | (self.qs << Self::QS_SHIFT)
     }
 
     /// 4 KiB aligned addr of invalidation request queue
     pub fn set_iqa(&mut self, addr: u64) {
-        assert_eq!(addr & !Self::IQA_MASK, 0, "set iqa: addr not 4 KiB aligned");
+        assert_eq!(addr & 0xfff, 0, "set iqa: addr not 4 KiB aligned");
         self.iqa = addr;
     }
 
@@ -170,7 +168,7 @@ impl InvalidationQueueAddressRegister {
     }
 
     pub fn new_from_bits(bits: u64) -> Self {
-        let iqa = bits & Self::IQA_MASK;
+        let iqa = bits & !0xfff;
         let dw = (bits & Self::DW_MASK) >> Self::DW_SHIFT;
         let qs = (bits & Self::QS_MASK) >> Self::QS_SHIFT;
 
@@ -339,34 +337,40 @@ impl InvalidationWaitDescriptor {
     /// wait descriptor
     const DESC_TYPE: DescType = DescType::InvalidationWaitDescriptor;
 
-    const DW_FLAG: u64 = 0x1 << 5;
-
     const STATUS_DATA_SHIFT: u64 = 32;
     #[allow(dead_code)]
     const STATUS_DATA_MASK: u64 = bitmask(Self::STATUS_DATA_SHIFT as u32, 63);
 
-    /// New wait descritptor. Poll `status_wb_addr` for `wb_value` to check check completion
-    /// # Arguments
-    /// - `status_wb_addr` : address to write value to once preceeding requests have completed
-    /// - `wb_value` : value to write to `status_wb_addr` once preceeding requests have completed
-    pub fn new(status_wb_addr: Frame, wb_value: u32) -> Self {
-        let high = status_wb_addr.phys_addr.as_u64();
-        assert_eq!(high % 4, 0, "Write back address needs to be 4 byte aligned");
-        let low = Self::DESC_TYPE.as_low_qw_mask()
-            | Self::DW_FLAG
-            | ((wb_value as u64) << Self::STATUS_DATA_SHIFT);
-
+    pub fn new_sw_fence(wb_addr: HostPhysAddr, wb_value: u64) -> InvalidationWaitDescriptor {
+        let high = wb_addr.as_u64();
+        let low = wb_value << Self::STATUS_DATA_SHIFT
+            | Self::DESC_TYPE.as_low_qw_mask()
+            | (1 << 5)
+            | (1 << 6);
         Self { high, low }
     }
 
     pub fn get_status_addr(&self) -> u64 {
-        self.high & !0xfff
+        self.high
     }
 
     pub fn set_status_addr(&mut self, value: u64) {
-        //save current status bits
-        let status_buf = self.high & 0xfff;
-        self.high = (value & !0xfff) | status_buf;
+        //this is wrong: lowest two bits (not 12) are reserved but NOT status bits
+        let old_buggy_status_check = self.high & 0xfff;
+        if old_buggy_status_check != 0 {
+            log::error!(
+                "old code wold have ORed 0x{} to addr",
+                old_buggy_status_check
+            );
+        }
+        assert_eq!(
+            value & 0b11,
+            0,
+            "writeback addr 0x{:x} needs to be 4 byte aligned",
+            value
+        );
+
+        self.high = value
     }
 
     /// Returns (high bits, low bits)

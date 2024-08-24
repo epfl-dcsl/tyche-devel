@@ -5,6 +5,7 @@ use vmx::bitmaps::{EptEntryFlags, EptMemoryType};
 use vmx::ept::{GIANT_PAGE_SIZE, HUGE_PAGE_SIZE, PAGE_SIZE};
 
 use crate::frame_allocator::FrameAllocator;
+use crate::ioptmapper::PAGE_MASK;
 use crate::mapper::Mapper;
 use crate::walker::{Address, Level, WalkNext, Walker};
 
@@ -117,7 +118,9 @@ impl Mapper for EptMapper {
 }
 
 impl EptMapper {
+    /// Get HPA for GPA, preserves offset bits
     pub fn lookup(&mut self, gpa: GuestPhysAddr) -> Option<HostPhysAddr> {
+        let offset_bits = gpa.as_u64() & PAGE_MASK as u64;
         let mut result_hpa = None;
         let walk_result = unsafe {
             self.walk_range(
@@ -141,7 +144,7 @@ impl EptMapper {
             //Walk succeeded but GPA is not mapped
             (None, Ok(_)) => return None,
             //Walk succeeded and GPA is mapped
-            (Some(hpa), _) => return Some(HostPhysAddr::from_u64(hpa)),
+            (Some(hpa), _) => return Some(HostPhysAddr::from_u64(hpa | offset_bits)),
             //Walk failed, mapping status unknown, should not happen if PTs are well formed
             _ => panic!("EPT walk failed"),
         }

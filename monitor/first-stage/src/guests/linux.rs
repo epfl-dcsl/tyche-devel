@@ -40,7 +40,7 @@ const SETUP_HDR: u64 = 0x1f1;
  * - intremap=nopost : We do not support interrrupt posting but want interrupt remapping. Currently QEMU does not have support for posting in its IOMMU anyway
  */
 static COMMAND_LINE: &'static [u8] =
-    b"root=/dev/sdb2 apic=debug earlyprintk=serial,ttyS0 console=ttyS0 iommu=on intel_iommu=on iommu.passthrough=1 intremap=nopost iommu.strict=1\0";
+    b"root=/dev/sdb2 apic=debug earlyprintk=serial,ttyS0 console=ttyS0 iommu=off intremap=on swiotlb=force\0";
 #[cfg(feature = "bare_metal")]
 static COMMAND_LINE: &'static [u8] =
     b"root=/dev/sdb2 apic=debug earlyprintk=serial,ttyS0,115200 console=ttyS0,115200\0";
