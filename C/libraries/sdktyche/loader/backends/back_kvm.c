@@ -257,6 +257,43 @@ failure:
   return FAILURE;
 }
 
+
+int backend_td_register_mmap(tyche_domain_t* domain, void* addr, size_t len) {
+  msg_t info = {0};
+  domain_mslot_t* slot = NULL;
+  if (domain == NULL) {
+    ERROR("Nul argument");
+    goto failure;
+  }
+  slot = malloc(sizeof(domain_mslot_t));
+  if (slot == NULL) {
+    ERROR("Unable to allocate the mslot");
+    goto failure;
+  }
+  memset(slot, 0, sizeof(domain_mslot_t));
+  slot->size = len;
+  slot->id = domain->mslot_id++;
+  slot->virtoffset = (usize) addr;
+  info.virtaddr = (usize) addr;
+  info.size = (usize) len;
+  if (ioctl(domain->backend.memfd, CONTALLOC_REGISTER_MMAP, &info) != SUCCESS) {
+    ERROR("Unable to register the mmap");
+    goto failure_free;
+  }
+  // Now get the physoffset.
+  if (ioctl(domain->backend.memfd, CONTALLOC_GET_PHYSOFFSET, &info)!= SUCCESS) {
+    ERROR("Getting physoffset failed!");
+    goto failure_free;
+  }
+  slot->physoffset = info.physoffset;
+  dll_add(&(domain->mmaps), slot, list);
+  return SUCCESS;
+failure_free:
+  free(slot);
+failure:
+  return FAILURE;
+}
+
 int backend_td_virt_to_phys(tyche_domain_t* domain, usize vaddr, usize* paddr) {
   msg_t info = {0};
   if (domain == NULL || paddr == NULL) {

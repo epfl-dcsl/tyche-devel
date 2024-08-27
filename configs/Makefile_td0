@@ -51,3 +51,9 @@ gramine-strace:
 
 gramine-hellocpp:
 	cd /home/dev/Documents/gramine/CI-Examples/hellocpp && sudo /gramine-install/gramine-tyche helloworld
+
+gramine-redis:
+	cd /home/dev/Documents/gramine/CI-Examples/redis && sudo /gramine-install/gramine-tyche redis-server
+
+gramine-redis-strace:
+	cd /home/dev/Documents/gramine/CI-Examples/redis && sudo strace -o /tmp/gramredis.txt /gramine-install/gramine-tyche redis-server

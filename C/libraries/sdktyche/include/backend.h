@@ -50,6 +50,8 @@ int backend_td_alloc_mem(tyche_domain_t* domain);
 /// Allocate memory and leave control to the caller; adds a slot.
 int backend_td_mmap(tyche_domain_t* domain, void* addr, size_t len,
     int prot, int flags);
+/// Register a region mmaped by linux rather than the driver.
+int backend_td_register_mmap(tyche_domain_t* domain, void* addr, size_t len);
 /// Find the physical address for a given virtual one.
 int backend_td_virt_to_phys(tyche_domain_t* domain, usize vaddr, usize* paddr);
 /// Register a region for the domain.
