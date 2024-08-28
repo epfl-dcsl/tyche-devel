@@ -165,7 +165,7 @@ pub fn load<T: MemoryColoring + Clone>(
                 stage2_iommu_hva,
                 iommu.base_address,
                 iommu.size,
-                PtFlag::PRESENT | PtFlag::WRITE,
+                PtFlag::PRESENT | PtFlag::WRITE | PtFlag::PAGE_CACHE_DISABLE,
             ),
             crate::elf::ELfTargetEnvironment::Guest(_) => panic!("stage2 with guest mapper"),
         }

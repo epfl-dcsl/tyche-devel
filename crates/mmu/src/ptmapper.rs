@@ -307,16 +307,6 @@ where
                     if level == Level::L1 {
                         assert!(phys % (PageSize::NORMAL.bits() as u64) == 0);
                         *entry = phys | prot.bits();
-                        /* FIXME: TODO: luca:
-                         * Hacky change to map iommu as uncacheable to tyche
-                         */
-                        if phys == 0xfed90000 {
-                            log::info!(
-                                "Fixup IOMMU mapping of tyche as uncacheable + writethrough"
-                            );
-                            *entry |=
-                                (PtFlag::PAGE_CACHE_DISABLE | PtFlag::PAGE_WRITE_THROUGH).bits();
-                        }
 
                         return WalkNext::Leaf;
                     }
