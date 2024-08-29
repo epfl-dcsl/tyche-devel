@@ -846,6 +846,8 @@ impl MonitorX86 {
         | VmxExitReason::VirtualizedEoi
         | VmxExitReason::ApicAccess
         | VmxExitReason::VmxPreemptionTimerExpired
+        | VmxExitReason::AccessToGdtrOrIdtr
+        | VmxExitReason::AccessToLdtrOrTr
         | VmxExitReason::Hlt => {
             log::trace!("Handling {:?} for dom {} on core {}", reason, domain.idx(), cpuid());
             if reason == VmxExitReason::ExternalInterrupt {
