@@ -34,10 +34,8 @@ const SETUP_HDR: u64 = 0x1f1;
 // WARNING: Don't forget that the command line must be null terminated ('\0')!
 #[cfg(not(feature = "bare_metal"))]
 /**
- * - `iommu=on intel_iommu=on iommu.passthrough=1 iommu.strict=1` IOMMU is used for DMA Remapping, Invalidation Qeueue and Interrupt remapping.
  * The IOMMU device is advertized to Linux via ACPI but we don't map it. All accesses go through a paravirtualized driver
- * The above options (combined with the Kernel config). Ensure that Linux does not try to configure DMA remapping, because we manage this in tyche
- * - intremap=nopost : We do not support interrrupt posting but want interrupt remapping. Currently QEMU does not have support for posting in its IOMMU anyway
+ * The  options `iommu=off swiotlb=force`  (combined with the Kernel config). Ensure that Linux does not try to configure DMA remapping, because we manage this in Tyche.
  */
 static COMMAND_LINE: &'static [u8] =
     b"root=/dev/sdb2 apic=debug earlyprintk=serial,ttyS0 console=ttyS0 iommu=off intremap=on swiotlb=force\0";
@@ -108,9 +106,6 @@ impl Guest for Linux {
             };
             manifest.iommu = Some(iommu);
         }
-
-        //This will remove the DMAR header if it is present in order to hide the IOMMU from the Linux guest
-        //AcpiInfo::invalidate_dmar(rsdp, host_allocator.get_physical_offset());
 
         // Build the boot params
 

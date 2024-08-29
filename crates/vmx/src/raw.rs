@@ -168,7 +168,6 @@ pub unsafe fn vmresume(
     _vmcs: &mut ActiveVmcs,
     regs: &mut [usize; REGFILE_SIZE],
 ) -> Result<(), VmxError> {
-    //TODO: continue here: large scale test shows that this does not work :(
     let rip_field = VmcsField::HostRip as u64;
     let rsp_field = VmcsField::HostRsp as u64;
     // TODO Start by switching lstar IF needed.
@@ -234,7 +233,6 @@ pub unsafe fn vmresume(
     //regs[GPF::Lstar as usize] = msr::Msr::new(IA32_LSTAR.address()).read() as usize;
     // Restore the previous lstar.
     //msr::Msr::new(IA32_LSTAR.address()).write(lstar);
-
     res
 }
 

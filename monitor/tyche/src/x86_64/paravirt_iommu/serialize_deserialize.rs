@@ -5,7 +5,7 @@ use vtd::queue_invalidation_regs::{DescriptorSize, RawDescriptor};
 
 use super::iommu_register_offsets::DmarRegister;
 
-/// SIze of the raw  data in PvIommuResult in usize
+/// Size of the raw  data in PvIommuResult in usize
 const PV_IOMMU_RESULT_USIZE: usize = 5;
 /// Like `PV_IOMMU_RESULT_USIZE` but in bytes
 const PV_IOMMU_RESULT_BYTES: usize = PV_IOMMU_RESULT_USIZE * mem::size_of::<usize>();

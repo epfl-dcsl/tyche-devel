@@ -274,7 +274,6 @@ pub trait Monitor<T: PlatformState + 'static> {
             }
         }
         //create CAPAs for dom0
-        //TODO: we can again create root regions for all memory. The remapper will take care of differentiating between core memory and additional memory
         for mr in manifest.get_boot_mem_regions() {
             match mr.kind {
                 MemoryRegionKind::UseableRAM => match manifest.dom0_memory {
@@ -357,7 +356,7 @@ pub trait Monitor<T: PlatformState + 'static> {
             }
 
             //TODO: In the future, we just leave a whole in the addr space (right now there is a bug/issue, were creating
-            //the root region with no ops, it will just be filled with RAM in the remapper)
+            //the root region with no ops, it will just be filled with RAM in the remapper. This could lead to hard to debug situations)
             //Thus we map IOMMU as read only for now
             //Exclude IOMMU
             let device_start = prev.end;
@@ -515,12 +514,10 @@ pub trait Monitor<T: PlatformState + 'static> {
         let mut initial_io_domain = IO_DOMAIN.lock();
         *initial_io_domain = Some(io_domain);
 
-        log::info!("Calling start_domain_on_core...");
         // TODO: taken from part of init_vcpu.
         engine
             .start_domain_on_core(domain, cpuid())
             .expect("Failed to start initial domain on core");
-        log::info!("done!");
         domain
     }
 
@@ -965,8 +962,6 @@ pub trait Monitor<T: PlatformState + 'static> {
         return Ok(());
     }
 
-    //this handles the vmcalls
-    //at some point all of the exchanged data needs to fit into registers
     fn do_monitor_call(
         state: &mut T,
         domain: &mut Handle<Domain>,
@@ -1212,30 +1207,17 @@ pub trait Monitor<T: PlatformState + 'static> {
                 let mark_finished = args[2];
                 let raw_data = &args[3..6];
                 let raw_max_size = raw_data.len() * mem::size_of::<usize>();
-                /*log::info!(
-                    "SEND_DATA: raw_data 0x{:x?} size {}, value at idx 0 is {:x}",
-                    raw_data,
-                    specified_payload_bytes,
-                    raw_data[0],
-                );*/
                 if specified_payload_bytes > raw_max_size {
                     //TODO: better error value
                     return Err(CapaError::InvalidOperation);
                 }
-                //TODO: stuff breaks here
                 let data: &[u8] = unsafe {
                     slice::from_raw_parts(raw_data.as_ptr() as *const u8, specified_payload_bytes)
                 };
-                /*log::info!(
-                    "SEND_DATA tyche call handler: raw_handle {}, mark_finished? {}, data as u8 0x{:x?}",
-                    raw_handle,
-                    mark_finished,
-                    data,
-                );*/
+
                 match Self::do_store_domain_data(state, domain, raw_handle, data, mark_finished) {
                     Ok(handle) => {
                         res[0] = handle.serialize() as usize;
-                        //log::info!("SEND_DATA: returning handle {}", res[0]);
                         return Ok(true);
                     }
                     Err(e) => {
@@ -1248,13 +1230,6 @@ pub trait Monitor<T: PlatformState + 'static> {
                 let raw_handle = args[0];
                 let (chunck, actual_size, remaining) =
                     Self::do_copy_data_to_domain(state, domain, raw_handle)?;
-                /*log::info!(
-                    "GET DATA : raw_handle {:?} , data_chunck {:x?}, remaining {}, actual_size {}",
-                    raw_handle,
-                    chunck,
-                    remaining,
-                    actual_size
-                );*/
 
                 res[0] = remaining;
                 res[1] = actual_size;
@@ -1413,7 +1388,6 @@ pub trait Monitor<T: PlatformState + 'static> {
                         core_map
                     );
                     // Do we have to process updates
-                    //unsafe { asm!("ud2") };
                     if T::update_permission(domain, engine) {
                         let mut core_count = core_map.count_ones() as usize;
                         if (1 << core_id) & core_map != 0 {

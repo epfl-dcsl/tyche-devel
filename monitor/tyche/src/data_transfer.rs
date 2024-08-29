@@ -254,8 +254,3 @@ impl DataTransferPool {
         Ok((out_data, used_bytes, remaining_bytes))
     }
 }
-
-#[cfg(test)]
-mod test {
-    //TODO: implement some tests
-}

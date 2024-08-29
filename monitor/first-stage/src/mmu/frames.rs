@@ -1270,33 +1270,12 @@ unsafe impl RangeAllocator for RangeFrameAllocator {
                 start: HostPhysAddr::new(cursor.as_u64() as usize),
                 end: HostPhysAddr::new(new_cursor.as_u64() as usize),
             };
-            //let mut res = Vec::new();
-            //res.push(range);
             store_cb(range);
             Ok(())
         } else {
             Err(())
         }
     }
-
-    /*fn allocate_range(&self, size: usize) -> Option<StackList<PhysRange>> {
-        let cursor = self.cursor.get();
-        if cursor + size < self.range_end {
-            let new_cursor = (cursor + size).align_up(PAGE_SIZE as u64);
-            self.cursor.set(new_cursor);
-            let range = PhysRange {
-                start: HostPhysAddr::new(cursor.as_u64() as usize),
-                end: HostPhysAddr::new(new_cursor.as_u64() as usize),
-            };
-            let list = StackList {
-                data: range,
-                prev: None,
-            };
-            Some(list)
-        } else {
-            None
-        }
-    }*/
 }
 
 // ———————————————————————————— Helper Functions ———————————————————————————— //

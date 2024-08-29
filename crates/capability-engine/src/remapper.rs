@@ -207,8 +207,6 @@ impl<const SIMPLE: usize, const COMPACT: usize> Remapper<SIMPLE, COMPACT> {
             regions: remap_region_snapshot,
         };
 
-        //TODO: sanity check that this does not overlap with any existing stuff:
-
         let _handle = self
             .compact_remaps
             .allocate(entry)
@@ -460,25 +458,6 @@ impl<'a, const SIMPLE: usize, const COMPACT: usize, T: MemoryColoring + Clone + 
 {
     type Item = Mapping;
 
-    /*Initial state
-       pub fn new_remap_iter<'a, T: MemoryColoring + Clone + Default>(
-        &'a self,
-        coloring: T,
-        regions: PermissionIterator<'a, T>,
-    ) -> RemapIterator<'a, SIMPLE, COMPACT, T> {
-        let merged_remap_iter: MergedRemapIter<SIMPLE, COMPACT, T> =
-            self.new_merged_remap_iter(coloring);
-        RemapIterator {
-            regions,
-            next_region_start: None,
-            remap_commands_iter: merged_remap_iter,
-            next_segment_start: None,
-            cursor: 0,
-            ongoing_segment: None,
-            max_segment: None,
-        }
-    }
-    */
     fn next(&mut self) -> Option<Self::Item> {
         loop {
             // First, if there is an ongoing segment being remapped, continue
@@ -497,7 +476,6 @@ impl<'a, const SIMPLE: usize, const COMPACT: usize, T: MemoryColoring + Clone + 
 
             // Update next region and segment start, if needed
             if self.next_region_start.is_none() {
-                //luca: we do clone+next as a way to get a peek without changing the state
                 self.next_region_start = self.regions.peek().map(|region| region.start);
             }
             if self.next_segment_start.is_none() {
@@ -506,7 +484,7 @@ impl<'a, const SIMPLE: usize, const COMPACT: usize, T: MemoryColoring + Clone + 
             }
 
             //luca: Terminology:
-            // - Segment: chunck of contig mem that we want to map
+            // - Segment: chunk of contig mem that we want to map
             // - region: phys mem that we have access to
             match (self.next_segment_start, self.next_region_start) {
                 (None, None) => {
@@ -530,8 +508,6 @@ impl<'a, const SIMPLE: usize, const COMPACT: usize, T: MemoryColoring + Clone + 
 
                     // Skip empty regions
                     if self.cursor == region.end {
-                        //luca:: recursion!!!, that looks dangerous
-                        //return self.next();
                         continue;
                     }
 
@@ -541,8 +517,6 @@ impl<'a, const SIMPLE: usize, const COMPACT: usize, T: MemoryColoring + Clone + 
                     self.cursor = region.end;
 
                     if max_segment >= region.end {
-                        // Skip this region, already covered
-                        //return self.next();
                         continue;
                     }
                     let start = cmp::max(cursor, max_segment);
@@ -586,7 +560,6 @@ impl<'a, const SIMPLE: usize, const COMPACT: usize, T: MemoryColoring + Clone + 
                             cursor: self.cursor,
                             segment: segment.clone(),
                         });
-                        //return self.next();
                         continue;
                     } else {
                         // A region comes first, we emit a mapping if no segment covered it
@@ -620,7 +593,6 @@ impl<'a, const SIMPLE: usize, const COMPACT: usize, T: MemoryColoring + Clone + 
                             return Some(mapping);
                         } else {
                             // Otherwise move on to next iteration
-                            //return self.next();
                             continue;
                         }
                     }
@@ -668,7 +640,7 @@ impl<'a, T: MemoryColoring + Clone + Default> SingleSegmentIterator<'a, T> {
         };
 
         /*luca: if we are here, we have a region for our segment.
-         * Our segment might spand multiple regions. Thus, we next update
+         * Our segment might span multiple regions. Thus, we next update
          * the cursor, to keep track where exactly in memory we are
          * The purpose of the region, is to give us the ptracker.permissions for the mapping
          * that we are about to create.

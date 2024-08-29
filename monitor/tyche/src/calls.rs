@@ -4,8 +4,6 @@
 // Remove this once the Risc-V version is implemented.
 #![cfg_attr(target_arch = "riscv64", allow(dead_code))]
 
-//luca: definition of "vmcalls" from dom0 to tyche
-
 pub const CREATE_DOMAIN: usize = 1;
 pub const SEAL_DOMAIN: usize = 2;
 pub const SEND: usize = 3;

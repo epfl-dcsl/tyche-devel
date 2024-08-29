@@ -107,7 +107,6 @@ impl Mapper for EptMapper {
                         .allocate_frame()
                         .expect("map_range: unable to allocate page table entry")
                         .zeroed();
-                    //*entry = frame.phys_addr.as_u64() | prot.bits();
                     *entry = frame.phys_addr.as_u64() | EPT_PRESENT.bits();
                     WalkNext::Continue
                 },

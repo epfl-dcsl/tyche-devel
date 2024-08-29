@@ -475,7 +475,6 @@ impl LoadedElf {
     /// Returns the virtual address of the start of the stack (highest address with SysV
     /// conventions, to be put in %rsp) as well as the physical address corresponding to the start
     /// of the stack.
-    //luca: we only call this for stage2
     pub fn add_stack(
         &mut self,
         stack_virt_addr: VirtAddr,

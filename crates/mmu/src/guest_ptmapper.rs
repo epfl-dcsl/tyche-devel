@@ -1,7 +1,7 @@
 ///This mapper does not require the GPAs to be identity mapped
-/// to the stage1 memory. Instead it stores explictly stores 
-/// the HPA for each GPA. To achieve this we hackily reuse the
-/// existing ptmapper as a "hashmap"
+/// to the stage1 memory. Instead it explictly stores 
+/// the HPA for each GPA. To achieve this, we hackily reuse the
+/// existing ptmapper as a "dictionary"
 use core::cell::RefCell;
 use core::marker::PhantomData;
 
@@ -102,14 +102,8 @@ impl GuestPtMapper<GuestPhysAddr, GuestVirtAddr> {
     ) -> Result<(), usize> {
         //number of bytes that still need to be mapped
         let mut remaining_bytes = size;
-        //log::info!("initial remaining_bytes: 0x{:x}", remaining_bytes);
         let mut next_virt_addr = virt_addr;
         for (_, phys_range) in phys_ranges.iter().enumerate() {
-            /*log::info!(
-                "{:2} processing phys_range {:x?}",
-                phys_range_idx,
-                phys_range
-            );*/
             assert_eq!(phys_range.start.as_usize() % PAGE_SIZE, 0);
 
             //compute number of bytes that we can map in this iteration
@@ -129,7 +123,6 @@ impl GuestPtMapper<GuestPhysAddr, GuestVirtAddr> {
             self.enable_pse = true;
             remaining_bytes -= mapping_size;
 
-            //log::info!("new remaining_bytes: 0x{:x}", remaining_bytes);
             if remaining_bytes == 0 {
                 return Ok(());
             }
@@ -218,11 +211,6 @@ impl GuestPtMapper<GuestPhysAddr, GuestVirtAddr> {
                     *when traversing our page table itself, we need to map the gpa to and hpa (and then to and hva)
                     in order to do the traversal itself. To do this, we query the `gpa_to_hpa_tables` that we update here
                     */
-                    /*log::info!(
-                        "Guest PTMapper, allocated mem for new pt entry, GPA 0x{:x}, SPA 0x{:x}",
-                        frame_gpa.as_u64(),
-                        frame.phys_addr.as_u64(),
-                    );*/
                     gpa_to_hpa_tables.map_range(
                         allocator,
                         frame_gpa,

@@ -216,11 +216,9 @@ impl PlatformState for StateX86 {
     }
 
     fn update_permission(domain: Handle<Domain>, engine: &mut MutexGuard<CapaEngine>) -> bool {
-        log::info!("x86_update_permissions");
         if engine[domain].is_io() {
             Self::update_domain_iopt(domain, engine)
         } else {
-            log::info!("x86_update_permissions: about to call update_domain_ept");
             Self::update_domain_ept(domain, engine)
         }
     }

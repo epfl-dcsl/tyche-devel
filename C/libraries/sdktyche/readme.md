@@ -1,9 +1,8 @@
-# SDK Tyche 
-//driver for creating tds, supports both kvm and custom backend
-
+# SDK Tyche
 
 The sdk allows to easily build domains (enclaves, sandboxes, or mixes of both).
 It is divided into two folders:
+
 1. `loader`: contains the logic to load a domain.
 2. `runtime`: small runtime API for the loaded domain.
 
@@ -15,8 +14,7 @@ The domain binary is expected to be embedded as a section inside the application
 
 ## Runtime
 
-By default, it casts a shared_buffer pointer to the address `0x300000` which should map the enclave's instrumentation done by tychools (make sure you add a shared segment at that address). 
-
+By default, it casts a shared_buffer pointer to the address `0x300000` which should map the enclave's instrumentation done by tychools (make sure you add a shared segment at that address).
 
 ## Examples
 

@@ -459,14 +459,12 @@ int load_domain(tyche_domain_t* domain)
     goto failure;
   }
   
-  //luca: sdk uses API to create TD
   // Call the backend to create the domain.
   if (backend_td_create(domain) != SUCCESS) {
     ERROR("Backend error creating the backend.");
     goto failure;
   }
 
-  //luca: sdk uses API to alloc memory for TD.
   // Call the backend to allocate the domain's memory.
   if (backend_td_alloc_mem(domain) != SUCCESS) {
     ERROR("Backend error allocating domain's memory.");
@@ -479,7 +477,6 @@ int load_domain(tyche_domain_t* domain)
     goto failure;
   }
 
-  //luca: sdk copies content to memory of newly created TD
   // Copy the domain's content.
   phys_size = 0;
   slot = domain->mmaps.head;
@@ -569,8 +566,6 @@ int load_domain(tyche_domain_t* domain)
     if (conf_or_shared == CONFIDENTIAL) {
       flags |= MEM_CONFIDENTIAL;
     }
-
-    //luca: Alloc mem. N.B. this is still in the for-each segment loop
     if (backend_td_register_region(
           domain,
           dest,

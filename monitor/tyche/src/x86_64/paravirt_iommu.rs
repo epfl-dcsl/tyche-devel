@@ -59,12 +59,6 @@ impl ReverseMap {
     fn store(&mut self, hpa: HostPhysAddr, gpa: GuestPhysAddr) {
         //this is sized large enough that we should never overwrite any entry that we still need
         //TODO: better data structure, invalidate once descriptor has been processed
-        /*for (s_hpa, s_gpa) in self.reverse_map.iter_mut() {
-            if *s_hpa == hpa {
-                *s_gpa = gpa;
-                return;
-            }
-        }*/
         self.reverse_map[self.rm_next_idx] = (hpa, gpa);
         self.rm_next_idx = (self.rm_next_idx + 1) % self.reverse_map.len();
     }

@@ -172,8 +172,6 @@ impl<'a, T: MemoryColoring + Clone + Default> Iterator for CompatifiedMappingIte
          * it cannot be larger. Thus, we cannot end up in the situation where we want to map an identity
          * mapped device but have already used that part of the address space for one of the preceedign
          * mappings
-         *
-         * TODO: preserve order when adding new colors later on
          */
         let resource_kind = range.resource_kind;
         match resource_kind {

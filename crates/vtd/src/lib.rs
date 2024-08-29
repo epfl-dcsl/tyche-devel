@@ -126,8 +126,6 @@ impl Iommu {
     ) -> Result<(), &'static str> {
         //initialize tail register 11.4.9.2
         //the head register is managed by HW
-        /*let mut tail_reg = InvalidationQueueTail::default();
-        tail_reg.set_queue_tail(0)?;*/
         self.set_invalidation_queue_tail(0);
         assert_eq!(
             self.get_invalidation_queue_head(),
@@ -200,7 +198,7 @@ impl Iommu {
         self.enable_quid_invaliadtion_from(queue_range, queue_mapping, desc_size)
     }
 
-    ///Read decriptor from the given offset in the Invalidation Queue
+    /// Read decriptor from the given offset in the Invalidation Queue
     /// Assumes that Invalidation Queue feature has been initialized
     /// #Arguments
     /// - `offset` : offset in bytes from the start of the queue. Must be a multiple of the descritpor size
@@ -642,7 +640,6 @@ bitflags! {
         const INVALIDATION_TIME_OUT_ERROR   = 1 << 6;
         const FAULT_RECORD_INDEX            = 0b11111111 << 8;
     }
-
 
     pub struct FaultRecording: u64 {
         const SOURCE_ID           = 0b111111111111111;

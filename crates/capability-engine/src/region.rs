@@ -79,7 +79,6 @@ pub enum ResourceKind {
 }
 
 impl ResourceKind {
-    //TODO: calculcate
     pub const SERIALIZED_SIZE: usize = ActiveMemoryColoring::BYTES_FOR_COLOR_BITMAP + 1;
     ///Convenience function that creates a RessourceKind::RAM with all partitions/colors enabled
     pub fn ram_with_all_partitions() -> ResourceKind {
@@ -326,7 +325,7 @@ impl<const N: usize, const K: usize> From<&MyBitmap<N, K>> for PartitionRefCount
 
 // ———————————————————————————————— Regions ————————————————————————————————— //
 
-///Like `ResourceKind` but we need a different associated type here, to keep a refcount instead of
+/// Like `ResourceKind` but we need a different associated type here, to keep a refcount instead of
 /// just a bitmap. Changing the other type would add some memory overhead, as we only need
 /// the refcount information here
 #[derive(Debug, Clone, Copy)]

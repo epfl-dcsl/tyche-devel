@@ -19,8 +19,6 @@
 #include <asm/vmx.h>
 #endif
 
-//luca:
-
 // ————————————————————————— Local helper functions ————————————————————————— //
 
 static int ioctl_mprotect(handle_t handle, usize vstart, usize size, 

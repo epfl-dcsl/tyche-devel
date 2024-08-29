@@ -11,8 +11,6 @@
 #include <time.h>
 #include <ucontext.h>
 
-// luca: very simple example
-
 // ———————————————————————————— Local Variables ————————————————————————————— //
 
 tyche_domain_t *sandbox = NULL;
@@ -47,21 +45,17 @@ int write_ro() {
   TEST(sandbox != NULL);
   TEST(shared != NULL);
   LOG("Executing WRITE_RO enclave\n");
-  while(1) {
-    write_ro_t *msg = (write_ro_t *)(&(shared->args));
-    memcpy(msg->buffer, "My saved message\0", 17);
-    LOG("Wrote the message");
-    // Call the enclave.
-    if (sdk_call_domain(sandbox) != SUCCESS) {
-      ERROR("Unable to call the sandbox %d!", sandbox->handle);
-      goto failure;
-    }
-    LOG("The sandbox has return.");
-    TEST(strcmp(msg->buffer, "My saved message") == 0);
-    LOG("The message is still here:\n%s", msg->buffer);
-    sleep(1);
+  write_ro_t *msg = (write_ro_t *)(&(shared->args));
+  memcpy(msg->buffer, "My saved message\0", 17);
+  LOG("Wrote the message");
+  // Call the enclave.
+  if (sdk_call_domain(sandbox) != SUCCESS) {
+    ERROR("Unable to call the sandbox %d!", sandbox->handle);
+    goto failure;
   }
-  LOG("Calling sdk_delete_domain")
+  LOG("The sandbox has return.");
+  TEST(strcmp(msg->buffer, "My saved message") == 0);
+  LOG("The message is still here:\n%s", msg->buffer);
   // Clean up.
   if (sdk_delete_domain(sandbox) != SUCCESS) {
     ERROR("Unable to delete the sandbox %d", sandbox->handle);
