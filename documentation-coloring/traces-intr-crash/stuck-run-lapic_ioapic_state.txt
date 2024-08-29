@@ -1,0 +1,81 @@
+[    0.636163] drivers/iommu/intel/dmar.c:1448 qi_submit_sync done waiting
+[    0.636163] scsi host0: ahci
+[    0.636163] scsi host1: ahci
+[    0.636163] scsi host2: ahci
+[    0.636163] scsi host3: ahci
+[    0.636163] scsi host4: ahci
+[    0.636163] scsi host5: ahci
+[    0.636163] ata1: SATA max UDMA/133 abar m4096@0xc1060000 port 0xc1060100 irq 25
+[    0.636163] ata2: SATA max UDMA/133 abar m4096@0xc1060000 port 0xc1060180 irq 25
+[    0.636163] ata3: SATA max UDMA/133 abar m4096@0xc1060000 port 0xc1060200 irq 25
+[    0.636163] ata4: SATA max UDMA/133 abar m4096@0xc1060000 port 0xc1060280 irq 25
+[    0.636163] ata5: SATA max UDMA/133 abar m4096@0xc1060000 port 0xc1060300 irq 25
+[    0.636163] ata6: SATA max UDMA/133 abar m4096@0xc1060000 port 0xc1060380 irq 25
+[    0.636163] e100: Intel(R) PRO/100 Network Driver
+[    0.636163] e100: Copyright(c) 1999-2006 Intel Corporation
+[    0.636163] e1000: Intel(R) PRO/1000 Network Driver
+[    0.636163] e1000: Copyright (c) 1999-2006 Intel Corporation.
+[    0.636163] ACPI: \_SB_.GSIG: Enabled at IRQ 22
+[    0.636163] drivers/acpi/pci_link.c:595
+[    0.636163] drivers/acpi/pci_link.c:599
+[    0.636163] drivers/acpi/pci_link.c:638
+[    0.636163] drivers/acpi/pci_link.c:656
+[    0.636163] drivers/iommu/intel/irq_remapping.c:1372 trying to alloc 1 IRQs
+[    0.636163] drivers/iommu/intel/irq_remapping.c:1419 ret
+
+# in runs where we do not get stuck, the following logs in qemu are not triggered/generated
+
+../qemu/hw/intc/ioapic.c:166 ioapic_set_irq s->irr = 0x0
+../qemu/hw/intc/ioapic.c:168 ioapic_set_irq hotfixing vector to value 2 #this is the index in the following table of the IOAPIC
+table[0] = 0x10000
+table[1] = 0x10000
+table[2] = 0x3000000000002 # Interrupt vector 2 (NMI), masked . The "masked" part seems fishy as we just injected this interrupts, are we maybe infinetly waiting for it?
+table[3] = 0x10000
+table[4] = 0x10000
+table[5] = 0x10000
+table[6] = 0x10000
+table[7] = 0x10000
+table[8] = 0x10000
+table[9] = 0x11000000008009
+table[10] = 0x10000
+table[11] = 0x10000
+table[12] = 0x10000
+table[13] = 0x10000
+table[14] = 0x10000
+table[15] = 0x10000
+table[16] = 0x10000
+table[17] = 0x10000
+table[18] = 0x10000
+table[19] = 0x10000
+table[20] = 0x10000
+table[21] = 0x10000
+table[22] = 0x10000
+table[23] = 0x10000
+../qemu/hw/intc/ioapic.c:180 ioapic_set_irq mask = 0x4, entry=0x3000000000002
+../qemu/hw/intc/ioapic.c:205 ioapic_set_irq not level triggered
+
+
+
+
+
+
+
+#output from qemu monitor `info lapic`
+dumping local APIC state for CPU 0
+
+LVT0     0x00010700 active-hi edge  masked                      ExtINT (vec 0)
+LVT1     0x00000400 active-hi edge                              NMI
+LVTPC    0x00000400 active-hi edge                              NMI
+LVTERR   0x000000fe active-hi edge                              Fixed  (vec 254)
+LVTTHMR  0x00010000 active-hi edge  masked                      Fixed  (vec 0)
+LVTT     0x000400ec active-hi edge                 tsc-deadline Fixed  (vec 236)
+Timer    DCR=0xb (divide by 1) initial_count = 0 current_count = 0
+SPIV     0x000001ff APIC enabled, focus=off, spurious vec 255
+ICR      0x00000000 physical edge de-assert no-shorthand
+ICR2     0x00000000 cpu 0 (X2APIC ID)
+ESR      0x00000000
+ISR      (none)
+IRR      236 #this is the bit idx, i.e. LVTT timer interrupt is pending but not yet serviced
+
+APR 0x00 TPR 0x10 DFR 0x0f LDR 0x00 PPR 0x10
+(qemu)
