@@ -30,13 +30,13 @@ pub struct Mapping {
 #[derive(Clone, Debug)]
 pub struct Segment {
     /// Host Physical Address
-    hpa: usize,
+    pub hpa: usize,
     /// Guest Physical Address
-    gpa: usize,
+    pub gpa: usize,
     /// Size of the segment to remap
-    size: usize,
+    pub size: usize,
     /// Number of repetitions
-    repeat: usize,
+    pub repeat: usize,
     /// Next segment in the linked list
     next: Option<Handle<Segment>>,
 }

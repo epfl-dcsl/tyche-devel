@@ -2,6 +2,9 @@ all:
 
 TD1_MASK ?= 0x1
 
+
+lkvm_exists = $(shell command -v lkvm > /dev/null 2>&1 && echo yes || echo no)
+
 install_driver:
 	sudo ./scripts/mod_switch.sh
 
@@ -19,6 +22,7 @@ run_td1:
 run_td1_multi:
 	QEMU_PIN_CORES=0 \
 	/home/dev/Documents/qemu/build/qemu-system-x86_64 \
+	-L /home/dev/Documents/qemu/build/qemu-bundle/usr/local/share/qemu/bios-256k.bin \
 	-kernel vms/bzImage \
 	-nographic \
 	-enable-kvm -m 100 \
@@ -40,20 +44,11 @@ regression:
 	sudo ./programs/sdk_kvm/app_selector
 	sudo ./programs/sdk_kvm/application_with_sandbox
 
-gramine:
-	cd /home/dev/Documents/gramine/CI-Examples/helloworld && sudo /gramine-install/gramine-tyche helloworld
-
-gramine-dbg:
-	cd /home/dev/Documents/gramine/CI-Examples/helloworld && sudo GDB=1 /gramine-install/gramine-tyche helloworld
-
-gramine-strace:
-	cd /home/dev/Documents/gramine/CI-Examples/helloworld && sudo strace -o /tmp/gramout.txt /gramine-install/gramine-tyche helloworld
-
-gramine-hellocpp:
-	cd /home/dev/Documents/gramine/CI-Examples/hellocpp && sudo /gramine-install/gramine-tyche helloworld
-
-gramine-redis:
-	cd /home/dev/Documents/gramine/CI-Examples/redis && sudo /gramine-install/gramine-tyche redis-server
-
-gramine-redis-strace:
-	cd /home/dev/Documents/gramine/CI-Examples/redis && sudo strace -o /tmp/gramredis.txt /gramine-install/gramine-tyche redis-server
+run_td1_lkvm:
+ifeq ($(lkvm_exists), yes)
+	@echo "lkvm is available"
+else 
+	@echo "lkvm not found! Make sure it is in your path!"
+	@exit 1
+endif
+	KVM_PIN_CORES=0 lkvm run -c 1 -k vms/bzImage

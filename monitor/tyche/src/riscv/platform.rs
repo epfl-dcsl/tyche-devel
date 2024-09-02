@@ -839,6 +839,17 @@ impl PlatformState for StateRiscv {
     fn context_interrupted(&mut self, domain: &Handle<Domain>, core: usize) {
         todo!();
     }
+
+    // No remapping on RISC-V
+    fn find_hpa(
+        &mut self,
+        engine: &mut MutexGuard<CapaEngine>,
+        domain: Handle<Domain>,
+        gpa: usize,
+        size: usize,
+    ) -> Result<(usize, usize), CapaError> {
+        Ok(gpa, size)
+    }
 }
 
 // ————————————————————————— Monitor Implementation ————————————————————————— //

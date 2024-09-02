@@ -164,6 +164,14 @@ pub trait PlatformState {
     fn finish_notify(domain: &Handle<Domain>);
 
     fn context_interrupted(&mut self, domain: &Handle<Domain>, core: usize);
+
+    fn find_hpa(
+        &mut self,
+        engine: &mut MutexGuard<CapaEngine>,
+        domain: Handle<Domain>,
+        gpa: usize,
+        size: usize,
+    ) -> Result<(usize, usize), CapaError>;
 }
 
 pub trait Monitor<T: PlatformState + 'static> {
@@ -627,6 +635,16 @@ pub trait Monitor<T: PlatformState + 'static> {
         return Ok(capa);
     }
 
+    fn do_get_hpa(
+        state: &mut T,
+        current: &mut Handle<Domain>,
+        start: usize,
+        size: usize,
+    ) -> Result<(usize, usize), CapaError> {
+        let mut engine = Self::lock_engine(state, current);
+        state.find_hpa(&mut engine, *current, start, size)
+    }
+
     fn do_monitor_call(
         state: &mut T,
         domain: &mut Handle<Domain>,
@@ -733,7 +751,12 @@ pub trait Monitor<T: PlatformState + 'static> {
                 todo!("Exit called")
             }
             calls::DEBUG => {
-                log::info!("Debug called with {} from dom{}", args[0], domain.idx());
+                log::info!(
+                    "Debug called with {} from dom{} on core {}",
+                    args[0],
+                    domain.idx(),
+                    cpuid()
+                );
                 return Ok(false);
             }
             calls::CONFIGURE => {
@@ -832,6 +855,12 @@ pub trait Monitor<T: PlatformState + 'static> {
             calls::SERIALIZE_ATTESTATION => {
                 let written = Self::do_serialize_attestation(state, domain, args[0], args[1])?;
                 res[0] = written;
+                return Ok(true);
+            }
+            calls::GET_HPA => {
+                let (start, size) = Self::do_get_hpa(state, domain, args[0], args[1])?;
+                res[0] = start;
+                res[1] = size;
                 return Ok(true);
             }
             _ => {

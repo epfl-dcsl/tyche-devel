@@ -479,6 +479,31 @@ impl PlatformState for StateX86 {
         let mut context = Self::get_context(*domain, core);
         context.interrupted = true;
     }
+
+    fn find_hpa(
+        &mut self,
+        _engine: &mut MutexGuard<CapaEngine>,
+        domain: Handle<Domain>,
+        gpa: usize,
+        size: usize,
+    ) -> Result<(usize, usize), CapaError> {
+        let dom = Self::get_domain(domain);
+        for seg in dom.remapper.iter_segments() {
+            let seg_size = seg.size * seg.repeat;
+            // Okay we found the segment.
+            if seg.gpa >= gpa && (seg.gpa + seg_size) > gpa {
+                let hpa = if seg.repeat == 1 {
+                    seg.hpa + (gpa - seg.gpa)
+                } else {
+                    seg.hpa + ((seg.gpa - gpa) % seg.size)
+                };
+                let res_size = if seg.size >= size { size } else { seg.size };
+                return Ok((hpa, res_size));
+            }
+        }
+        // Not found, we assume the result is Identity mapped.
+        Ok((gpa, size))
+    }
 }
 
 // ————————————————————— Monitor Implementation on X86 —————————————————————— //
@@ -680,7 +705,7 @@ impl MonitorX86 {
                     },
                     Ok(false) => {},
                     Err(e) => {
-                        log::error!("Failure monitor call: {:?}, call: {} for dom {}", e, vmcall, domain.idx());
+                        log::error!("Failure monitor call: {:?}, call: {:?} for dom {} on core {}", e, vmcall, domain.idx(), cpuid());
                         context.set(VmcsField::GuestRax, 1, None).unwrap();
                         log::debug!("The vcpu: {:#x?}", vs.vcpu);
                         drop(context);
