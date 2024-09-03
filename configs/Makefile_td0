@@ -14,7 +14,7 @@ run_td1:
 	qemu-system-x86_64 \
 	-kernel vms/bzImage \
 	-nographic \
-	-enable-kvm -m 100 \
+	-enable-kvm -m 1G \
 	-bios vms/bios.bin \
 	-chardev file,path="/tyche/chardev/seabios",id=seabios -device isa-debugcon,iobase=0x402,chardev=seabios \
 	-append "noapic lpj=24000000 earlyprintk=serial,tty0 console=ttyS0"
@@ -36,6 +36,19 @@ run_td1_custom:
 	-nographic \
 	-enable-kvm -m 100 \
 	-append "noapic lpj=24000000 earlyprintk=serial,tty0 console=ttyS0"
+
+run_td1_with_drive:
+	QEMU_PIN_CORES=0 \
+	/home/dev/Documents/qemu/build/qemu-system-x86_64 \
+	-L /home/dev/Documents/qemu/build/qemu-bundle/usr/local/share/qemu/bios-256k.bin \
+	-kernel vms/bzImage \
+	-nographic \
+	-enable-kvm -m 1G \
+	-smp 2 \
+	-drive file=fake.disk,format=raw,index=0 \
+	-drive file=nested.qcow2,format=qcow2,media=disk,index=1 \
+	-append "noapic lpj=24000000 earlyprintk=serial,tty0 console=ttyS0"
+
 
 regression:
 	sudo ./scripts/mod_switch.sh

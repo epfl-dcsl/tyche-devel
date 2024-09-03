@@ -491,7 +491,7 @@ impl PlatformState for StateX86 {
         for seg in dom.remapper.iter_segments() {
             let seg_size = seg.size * seg.repeat;
             // Okay we found the segment.
-            if seg.gpa >= gpa && (seg.gpa + seg_size) > gpa {
+            if seg.gpa <= gpa && (seg.gpa + seg_size) > gpa {
                 let hpa = if seg.repeat == 1 {
                     seg.hpa + (gpa - seg.gpa)
                 } else {
