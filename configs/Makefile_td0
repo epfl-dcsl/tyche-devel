@@ -44,7 +44,8 @@ run_td1_with_drive:
 	-kernel vms/bzImage \
 	-nographic \
 	-enable-kvm -m 1G \
-	-smp 2 \
+	-smp 4 \
+	-cpu host \
 	-drive file=fake.disk,format=raw,index=0 \
 	-drive file=nested.qcow2,format=qcow2,media=disk,index=1 \
 	-append "noapic lpj=24000000 earlyprintk=serial,tty0 console=ttyS0"

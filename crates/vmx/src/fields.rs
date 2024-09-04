@@ -261,8 +261,8 @@ impl VmcsFieldAccessType {
 #[repr(u8)]
 pub enum VmcsFieldWidth {
     Width16 = 0,
-    Width32 = 1,
-    Width64 = 2,
+    Width32 = 2,
+    Width64 = 1,
     WidthNat = 3,
 }
 
@@ -270,10 +270,17 @@ impl VmcsFieldWidth {
     pub fn from_raw(v: u8) -> VmcsFieldWidth {
         match v {
             0 => VmcsFieldWidth::Width16,
-            1 => VmcsFieldWidth::Width32,
-            2 => VmcsFieldWidth::Width64,
+            2 => VmcsFieldWidth::Width32,
+            1 => VmcsFieldWidth::Width64,
             3 => VmcsFieldWidth::WidthNat,
             _ => panic!("Invalid VMCS field width value"),
+        }
+    }
+    pub fn byte_size(&self) -> usize {
+        match *self {
+            VmcsFieldWidth::Width16 => 2,
+            VmcsFieldWidth::Width32 => 4,
+            VmcsFieldWidth::WidthNat | VmcsFieldWidth::Width64 => 8,
         }
     }
 }
@@ -613,13 +620,6 @@ impl VmcsField {
             }
             VmcsFieldWidth::Width32 => {
                 // Special case for fields with high:low entries.
-                if let Some(high) = VmcsField::from_u32(self.raw() + 1) {
-                    if self.access_type() == VmcsFieldAccessType::Full
-                        && high.access_type() == VmcsFieldAccessType::High
-                    {
-                        return raw::vmwrite(self.raw() as u64, value as u64);
-                    }
-                }
                 let v: u32 = value as u32;
                 raw::vmwrite(self.raw() as u64, v as u64)
             }

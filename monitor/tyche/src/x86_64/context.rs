@@ -107,7 +107,7 @@ impl ContextGpx86 {
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[repr(usize)]
-pub enum Context64x86 {
+pub enum Context32x86 {
     PinBasedVmExecControl = 0,
     CpuBasedVmExecControl = 1,
     ExceptionBitmap = 2,
@@ -159,7 +159,7 @@ pub enum Context64x86 {
     VmxPreemptionTimerValue = 48,
 }
 
-impl Context64x86 {
+impl Context32x86 {
     pub fn as_vmcs_field(&self) -> VmcsField {
         match self {
             Self::PinBasedVmExecControl => VmcsField::PinBasedVmExecControl,
@@ -331,7 +331,7 @@ impl Context64x86 {
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[repr(usize)]
-pub enum Context32x86 {
+pub enum Context64x86 {
     IoBitmapA = 0,
     IoBitmapB = 1,
     MsrBitmap = 2,
@@ -374,7 +374,7 @@ pub enum Context32x86 {
     HostIa32PerfGlobalCtrl = 39,
 }
 
-impl Context32x86 {
+impl Context64x86 {
     pub fn as_vmcs_field(&self) -> VmcsField {
         match self {
             Self::IoBitmapA => VmcsField::IoBitmapA,
