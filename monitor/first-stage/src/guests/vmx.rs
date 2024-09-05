@@ -6,7 +6,7 @@ use stage_two_abi::GuestInfo;
 use vmx::fields::VmcsField;
 use vmx::{msr, ActiveVmcs, VmxError};
 use x86_64::instructions::tables::{sgdt, sidt};
-use x86_64::registers::model_specific::Efer;
+use x86_64::registers::model_specific::{Efer, EferFlags};
 use x86_64::registers::segmentation;
 use x86_64::registers::segmentation::Segment;
 
@@ -19,6 +19,8 @@ pub fn save_host_info(info: &mut GuestInfo) {
     info.fs = segmentation::FS::get_reg().0;
     info.gs = segmentation::GS::get_reg().0;
     info.ss = segmentation::SS::get_reg().0;
+    // Enable (S)ystem (C)all (E)xtension (SCE) in EFER.
+    unsafe { Efer::write(Efer::read().union(EferFlags::SYSTEM_CALL_EXTENSIONS)) };
     info.efer = Efer::read().bits();
 }
 
@@ -75,7 +77,8 @@ pub fn save_host_state<'vmx>(_vmcs: &mut ActiveVmcs<'vmx>) -> Result<(), VmxErro
         VmcsField::HostIa32SysenterEsp.vmwrite(msr::SYSENTER_ESP.read() as usize)?;
         VmcsField::HostIa32SysenterEip.vmwrite(msr::SYSENTER_EIP.read() as usize)?;
         VmcsField::HostIa32SysenterCs.vmwrite(msr::SYSENTER_CS.read() as usize)?;
-        VmcsField::HostIa32Efer.vmwrite(Efer::read().bits() as usize)?;
+        // Enable SCE in EFER (see comment above).
+        VmcsField::HostIa32Efer.vmwrite((Efer::read().bits() | 0x1) as usize)?;
     }
 
     // Control registers

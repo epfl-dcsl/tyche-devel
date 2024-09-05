@@ -619,11 +619,11 @@ impl VmcsField {
                 raw::vmwrite(self.raw() as u64, v as u64)
             }
             VmcsFieldWidth::Width32 => {
-                // Special case for fields with high:low entries.
                 let v: u32 = value as u32;
                 raw::vmwrite(self.raw() as u64, v as u64)
             }
             VmcsFieldWidth::Width64 => {
+                //TODO Special case for fields with high:low entries?
                 let v: u64 = value as u64;
                 raw::vmwrite(self.raw() as u64, v)
             }

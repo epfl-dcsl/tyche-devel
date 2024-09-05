@@ -50,6 +50,14 @@ run_td1_with_drive:
 	-drive file=nested.qcow2,format=qcow2,media=disk,index=1 \
 	-append "noapic lpj=24000000 earlyprintk=serial,tty0 console=ttyS0"
 
+run_td1_lkvm_with_disk:
+	KVM_PIN_CORES=0 lkvm run \
+        --kernel ./vms/bzImage \
+        --disk nested.raw \
+        --params "root=/dev/vda2" \
+        --console virtio \
+        --network virtio \
+        --cpus 2
 
 regression:
 	sudo ./scripts/mod_switch.sh

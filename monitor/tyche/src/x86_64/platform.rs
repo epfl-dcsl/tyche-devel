@@ -679,13 +679,6 @@ impl MonitorX86 {
 
                 // Special case for switch.
                 if vmcall == calls::SWITCH {
-                    {
-                        //TODO: figure out a way to fix this.
-                        let mut msr = vmx::msr::Msr::new(0xC000_0080);
-                        unsafe {
-                            msr.write(0xd01);
-                        }
-                    }
                     vs.vcpu.next_instruction().or(Err(CapaError::PlatformError))?;
                 } else if vmcall == calls::EXIT {
                     return Ok(HandlerResult::Exit);

@@ -18,6 +18,7 @@
 .equ CR4_PGE, (1 << 7)
 .equ EFER_LME, (1 << 8)
 .equ EFER_NXE, (1 << 11)
+.equ EFER_SCE, (1 << 0)
 
 .global ap_trampoline_start
 .global ap_trampoline_end
@@ -58,7 +59,7 @@ ap_trampoline_start:
     # EFER: enable LME and NXE
     mov     ecx, 0xC0000080
     rdmsr
-    or      eax, EFER_LME | EFER_NXE
+    or      eax, EFER_LME | EFER_NXE | EFER_SCE
     wrmsr
 
     # cr0: enable PE and PG (CR0_PE | CR0_PG)
