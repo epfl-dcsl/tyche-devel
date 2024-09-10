@@ -337,6 +337,20 @@ impl<'vmx> ActiveVmcs<'vmx> {
     pub fn switch_frame(&mut self, dest: Frame) -> Result<(), VmxError> {
         // Save the state of the current VM.
         self.flush();
+        unsafe {
+            // When switching frame we need to clear the old one to ensure it is not active
+            // anymore. This is required because we don't prevent VMCS from being migrated from one
+            // core to another (e.g. creating a new VCMS on core A but starting the domain on core
+            // B).
+            // This might have performance implications, as it requires clearing
+            // micro-architectural caches, but hopefully this is mostly required during domain
+            // initialization. It might be worth to measure the overhead and add an option to
+            // disable the clearing if the VMCS will not be migrated.
+            raw::vmclear(self.frame().phys_addr.as_u64())
+                .expect("Failed to clear VMCS when switching frame")
+        };
+
+        // Load target VMCS
         self.region.set_frame(dest);
         match unsafe { raw::vmptrld(self.region.frame().phys_addr.as_u64()) } {
             Err(e) => {
