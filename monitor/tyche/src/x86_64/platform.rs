@@ -155,6 +155,9 @@ impl PlatformState for StateX86 {
             // Init to the default values.
             let info: GuestInfo = Default::default();
             vmx_helper::default_vmcs_config(&mut self.vcpu, &info, false);
+            let vpid = (domain.idx() + 1) as u16; // VPID 0 is reserved for VMX root execution
+            self.vcpu.set_vpid(vpid).expect("Failled to install VPID");
+            log::info!("Configured VPID {} on CPU {} for domain {}", vpid, cpuid(), domain.idx());
 
             // Load the default values.
             load_host_state(&mut self.vcpu, &mut values).or(Err(CapaError::InvalidValue))?;
@@ -552,6 +555,7 @@ impl MonitorX86 {
         unsafe {
             vmx_helper::init_vcpu(&mut state.vcpu, &manifest.info, &mut ctx);
         }
+        state.vcpu.set_vpid((domain.idx() + 1) as u16).expect("Failed to set VPID");
         (state, domain)
     }
 

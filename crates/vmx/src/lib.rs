@@ -651,6 +651,10 @@ impl<'vmx> ActiveVmcs<'vmx> {
         Ok(self.get(VmcsField::EptPointer)? as u64)
     }
 
+    pub fn set_vpid(&mut self, vpid: u16) -> Result<(), VmxError> {
+        self.set(VmcsField::VirtualProcessorId, vpid as usize)
+    }
+
     /// Sets the EPTP address list.
     pub fn set_eptp_list(&mut self, eptp_list: &ept::EptpList) -> Result<(), VmxError> {
         self.set(VmcsField::EptpListAddress, eptp_list.get_ptr().as_usize())

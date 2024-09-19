@@ -93,7 +93,8 @@ pub fn default_vmcs_config(vmcs: &mut ActiveVmcs, info: &GuestInfo, switching: b
 
     let mut secondary_ctrls = SecondaryControls::ENABLE_RDTSCP
         | SecondaryControls::ENABLE_EPT
-        | SecondaryControls::UNRESTRICTED_GUEST;
+        | SecondaryControls::UNRESTRICTED_GUEST
+        | SecondaryControls::ENABLE_VPID;
     if switching {
         secondary_ctrls |= SecondaryControls::ENABLE_VM_FUNCTIONS
     }
