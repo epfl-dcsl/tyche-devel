@@ -4,6 +4,7 @@ mod arch;
 mod context;
 mod cpuid_filter;
 mod init;
+mod perf;
 mod platform;
 mod state;
 mod vmx_helper;

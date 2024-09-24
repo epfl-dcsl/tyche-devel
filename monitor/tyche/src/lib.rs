@@ -2,6 +2,7 @@
 #![no_std]
 #![feature(fn_align)]
 #![feature(naked_functions)]
+#![feature(isqrt)]
 
 pub mod allocator;
 pub mod attestation_domain;
