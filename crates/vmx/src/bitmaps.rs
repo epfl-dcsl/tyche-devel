@@ -451,4 +451,79 @@ pub mod exit_qualification {
         LmswRegister(u16),
         LmswMemory(u16),
     }
+
+    // APIC Access qualifications
+    // See table 28-6
+    const APIC_LINEAR_ADDR_MASK: usize = (1 << 12) - 1;
+    const APIC_ACCESS_TYPE_MASK: usize = (0b111) << 12;
+    const APIC_ASYNC_ACCESS_MASK: usize = (0b1) << 16;
+
+    /// Access type for an APIC access qualification
+    #[derive(Clone, Copy, Debug)]
+    #[repr(u8)]
+    pub enum ApicAccessType {
+        ReadLinear = 0,
+        WriteLinear = 1,
+        InsFetchLinear = 2,
+        EventDeliveryLinear = 3,
+        MonitoringLinear = 4,
+        EventDeliveryGpa = 10,
+        MonitoringGpa = 11,
+        InsFetchGpa = 12,
+    }
+
+    impl ApicAccessType {
+        pub fn from_value(val: u8) -> Option<Self> {
+            let res = match val {
+                0 => Self::ReadLinear,
+                1 => Self::WriteLinear,
+                2 => Self::InsFetchLinear,
+                3 => Self::EventDeliveryLinear,
+                4 => Self::MonitoringLinear,
+                10 => Self::EventDeliveryGpa,
+                11 => Self::MonitoringGpa,
+                12 => Self::InsFetchGpa,
+                _ => {
+                    return None;
+                }
+            };
+            Some(res)
+        }
+
+        pub fn is_linear(&self) -> bool {
+            match *self {
+                Self::EventDeliveryGpa | Self::InsFetchGpa | Self::MonitoringGpa => false,
+                _ => true,
+            }
+        }
+    }
+
+    #[derive(Debug)]
+    pub struct ApicAccessQualification {
+        pub offset: Option<u16>,
+        pub access: ApicAccessType,
+        pub is_async: bool,
+    }
+
+    impl ApicAccessQualification {
+        pub fn from_value(value: usize) -> Option<Self> {
+            let r_linear = value & APIC_LINEAR_ADDR_MASK;
+            let r_access = (value & APIC_ACCESS_TYPE_MASK) >> 12;
+            let is_async: bool = (value & APIC_ASYNC_ACCESS_MASK) == APIC_ASYNC_ACCESS_MASK;
+
+            if let Some(access) = ApicAccessType::from_value(r_access as u8) {
+                let offset = if access.is_linear() {
+                    Some(r_linear as u16)
+                } else {
+                    None
+                };
+                return Some(Self {
+                    offset,
+                    access,
+                    is_async,
+                });
+            }
+            return None;
+        }
+    }
 }

@@ -8,7 +8,7 @@ use crate::capa::{Capa, IntoCapa};
 use crate::config::{NB_CAPAS_PER_DOMAIN, NB_DOMAINS};
 use crate::free_list::FreeList;
 use crate::gen_arena::GenArena;
-use crate::permission::{self, PermissionIndex, Permissions};
+use crate::permission::{self, monitor_inter_perm, PermissionIndex, Permissions};
 use crate::region::{PermissionChange, RegionTracker, TrackerPool};
 use crate::segment::{self, RegionPool};
 use crate::update::{Update, UpdateBuffer};
@@ -378,9 +378,13 @@ pub(crate) fn has_permission(
     value: u64,
 ) -> Result<(), CapaError> {
     let domain = &domains[domain];
-    // Let's ignore the read/write for the moment.
+    // Let's ignore the read/write for the moment and CPUID.
     if perm >= PermissionIndex::MgmtRead16
         || domain.permissions.perm[perm as usize] & value == value
+    {
+        Ok(())
+    } else if perm == PermissionIndex::MonitorInterface
+        && (value & (domain.permissions.perm[perm as usize] | monitor_inter_perm::CPUID)) == value
     {
         Ok(())
     } else {

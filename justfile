@@ -334,9 +334,6 @@ install-drivers:
 setup_lab_x86:
   @just build-linux-x86 && just install-drivers
   @just build-linux-x86-nested
-  rm -rf /tmp/seabios_tmp
-  git clone git@github.com:aghosn/seabios.git /tmp/seabios_tmp
-  make -C /tmp/seabios_tmp/
   ARCH=x86 make -C C/ ubuntu_mount
   ARCH=x86 make -C C/ update_disk
   # Copy all the necessary files
@@ -349,9 +346,16 @@ setup_lab_x86:
   sudo cp scripts/mod_switch.sh /tmp/mount/tyche/scripts/mod_switch.sh
   sudo cp configs/README_td0.md /tmp/mount/tyche/README.md
   sudo chmod +x /tmp/mount/tyche/scripts/mod_switch.sh
-  sudo cp /tmp/seabios_tmp/out/bios.bin /tmp/mount/tyche/vms/bios.bin
-  rm -rf /tmp/seabios_tmp/
+  @just seabios_setup
   ARCH=x86 make -C C/ ubuntu_umount
+
+seabios_setup:
+  #!/usr/bin/env bash
+  if [ ! -d builds/seabios ]; then
+    git clone git@github.com:aghosn/seabios.git builds/seabios
+  fi
+  make -C builds/seabios
+  sudo cp builds/seabios/out/bios.bin /tmp/mount/tyche/vms/bios.bin
 
 # The following line gives highlighting on vim
 # vim: set ft=make :

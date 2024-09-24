@@ -48,13 +48,13 @@ run_td1_with_drive:
 	-cpu host \
 	-drive file=fake.disk,format=raw,index=0 \
 	-drive file=nested.qcow2,format=qcow2,media=disk,index=1 \
-	-append "noapic lpj=24000000 earlyprintk=serial,tty0 console=ttyS0"
+	-append "noapic lpj=24000000 earlyprintk=serial,tty0 console=ttyS0 root=/dev/sdb2"
 
 run_td1_lkvm_with_disk:
 	KVM_PIN_CORES=0 lkvm run \
         --kernel ./vms/bzImage \
         --disk nested.raw \
-        --params "root=/dev/vda2" \
+        --params "noapic root=/dev/vda2 swiotlb=force" \
         --console virtio \
         --network virtio \
         --cpus 2
@@ -73,4 +73,24 @@ else
 	@echo "lkvm not found! Make sure it is in your path!"
 	@exit 1
 endif
-	KVM_PIN_CORES=0 lkvm run -c 1 -k vms/bzImage
+	KVM_PIN_CORES=0 lkvm run -c 1 -k vms/bzImage -p "noapic swiotlb=force"
+
+run_coco_lkvm:
+ifeq ($(lkvm_exists), yes)
+	@echo "lkvm is available"
+else 
+	@echo "lkvm not found! Make sure it is in your path!"
+	@exit 1
+endif
+	KVM_PIN_CORES=0 lkvm run -c 1 -k vms/bzImage -p "noapic swiotlb=force tyche.tyche_coco=true"
+
+run_coco_lkvm_with_disk:
+	KVM_PIN_CORES=0 lkvm run \
+        --kernel ./vms/bzImage \
+        --disk nested.raw \
+        --params "noapic root=/dev/vda2 swiotlb=force tyche.tyche_coco=true" \
+        --console virtio \
+        --network virtio \
+        --cpus 2
+
+

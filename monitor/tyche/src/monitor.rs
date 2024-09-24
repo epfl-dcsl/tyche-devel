@@ -447,8 +447,8 @@ pub trait Monitor<T: PlatformState + 'static> {
         let mut engine = Self::lock_engine(state, current);
         // Send is not allowed for region capa.
         // Use do_send_region instead.
-        match engine.get_region_capa(*current, capa)? {
-            Some(_) => return Err(CapaError::InvalidCapa),
+        match engine.get_region_capa(*current, capa) {
+            Ok(Some(_)) => return Err(CapaError::InvalidCapa),
             _ => {}
         }
         engine.send(*current, capa, to)?;
@@ -747,12 +747,20 @@ pub trait Monitor<T: PlatformState + 'static> {
                 Self::do_return_to_manager(state, domain, cpuid())?;
                 return Ok(false);
             }
+            calls::CALL_MANAGER => {
+                log::trace!("Calling manager from dom {}", domain.idx());
+                // This is handled like a violation. with the exception that
+                // we move the instruction pointer before.
+                // TODO(aghosn): might end up doing the same for regular vms.
+                Self::do_handle_violation(state, domain)?;
+                return Ok(false);
+            }
             calls::EXIT => {
                 todo!("Exit called")
             }
             calls::DEBUG => {
                 log::info!(
-                    "Debug called with {} from dom{} on core {}",
+                    "Debug called with {:#x} from dom{} on core {}\n\n",
                     args[0],
                     domain.idx(),
                     cpuid()
@@ -771,6 +779,7 @@ pub trait Monitor<T: PlatformState + 'static> {
                         Ok(_) => 0,
                         Err(e) => {
                             log::error!("Configuration error: {:?}", e);
+                            log::error!("Bitmap: {:?}, value {:#x}", bitmap, value);
                             1
                         }
                     }
