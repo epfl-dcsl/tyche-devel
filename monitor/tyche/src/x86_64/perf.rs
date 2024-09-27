@@ -41,12 +41,21 @@ pub enum PerfEvent {
     VmcallSelfConfigure,
     VmcallReturnToManager,
     VmcallGetHpa,
+    IoInstr,
+    Msr,
+    VmxTimer,
     Cpuid,
     ControlRegisterAccess,
     EptViolation,
+    ExternalInt,
+    Exception,
+    ApicAccess,
+    VirtEoi,
+    Xsetbv,
+    Debug,
 }
 
-const NB_EVENTS: usize = 17;
+const NB_EVENTS: usize = 26;
 
 static EVENTS: [PerfEvent; NB_EVENTS] = [
     PerfEvent::Other,
@@ -64,8 +73,17 @@ static EVENTS: [PerfEvent; NB_EVENTS] = [
     PerfEvent::VmcallGetHpa,
     PerfEvent::VmcallReturnToManager,
     PerfEvent::Cpuid,
+    PerfEvent::IoInstr,
+    PerfEvent::Msr,
+    PerfEvent::VmxTimer,
     PerfEvent::ControlRegisterAccess,
     PerfEvent::EptViolation,
+    PerfEvent::ExternalInt,
+    PerfEvent::Exception,
+    PerfEvent::ApicAccess,
+    PerfEvent::VirtEoi,
+    PerfEvent::Xsetbv,
+    PerfEvent::Debug,
 ];
 
 fn rdtsc() -> u64 {

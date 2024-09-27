@@ -7,6 +7,8 @@ use vmx::{ActiveVmcs, VmxError};
 
 use crate::rcframe::{RCFrame, RCFramePool};
 
+pub const MAX_CPUID_ENTRIES: usize = 50;
+
 trait ContextRegisterx86 {
     fn as_vmcs_field(&self) -> VmcsField;
     fn from_vmcs_field(field: VmcsField) -> Option<Self>
@@ -792,6 +794,16 @@ pub struct SchedInfo {
     pub saved_ctrls: usize,
 }
 
+pub struct CpuidEntry {
+    pub function: u32,
+    pub index: u32,
+    pub flags: u32,
+    pub eax: u32,
+    pub ebx: u32,
+    pub ecx: u32,
+    pub edx: u32,
+}
+
 pub struct Contextx86 {
     pub regs: RegisterContext<
         { Context16x86::size() },
@@ -804,6 +816,8 @@ pub struct Contextx86 {
     pub interrupted: bool,
     pub sched_info: SchedInfo,
     pub vmcs: Handle<RCFrame>,
+    pub nb_active_cpuid_entries: usize,
+    pub cpuid_entries: [CpuidEntry; MAX_CPUID_ENTRIES],
 }
 
 impl Contextx86 {

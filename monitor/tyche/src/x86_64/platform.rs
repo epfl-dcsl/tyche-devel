@@ -27,6 +27,7 @@ use super::{cpuid, vmx_helper};
 use crate::allocator::{self, allocator};
 use crate::monitor::{CoreUpdate, Monitor, PlatformState};
 use crate::rcframe::{drop_rc, RCFrame};
+use crate::x86_64::context::CpuidEntry;
 use crate::x86_64::state::TLB_FLUSH_BARRIERS;
 use crate::{calls, MonitorErrors};
 
@@ -620,6 +621,61 @@ impl MonitorX86 {
             .unwrap();
     }
 
+    fn emulate_cpuid_cached(&self, domain: Handle<Domain>) -> Result<(), ()> {
+        let mut context = StateX86::get_context(domain, cpuid());
+
+        if context.nb_active_cpuid_entries == 0 {
+            // No cached cpuid
+            return Err(());
+        }
+
+        let function = context.get(VmcsField::GuestRax, None).unwrap() as u32;
+        let index = context.get(VmcsField::GuestRcx, None).unwrap() as u32;
+
+        for i in 0..context.nb_active_cpuid_entries {
+            let entry = &context.cpuid_entries[i];
+
+            if entry.function != function {
+                // Function does not match, check the next one
+                continue;
+            }
+
+            // If the  index is not significant, or if the index is the same
+            if (entry.flags & 0b1 == 0) || entry.index == index {
+                let eax = entry.eax;
+                let ebx = entry.ebx;
+                let ecx = entry.ecx;
+                let edx = entry.edx;
+                // log::trace!(
+                //     "Successful CPUID emulation: {:08x} {:08x} - {:08x} {:08x} {:08x} {:08x}",
+                //     function,
+                //     index,
+                //     eax,
+                //     ebx,
+                //     ecx,
+                //     edx
+                // );
+                // return Err(());
+                context
+                    .set(VmcsField::GuestRax, eax as usize, None)
+                    .unwrap();
+                context
+                    .set(VmcsField::GuestRbx, ebx as usize, None)
+                    .unwrap();
+                context
+                    .set(VmcsField::GuestRcx, ecx as usize, None)
+                    .unwrap();
+                context
+                    .set(VmcsField::GuestRdx, edx as usize, None)
+                    .unwrap();
+                return Ok(());
+            }
+        }
+
+        // log::trace!("Failed to emulate CPUID: {:08x} {:08x}", function, index);
+        Err(())
+    }
+
     pub fn main_loop(&mut self, mut state: StateX86, mut domain: Handle<Domain>) {
         let mut perf = PerfContext::new();
         let core_id = cpuid();
@@ -712,7 +768,16 @@ impl MonitorX86 {
                 } else if vmcall == calls::EXIT {
                     return Ok(HandlerResult::Exit);
                 }
-                let success = Self::do_monitor_call(vs, domain, vmcall, &args, &mut res);
+
+                let success  = match vmcall {
+                    calls::EXIT => return Ok(HandlerResult::Exit),
+                    calls::SET_CPUID_ENTRY => {
+                        let engine = Self::lock_engine(vs, domain);
+                        let target = engine.get_domain_capa(*domain, LocalCapa::new(args[0])).expect("Invalid capa for SET_CPUID_ENTRY");
+                        self.install_cpuid_entry(target, &args)
+                    }
+                    _ => Self::do_monitor_call(vs, domain, vmcall, &args, &mut res)
+                };
                 // Put the results back.
                 let mut context = StateX86::get_context(*domain, cpuid());
                 match success {
@@ -749,11 +814,42 @@ impl MonitorX86 {
             log::trace!("cpu {} received init signal", cpuid());
             Ok(HandlerResult::Resume)
         }
-        VmxExitReason::Cpuid if domain.idx() == 0 => {
+        VmxExitReason::Cpuid => {
             perf.event(PerfEvent::Cpuid);
-            Self::emulate_cpuid(domain);
-            vs.vcpu.next_instruction().or(Err(CapaError::PlatformError))?;
-            Ok(HandlerResult::Resume)
+
+            // Domain 0 gets direct access to CPUID
+            if domain.idx() == 0 {
+                Self::emulate_cpuid(domain);
+                vs.vcpu.next_instruction().or(Err(CapaError::PlatformError))?;
+                return Ok(HandlerResult::Resume)
+            }
+            // Otherwise check if we have cached CPUID entries
+            match self.emulate_cpuid_cached(*domain) {
+                // Successfully emulated CPUID
+                Ok(_) => {
+                    vs.vcpu.next_instruction().or(Err(CapaError::PlatformError))?;
+                    return Ok(HandlerResult::Resume);
+                }
+                // Failed to emulate CPUID, continuing
+                Err(_) => (),
+            }
+            // Finaly some domains get direct access to CPUID
+            let perms = Self::do_get_self(vs, domain, permission::PermissionIndex::MonitorInterface)?;
+            if perms & permission::monitor_inter_perm::CPUID as usize != 0 {
+                Self::emulate_cpuid(domain);
+                vs.vcpu.next_instruction().or(Err(CapaError::PlatformError))?;
+                return Ok(HandlerResult::Resume);
+            }
+            match Self::do_handle_violation(vs, domain) {
+                Ok(_) => {
+                    return Ok(HandlerResult::Resume);
+                }
+                Err(e) => {
+                    log::error!("Unable to handle cpuid: {:?}", e);
+                    log::info!("The vcpu: {:x?}", vs.vcpu);
+                    return Ok(HandlerResult::Crash);
+                }
+            }
         }
         VmxExitReason::ControlRegisterAccesses if domain.idx() == 0 => {
             perf.event(PerfEvent::ControlRegisterAccess);
@@ -801,6 +897,7 @@ impl MonitorX86 {
             panic!("Received an exception on dom0?");
         }
         VmxExitReason::Xsetbv if domain.idx() == 0 => {
+            perf.event(PerfEvent::Xsetbv);
             let mut context = StateX86::get_context(*domain, cpuid());
             let ecx = context.get(VmcsField::GuestRcx, None).or(Err(CapaError::PlatformError))?;
             let eax = context.get(VmcsField::GuestRax, None).or(Err(CapaError::PlatformError))?;
@@ -825,6 +922,7 @@ impl MonitorX86 {
             Ok(HandlerResult::Resume)
         }
         VmxExitReason::Wrmsr if domain.idx() == 0 => {
+            perf.event(PerfEvent::Msr);
             let mut context = StateX86::get_context(*domain, cpuid());
             let ecx = context.get(VmcsField::GuestRcx, None).or(Err(CapaError::PlatformError))?;
             if ecx >= 0x4B564D00 && ecx <= 0x4B564DFF {
@@ -839,6 +937,7 @@ impl MonitorX86 {
             }
         }
         VmxExitReason::Rdmsr if domain.idx() == 0 => {
+            perf.event(PerfEvent::Msr);
             let mut context = StateX86::get_context(*domain, cpuid());
             let ecx = context.get(VmcsField::GuestRcx, None).or(Err(CapaError::PlatformError))?;
             log::trace!("rdmsr 0x{:x}", ecx);
@@ -866,7 +965,6 @@ impl MonitorX86 {
         | VmxExitReason::IoInstruction
         | VmxExitReason::ControlRegisterAccesses
         | VmxExitReason::TripleFault
-        | VmxExitReason::Cpuid
         | VmxExitReason::Exception
         | VmxExitReason::Wrmsr
         | VmxExitReason::Rdmsr
@@ -882,6 +980,20 @@ impl MonitorX86 {
         | VmxExitReason::AccessToLdtrOrTr
         | VmxExitReason::Hlt => {
             log::trace!("Handling {:?} for dom {} on core {}", reason, domain.idx(), cpuid());
+            match reason {
+                VmxExitReason::EptViolation => perf.event(PerfEvent::EptViolation),
+                VmxExitReason::VmxPreemptionTimerExpired => perf.event(PerfEvent::VmxTimer),
+                VmxExitReason::ControlRegisterAccesses => perf.event(PerfEvent::ControlRegisterAccess),
+                VmxExitReason::Exception => perf.event(PerfEvent::Exception),
+                VmxExitReason::IoInstruction => perf.event(PerfEvent::IoInstr),
+                VmxExitReason::ExternalInterrupt => perf.event(PerfEvent::ExternalInt),
+                VmxExitReason::Xsetbv => perf.event(PerfEvent::Xsetbv),
+                VmxExitReason::VirtualizedEoi => perf.event(PerfEvent::VirtEoi),
+                VmxExitReason::ApicAccess | VmxExitReason::ApicWrite => perf.event(PerfEvent::ApicAccess),
+                VmxExitReason::Rdmsr | VmxExitReason::Wrmsr => perf.event(PerfEvent::Msr),
+                _ => (),
+            }
+
             if reason == VmxExitReason::ExternalInterrupt {
                 /*let address_eoi = 0xfee000b0 as *mut u32;
                 unsafe {
@@ -889,15 +1001,6 @@ impl MonitorX86 {
                     *address_eoi = 0;
                 }*/
                 x2apic::send_eoi();
-            }
-            // Check if the domain can emulate cpuid.
-            if reason == VmxExitReason::Cpuid {
-                let perms = Self::do_get_self(vs, domain, permission::PermissionIndex::MonitorInterface)?;
-                if perms & permission::monitor_inter_perm::CPUID as usize != 0 {
-                    Self::emulate_cpuid(domain);
-                    vs.vcpu.next_instruction().or(Err(CapaError::PlatformError))?;
-                    return Ok(HandlerResult::Resume);
-                }
             }
             match Self::do_handle_violation(vs, domain) {
                 Ok(_) => {
@@ -919,5 +1022,64 @@ impl MonitorX86 {
             Ok(HandlerResult::Crash)
         }
         }
+    }
+
+    fn install_cpuid_entry(
+        &mut self,
+        domain: Handle<Domain>,
+        args: &[usize; 6],
+    ) -> Result<bool, CapaError> {
+        let mut context = StateX86::get_context(domain, cpuid());
+        if context.nb_active_cpuid_entries >= context.cpuid_entries.len() {
+            return Err(CapaError::OutOfMemory);
+        }
+
+        let function = args[1] as u32;
+        let index = (args[2] & 0xffffffff) as u32;
+        let flags = (args[2] >> 32) as u32;
+        let eax = (args[3] & 0xffffffff) as u32;
+        let ebx = (args[3] >> 32) as u32;
+        let ecx = (args[4] & 0xffffffff) as u32;
+        let edx = (args[4] >> 32) as u32;
+
+        log::info!(
+            "Configure CPUID on domain {} {:08x} {:08x} {:08x} - {:08x} {:08x} {:08x} {:08x}",
+            domain.idx(),
+            function,
+            index,
+            flags,
+            eax,
+            ebx,
+            ecx,
+            edx
+        );
+
+        // Update permissions if already present
+        for i in 0..context.nb_active_cpuid_entries {
+            let entry = &mut context.cpuid_entries[i];
+            if entry.function == function && entry.index == index {
+                entry.flags = flags;
+                entry.eax = eax;
+                entry.ebx = ebx;
+                entry.ecx = ecx;
+                entry.edx = edx;
+
+                return Ok(true);
+            }
+        }
+
+        let idx = context.nb_active_cpuid_entries;
+        context.nb_active_cpuid_entries += 1;
+        context.cpuid_entries[idx] = CpuidEntry {
+            function,
+            index,
+            flags,
+            eax,
+            ebx,
+            ecx,
+            edx,
+        };
+
+        return Ok(true);
     }
 }

@@ -30,5 +30,6 @@ pub const SERIALIZE_ATTESTATION: usize = 22;
 pub const RETURN_TO_MANAGER: usize = 23;
 pub const GET_HPA: usize = 24;
 pub const CALL_MANAGER: usize = 25;
+pub const SET_CPUID_ENTRY: usize = 26;
 /// For benchmarks to measure the cost of communication with tyche.
 pub const _TEST_CALL: usize = 30;

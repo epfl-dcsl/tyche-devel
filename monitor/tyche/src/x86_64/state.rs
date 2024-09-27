@@ -12,7 +12,7 @@ use vmx::fields::VmcsField;
 use vmx::{ActiveVmcs, VmxExitReason, Vmxon};
 use vtd::Iommu;
 
-use super::context::{Contextx86, SchedInfo};
+use super::context::{Contextx86, CpuidEntry, SchedInfo, MAX_CPUID_ENTRIES};
 use super::vmx_helper::{dump_host_state, load_host_state};
 use crate::allocator::allocator;
 use crate::monitor::PlatformState;
@@ -40,6 +40,16 @@ pub static TLB_FLUSH_BARRIERS: [Barrier; NB_DOMAINS] = [Barrier::NEW; NB_DOMAINS
 pub static TLB_FLUSH: [AtomicBool; NB_DOMAINS] = [FALSE; NB_DOMAINS];
 
 // —————————————————————————————— Empty values —————————————————————————————— //
+
+const EMPTY_CPUID_ENTRY: CpuidEntry = CpuidEntry {
+    function: 0,
+    index: 0,
+    flags: 0,
+    eax: 0,
+    ebx: 0,
+    ecx: 0,
+    edx: 0,
+};
 const EMPTY_CONTEXT_ARRAY: [Mutex<Contextx86>; NB_CORES] = [EMPTY_CONTEXT; NB_CORES];
 const EMPTY_CONTEXT: Mutex<Contextx86> = Mutex::new(Contextx86 {
     regs: RegisterContext {
@@ -57,6 +67,8 @@ const EMPTY_CONTEXT: Mutex<Contextx86> = Mutex::new(Contextx86 {
         saved_ctrls: 0,
     },
     vmcs: Handle::<RCFrame>::new_invalid(),
+    nb_active_cpuid_entries: 0,
+    cpuid_entries: [EMPTY_CPUID_ENTRY; MAX_CPUID_ENTRIES],
 });
 const EMPTY_DOMAIN: Mutex<DataX86> = Mutex::new(DataX86 {
     ept: None,
