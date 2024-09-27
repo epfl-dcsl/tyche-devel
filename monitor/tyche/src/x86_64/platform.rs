@@ -25,6 +25,7 @@ use super::state::{DataX86, StateX86, VmxState, CONTEXTS, DOMAINS, IOMMU, RC_VMC
 use super::vmx_helper::{dump_host_state, load_host_state};
 use super::{cpuid, vmx_helper};
 use crate::allocator::{self, allocator};
+use crate::calls::{MONITOR_FAILURE, MONITOR_SUCCESS};
 use crate::monitor::{CoreUpdate, Monitor, PlatformState};
 use crate::rcframe::{drop_rc, RCFrame};
 use crate::x86_64::context::CpuidEntry;
@@ -804,7 +805,7 @@ impl MonitorX86 {
                 let mut context = StateX86::get_context(*domain, cpuid());
                 match success {
                     Ok(true) => {
-                          context.set(VmcsField::GuestRax, 0, None).unwrap();
+                          context.set(VmcsField::GuestRax, MONITOR_SUCCESS, None).unwrap();
                           context.set(VmcsField::GuestRdi, res[0], None).unwrap();
                           context.set(VmcsField::GuestRsi, res[1], None).unwrap();
                           context.set(VmcsField::GuestRdx, res[2], None).unwrap();
@@ -815,7 +816,7 @@ impl MonitorX86 {
                     Ok(false) => {},
                     Err(e) => {
                         log::error!("Failure monitor call: {:?}, call: {:?} for dom {} on core {}", e, vmcall, domain.idx(), cpuid());
-                        context.set(VmcsField::GuestRax, 1, None).unwrap();
+                        context.set(VmcsField::GuestRax, MONITOR_FAILURE, None).unwrap();
                         log::debug!("The vcpu: {:#x?}", vs.vcpu);
                         drop(context);
                         let callback = |dom: Handle<Domain>, engine: &mut CapaEngine| {

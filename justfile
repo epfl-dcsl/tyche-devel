@@ -164,11 +164,18 @@ _build-linux-common ARCH CROSS_COMPILE=extra_arg:
 	@just _clean-linux-config {{ARCH}}
 
 build-linux-x86-nested:
+  # Normal VMs, no swiotlb or cma.
   cp ./configs/linux-x86-nested.config ./linux/arch/x86/configs/linux-x86-nested_defconfig
   mkdir -p ./builds/linux-x86-nested
   make -C ./linux ARCH=x86 O=../builds/linux-x86-nested defconfig KBUILD_DEFCONFIG=linux-x86-nested_defconfig
   make -C ./linux ARCH=x86 O=../builds/linux-x86-nested -j `nproc`
   rm ./linux/arch/x86/configs/linux-x86-nested_defconfig
+  # Confidential VMs, swiotlb and cma.
+  cp ./configs/linux-x86-nested-confidential.config ./linux/arch/x86/configs/linux-x86-nested-confidential_defconfig
+  mkdir -p ./builds/linux-x86-nested-confidential
+  make -C ./linux ARCH=x86 O=../builds/linux-x86-nested-confidential defconfig KBUILD_DEFCONFIG=linux-x86-nested-confidential_defconfig
+  make -C ./linux ARCH=x86 O=../builds/linux-x86-nested-confidential -j `nproc`
+  rm ./linux/arch/x86/configs/linux-x86-nested-confidential_defconfig
 
 _build-linux-header-common ARCH CROSS_COMPILE=extra_arg:
 	@just _setup-linux-config {{ARCH}}
@@ -339,6 +346,7 @@ setup_lab_x86:
   # Copy all the necessary files
   mkdir -p /tmp/mount/tyche/vms
   sudo cp builds/linux-x86-nested/arch/x86_64/boot/bzImage /tmp/mount/tyche/vms/bzImage
+  sudo cp builds/linux-x86-nested-confidential/arch/x86_64/boot/bzImage /tmp/mount/tyche/vms/bzImageConfidential
   sudo cp configs/Makefile_td0 /tmp/mount/tyche/Makefile
   mkdir -p /tmp/mount/tyche/scripts
   mkdir -p /tmp/mount/tyche/chardev/

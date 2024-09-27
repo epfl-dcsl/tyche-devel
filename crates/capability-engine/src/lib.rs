@@ -766,6 +766,13 @@ impl CapaEngine {
                     &mut self.regions,
                     &mut self.domains,
                 )?;
+                // Create a Channel to the parent.
+                let _chan = insert_capa(
+                    handle,
+                    Capa::Channel(manager),
+                    &mut self.regions,
+                    &mut self.domains,
+                )?;
                 self.updates
                     .push(Update::CreateDomain { domain: handle })
                     .unwrap();

@@ -33,3 +33,8 @@ pub const CALL_MANAGER: usize = 25;
 pub const SET_CPUID_ENTRY: usize = 26;
 /// For benchmarks to measure the cost of communication with tyche.
 pub const _TEST_CALL: usize = 30;
+
+// ————————————————————— Return values for the monitor —————————————————————— //
+pub const MONITOR_SUCCESS: usize = 0;
+pub const MONITOR_FAILURE: usize = 1;
+pub const MONITOR_SWITCH_INTERRUPTED: usize = 2;

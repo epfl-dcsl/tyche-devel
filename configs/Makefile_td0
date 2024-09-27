@@ -46,9 +46,23 @@ run_td1_with_drive:
 	-enable-kvm -m 1G \
 	-smp 4 \
 	-cpu host \
-	-drive file=fake.disk,format=raw,index=0 \
-	-drive file=nested.qcow2,format=qcow2,media=disk,index=1 \
-	-append "noapic lpj=24000000 earlyprintk=serial,tty0 console=ttyS0 root=/dev/sdb2"
+	-drive file=nested.raw,format=raw,media=disk,index=0 \
+	-append "noapic lpj=24000000 earlyprintk=serial,tty0 console=ttyS0 root=/dev/sda2"
+
+run_td1_qemu_virtio:
+	QEMU_PIN_CORES=0 \
+	/home/dev/Documents/qemu/build/qemu-system-x86_64 \
+	-kernel vms/bzImage \
+	-nographic \
+	-enable-kvm -m 1G \
+	-smp 4 \
+	-cpu host \
+	-machine q35,kernel_irqchip=split,confidential-guest-support=tdx,hpet=off \
+	-nodefaults \
+	-device virtio-net-pci,netdev=nic0_td -netdev user,id=nic0_td,hostfwd=tcp::10022-:22 \
+	-drive file=nested.raw,format=raw,media=disk,index=0,id=virtio-disk0,if=none \
+	-device virtio-blk-pci,drive=virtio-disk0 \
+	-append "noapic lpj=24000000 earlyprintk=serial,tty0 console=ttyS0 root=/dev/vda2"
 
 run_td1_lkvm_with_disk:
 	KVM_PIN_CORES=0 lkvm run \
@@ -78,19 +92,30 @@ endif
 run_coco_lkvm:
 ifeq ($(lkvm_exists), yes)
 	@echo "lkvm is available"
-else 
+else
 	@echo "lkvm not found! Make sure it is in your path!"
 	@exit 1
 endif
-	KVM_PIN_CORES=0 lkvm run -c 1 -k vms/bzImage -p "noapic swiotlb=force tyche.tyche_coco=true"
+	KVM_PIN_CORES=0 CONFIDENTIAL_VM=1 lkvm run -c 2 \
+		-k vms/bzImageConfidential \
+		-p "noapic swiotlb=force tyche.tyche_coco=true"
+		--console virtio \
+		--network virtio
 
 run_coco_lkvm_with_disk:
-	KVM_PIN_CORES=0 lkvm run \
-        --kernel ./vms/bzImage \
+ifeq ($(lkvm_exists), yes)
+	@echo "lkvm is available"
+else
+	@echo "lkvm not found! Make sure it is in your path!"
+	@exit 1
+endif
+	KVM_PIN_CORES=0 CONFIDENTIAL_VM=1 lkvm run \
+        --kernel ./vms/bzImageConfidential \
         --disk nested.raw \
-        --params "noapic root=/dev/vda2 swiotlb=force tyche.tyche_coco=true" \
+        --params "noapic root=/dev/vda2 swiotlb=force tyche.tyche_coco=true cma=100k" \
         --console virtio \
         --network virtio \
+        --mem 2G \
         --cpus 2
 
 

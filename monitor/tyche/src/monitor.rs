@@ -744,7 +744,8 @@ pub trait Monitor<T: PlatformState + 'static> {
             }
             calls::RETURN_TO_MANAGER => {
                 log::trace!("Return to manager from dom {}", domain.idx());
-                Self::do_return_to_manager(state, domain, cpuid())?;
+                Self::do_handle_violation(state, domain)?;
+                //Self::do_return_to_manager(state, domain, cpuid())?;
                 return Ok(false);
             }
             calls::CALL_MANAGER => {

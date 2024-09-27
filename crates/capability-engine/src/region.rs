@@ -250,10 +250,6 @@ impl RegionTracker {
             prev = Some(bound);
             bound = self.split_region_at(bound, start, tracker)?;
         }
-        // Check if we need a split for the end.
-        if tracker[bound].end > end {
-            let _ = self.split_region_at(bound, end, tracker)?;
-        }
 
         assert_eq!(
             tracker[bound].start, start,
@@ -262,7 +258,14 @@ impl RegionTracker {
 
         let mut change = PermissionChange::None;
         let mut next = bound;
+
         while tracker[next].start < end {
+            // Only a partial overlap.
+            if tracker[next].end > end {
+                let _ = self.split_region_at(next, end, tracker)?;
+                // We do not need to do anything more because the next
+                // handle is now fully contained and removable.
+            }
             let mut update = self.decrease_refcount(next, tracker);
             update.update(self.decrease_ops(next, ops, tracker));
             change.update(update);

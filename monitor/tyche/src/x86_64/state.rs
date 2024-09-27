@@ -15,6 +15,7 @@ use vtd::Iommu;
 use super::context::{Contextx86, CpuidEntry, SchedInfo, MAX_CPUID_ENTRIES};
 use super::perf;
 use crate::allocator::allocator;
+use crate::calls::{MONITOR_SUCCESS, MONITOR_SWITCH_INTERRUPTED};
 use crate::monitor::PlatformState;
 use crate::rcframe::{RCFrame, RCFramePool, EMPTY_RCFRAME};
 use crate::sync::Barrier;
@@ -263,10 +264,12 @@ impl StateX86 {
                 vcpu.set_pin_based_ctrls(PinbasedControls::from_bits_truncate(saved as u32))
                     .unwrap();
             }
-            next_ctx.copy_interrupt_frame(current_ctx, vcpu).unwrap();
+            next_ctx
+                .copy_interrupt_frame(current_ctx, vcpu, false)
+                .unwrap();
             // Set the return values.
             next_ctx
-                .set(VmcsField::GuestRax, 0, None)
+                .set(VmcsField::GuestRax, MONITOR_SWITCH_INTERRUPTED, None)
                 .or(Err(CapaError::PlatformError))?;
             next_ctx
                 .set(VmcsField::GuestRdi, return_capa.as_usize(), None)
@@ -277,7 +280,7 @@ impl StateX86 {
         } else {
             // Case 3: synchronous call.
             next_ctx
-                .set(VmcsField::GuestRax, 0, None)
+                .set(VmcsField::GuestRax, MONITOR_SUCCESS, None)
                 .or(Err(CapaError::PlatformError))?;
             next_ctx
                 .set(VmcsField::GuestRdi, return_capa.as_usize(), None)
