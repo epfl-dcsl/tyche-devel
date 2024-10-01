@@ -250,7 +250,7 @@ impl StateX86 {
         if current_ctx.interrupted {
             // If it was a timer, we need to reset the information.
             if current_ctx
-                .get(VmcsField::VmExitReason, Some(vcpu))
+                .get_current(VmcsField::VmExitReason, Some(vcpu))
                 .unwrap()
                 == VmxExitReason::VmxPreemptionTimerExpired as usize
                 && current_ctx.sched_info.timed
@@ -284,25 +284,6 @@ impl StateX86 {
             next_ctx
                 .set(VmcsField::GuestRdi, return_capa.as_usize(), None)
                 .or(Err(CapaError::PlatformError))?;
-            if delta != 0 {
-                // We should do it differently, e.g., put it in the cache.
-                // But the problem is that ctrls fields behave in an odd way (see vmx/src/lib.rs
-                // set_ctrls).
-                next_ctx.sched_info.timed = true;
-                next_ctx.sched_info.saved_ctrls = next_ctx
-                    .get(VmcsField::PinBasedVmExecControl, None)
-                    .unwrap();
-                next_ctx.sched_info.budget = delta;
-                let mut pin =
-                    PinbasedControls::from_bits_truncate(next_ctx.sched_info.saved_ctrls as u32);
-                pin.set(PinbasedControls::VMX_PREEMPTION_TIMER, true);
-                next_ctx
-                    .set(VmcsField::PinBasedVmExecControl, pin.bits() as usize, None)
-                    .unwrap();
-                next_ctx
-                    .set(VmcsField::VmxPreemptionTimerValue, delta, None)
-                    .unwrap();
-            }
         }
 
         // Now the logic for shared vs. private vmcs.
@@ -315,7 +296,30 @@ impl StateX86 {
 
         // Configure state of the next TD
         perf::start_step(1);
-        next_ctx.switch_flush(&RC_VMCS, vcpu);
+        //next_ctx.switch_flush(&RC_VMCS, vcpu);
+        next_ctx.switch_no_flush(&RC_VMCS, vcpu);
+        if delta != 0 {
+            // We should do it differently, e.g., put it in the cache.
+            // But the problem is that ctrls fields behave in an odd way (see vmx/src/lib.rs
+            // set_ctrls).
+            next_ctx.sched_info.timed = true;
+            //TODO change this.
+            next_ctx.sched_info.saved_ctrls = next_ctx
+                .get_current(VmcsField::PinBasedVmExecControl, Some(vcpu))
+                .unwrap();
+            next_ctx.sched_info.budget = delta;
+            let mut pin =
+                PinbasedControls::from_bits_truncate(next_ctx.sched_info.saved_ctrls as u32);
+            pin.set(PinbasedControls::VMX_PREEMPTION_TIMER, true);
+            next_ctx
+                .set(VmcsField::PinBasedVmExecControl, pin.bits() as usize, None)
+                .unwrap();
+            next_ctx
+                .set(VmcsField::VmxPreemptionTimerValue, delta, None)
+                .unwrap();
+        }
+        next_ctx.flush(vcpu);
+
         perf::commit_step(1);
         vcpu.set_ept_ptr(HostPhysAddr::new(
             next_domain.ept.unwrap().as_usize() | EPT_ROOT_FLAGS,
