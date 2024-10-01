@@ -267,7 +267,6 @@ pub struct VmcsRegion<'vmx> {
 
 /// The active Vmcs. Writting to vmcs using assembly or raw wrappers will write to this structures.
 pub struct ActiveVmcs<'vmx> {
-    launched: bool,
     region: VmcsRegion<'vmx>,
 }
 
@@ -276,10 +275,7 @@ impl<'vmx> VmcsRegion<'vmx> {
     //  TODO: Enforce that only a single region can be active at any time.
     pub fn set_as_active(self: Self) -> Result<ActiveVmcs<'vmx>, VmxError> {
         unsafe { raw::vmptrld(self.frame.phys_addr.as_u64())? };
-        Ok(ActiveVmcs {
-            launched: false,
-            region: self,
-        })
+        Ok(ActiveVmcs { region: self })
     }
 
     pub fn frame(&self) -> &Frame {
@@ -298,32 +294,10 @@ impl<'vmx> ActiveVmcs<'vmx> {
         Ok(self.region)
     }
 
-    pub fn flush(&mut self) {
-        if !self.launched {
-            return;
-        }
-        // Dump the current state.
-        unsafe {
-            raw::vmclear(self.region.frame.phys_addr.as_u64()).expect("Unable to perform a clear");
-        };
-        self.launched = false;
-    }
-
     pub fn reload(&self) {
         unsafe {
             raw::vmptrld(self.region.frame.phys_addr.as_u64()).expect("Unable to reset the vmptr");
         }
-    }
-
-    pub fn copy_into(&mut self, mut dest: Frame) {
-        if self.launched {
-            self.flush();
-        }
-        // Write the VMCS back.
-        unsafe {
-            raw::vmptrld(self.region.frame.phys_addr.as_u64()).expect("Unable to reset the vmptr");
-        }
-        dest.as_mut().copy_from_slice(self.region.frame().as_ref());
     }
 
     pub fn load_from(&mut self, src: Frame) {
@@ -334,22 +308,11 @@ impl<'vmx> ActiveVmcs<'vmx> {
         self.region.frame()
     }
 
-    pub fn switch_frame(&mut self, dest: Frame) -> Result<(), VmxError> {
-        // Save the state of the current VM.
-        self.flush();
-        unsafe {
-            // When switching frame we need to clear the old one to ensure it is not active
-            // anymore. This is required because we don't prevent VMCS from being migrated from one
-            // core to another (e.g. creating a new VCMS on core A but starting the domain on core
-            // B).
-            // This might have performance implications, as it requires clearing
-            // micro-architectural caches, but hopefully this is mostly required during domain
-            // initialization. It might be worth to measure the overhead and add an option to
-            // disable the clearing if the VMCS will not be migrated.
-            raw::vmclear(self.frame().phys_addr.as_u64())
-                .expect("Failed to clear VMCS when switching frame")
-        };
+    pub fn vmclear(&mut self) -> Result<(), VmxError> {
+        unsafe { raw::vmclear(self.frame().phys_addr.as_u64()) }
+    }
 
+    pub fn switch_frame(&mut self, dest: Frame) -> Result<(), VmxError> {
         // Load target VMCS
         self.region.set_frame(dest);
         match unsafe { raw::vmptrld(self.region.frame().phys_addr.as_u64()) } {
@@ -363,7 +326,6 @@ impl<'vmx> ActiveVmcs<'vmx> {
             }
             Ok(()) => Ok(()),
         }?;
-        self.launched = false;
         Ok(())
     }
 
@@ -474,7 +436,6 @@ impl<'vmx> ActiveVmcs<'vmx> {
         &mut self,
         regs: &mut [usize; REGFILE_SIZE],
     ) -> Result<VmxExitReason, VmxError> {
-        self.launched = true;
         raw::vmlaunch(self, regs)?;
         self.exit_reason()
     }
@@ -490,17 +451,6 @@ impl<'vmx> ActiveVmcs<'vmx> {
     ) -> Result<VmxExitReason, VmxError> {
         raw::vmresume(self, regs)?;
         self.exit_reason()
-    }
-
-    pub unsafe fn run(
-        &mut self,
-        regs: &mut [usize; REGFILE_SIZE],
-    ) -> Result<VmxExitReason, VmxError> {
-        if self.launched {
-            self.resume(regs)
-        } else {
-            self.launch(regs)
-        }
     }
 
     /// Sets the pin-based controls.

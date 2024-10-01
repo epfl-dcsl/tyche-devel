@@ -13,8 +13,8 @@ use vmx::{ActiveVmcs, VmxExitReason, Vmxon};
 use vtd::Iommu;
 
 use super::context::{Contextx86, CpuidEntry, SchedInfo, MAX_CPUID_ENTRIES};
-use super::vmx_helper::{dump_host_state, load_host_state};
 use super::perf;
+use super::vmx_helper::{dump_host_state, load_host_state};
 use crate::allocator::allocator;
 use crate::monitor::PlatformState;
 use crate::rcframe::{RCFrame, RCFramePool, EMPTY_RCFRAME};
@@ -68,6 +68,7 @@ const EMPTY_CONTEXT: Mutex<Contextx86> = Mutex::new(Contextx86 {
         saved_ctrls: 0,
     },
     vmcs: Handle::<RCFrame>::new_invalid(),
+    launched: false,
     nb_active_cpuid_entries: 0,
     cpuid_entries: [EMPTY_CPUID_ENTRY; MAX_CPUID_ENTRIES],
 });
@@ -312,13 +313,6 @@ impl StateX86 {
         current_ctx.load(vcpu);
         perf::commit_step(3);
 
-        // NOTE; it seems on hardware we need to save and restore the host context, but we don't know
-        // why yet, we need further invesdigation to be able to optimise this.
-        perf::start_step(2);
-        let mut values: [usize; 13] = [0; 13];
-        dump_host_state(vcpu, &mut values).expect("Couldn't save host context");
-        perf::commit_step(2);
-
         // Configure state of the next TD
         perf::start_step(1);
         next_ctx.switch_flush(&RC_VMCS, vcpu);
@@ -327,7 +321,6 @@ impl StateX86 {
             next_domain.ept.unwrap().as_usize() | EPT_ROOT_FLAGS,
         ))
         .expect("Failed to update EPT");
-        load_host_state(vcpu, &mut values).expect("Couldn't save host context");
         perf::commit_step(0);
         Ok(())
     }
