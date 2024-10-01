@@ -20,10 +20,10 @@ use vmx::VmxExitReason;
 use super::context::{ContextGpx86, Contextx86};
 use super::cpuid_filter::{filter_mpk, filter_tpause};
 use super::init::NB_BOOTED_CORES;
-use super::perf::{PerfContext, PerfEvent};
+use super::perf::PerfEvent;
 use super::state::{DataX86, StateX86, VmxState, CONTEXTS, DOMAINS, IOMMU, RC_VMCS, TLB_FLUSH};
 use super::vmx_helper::{dump_host_state, load_host_state};
-use super::{cpuid, vmx_helper};
+use super::{cpuid, perf, vmx_helper};
 use crate::allocator::{self, allocator};
 use crate::monitor::{CoreUpdate, Monitor, PlatformState};
 use crate::rcframe::{drop_rc, RCFrame};
@@ -162,6 +162,7 @@ impl PlatformState for StateX86 {
 
             // Load the default values.
             load_host_state(&mut self.vcpu, &mut values).or(Err(CapaError::InvalidValue))?;
+            self.vcpu.vmclear().expect("Could not clear vCPU");
 
             // Switch back the frame.
             self.vcpu
@@ -677,18 +678,17 @@ impl MonitorX86 {
     }
 
     pub fn main_loop(&mut self, mut state: StateX86, mut domain: Handle<Domain>) {
-        let mut perf = PerfContext::new();
         let core_id = cpuid();
         let mut result = unsafe {
             let mut context = StateX86::get_context(domain, core_id);
             state.vcpu.run(&mut context.regs.state_gp.values)
         };
         loop {
-            perf.start();
+            perf::start();
             let exit_reason = match result {
                 Ok(exit_reason) => {
                     let res = self
-                        .handle_exit(&mut state, exit_reason, &mut domain, &mut perf)
+                        .handle_exit(&mut state, exit_reason, &mut domain)
                         .expect("Failed to handle VM exit");
 
                     // Apply core-local updates before returning
@@ -706,8 +706,8 @@ impl MonitorX86 {
 
             match exit_reason {
                 HandlerResult::Resume => {
-                    perf.commit();
-                    perf.display_stats();
+                    perf::commit();
+                    perf::display_stats();
                     result = unsafe {
                         let mut context = StateX86::get_context(domain, core_id);
                         context.flush(&mut state.vcpu);
@@ -727,7 +727,6 @@ impl MonitorX86 {
         vs: &mut StateX86,
         reason: VmxExitReason,
         domain: &mut Handle<Domain>,
-        perf: &mut PerfContext,
     ) -> Result<HandlerResult, CapaError> {
         match reason {
             VmxExitReason::Vmcall => {
@@ -747,19 +746,19 @@ impl MonitorX86 {
 
                 // Track the VMCall events
                 match vmcall {
-                    calls::SWITCH => perf.event(PerfEvent::VmcallSwitch),
-                    calls::DUPLICATE => perf.event(PerfEvent::VmcallDuplicate),
-                    calls::ENUMERATE => perf.event(PerfEvent::VmcallEnumerate),
-                    calls::READ_ALL_GP => perf.event(PerfEvent::VmcallGetAllGp),
-                    calls::WRITE_ALL_GP => perf.event(PerfEvent::VmcallWriteAllGp),
-                    calls::WRITE_FIELDS=> perf.event(PerfEvent::VmcallWriteField),
-                    calls::CONFIGURE => perf.event(PerfEvent::VmcallConfigure),
-                    calls::CONFIGURE_CORE => perf.event(PerfEvent::VmcallConfigureCore),
-                    calls::GET_CONFIG_CORE => perf.event(PerfEvent::VmcallGetConfigCore),
-                    calls::SELF_CONFIG => perf.event(PerfEvent::VmcallSelfConfigure),
-                    calls::RETURN_TO_MANAGER => perf.event(PerfEvent::VmcallReturnToManager),
-                    calls::GET_HPA => perf.event(PerfEvent::VmcallGetHpa),
-                    _ => perf.event(PerfEvent::Vmcall)
+                    calls::SWITCH => perf::event(PerfEvent::VmcallSwitch),
+                    calls::DUPLICATE => perf::event(PerfEvent::VmcallDuplicate),
+                    calls::ENUMERATE => perf::event(PerfEvent::VmcallEnumerate),
+                    calls::READ_ALL_GP => perf::event(PerfEvent::VmcallGetAllGp),
+                    calls::WRITE_ALL_GP => perf::event(PerfEvent::VmcallWriteAllGp),
+                    calls::WRITE_FIELDS=> perf::event(PerfEvent::VmcallWriteField),
+                    calls::CONFIGURE => perf::event(PerfEvent::VmcallConfigure),
+                    calls::CONFIGURE_CORE => perf::event(PerfEvent::VmcallConfigureCore),
+                    calls::GET_CONFIG_CORE => perf::event(PerfEvent::VmcallGetConfigCore),
+                    calls::SELF_CONFIG => perf::event(PerfEvent::VmcallSelfConfigure),
+                    calls::RETURN_TO_MANAGER => perf::event(PerfEvent::VmcallReturnToManager),
+                    calls::GET_HPA => perf::event(PerfEvent::VmcallGetHpa),
+                    _ => perf::event(PerfEvent::Vmcall)
                 }
 
                 // Special case for switch.
@@ -815,7 +814,7 @@ impl MonitorX86 {
             Ok(HandlerResult::Resume)
         }
         VmxExitReason::Cpuid => {
-            perf.event(PerfEvent::Cpuid);
+            perf::event(PerfEvent::Cpuid);
 
             // Domain 0 gets direct access to CPUID
             if domain.idx() == 0 {
@@ -852,7 +851,7 @@ impl MonitorX86 {
             }
         }
         VmxExitReason::ControlRegisterAccesses if domain.idx() == 0 => {
-            perf.event(PerfEvent::ControlRegisterAccess);
+            perf::event(PerfEvent::ControlRegisterAccess);
             // Handle some of these only for dom0, the other domain's problems
             // are for now forwarded to the manager domain.
             let mut context = StateX86::get_context(*domain, cpuid());
@@ -880,7 +879,7 @@ impl MonitorX86 {
             Ok(HandlerResult::Resume)
         }
         VmxExitReason::EptViolation if domain.idx() == 0 => {
-            perf.event(PerfEvent::EptViolation);
+            perf::event(PerfEvent::EptViolation);
             let addr = vs.vcpu.guest_phys_addr().or(Err(CapaError::PlatformError))?;
             log::error!(
                 "EPT Violation on dom0 core {}! virt: 0x{:x}, phys: 0x{:x}",
@@ -897,7 +896,7 @@ impl MonitorX86 {
             panic!("Received an exception on dom0?");
         }
         VmxExitReason::Xsetbv if domain.idx() == 0 => {
-            perf.event(PerfEvent::Xsetbv);
+            perf::event(PerfEvent::Xsetbv);
             let mut context = StateX86::get_context(*domain, cpuid());
             let ecx = context.get(VmcsField::GuestRcx, None).or(Err(CapaError::PlatformError))?;
             let eax = context.get(VmcsField::GuestRax, None).or(Err(CapaError::PlatformError))?;
@@ -922,7 +921,7 @@ impl MonitorX86 {
             Ok(HandlerResult::Resume)
         }
         VmxExitReason::Wrmsr if domain.idx() == 0 => {
-            perf.event(PerfEvent::Msr);
+            perf::event(PerfEvent::Msr);
             let mut context = StateX86::get_context(*domain, cpuid());
             let ecx = context.get(VmcsField::GuestRcx, None).or(Err(CapaError::PlatformError))?;
             if ecx >= 0x4B564D00 && ecx <= 0x4B564DFF {
@@ -937,7 +936,7 @@ impl MonitorX86 {
             }
         }
         VmxExitReason::Rdmsr if domain.idx() == 0 => {
-            perf.event(PerfEvent::Msr);
+            perf::event(PerfEvent::Msr);
             let mut context = StateX86::get_context(*domain, cpuid());
             let ecx = context.get(VmcsField::GuestRcx, None).or(Err(CapaError::PlatformError))?;
             log::trace!("rdmsr 0x{:x}", ecx);
@@ -981,16 +980,16 @@ impl MonitorX86 {
         | VmxExitReason::Hlt => {
             log::trace!("Handling {:?} for dom {} on core {}", reason, domain.idx(), cpuid());
             match reason {
-                VmxExitReason::EptViolation => perf.event(PerfEvent::EptViolation),
-                VmxExitReason::VmxPreemptionTimerExpired => perf.event(PerfEvent::VmxTimer),
-                VmxExitReason::ControlRegisterAccesses => perf.event(PerfEvent::ControlRegisterAccess),
-                VmxExitReason::Exception => perf.event(PerfEvent::Exception),
-                VmxExitReason::IoInstruction => perf.event(PerfEvent::IoInstr),
-                VmxExitReason::ExternalInterrupt => perf.event(PerfEvent::ExternalInt),
-                VmxExitReason::Xsetbv => perf.event(PerfEvent::Xsetbv),
-                VmxExitReason::VirtualizedEoi => perf.event(PerfEvent::VirtEoi),
-                VmxExitReason::ApicAccess | VmxExitReason::ApicWrite => perf.event(PerfEvent::ApicAccess),
-                VmxExitReason::Rdmsr | VmxExitReason::Wrmsr => perf.event(PerfEvent::Msr),
+                VmxExitReason::EptViolation => perf::event(PerfEvent::EptViolation),
+                VmxExitReason::VmxPreemptionTimerExpired => perf::event(PerfEvent::VmxTimer),
+                VmxExitReason::ControlRegisterAccesses => perf::event(PerfEvent::ControlRegisterAccess),
+                VmxExitReason::Exception => perf::event(PerfEvent::Exception),
+                VmxExitReason::IoInstruction => perf::event(PerfEvent::IoInstr),
+                VmxExitReason::ExternalInterrupt => perf::event(PerfEvent::ExternalInt),
+                VmxExitReason::Xsetbv => perf::event(PerfEvent::Xsetbv),
+                VmxExitReason::VirtualizedEoi => perf::event(PerfEvent::VirtEoi),
+                VmxExitReason::ApicAccess | VmxExitReason::ApicWrite => perf::event(PerfEvent::ApicAccess),
+                VmxExitReason::Rdmsr | VmxExitReason::Wrmsr => perf::event(PerfEvent::Msr),
                 _ => (),
             }
 
@@ -1042,7 +1041,7 @@ impl MonitorX86 {
         let ecx = (args[4] & 0xffffffff) as u32;
         let edx = (args[4] >> 32) as u32;
 
-        log::info!(
+        log::trace!(
             "Configure CPUID on domain {} {:08x} {:08x} {:08x} - {:08x} {:08x} {:08x} {:08x}",
             domain.idx(),
             function,
