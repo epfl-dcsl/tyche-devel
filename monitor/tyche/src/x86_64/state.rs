@@ -14,7 +14,6 @@ use vtd::Iommu;
 
 use super::context::{Contextx86, CpuidEntry, SchedInfo, MAX_CPUID_ENTRIES};
 use super::perf;
-use super::vmx_helper::{dump_host_state, load_host_state};
 use crate::allocator::allocator;
 use crate::monitor::PlatformState;
 use crate::rcframe::{RCFrame, RCFramePool, EMPTY_RCFRAME};
@@ -291,7 +290,8 @@ impl StateX86 {
             panic!("Why are the two vmcs the same?");
         }
         perf::start_step(3);
-        current_ctx.load(vcpu);
+        // Skip the load.
+        //current_ctx.load(vcpu);
         perf::commit_step(3);
 
         // Configure state of the next TD
