@@ -816,6 +816,7 @@ pub struct Contextx86 {
     pub interrupted: bool,
     pub sched_info: SchedInfo,
     pub vmcs: Handle<RCFrame>,
+    pub launched: bool,
     pub nb_active_cpuid_entries: usize,
     pub cpuid_entries: [CpuidEntry; MAX_CPUID_ENTRIES],
 }
@@ -967,6 +968,7 @@ impl Contextx86 {
 
     pub fn reset(&mut self) {
         self.regs.reset();
+        self.launched = false;
         self.interrupted = false;
         self.sched_info.timed = false;
         self.sched_info.saved_ctrls = 0;

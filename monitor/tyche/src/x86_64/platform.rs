@@ -15,7 +15,7 @@ use stage_two_abi::{GuestInfo, Manifest};
 use utils::HostPhysAddr;
 use vmx::bitmaps::exit_qualification;
 use vmx::fields::VmcsField;
-use vmx::VmxExitReason;
+use vmx::{VmxError, VmxExitReason};
 
 use super::context::{ContextGpx86, Contextx86};
 use super::cpuid_filter::{filter_mpk, filter_tpause};
@@ -676,12 +676,25 @@ impl MonitorX86 {
         Err(())
     }
 
+    pub unsafe fn run_vcpu(
+        &mut self,
+        state: &mut StateX86,
+        context: &mut Contextx86,
+    ) -> Result<VmxExitReason, VmxError> {
+        if !context.launched {
+            context.launched = true;
+            state.vcpu.launch(&mut context.regs.state_gp.values)
+        } else {
+            state.vcpu.resume(&mut context.regs.state_gp.values)
+        }
+    }
+
     pub fn main_loop(&mut self, mut state: StateX86, mut domain: Handle<Domain>) {
         let mut perf = PerfContext::new();
         let core_id = cpuid();
         let mut result = unsafe {
             let mut context = StateX86::get_context(domain, core_id);
-            state.vcpu.run(&mut context.regs.state_gp.values)
+            self.run_vcpu(&mut state, &mut context)
         };
         loop {
             perf.start();
@@ -711,7 +724,7 @@ impl MonitorX86 {
                     result = unsafe {
                         let mut context = StateX86::get_context(domain, core_id);
                         context.flush(&mut state.vcpu);
-                        state.vcpu.run(&mut context.regs.state_gp.values)
+                        self.run_vcpu(&mut state, &mut context)
                     };
                 }
                 _ => {
