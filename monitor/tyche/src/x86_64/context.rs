@@ -929,7 +929,7 @@ impl Contextx86 {
     }
 
     /// Read vcpu, write context.
-    pub fn load(&mut self, vcpu: &ActiveVmcs) {
+    pub fn _load(&mut self, vcpu: &ActiveVmcs) {
         // General purpose registers are handled by vmlaunch/vmresume.
         // 16-bits.
         for i in 0..Context16x86::size() {
@@ -961,7 +961,7 @@ impl Contextx86 {
     }
 
     /// Switch frames and flush.
-    pub fn switch_flush(&mut self, rc_vmcs: &Mutex<RCFramePool>, vcpu: &mut ActiveVmcs) {
+    pub fn _switch_flush(&mut self, rc_vmcs: &Mutex<RCFramePool>, vcpu: &mut ActiveVmcs) {
         let locked = rc_vmcs.lock();
         let rc_frame = locked.get(self.vmcs).unwrap();
         // Switch the frame.
