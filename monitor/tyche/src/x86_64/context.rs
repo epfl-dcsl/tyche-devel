@@ -865,13 +865,31 @@ impl Contextx86 {
         Ok(())
     }
 
-    pub fn get(&mut self, field: VmcsField, vcpu: Option<&ActiveVmcs>) -> Result<usize, VmxError> {
+    pub fn get_current(
+        &mut self,
+        field: VmcsField,
+        vcpu: Option<&ActiveVmcs>,
+    ) -> Result<usize, VmxError> {
         let (group, idx) = Self::translate_field(field);
         if group != RegisterGroup::RegGp {
             if let Some(vcpu) = vcpu {
                 self.regs.set(group, idx, vcpu.get(field)?).unwrap();
                 self.regs.clear(group, idx);
             }
+        }
+        Ok(self.regs.get(group, idx).unwrap())
+    }
+
+    //TODO: modify this.
+    pub fn get_from_frame(
+        &mut self,
+        field: VmcsField,
+        vcpu: &ActiveVmcs,
+    ) -> Result<usize, VmxError> {
+        let (group, idx) = Self::translate_field(field);
+        if group != RegisterGroup::RegGp {
+            self.regs.set(group, idx, vcpu.get(field)?).unwrap();
+            self.regs.clear(group, idx);
         }
         Ok(self.regs.get(group, idx).unwrap())
     }
@@ -952,6 +970,13 @@ impl Contextx86 {
         self.flush(vcpu);
     }
 
+    pub fn switch_no_flush(&mut self, rc_vmcs: &Mutex<RCFramePool>, vcpu: &mut ActiveVmcs) {
+        let locked = rc_vmcs.lock();
+        let rc_frame = locked.get(self.vmcs).unwrap();
+        // Switch the frame.
+        vcpu.switch_frame(rc_frame.frame).unwrap();
+    }
+
     // TODO: maybe more efficient if we dump the frame first?
     pub fn copy_interrupt_frame(
         &mut self,
@@ -959,7 +984,7 @@ impl Contextx86 {
         vcpu: &ActiveVmcs,
     ) -> Result<(), VmxError> {
         for i in DUMP_FRAME {
-            let value = child.get(i.1, Some(vcpu))?;
+            let value = child.get_current(i.1, Some(vcpu))?;
             self.set(i.0, value, None)?;
         }
 

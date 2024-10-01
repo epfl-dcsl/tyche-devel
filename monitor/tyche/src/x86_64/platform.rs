@@ -339,7 +339,16 @@ impl PlatformState for StateX86 {
         if engine.is_domain_sealed(*domain) && ((1 << idx) & bitmap == 0) {
             return Err(CapaError::InsufficientPermissions);
         }
-        ctxt.get(field, None).or(Err(CapaError::PlatformError))
+        //TODO: patch.
+        let rcvmcs = RC_VMCS.lock();
+        let frame = rcvmcs.get(ctxt.vmcs).unwrap();
+        let restore = *self.vcpu.frame();
+        self.vcpu.switch_frame(frame.frame).unwrap();
+        let res = ctxt
+            .get_from_frame(field, &self.vcpu)
+            .or(Err(CapaError::PlatformError));
+        self.vcpu.switch_frame(restore).unwrap();
+        return res;
     }
 
     fn get_core_gp(
@@ -383,28 +392,28 @@ impl PlatformState for StateX86 {
     ) -> Result<(), CapaError> {
         let mut ctxt = Self::get_context(*domain, core);
         res[0] = (
-            ctxt.get(VmcsField::GuestRbp, None).unwrap(),
-            ctxt.get(VmcsField::GuestRbx, None).unwrap(),
+            ctxt.get_current(VmcsField::GuestRbp, None).unwrap(),
+            ctxt.get_current(VmcsField::GuestRbx, None).unwrap(),
         );
         res[1] = (
-            ctxt.get(VmcsField::GuestRcx, None).unwrap(),
-            ctxt.get(VmcsField::GuestRdx, None).unwrap(),
+            ctxt.get_current(VmcsField::GuestRcx, None).unwrap(),
+            ctxt.get_current(VmcsField::GuestRdx, None).unwrap(),
         );
         res[2] = (
-            ctxt.get(VmcsField::GuestR8, None).unwrap(),
-            ctxt.get(VmcsField::GuestR9, None).unwrap(),
+            ctxt.get_current(VmcsField::GuestR8, None).unwrap(),
+            ctxt.get_current(VmcsField::GuestR9, None).unwrap(),
         );
         res[3] = (
-            ctxt.get(VmcsField::GuestR10, None).unwrap(),
-            ctxt.get(VmcsField::GuestR11, None).unwrap(),
+            ctxt.get_current(VmcsField::GuestR10, None).unwrap(),
+            ctxt.get_current(VmcsField::GuestR11, None).unwrap(),
         );
         res[4] = (
-            ctxt.get(VmcsField::GuestR12, None).unwrap(),
-            ctxt.get(VmcsField::GuestR13, None).unwrap(),
+            ctxt.get_current(VmcsField::GuestR12, None).unwrap(),
+            ctxt.get_current(VmcsField::GuestR13, None).unwrap(),
         );
         res[5] = (
-            ctxt.get(VmcsField::GuestR14, None).unwrap(),
-            ctxt.get(VmcsField::GuestR15, None).unwrap(),
+            ctxt.get_current(VmcsField::GuestR14, None).unwrap(),
+            ctxt.get_current(VmcsField::GuestR15, None).unwrap(),
         );
         Ok(())
     }
@@ -580,8 +589,8 @@ impl MonitorX86 {
 
     pub fn emulate_cpuid(domain: &mut Handle<Domain>) {
         let mut context = StateX86::get_context(*domain, cpuid());
-        let input_eax = context.get(VmcsField::GuestRax, None).unwrap();
-        let input_ecx = context.get(VmcsField::GuestRcx, None).unwrap();
+        let input_eax = context.get_current(VmcsField::GuestRax, None).unwrap();
+        let input_ecx = context.get_current(VmcsField::GuestRcx, None).unwrap();
         let mut eax: usize;
         let mut ebx: usize;
         let mut ecx: usize;
@@ -629,8 +638,8 @@ impl MonitorX86 {
             return Err(());
         }
 
-        let function = context.get(VmcsField::GuestRax, None).unwrap() as u32;
-        let index = context.get(VmcsField::GuestRcx, None).unwrap() as u32;
+        let function = context.get_current(VmcsField::GuestRax, None).unwrap() as u32;
+        let index = context.get_current(VmcsField::GuestRcx, None).unwrap() as u32;
 
         for i in 0..context.nb_active_cpuid_entries {
             let entry = &context.cpuid_entries[i];
@@ -746,13 +755,13 @@ impl MonitorX86 {
             VmxExitReason::Vmcall => {
                 let (vmcall, arg_1, arg_2, arg_3, arg_4, arg_5, arg_6) = {
                     let mut context = StateX86::get_context(*domain, cpuid());
-                    let vmcall = context.get(VmcsField::GuestRax, None).unwrap();
-                    let arg_1 = context.get(VmcsField::GuestRdi, None).unwrap();
-                    let arg_2 = context.get(VmcsField::GuestRsi, None).unwrap();
-                    let arg_3 = context.get(VmcsField::GuestRdx, None).unwrap();
-                    let arg_4 = context.get(VmcsField::GuestRcx, None).unwrap();
-                    let arg_5 = context.get(VmcsField::GuestR8, None).unwrap();
-                    let arg_6 = context.get(VmcsField::GuestR9, None).unwrap();
+                    let vmcall = context.get_current(VmcsField::GuestRax, None).unwrap();
+                    let arg_1 = context.get_current(VmcsField::GuestRdi, None).unwrap();
+                    let arg_2 = context.get_current(VmcsField::GuestRsi, None).unwrap();
+                    let arg_3 = context.get_current(VmcsField::GuestRdx, None).unwrap();
+                    let arg_4 = context.get_current(VmcsField::GuestRcx, None).unwrap();
+                    let arg_5 = context.get_current(VmcsField::GuestR8, None).unwrap();
+                    let arg_6 = context.get_current(VmcsField::GuestR9, None).unwrap();
                     (vmcall, arg_1, arg_2, arg_3, arg_4, arg_5, arg_6)
                 };
                 let args: [usize; 6] = [arg_1, arg_2, arg_3, arg_4, arg_5, arg_6];
@@ -878,7 +887,7 @@ impl MonitorX86 {
                         panic!("VmExit reason for access to control register is not a control register.");
                     }
                     if cr == VmcsField::GuestCr4 {
-                        let value = context.get(reg, Some(&mut vs.vcpu)).or(Err(CapaError::PlatformError))? as usize;
+                        let value = context.get_current(reg, Some(&mut vs.vcpu)).or(Err(CapaError::PlatformError))? as usize;
                         context.set(VmcsField::Cr4ReadShadow, value, Some(&mut vs.vcpu)).or(Err(CapaError::PlatformError))?;
                         let real_value = value | (1 << 13); // VMXE
                         context.set(cr, real_value, Some(&mut vs.vcpu)).or(Err(CapaError::PlatformError))?;
@@ -912,9 +921,9 @@ impl MonitorX86 {
         VmxExitReason::Xsetbv if domain.idx() == 0 => {
             perf.event(PerfEvent::Xsetbv);
             let mut context = StateX86::get_context(*domain, cpuid());
-            let ecx = context.get(VmcsField::GuestRcx, None).or(Err(CapaError::PlatformError))?;
-            let eax = context.get(VmcsField::GuestRax, None).or(Err(CapaError::PlatformError))?;
-            let edx = context.get(VmcsField::GuestRdx, None).or(Err(CapaError::PlatformError))?;
+            let ecx = context.get_current(VmcsField::GuestRcx, None).or(Err(CapaError::PlatformError))?;
+            let eax = context.get_current(VmcsField::GuestRax, None).or(Err(CapaError::PlatformError))?;
+            let edx = context.get_current(VmcsField::GuestRdx, None).or(Err(CapaError::PlatformError))?;
 
             let xrc_id = ecx & 0xFFFFFFFF; // Ignore 32 high-order bits
             if xrc_id != 0 {
@@ -937,7 +946,7 @@ impl MonitorX86 {
         VmxExitReason::Wrmsr if domain.idx() == 0 => {
             perf.event(PerfEvent::Msr);
             let mut context = StateX86::get_context(*domain, cpuid());
-            let ecx = context.get(VmcsField::GuestRcx, None).or(Err(CapaError::PlatformError))?;
+            let ecx = context.get_current(VmcsField::GuestRcx, None).or(Err(CapaError::PlatformError))?;
             if ecx >= 0x4B564D00 && ecx <= 0x4B564DFF {
                 // Custom MSR range, used by KVM
                 // See https://docs.kernel.org/virt/kvm/x86/msr.html
@@ -952,7 +961,7 @@ impl MonitorX86 {
         VmxExitReason::Rdmsr if domain.idx() == 0 => {
             perf.event(PerfEvent::Msr);
             let mut context = StateX86::get_context(*domain, cpuid());
-            let ecx = context.get(VmcsField::GuestRcx, None).or(Err(CapaError::PlatformError))?;
+            let ecx = context.get_current(VmcsField::GuestRcx, None).or(Err(CapaError::PlatformError))?;
             log::trace!("rdmsr 0x{:x}", ecx);
             if ecx >= 0xc0010000 && ecx <= 0xc0020000 {
                 // Reading an AMD specific register, just ignore it
