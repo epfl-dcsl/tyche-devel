@@ -228,6 +228,7 @@ impl StateX86 {
         return_capa: LocalCapa,
         delta: usize,
     ) -> Result<(), CapaError> {
+        perf::start_step(0);
         // Safety check that both contexts have a valid vmcs.
         if current_ctx.vmcs.is_invalid() || next_ctx.vmcs.is_invalid() {
             log::error!(
