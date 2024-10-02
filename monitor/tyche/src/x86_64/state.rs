@@ -289,13 +289,6 @@ impl StateX86 {
             panic!("Why are the two vmcs the same?");
         }
 
-        perf::start_step(3);
-        // Skip the load.
-        //current_ctx.load(vcpu);
-        perf::commit_step(3);
-
-        // Configure state of the next TD
-        perf::start_step(1);
         //next_ctx.switch_flush(&RC_VMCS, vcpu);
         next_ctx.switch_no_flush(&RC_VMCS, vcpu);
         if delta != 0 {
@@ -320,12 +313,10 @@ impl StateX86 {
         }
         next_ctx.flush(vcpu);
 
-        perf::commit_step(1);
         vcpu.set_ept_ptr(HostPhysAddr::new(
             next_domain.ept.unwrap().as_usize() | EPT_ROOT_FLAGS,
         ))
         .expect("Failed to update EPT");
-        perf::commit_step(0);
         Ok(())
     }
 }

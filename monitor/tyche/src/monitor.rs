@@ -1026,6 +1026,7 @@ pub trait Monitor<T: PlatformState + 'static> {
             }
         }
     }
+
     fn apply_core_updates(state: &mut T, current: &mut Handle<Domain>, core_id: usize) {
         let core = cpuid();
         let mut update_queue = CORE_UPDATES[core_id].lock();
