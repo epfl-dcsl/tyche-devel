@@ -7,7 +7,7 @@ use capa_engine::config::NB_CORES;
 
 use crate::arch::cpuid;
 
-const PERF_ENABLED: bool = true;
+const PERF_ENABLED: bool = false;
 const DISPLAY_CORE: usize = 4;
 const DISPLAY_DELAY: u64 = 50_000_000_000;
 const MAX_STEPS: usize = 5;
