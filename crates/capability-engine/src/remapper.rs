@@ -98,6 +98,10 @@ impl<const N: usize> Remapper<N> {
         if self.overlaps(gpa, size * repeat) {
             return Err(CapaError::AlreadyAliased);
         }
+        // Save space, don't put identity mappings in the remapper.
+        if repeat == 1 && gpa == hpa {
+            return Ok(());
+        }
         Ok(self
             .insert_segment(Segment {
                 hpa,
