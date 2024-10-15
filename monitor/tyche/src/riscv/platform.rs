@@ -843,7 +843,10 @@ impl PlatformState for StateRiscv {
     }
 
     fn context_interrupted(&mut self, domain: &Handle<Domain>, core: usize) {
-        todo!();
+        // NOTE: on x86 we mark the context as interrupted and we use the flag to not overwrite
+        // some of the registers. Do we need to do the same on RISC-V?
+        // let mut context = Self::get_context(*domain, core);
+        // context.interrupted = true;
     }
 
     // No remapping on RISC-V
@@ -854,7 +857,7 @@ impl PlatformState for StateRiscv {
         gpa: usize,
         size: usize,
     ) -> Result<(usize, usize), CapaError> {
-        Ok(gpa, size)
+        Ok((gpa, size))
     }
 }
 
@@ -956,6 +959,7 @@ impl MonitorRiscv {
         let mut mie: usize = 0;
         let mut mip: usize = 0;
         let mut mideleg: usize = 0;
+        let mut medeleg: usize = 0;
         let mut satp: usize = 0;
         let hartid: usize = cpuid();
 
@@ -966,11 +970,14 @@ impl MonitorRiscv {
             asm!("csrr {}, mtval", out(reg) mtval);
             asm!("csrr {}, mie", out(reg) mie);
             asm!("csrr {}, mideleg", out(reg) mideleg);
+            asm!("csrr {}, medeleg", out(reg) medeleg);
             asm!("csrr {}, mip", out(reg) mip);
             asm!("csrr {}, satp", out(reg)satp);
         }
 
         log::trace!("###### TRAP FROM HART {} ######", hartid);
+
+        //log::info!("Handle exit: mideleg {:x} medeleg: {:x}", mideleg, medeleg);
 
         log::trace!(
         "mcause {:x}, mepc {:x} mstatus {:x} mtval {:x} mie {:x} mip {:x} mideleg {:x} ra {:x} a0 {:x} a1 {:x} a2 {:x} a3 {:x} a4 {:x} a5 {:x} a6 {:x} a7 {:x} satp: {:x}",
@@ -1124,6 +1131,15 @@ impl MonitorRiscv {
         if let Some(active_domain) = Self::get_active_dom(hartid) {
             StateRiscv::load_current_regs(&active_domain, hartid, reg_state);
         }
+
+       
+        unsafe {
+            asm!("csrr {}, mideleg", out(reg) mideleg);
+            asm!("csrr {}, medeleg", out(reg) medeleg);
+        }
+
+        //log::info!("Handle exit: mideleg {:x} medeleg: {:x}", mideleg, medeleg);
+
     }
 
     pub fn wrapper_monitor_call() {

@@ -9,9 +9,9 @@ use riscv_pmp::{
     PMP_CFG_ENTRIES, PMP_ENTRIES,
 };
 use riscv_utils::{
-    read_medeleg, read_mepc, read_mscratch, read_mstatus, read_satp, read_sepc,
+    read_medeleg, read_mepc, read_mscratch, read_mstatus, read_satp, read_sepc, read_stvec,
     toggle_supervisor_interrupts, write_medeleg, write_mepc, write_mscratch, write_mstatus,
-    write_satp, write_sepc, RegisterState, NUM_HARTS,
+    write_satp, write_sepc, write_stvec, RegisterState, NUM_HARTS,
 };
 use spin::{Mutex, MutexGuard};
 
@@ -40,6 +40,7 @@ const EMPTY_CONTEXT: Mutex<ContextRiscv> = Mutex::new(ContextRiscv {
     sp: 0,
     medeleg: 0,
     mstatus: 0,
+    stvec: 0,
 });
 
 const EMPTY_CONTEXT_ARRAY: [Mutex<ContextRiscv>; NB_CORES] = [EMPTY_CONTEXT; NB_CORES];
@@ -120,6 +121,7 @@ impl StateRiscv {
         current_ctx.satp = read_satp();
         current_ctx.medeleg = read_medeleg();
         current_ctx.mstatus = read_mstatus();
+        current_ctx.stvec = read_stvec();
 
         //Switch domain
         write_satp(next_ctx.satp);
@@ -137,6 +139,10 @@ impl StateRiscv {
             //If that mode is U-mode, good luck because page tables don't
             //expect that.
             write_mstatus(next_ctx.mstatus);
+        }
+
+        if next_ctx.stvec != 0 {
+            write_stvec(next_ctx.stvec);
         }
 
         // Propagate the state from the child, see drivers/tyche/src/domain.c exit frame.

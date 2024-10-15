@@ -161,6 +161,22 @@ pub fn write_mscratch(mscratch: usize) {
     }
 }
 
+pub fn read_stvec() -> usize {
+    let mut stvec: usize;
+
+    unsafe {
+        asm!("csrr {}, stvec", out(reg) stvec);
+    }
+
+    return stvec;
+}
+
+pub fn write_stvec(stvec: usize) {
+    unsafe {
+        asm!("csrw stvec, {}", in(reg) stvec);
+    }
+}
+
 pub fn read_mepc() -> usize {
     let mut mepc: usize;
 

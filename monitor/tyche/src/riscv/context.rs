@@ -4,6 +4,7 @@ use riscv_utils::RegisterState;
 pub struct ContextRiscv {
     pub reg_state: RegisterState,
     pub satp: usize,
+    pub stvec: usize,
     pub mepc: usize,
     pub sepc: usize,
     pub sp: usize,
