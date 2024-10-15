@@ -177,6 +177,22 @@ pub fn write_mepc(mepc: usize) {
     }
 }
 
+pub fn read_sepc() -> usize {
+    let mut sepc: usize;
+
+    unsafe {
+        asm!("csrr {}, sepc", out(reg) sepc);
+    }
+
+    return sepc;
+}
+
+pub fn write_sepc(sepc: usize) {
+    unsafe {
+        asm!("csrw sepc, {}", in(reg) sepc);
+    }
+}
+
 pub fn read_mstatus() -> usize {
     let mut mstatus: usize;
 

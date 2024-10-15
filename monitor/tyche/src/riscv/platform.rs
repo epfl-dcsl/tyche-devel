@@ -681,7 +681,13 @@ impl PlatformState for StateRiscv {
                 );
 
                 next_ctx.reg_state.a0 = 0x0;
-                next_ctx.reg_state.a1 = return_capa.as_usize() as isize;
+                // On keystone the runtime breaks the standard SBI and expects something
+                // else in a1.
+                if domain.idx() == 0 {
+                    next_ctx.reg_state.a1 = return_capa.as_usize() as isize;
+                } else {
+                    log::info!("Skipping setting a1");
+                }
                 *current_domain = domain;
             }
             CoreUpdate::Trap {
