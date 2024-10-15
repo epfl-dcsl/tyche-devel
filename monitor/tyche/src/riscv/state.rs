@@ -9,8 +9,9 @@ use riscv_pmp::{
     PMP_CFG_ENTRIES, PMP_ENTRIES,
 };
 use riscv_utils::{
-    read_medeleg, read_mepc, read_mscratch, read_mstatus, read_satp, toggle_supervisor_interrupts,
-    write_medeleg, write_mepc, write_mscratch, write_mstatus, write_satp, RegisterState, NUM_HARTS,
+    read_medeleg, read_mepc, read_mscratch, read_mstatus, read_satp, read_sepc,
+    toggle_supervisor_interrupts, write_medeleg, write_mepc, write_mscratch, write_mstatus,
+    write_satp, write_sepc, RegisterState, NUM_HARTS,
 };
 use spin::{Mutex, MutexGuard};
 
@@ -35,6 +36,7 @@ const EMPTY_CONTEXT: Mutex<ContextRiscv> = Mutex::new(ContextRiscv {
     reg_state: RegisterState::const_default(),
     satp: 0,
     mepc: 0,
+    sepc: 0,
     sp: 0,
     medeleg: 0,
     mstatus: 0,
@@ -92,6 +94,7 @@ impl StateRiscv {
         }
     }
 
+    #[inline(never)]
     pub fn switch_domain(
         current_domain: &mut Handle<Domain>,
         current_ctx: &mut MutexGuard<ContextRiscv>,
@@ -105,10 +108,14 @@ impl StateRiscv {
             next_ctx.mepc,
             next_ctx.sp
         );
+
+        log::info!("SWITCHING DOMAIN: {:x?}", next_ctx);
+
         //Save current context
         //TODO: do this before.
         //current_ctx.reg_state = *current_reg_state;
         current_ctx.mepc = read_mepc();
+        current_ctx.sepc = read_sepc();
         current_ctx.sp = read_mscratch(); //Recall that this is where the sp is saved.
         current_ctx.satp = read_satp();
         current_ctx.medeleg = read_medeleg();
@@ -118,6 +125,7 @@ impl StateRiscv {
         write_satp(next_ctx.satp);
         write_mscratch(next_ctx.sp);
         write_mepc(next_ctx.mepc);
+        write_sepc(next_ctx.sepc);
         write_medeleg(next_ctx.medeleg); //TODO: This needs to be part of Trap/UpdateTrap.
 
         if next_ctx.mstatus != 0 {
@@ -132,10 +140,14 @@ impl StateRiscv {
         }
 
         // Propagate the state from the child, see drivers/tyche/src/domain.c exit frame.
-        next_ctx.reg_state.a2 = current_ctx.mepc;
-        next_ctx.reg_state.a3 = current_ctx.sp;
-        next_ctx.reg_state.a4 = current_ctx.satp;
-        next_ctx.reg_state.a5 = current_ctx.medeleg;
+        if domain.idx() == 0 {
+            next_ctx.reg_state.a2 = current_ctx.mepc;
+            next_ctx.reg_state.a3 = current_ctx.sp;
+            next_ctx.reg_state.a4 = current_ctx.satp;
+            next_ctx.reg_state.a5 = current_ctx.medeleg;
+        } else {
+            log::info!("Switching into enclave");
+        }
         //TODO: change the architecture to read the context.
         //*current_reg_state = next_ctx.reg_state;
 

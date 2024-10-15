@@ -77,6 +77,13 @@ pub fn arch_entry_point(hartid: usize, manifest: RVManifest, log_level: log::Lev
             mideleg
         );
 
+        unsafe {
+            log::warn!("[Charly] Remove medeleg once kernel is debugged :)");
+            // Let's just delegate the load/store faults 
+            let deleg: usize = (1 << 1) | (1 << 5) | (1 << 7);
+            asm!("csrs medeleg, {}", in(reg) deleg);
+        }
+
         //TODO: Change function name to be arch independent. Not launching guest in RV.
         launch_guest(
             hartid,

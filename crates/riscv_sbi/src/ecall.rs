@@ -29,6 +29,9 @@ pub fn ecall_handler(
     mut out_val: &mut usize,
     reg_state: RegisterState,
 ) {
+    if reg_state.a7 == 0x08424b45 {
+        log::info!("Keystone ecall FID: {} ", reg_state.a6);
+    }
     match reg_state.a7 {
         sbi::EXT_BASE => sbi_ext_base_handler(
             &mut ret,
