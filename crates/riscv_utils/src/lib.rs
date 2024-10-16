@@ -369,6 +369,25 @@ pub fn set_mip_ssip() {
     }
 }
 
+/// Increase mtimecmp by the provided value.
+pub fn aclint_pushback_timer(value: usize) {
+    let hartid: usize;
+
+    unsafe {
+        asm!(
+            "csrr {}, mhartid",
+            out(reg) hartid
+        );
+    }
+
+    let target_addr: usize = ACLINT_MTIMECMP_BASE_ADDR + hartid * ACLINT_MTIMECMP_SIZE;
+
+    unsafe {
+        let timestamp = *(target_addr as *mut usize);
+        asm!("sd {}, 0({})", in(reg) timestamp + value, in(reg) target_addr);
+    }
+}
+
 pub fn aclint_mtimer_set_mtimecmp(target_hartid: usize, value: usize) {
     let target_addr: usize = ACLINT_MTIMECMP_BASE_ADDR + target_hartid * ACLINT_MTIMECMP_SIZE;
     LAST_TIMER_TICK[target_hartid].store(value, Ordering::SeqCst);

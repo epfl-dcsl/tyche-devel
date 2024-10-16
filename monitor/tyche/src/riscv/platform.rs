@@ -680,13 +680,18 @@ impl PlatformState for StateRiscv {
                     domain,
                 );
 
-                next_ctx.reg_state.a0 = 0x0;
                 // On keystone the runtime breaks the standard SBI and expects something
-                // else in a1.
+                // else in a0 and a1.
                 if domain.idx() == 0 {
+                    next_ctx.reg_state.a0 = 0x0;
                     next_ctx.reg_state.a1 = return_capa.as_usize() as isize;
                 } else {
-                    log::info!("Skipping setting a1");
+                    let mip: usize;
+                    unsafe {
+                        asm!("csrr {}, mip", out(reg) mip);
+                    }
+                    // log::info!("Enclave mip: {:b}", mip);
+                    // log::info!("Skipping setting a0 and a1");
                 }
                 *current_domain = domain;
             }
@@ -811,7 +816,8 @@ impl PlatformState for StateRiscv {
         alias: usize,
         size: usize,
     ) -> Result<(), CapaError> {
-        todo!();
+        Ok(())
+        // todo!();
     }
 
     fn prepare_notify(domain: &Handle<Domain>, core_count: usize) {
@@ -1105,8 +1111,8 @@ impl MonitorRiscv {
             }
             mcause::INSTRUCTION_PAGE_FAULT | mcause::LOAD_PAGE_FAULT | mcause::STORE_PAGE_FAULT => {
                 panic!(
-                    "Page Fault! mcause: {:x} mepc: {:x} mtval: {:x}",
-                    mcause, mepc, mtval
+                    "Page Fault! mcause: {:x} mepc: {:x} mtval: {:x}, mip: {:x}, mstatus: {:x}\n{:x?}",
+                    mcause, mepc, mtval, mip, mstatus, reg_state
                 );
             }
             _ => exit_handler_failed(mcause),
@@ -1132,14 +1138,12 @@ impl MonitorRiscv {
             StateRiscv::load_current_regs(&active_domain, hartid, reg_state);
         }
 
-       
         unsafe {
             asm!("csrr {}, mideleg", out(reg) mideleg);
             asm!("csrr {}, medeleg", out(reg) medeleg);
         }
 
         //log::info!("Handle exit: mideleg {:x} medeleg: {:x}", mideleg, medeleg);
-
     }
 
     pub fn wrapper_monitor_call() {
@@ -1148,8 +1152,8 @@ impl MonitorRiscv {
         active_dom = Self::get_active_dom(hartid).unwrap();
         let (tyche_call, arg_1, arg_2, arg_3, arg_4, arg_5, arg_6) = {
             let ctx = &mut StateRiscv::get_context(active_dom, hartid);
-            let tyche_call: usize = ctx.reg_state.a0.try_into().unwrap();
-            let arg_1: usize = ctx.reg_state.a1.try_into().unwrap();
+            let tyche_call: usize = ctx.reg_state.a0 as usize;
+            let arg_1: usize = ctx.reg_state.a1 as usize;
             let arg_2: usize = ctx.reg_state.a2;
             let arg_3: usize = ctx.reg_state.a3;
             let arg_4: usize = ctx.reg_state.a4;

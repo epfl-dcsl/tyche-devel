@@ -9,9 +9,7 @@ use riscv_pmp::{
     PMP_CFG_ENTRIES, PMP_ENTRIES,
 };
 use riscv_utils::{
-    read_medeleg, read_mepc, read_mscratch, read_mstatus, read_satp, read_sepc, read_stvec,
-    toggle_supervisor_interrupts, write_medeleg, write_mepc, write_mscratch, write_mstatus,
-    write_satp, write_sepc, write_stvec, RegisterState, NUM_HARTS,
+    aclint_pushback_timer, clear_mip_stip, read_medeleg, read_mepc, read_mscratch, read_mstatus, read_satp, read_sepc, read_stvec, toggle_supervisor_interrupts, write_medeleg, write_mepc, write_mscratch, write_mstatus, write_satp, write_sepc, write_stvec, RegisterState, NUM_HARTS
 };
 use spin::{Mutex, MutexGuard};
 
@@ -110,7 +108,7 @@ impl StateRiscv {
             next_ctx.sp
         );
 
-        log::info!("SWITCHING DOMAIN: {:x?}", next_ctx);
+        // log::info!("SWITCHING DOMAIN: {:x?}", next_ctx);
 
         //Save current context
         //TODO: do this before.
@@ -150,9 +148,20 @@ impl StateRiscv {
             next_ctx.reg_state.a2 = current_ctx.mepc;
             next_ctx.reg_state.a3 = current_ctx.sp;
             next_ctx.reg_state.a4 = current_ctx.satp;
-            next_ctx.reg_state.a5 = current_ctx.medeleg;
+            next_ctx.reg_state.a5 = current_ctx.reg_state.a2;
+            next_ctx.reg_state.a6 = current_ctx.reg_state.a1 as usize;
+
+            if current_ctx.reg_state.a1 == 0 {
+                let mip: usize;
+                aclint_pushback_timer(100_000_000);
+                clear_mip_stip();
+                unsafe {
+                    asm!("csrr {}, mip", out(reg) mip);
+                }
+                // log::info!("Clear timer, new mip: {:b}", mip);
+            }
         } else {
-            log::info!("Switching into enclave");
+            // log::info!("Switching into enclave");
         }
         //TODO: change the architecture to read the context.
         //*current_reg_state = next_ctx.reg_state;
