@@ -151,6 +151,9 @@ impl StateRiscv {
             next_ctx.reg_state.a5 = current_ctx.reg_state.a2;
             next_ctx.reg_state.a6 = current_ctx.reg_state.a1 as usize;
 
+            // log::info!("Enclave reg state: {:x?}", current_ctx);
+            // log::info!("Next state: {:x?}", next_ctx);
+
             if current_ctx.reg_state.a1 == 0 {
                 let mip: usize;
                 aclint_pushback_timer(100_000_000);

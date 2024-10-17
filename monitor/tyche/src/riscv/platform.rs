@@ -1069,8 +1069,10 @@ impl MonitorRiscv {
                         log::debug!("Calling wrappper monitor call");
                         Self::wrapper_monitor_call();
                         if let Some(active_dom) = Self::get_active_dom(hartid) {
-                            let dom_ctx = &mut StateRiscv::get_context(active_dom, hartid);
-                            dom_ctx.reg_state.a7 = 0;
+                            if active_dom.idx() == 0 {
+                                let dom_ctx = &mut StateRiscv::get_context(active_dom, hartid);
+                                dom_ctx.reg_state.a7 = 0;
+                            }
                         }
                     }
                 } else {
