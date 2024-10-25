@@ -688,7 +688,10 @@ fn carve_send() {
         capas(d0, engine)
     );
     snap!("{[0x0, 0x500 | 1 (1 - 1 - 1 - 1)]}", regions(d1, engine));
-    snap!("{Region([0x0, 0x500 | _URWXS])}", capas(d1, engine));
+    snap!(
+        "{Channel(1), Region([0x0, 0x500 | _URWXS])}",
+        capas(d1, engine)
+    );
 
     engine.revoke_domain(d1).unwrap();
     snap!("{Region([0x0, 0x1000 | _URWXS])}", capas(d0, engine));
@@ -1005,7 +1008,10 @@ fn alias_send() {
         capas(d0, engine)
     );
     snap!("{[0x0, 0x500 | 1 (1 - 1 - 1 - 1)]}", regions(d1, engine));
-    snap!("{Region([0x0, 0x500 | __RWXS])}", capas(d1, engine));
+    snap!(
+        "{Channel(1), Region([0x0, 0x500 | __RWXS])}",
+        capas(d1, engine)
+    );
 
     engine.revoke_domain(d1).unwrap();
     snap!("{Region([0x0, 0x1000 | _URWXS])}", capas(d0, engine));
@@ -1217,14 +1223,14 @@ fn counter_alias_carve_bug() {
     engine.send(d0, r2, d1_mgmt).unwrap();
 
     snap!(
-        "{Region([0x0, 0x5 | P_RWXS]), Region([0x0, 0x5 | __RWXS])}",
+        "{Channel(1), Region([0x0, 0x5 | P_RWXS]), Region([0x0, 0x5 | __RWXS])}",
         capas(d1, engine)
     );
     snap!("{[0x0, 0x5 | 1 (1 - 1 - 1 - 1)]}", regions(d1, engine));
 
     // Revoke the aliased (r1).
-    engine.revoke(d1, LocalCapa::new(0)).unwrap();
-    snap!("{}", capas(d1, engine));
+    engine.revoke(d1, LocalCapa::new(1)).unwrap();
+    snap!("{Channel(1)}", capas(d1, engine));
     snap!("{}", regions(d1, engine));
 }
 
@@ -1372,7 +1378,10 @@ fn alias_then_carve() {
         capas(d0, engine)
     );
     snap!("{[0x0, 0xa | 1 (1 - 1 - 1 - 1)]}", regions(d0, engine));
-    snap!("{Region([0x0, 0x5 | __R___])}", capas(d1, engine));
+    snap!(
+        "{Channel(1), Region([0x0, 0x5 | __R___])}",
+        capas(d1, engine)
+    );
     snap!("{[0x0, 0x5 | 1 (1 - 0 - 0 - 0)]}", regions(d1, engine));
 
     // We started with an alias so d0 should still have it.
@@ -1386,7 +1395,7 @@ fn alias_then_carve() {
     // One region that's carved from and alias and the carved one.
     // TODO(Charly) veryyyyy confusing though.
     snap!(
-        "{Region([0x0, 0x5 | __R___]), Region([0x0, 0x5 | P_R___])}",
+        "{Channel(1), Region([0x0, 0x5 | __R___]), Region([0x0, 0x5 | P_R___])}",
         capas(d1, engine)
     );
     snap!("{[0x0, 0x5 | 1 (1 - 0 - 0 - 0)]}", regions(d1, engine));
@@ -1641,7 +1650,7 @@ fn enclave_steal_via_alias() {
 
     // Check the enclave has the capa.
     assert!(engine
-        .get_region_capa(d1, LocalCapa::new(0))
+        .get_region_capa(d1, LocalCapa::new(1))
         .unwrap()
         .is_some());
 
@@ -1649,7 +1658,7 @@ fn enclave_steal_via_alias() {
     let _e_r1 = engine
         .alias_region(
             d1,
-            LocalCapa::new(0),
+            LocalCapa::new(1),
             AccessRights {
                 start: 1,
                 end: 2,
@@ -1659,7 +1668,7 @@ fn enclave_steal_via_alias() {
         .unwrap();
 
     snap!(
-        "{Region([0x0, 0x5 | PURWXS]), Region([0x1, 0x2 | __RWXS])}",
+        "{Channel(1), Region([0x0, 0x5 | PURWXS]), Region([0x1, 0x2 | __RWXS])}",
         capas(d1, engine)
     );
     snap!("{[0x0, 0x1 | 1 (1 - 1 - 1 - 1)] -> [0x1, 0x2 | 2 (2 - 2 - 2 - 2)] -> [0x2, 0x5 | 1 (1 - 1 - 1 - 1)]}", regions(d1, engine));
@@ -1674,7 +1683,7 @@ fn enclave_steal_via_alias() {
     engine.revoke(d0, revoke_r0).unwrap();
 
     // The child should be left without any capas.
-    snap!("{}", capas(d1, engine));
+    snap!("{Channel(1)}", capas(d1, engine));
     // and without any region.
     snap!("{}", regions(d1, engine));
     // The parent should have access to the entire address space.
@@ -1739,7 +1748,7 @@ fn enclave_steal_via_carve() {
 
     // Check the enclave has the capa.
     assert!(engine
-        .get_region_capa(d1, LocalCapa::new(0))
+        .get_region_capa(d1, LocalCapa::new(1))
         .unwrap()
         .is_some());
 
@@ -1747,7 +1756,7 @@ fn enclave_steal_via_carve() {
     let _e_r1 = engine
         .carve_region(
             d1,
-            LocalCapa::new(0),
+            LocalCapa::new(1),
             AccessRights {
                 start: 1,
                 end: 2,
@@ -1757,7 +1766,7 @@ fn enclave_steal_via_carve() {
         .unwrap();
 
     snap!(
-        "{Region([0x0, 0x5 | PURWXS]), Region([0x1, 0x2 | _UR___])}",
+        "{Channel(1), Region([0x0, 0x5 | PURWXS]), Region([0x1, 0x2 | _UR___])}",
         capas(d1, engine)
     );
     snap!("{[0x0, 0x1 | 1 (1 - 1 - 1 - 1)] -> [0x1, 0x2 | 1 (1 - 0 - 0 - 0)] -> [0x2, 0x5 | 1 (1 - 1 - 1 - 1)]}", regions(d1, engine));
@@ -1772,7 +1781,7 @@ fn enclave_steal_via_carve() {
     engine.revoke(d0, revoke_r0).unwrap();
 
     // The child should be left without any capas.
-    snap!("{}", capas(d1, engine));
+    snap!("{Channel(1)}", capas(d1, engine));
     // and without any region.
     snap!("{}", regions(d1, engine));
     // The parent should have access to the entire address space.
@@ -1840,7 +1849,7 @@ fn enclave_enclave_steal() {
 
     // Check the enclave has the capa.
     assert!(engine
-        .get_region_capa(d1, LocalCapa::new(0))
+        .get_region_capa(d1, LocalCapa::new(1))
         .unwrap()
         .is_some());
 
@@ -1848,7 +1857,7 @@ fn enclave_enclave_steal() {
     let e_e_r1 = engine
         .carve_region(
             d1,
-            LocalCapa::new(0),
+            LocalCapa::new(1),
             AccessRights {
                 start: 1,
                 end: 2,
@@ -1865,7 +1874,7 @@ fn enclave_enclave_steal() {
     engine.send(d1, e_e_r1, d2_mgmt).unwrap();
 
     snap!(
-        "{Region([0x0, 0x5 | PURWXS]), Management(3 | _)}",
+        "{Channel(1), Region([0x0, 0x5 | PURWXS]), Management(3 | _)}",
         capas(d1, engine)
     );
     snap!(
@@ -1880,18 +1889,21 @@ fn enclave_enclave_steal() {
     snap!("{[0x5, 0xa | 1 (1 - 1 - 1 - 1)]}", regions(d0, engine));
 
     // Check dom2
-    snap!("{Region([0x1, 0x2 | _UR___])}", capas(d2, engine));
+    snap!(
+        "{Channel(2), Region([0x1, 0x2 | _UR___])}",
+        capas(d2, engine)
+    );
     snap!("{[0x1, 0x2 | 1 (1 - 0 - 0 - 0)]}", regions(d2, engine));
 
     // Now revoke with the handle we have.
     engine.revoke(d0, revoke_r0).unwrap();
 
     // The child should be left without any capas.
-    snap!("{Management(3 | _)}", capas(d1, engine));
+    snap!("{Channel(1), Management(3 | _)}", capas(d1, engine));
     // and without any region.
     snap!("{}", regions(d1, engine));
 
-    snap!("{}", capas(d2, engine));
+    snap!("{Channel(2)}", capas(d2, engine));
     snap!("{}", regions(d2, engine));
     // The parent should have access to the entire address space.
     snap!(
@@ -1951,7 +1963,7 @@ fn test_domain_capabilities() {
     let d2 = engine.get_domain_capa(d1, d2_mgmt).unwrap();
 
     // Should not be able to send a capa.
-    let err = engine.send(d1, LocalCapa::new(0), d2_mgmt);
+    let err = engine.send(d1, LocalCapa::new(1), d2_mgmt);
     assert!(err.is_err());
     assert_eq!(err.err().unwrap(), CapaError::InsufficientPermissions);
 
@@ -1965,7 +1977,7 @@ fn test_domain_capabilities() {
         )
         .unwrap();
 
-    engine.send(d1, LocalCapa::new(0), d2_mgmt).unwrap();
+    engine.send(d1, LocalCapa::new(1), d2_mgmt).unwrap();
 
     // Check the regions.
     snap!("{}", regions(d0, engine));
@@ -1973,7 +1985,7 @@ fn test_domain_capabilities() {
     snap!("{[0x0, 0x100 | 1 (1 - 1 - 1 - 1)]}", regions(d2, engine));
 
     // Impossible to revoke a root region..
-    let err = engine.revoke(d2, LocalCapa::new(0));
+    let err = engine.revoke(d2, LocalCapa::new(1));
     assert!(err.is_err());
 }
 
@@ -2055,7 +2067,10 @@ fn new_capa() {
         capas(d0, engine)
     );
     snap!("{[0x0, 0x40 | 1 (1 - 1 - 1 - 1)] -> [0x40, 0x50 | 2 (2 - 2 - 2 - 2)] -> [0x50, 0x100 | 1 (1 - 1 - 1 - 1)]}", regions(d0, engine));
-    snap!("{Region([0x10, 0x20 | __RWXS])}", capas(d1_capa, engine));
+    snap!(
+        "{Channel(1), Region([0x10, 0x20 | __RWXS])}",
+        capas(d1_capa, engine)
+    );
     snap!(
         "{[0x10, 0x20 | 1 (1 - 1 - 1 - 1)]}",
         regions(d1_capa, engine)
@@ -2070,7 +2085,7 @@ fn new_capa() {
         regions(d0, engine)
     );
     snap!(
-        "{Region([0x10, 0x20 | __RWXS]), Region([0x30, 0x50 | PURWXS])}",
+        "{Channel(1), Region([0x10, 0x20 | __RWXS]), Region([0x30, 0x50 | PURWXS])}",
         capas(d1_capa, engine)
     );
     snap!(
@@ -2086,7 +2101,10 @@ fn new_capa() {
         "{[0x0, 0x30 | 1 (1 - 1 - 1 - 1)] -> [0x50, 0x100 | 1 (1 - 1 - 1 - 1)]}",
         regions(d0, engine)
     );
-    snap!("{Region([0x40, 0x50 | __RWXS])}", capas(d2_capa, engine));
+    snap!(
+        "{Channel(1), Region([0x40, 0x50 | __RWXS])}",
+        capas(d2_capa, engine)
+    );
     snap!(
         "{[0x40, 0x50 | 1 (1 - 1 - 1 - 1)]}",
         regions(d2_capa, engine)
@@ -2101,7 +2119,7 @@ fn new_capa() {
         regions(d0, engine)
     );
     snap!(
-        "{Region([0x40, 0x50 | __RWXS]), Region([0x60, 0x80 | _URWXS])}",
+        "{Channel(1), Region([0x40, 0x50 | __RWXS]), Region([0x60, 0x80 | _URWXS])}",
         capas(d2_capa, engine)
     );
     snap!(
@@ -2115,7 +2133,10 @@ fn new_capa() {
         "{Management(2 | _), Management(3 | _), Region([0x0, 0x100 | PURWXS])}",
         capas(d0, engine)
     );
-    snap!("{Region([0x30, 0x50 | PURWXS])}", capas(d1_capa, engine));
+    snap!(
+        "{Channel(1), Region([0x30, 0x50 | PURWXS])}",
+        capas(d1_capa, engine)
+    );
     snap!(
         "{[0x30, 0x50 | 1 (1 - 1 - 1 - 1)]}",
         regions(d1_capa, engine)
@@ -2124,10 +2145,13 @@ fn new_capa() {
         "{[0x0, 0x30 | 1 (1 - 1 - 1 - 1)] -> [0x50, 0x60 | 1 (1 - 1 - 1 - 1)] -> [0x80, 0x100 | 1 (1 - 1 - 1 - 1)]}",
         regions(d0, engine)
     );
-    engine.revoke(d1_capa, LocalCapa::new(1)).unwrap();
-    snap!("{}", capas(d1_capa, engine));
+    engine.revoke(d1_capa, LocalCapa::new(2)).unwrap();
+    snap!("{Channel(1)}", capas(d1_capa, engine));
     snap!("{}", regions(d1_capa, engine));
-    snap!("{Region([0x60, 0x80 | _URWXS])}", capas(d2_capa, engine));
+    snap!(
+        "{Channel(1), Region([0x60, 0x80 | _URWXS])}",
+        capas(d2_capa, engine)
+    );
     snap!(
         "{[0x60, 0x80 | 1 (1 - 1 - 1 - 1)]}",
         regions(d2_capa, engine)
@@ -2136,8 +2160,8 @@ fn new_capa() {
         "{[0x0, 0x60 | 1 (1 - 1 - 1 - 1)] -> [0x80, 0x100 | 1 (1 - 1 - 1 - 1)]}",
         regions(d0, engine)
     );
-    engine.revoke(d2_capa, LocalCapa::new(1)).unwrap();
-    snap!("{}", capas(d2_capa, engine));
+    engine.revoke(d2_capa, LocalCapa::new(2)).unwrap();
+    snap!("{Channel(1)}", capas(d2_capa, engine));
     snap!("{}", regions(d2_capa, engine));
     snap!("{[0x0, 0x100 | 1 (1 - 1 - 1 - 1)]}", regions(d0, engine));
 
@@ -2159,7 +2183,7 @@ fn capas(domain: Handle<Domain>, engine: &mut CapaEngine) -> String {
     let mut buff = String::from("{");
     let mut is_first = true;
 
-    while let Some((capa, new_token)) = engine.enumerate(domain, token) {
+    while let Some((capa, new_token, _idx)) = engine.enumerate(domain, token) {
         if is_first {
             is_first = false;
         } else {
