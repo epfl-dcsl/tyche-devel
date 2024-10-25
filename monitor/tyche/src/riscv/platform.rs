@@ -848,7 +848,7 @@ impl PlatformState for StateRiscv {
         gpa: usize,
         size: usize,
     ) -> Result<(usize, usize), CapaError> {
-        Ok(gpa, size)
+        Ok((gpa, size))
     }
 }
 
