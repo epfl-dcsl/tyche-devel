@@ -112,7 +112,7 @@ callback_action_t pte_page_visit(entry_t* curr, level_t level, pt_profile_t* pro
 void test_simple_map(pt_profile_t* profile)
 {
   // Configure the mappers.
-  profile->how = riscv48_how_map;
+  profile->how = riscv_how_map;
   profile->mappers[LVL0] = pte_page_mapper;
   profile->mappers[LVL1] = pte_page_mapper;
   profile->mappers[LVL2] = pte_page_mapper;
@@ -136,7 +136,7 @@ void test_simple_map(pt_profile_t* profile)
 
   // Now let's check they are mapped.
   extra->invoc_count = 0;
-  profile->how = riscv48_how_visit_leaves; 
+  profile->how = riscv_how_visit_leaves;
   profile->visitors[LVL0] = pte_page_visit;
   int ret = pt_walk_page_range((entry_t) root, LVL3, s, e, profile);
   TEST(ret == 0);

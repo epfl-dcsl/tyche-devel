@@ -1,0 +1,29 @@
+{
+  "untrusted_bin": {
+    "path": "@UNTRUSTED_PATH@"
+  },
+  "kern_bin": {
+    "path":"@TRUSTED_PATH@",
+    "ops":[
+      {
+        "AddSegment":{
+          "size":8192,
+          "tpe":"KernelStackSB",
+          "write":true,"exec":false
+        }
+      },
+      {
+        "AddSegment":{
+          "start": 3145728, 
+          "size":8192,
+          "tpe":"KernelShared",
+          "write":false,
+          "exec":false
+        }
+      }
+    ]
+  },
+  "security": "Sandbox", 
+  "generate_pts": true,
+  "output": "application_with_sandbox"
+}
