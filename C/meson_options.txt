@@ -1,0 +1,3 @@
+option('arch', type: 'combo', choices: ['x86', 'riscv'], value: 'x86', description: 'Target architecture for the build')
+
+option('sdk', type: 'combo', choices: ['tyche', 'kvm'], value: 'tyche', description: 'The sdk to use: either direclty tyche or kvm API')
