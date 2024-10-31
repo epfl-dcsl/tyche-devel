@@ -194,8 +194,13 @@ impl PlatformState for StateX86 {
         domain.ept = Some(ept_root.phys_addr);
     }
 
-    fn revoke_domain(_domain: Handle<Domain>) {
-        // Noop for now, might need to send IPIs once we land multi-core
+    fn revoke_domain(domain: Handle<Domain>) {
+        let ctxt = Self::get_context(domain, cpuid());
+        if ctxt.launched {
+            let rcvmcs = RC_VMCS.lock();
+            let frame = rcvmcs.get(ctxt.vmcs).unwrap();
+            vmx::ActiveVmcs::vmclear_cached(&frame.frame).unwrap();
+        }
     }
 
     fn apply_core_update(
@@ -250,8 +255,9 @@ impl PlatformState for StateX86 {
                 todo!("Update this code path.");
             }
             CoreUpdate::DomainRevocation { revok, next } => {
-                // Do a switch.
-                {
+                Self::revoke_domain(*revok);
+                // If we're running the domain revoked, we need to perform a switch.
+                if revok.idx() == current_domain.idx() {
                     // Mark ourselves as interrupted.
                     let mut curr_ctx = Self::get_context(*current_domain, core);
                     curr_ctx.interrupted = true;
@@ -279,8 +285,9 @@ impl PlatformState for StateX86 {
                             None,
                         )
                         .unwrap();
+                    // Don't forget to swith the current domain.
+                    *current_domain = *next;
                 }
-                *current_domain = *next;
                 TLB_FLUSH_BARRIERS[revok.idx()].wait();
                 // Wait for the main thread to finish updating the engine.
                 TLB_FLUSH_BARRIERS[next.idx()].wait();
@@ -720,8 +727,12 @@ impl MonitorX86 {
                     res
                 }
                 Err(err) => {
-                    log::error!("Guest crash: {:?}", err);
-                    log::error!("Domain: {:?}", domain);
+                    log::error!(
+                        "Guest crash: {:?} | dom{} | core {}",
+                        err,
+                        domain.idx(),
+                        cpuid()
+                    );
                     log::error!("Vcpu: {:x?}", state.vcpu);
                     HandlerResult::Crash
                 }

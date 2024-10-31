@@ -1562,7 +1562,7 @@ fn free_resources() {
         }
 
         // Destroy domain, that should revoke all its regions
-        engine.revoke(d0, d1).unwrap();
+        engine.revoke_domain_capa(d0, d1).unwrap();
         // Drain updates
         while let Some(_) = engine.pop_update() {
             // Draining...
