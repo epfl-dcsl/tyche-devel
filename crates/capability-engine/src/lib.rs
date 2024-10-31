@@ -494,14 +494,11 @@ impl CapaEngine {
             Capa::Region(region) if self.regions[region].is_root() => {
                 Err(CapaError::InvalidOperation)
             }
-            // If the domain is running, put an update rather than revoke.
-            Capa::Management(dom) if self.domains[dom].cores() != 0 => {
-                self.updates.push(Update::RevokeDomain {
-                    manager: domain,
-                    mgmt_capa: capa,
-                    domain: dom,
-                })
-            }
+            Capa::Management(dom) => self.updates.push(Update::RevokeDomain {
+                manager: domain,
+                mgmt_capa: capa,
+                domain: dom,
+            }),
             // All other are simply revoked
             _ => domain::revoke_capa(
                 domain,
@@ -511,6 +508,24 @@ impl CapaEngine {
                 &mut self.tracker,
                 &mut self.updates,
             ),
+        }
+    }
+
+    pub fn revoke_domain_capa(
+        &mut self,
+        domain: Handle<Domain>,
+        capa: LocalCapa,
+    ) -> Result<(), CapaError> {
+        match self.domains[domain].get(capa)? {
+            Capa::Management(_dom) => domain::revoke_capa(
+                domain,
+                capa,
+                &mut self.regions,
+                &mut self.domains,
+                &mut self.tracker,
+                &mut self.updates,
+            ),
+            _ => Err(CapaError::InvalidCapa),
         }
     }
 
@@ -717,6 +732,10 @@ impl CapaEngine {
 
     pub fn get_domain_cores(&self, domain: Handle<Domain>) -> Result<u64, CapaError> {
         Ok(self.domains[domain].cores())
+    }
+
+    pub fn get_domain_core_map(&self, domain: Handle<Domain>) -> Result<u64, CapaError> {
+        Ok(self.domains[domain].core_map())
     }
 
     pub fn pop_update(&mut self) -> Option<Update> {

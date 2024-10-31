@@ -76,7 +76,7 @@ pub trait PlatformState {
 
     fn create_domain(domain: Handle<Domain>);
 
-    fn revoke_domain(_domain: Handle<Domain>);
+    fn revoke_domain(domain: Handle<Domain>);
 
     fn apply_core_update(
         &mut self,
@@ -941,35 +941,41 @@ pub trait Monitor<T: PlatformState + 'static> {
                     mgmt_capa,
                     domain,
                 } => {
+                    let core_map = engine.get_domain_core_map(domain).unwrap();
                     let cores = engine.get_domain_cores(domain).unwrap();
-                    let mut count = cores.count_ones() as usize;
                     let core_id = cpuid();
-                    // RevokeDomain updates never happen if the domain is not running.
-                    if count == 0 {
-                        panic!("This should never happen");
+
+                    // All the possible cores need to block on the domain sync.
+                    let mut all_cores_count = core_map.count_ones() as usize;
+                    if (core_map & (1 << core_id)) == 0 {
+                        // Add the current core the list.
+                        all_cores_count += 1;
                     } else {
-                        // We need to add one to the count to block on the barrier ourself..
-                        count += 1;
+                        // Make sure we flush on this core too.
+                        T::revoke_domain(domain);
                     }
+
                     // The algorithm includes 2 barriers:
-                    // 1) Send a message to everyone so that they get out of the vm.
+                    // 1) Send a message to all the cores on which the domain could run.
                     //  a) The engine is locked guaranteeing atomicity
-                    // 2) All relevant cores get the update and switch to the manager.
+                    // 2) All relevant cores get the update, those running the domain switch to the
+                    //    manager. All of them flush the state if necessary.
                     // 3) They notify this thread that it's done on the domain's barrier.
-                    // 3) They block on the manager's barrier.
+                    // 3) Everyone blocks on the manager's barrier.
                     // 4) The main thread can safely update other
                     //    cores engine state.
                     // 5) The main thread notifies everyone to resume.
                     let manager_core_map = engine
                         .get_domain_permission(manager, permission::PermissionIndex::AllowedCores);
-                    T::prepare_notify(&domain, count);
-                    T::prepare_notify(&manager, count);
-                    for core in BitmapIterator::new(cores) {
+                    T::prepare_notify(&domain, all_cores_count);
+                    T::prepare_notify(&manager, all_cores_count);
+                    for core in BitmapIterator::new(core_map) {
                         if core == core_id {
                             continue;
                         }
-                        // Check that the manager can run on that core.
-                        if manager_core_map & (1 << core) == 0 {
+                        // If the core is part of the ones where the manager needs to be scheduled,
+                        // check the manager can run on there.
+                        if ((1 << core) & cores != 0) && (manager_core_map & (1 << core) == 0) {
                             panic!("The manager cannot run on the target core!");
                         }
                         let mut core_updates = CORE_UPDATES[core as usize].lock();
@@ -980,16 +986,17 @@ pub trait Monitor<T: PlatformState + 'static> {
                             })
                             .unwrap();
                     }
-                    T::notify_cores(&domain, core_id, cores as usize);
+                    T::notify_cores(&domain, core_id, core_map as usize);
                     T::acknowledge_notify(&domain);
-                    // All cores should have stopped now and are blocking on the manager's signal.
+                    // All cores running the revoked domain should have stopped
+                    // and are blocking on the manager's signal.
                     for core in BitmapIterator::new(cores) {
                         // Change the domain on the core.
                         engine.partial_switch(domain, manager, core).unwrap();
                     }
                     // Check the domain's cores have been preempted.
                     assert_eq!(engine.get_domain_cores(domain), Ok(0));
-                    engine.revoke(manager, mgmt_capa).unwrap();
+                    engine.revoke_domain_capa(manager, mgmt_capa).unwrap();
                     // Free the threads
                     T::acknowledge_notify(&manager);
                 }

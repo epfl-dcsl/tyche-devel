@@ -312,6 +312,10 @@ impl<'vmx> ActiveVmcs<'vmx> {
         unsafe { raw::vmclear(self.frame().phys_addr.as_u64()) }
     }
 
+    pub fn vmclear_cached(frame: &Frame) -> Result<(), VmxError> {
+        unsafe { raw::vmclear(frame.phys_addr.as_u64()) }
+    }
+
     pub fn switch_frame(&mut self, dest: Frame) -> Result<(), VmxError> {
         // Load target VMCS
         self.region.set_frame(dest);
