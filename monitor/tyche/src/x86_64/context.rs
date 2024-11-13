@@ -1,11 +1,10 @@
 use capa_engine::context::{RegisterContext, RegisterGroup};
-use capa_engine::Handle;
-use spin::Mutex;
+use mmu::FrameAllocator;
 use vmx::bitmaps::{PinbasedControls, PrimaryControls, SecondaryControls};
 use vmx::fields::{VmcsField, VmcsFieldWidth};
-use vmx::{ActiveVmcs, VmxError, VmxExitReason};
+use vmx::{ActiveVmcs, Frame, VmxError, VmxExitReason};
 
-use crate::rcframe::{RCFrame, RCFramePool};
+use crate::allocator::allocator;
 
 pub const MAX_CPUID_ENTRIES: usize = 50;
 
@@ -820,7 +819,7 @@ pub struct Contextx86 {
     // State.
     pub interrupted: bool,
     pub sched_info: SchedInfo,
-    pub vmcs: Handle<RCFrame>,
+    pub vmcs: Option<Frame>,
     pub launched: bool,
     pub nb_active_cpuid_entries: usize,
     pub cpuid_entries: [CpuidEntry; MAX_CPUID_ENTRIES],
@@ -966,20 +965,16 @@ impl Contextx86 {
     }
 
     /// Switch frames and flush.
-    pub fn _switch_flush(&mut self, rc_vmcs: &Mutex<RCFramePool>, vcpu: &mut ActiveVmcs) {
-        let locked = rc_vmcs.lock();
-        let rc_frame = locked.get(self.vmcs).unwrap();
+    pub fn _switch_flush(&mut self, vcpu: &mut ActiveVmcs) {
         // Switch the frame.
-        vcpu.switch_frame(rc_frame.frame).unwrap();
+        vcpu.switch_frame(self.vmcs.unwrap()).unwrap();
         // Load values that changed.
         self.flush(vcpu);
     }
 
-    pub fn switch_no_flush(&mut self, rc_vmcs: &Mutex<RCFramePool>, vcpu: &mut ActiveVmcs) {
-        let locked = rc_vmcs.lock();
-        let rc_frame = locked.get(self.vmcs).unwrap();
+    pub fn switch_no_flush(&mut self, vcpu: &mut ActiveVmcs) {
         // Switch the frame.
-        vcpu.switch_frame(rc_frame.frame).unwrap();
+        vcpu.switch_frame(self.vmcs.unwrap()).unwrap();
     }
 
     // TODO: maybe more efficient if we dump the frame first?
@@ -1008,7 +1003,11 @@ impl Contextx86 {
         self.sched_info.timed = false;
         self.sched_info.saved_ctrls = 0;
         self.sched_info.budget = 0;
-        //TODO: the rvmcs is cleaned elsewhere... change this.
+        if let Some(f) = self.vmcs {
+            let allocator = allocator();
+            unsafe { allocator.free_frame(f.phys_addr).unwrap() };
+        }
+        self.vmcs = None;
     }
 }
 

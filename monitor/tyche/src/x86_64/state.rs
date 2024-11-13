@@ -2,7 +2,7 @@ use core::sync::atomic::{AtomicBool, Ordering};
 
 use capa_engine::config::{NB_CORES, NB_DOMAINS, NB_REMAP_REGIONS};
 use capa_engine::context::{RegisterContext, RegisterState};
-use capa_engine::{CapaEngine, CapaError, Domain, GenArena, Handle, LocalCapa, MemOps, Remapper};
+use capa_engine::{CapaEngine, CapaError, Domain, Handle, LocalCapa, MemOps, Remapper};
 use mmu::eptmapper::EPT_ROOT_FLAGS;
 use mmu::{EptMapper, FrameAllocator, IoPtFlag, IoPtMapper};
 use spin::{Mutex, MutexGuard};
@@ -17,7 +17,6 @@ use super::perf;
 use crate::allocator::allocator;
 use crate::calls::{MONITOR_SUCCESS, MONITOR_SWITCH_INTERRUPTED};
 use crate::monitor::PlatformState;
-use crate::rcframe::{RCFrame, RCFramePool, EMPTY_RCFRAME};
 use crate::sync::Barrier;
 
 /// VMXState encapsulates the vmxon and current vcpu.
@@ -30,8 +29,6 @@ pub struct VmxState {
 
 /// Static values
 pub static DOMAINS: [Mutex<DataX86>; NB_DOMAINS] = [EMPTY_DOMAIN; NB_DOMAINS];
-pub static RC_VMCS: Mutex<RCFramePool> =
-    Mutex::new(GenArena::new([EMPTY_RCFRAME; { NB_DOMAINS * NB_CORES }]));
 pub static CONTEXTS: [[Mutex<Contextx86>; NB_CORES]; NB_DOMAINS] =
     [EMPTY_CONTEXT_ARRAY; NB_DOMAINS];
 pub static IOMMU: Mutex<Iommu> =
@@ -67,7 +64,7 @@ const EMPTY_CONTEXT: Mutex<Contextx86> = Mutex::new(Contextx86 {
         budget: 0,
         saved_ctrls: 0,
     },
-    vmcs: Handle::<RCFrame>::new_invalid(),
+    vmcs: None,
     launched: false,
     nb_active_cpuid_entries: 0,
     cpuid_entries: [EMPTY_CPUID_ENTRY; MAX_CPUID_ENTRIES],
@@ -230,11 +227,11 @@ impl StateX86 {
     ) -> Result<(), CapaError> {
         perf::start_step(0);
         // Safety check that both contexts have a valid vmcs.
-        if current_ctx.vmcs.is_invalid() || next_ctx.vmcs.is_invalid() {
+        if current_ctx.vmcs.is_none() || next_ctx.vmcs.is_none() {
             log::error!(
                 "VMCS are none during switch: curr:{:?}, next:{:?}",
-                current_ctx.vmcs.is_invalid(),
-                next_ctx.vmcs.is_invalid()
+                current_ctx.vmcs.is_none(),
+                next_ctx.vmcs.is_none()
             );
             return Err(CapaError::InvalidSwitch);
         }
@@ -288,13 +285,7 @@ impl StateX86 {
                 .or(Err(CapaError::PlatformError))?;
         }
 
-        // Now the logic for shared vs. private vmcs.
-        if current_ctx.vmcs == next_ctx.vmcs {
-            panic!("Why are the two vmcs the same?");
-        }
-
-        //next_ctx.switch_flush(&RC_VMCS, vcpu);
-        next_ctx.switch_no_flush(&RC_VMCS, vcpu);
+        next_ctx.switch_no_flush(vcpu);
         if delta != 0 {
             // We should do it differently, e.g., put it in the cache.
             // But the problem is that ctrls fields behave in an odd way (see vmx/src/lib.rs

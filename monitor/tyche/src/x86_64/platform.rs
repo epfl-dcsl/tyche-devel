@@ -21,13 +21,12 @@ use super::context::{ContextGpx86, Contextx86};
 use super::cpuid_filter::{filter_mpk, filter_tpause};
 use super::init::NB_BOOTED_CORES;
 use super::perf::PerfEvent;
-use super::state::{DataX86, StateX86, VmxState, CONTEXTS, DOMAINS, IOMMU, RC_VMCS, TLB_FLUSH};
+use super::state::{DataX86, StateX86, VmxState, CONTEXTS, DOMAINS, IOMMU, TLB_FLUSH};
 use super::vmx_helper::{dump_host_state, load_host_state};
 use super::{cpuid, perf, vmx_helper};
 use crate::allocator::{self, allocator};
 use crate::calls::{MONITOR_FAILURE, MONITOR_SUCCESS};
 use crate::monitor::{CoreUpdate, Monitor, PlatformState};
-use crate::rcframe::{drop_rc, RCFrame};
 use crate::x86_64::context::CpuidEntry;
 use crate::x86_64::state::TLB_FLUSH_BARRIERS;
 use crate::{calls, MonitorErrors};
@@ -136,14 +135,11 @@ impl PlatformState for StateX86 {
         core: usize,
     ) -> Result<(), CapaError> {
         let allocator = allocator();
-        let mut rcvmcs = RC_VMCS.lock();
         let dest = &mut Self::get_context(domain, core);
         // Reset all the values inside the dest.
         dest.reset();
         let frame = allocator.allocate_frame().unwrap();
-        let rc = RCFrame::new(frame);
-        drop_rc(&mut *rcvmcs, dest.vmcs);
-        dest.vmcs = rcvmcs.allocate(rc).expect("Unable to allocate rc frame");
+        dest.vmcs = Some(frame);
         // Init the frame it needs the identifier.
         self.vmxon.init_frame(frame);
         // Init the host state.
@@ -152,9 +148,7 @@ impl PlatformState for StateX86 {
             let mut values: [usize; 13] = [0; 13];
             dump_host_state(&mut self.vcpu, &mut values).or(Err(CapaError::InvalidValue))?;
             // Switch to the target frame.
-            self.vcpu
-                .switch_frame(rcvmcs.get(dest.vmcs).unwrap().frame)
-                .unwrap();
+            self.vcpu.switch_frame(dest.vmcs.unwrap()).unwrap();
             // Init to the default values.
             let info: GuestInfo = Default::default();
             vmx_helper::default_vmcs_config(&mut self.vcpu, &info, false);
@@ -166,9 +160,7 @@ impl PlatformState for StateX86 {
             self.vcpu.vmclear().expect("Could not clear vCPU");
 
             // Switch back the frame.
-            self.vcpu
-                .switch_frame(rcvmcs.get(current_ctxt.vmcs).unwrap().frame)
-                .unwrap();
+            self.vcpu.switch_frame(current_ctxt.vmcs.unwrap()).unwrap();
         }
         return Ok(());
     }
@@ -197,9 +189,7 @@ impl PlatformState for StateX86 {
     fn revoke_domain(domain: Handle<Domain>) {
         let ctxt = Self::get_context(domain, cpuid());
         if ctxt.launched {
-            let rcvmcs = RC_VMCS.lock();
-            let frame = rcvmcs.get(ctxt.vmcs).unwrap();
-            vmx::ActiveVmcs::vmclear_cached(&frame.frame).unwrap();
+            vmx::ActiveVmcs::vmclear_cached(&ctxt.vmcs.unwrap()).unwrap();
         }
     }
 
@@ -349,10 +339,10 @@ impl PlatformState for StateX86 {
             return Err(CapaError::InsufficientPermissions);
         }
         //TODO: patch.
-        let rcvmcs = RC_VMCS.lock();
-        let frame = rcvmcs.get(ctxt.vmcs).unwrap();
+        //let rcvmcs = RC_VMCS.lock();
+        //let frame = rcvmcs.get(ctxt.vmcs).unwrap();
         let restore = *self.vcpu.frame();
-        self.vcpu.switch_frame(frame.frame).unwrap();
+        self.vcpu.switch_frame(ctxt.vmcs.unwrap()).unwrap();
         let res = ctxt
             .get_from_frame(field, &self.vcpu)
             .or(Err(CapaError::PlatformError));
@@ -560,11 +550,7 @@ impl MonitorX86 {
         };
         let dom = StateX86::get_domain(domain);
         let mut ctx = StateX86::get_context(domain, cpuid());
-        let rcframe = RC_VMCS
-            .lock()
-            .allocate(RCFrame::new(*state.vcpu.frame()))
-            .expect("Unable to allocate rcframe");
-        ctx.vmcs = rcframe;
+        ctx.vmcs = Some(*state.vcpu.frame());
         state
             .vcpu
             .set_ept_ptr(HostPhysAddr::new(

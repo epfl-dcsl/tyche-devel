@@ -494,11 +494,13 @@ impl CapaEngine {
             Capa::Region(region) if self.regions[region].is_root() => {
                 Err(CapaError::InvalidOperation)
             }
-            Capa::Management(dom) => self.updates.push(Update::RevokeDomain {
-                manager: domain,
-                mgmt_capa: capa,
-                domain: dom,
-            }),
+            Capa::Management(dom) if self.domains[dom].is_sealed() => {
+                self.updates.push(Update::RevokeDomain {
+                    manager: domain,
+                    mgmt_capa: capa,
+                    domain: dom,
+                })
+            }
             // All other are simply revoked
             _ => domain::revoke_capa(
                 domain,
