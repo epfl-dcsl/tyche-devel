@@ -52,3 +52,4 @@ install_tychools = custom_target('install-tychools',
 
 ## ————————————————————————————— Subdirectories ————————————————————————————— ##
 subdir('libraries')
+subdir('microbenchmarks')

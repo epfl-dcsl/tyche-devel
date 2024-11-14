@@ -1,20 +1,20 @@
 {
   "untrusted_bin": {
-    "path": "mock_app"
+    "path": "@UNTRUSTED_PATH@"
   },
   "kern_bin": {
-    "path":"mock_dom",
+    "path":"@TRUSTED_PATH@",
     "ops":[
       {
         "AddSegment":{
-          "size": 10477568,
-          "tpe":"KernelConfidential",
+          "size": @SEGMENT_SIZE@,
+          "tpe": "@TPE@",
           "write":true,"exec":false
         }
       }
     ]
   },
   "generate_pts": false,
-  "security": "Confidential",
-  "output": "bin/carve/10M"
+  "security": "@SECURITY@",
+  "output": "@OUTPUT@"
 }
