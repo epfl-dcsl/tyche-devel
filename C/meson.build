@@ -13,7 +13,6 @@ elif arch == 'riscv'
   if sdk == 'kvm'
     error('sdk kvm is not supported for riscv!')
   endif
-  ##gcc_version = current_dir+'/../target/riscv64gc-unknown-linux-gnu/release'
 else 
   error('Unsupported architecture: '+ arch)
 endif
