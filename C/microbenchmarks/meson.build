@@ -35,7 +35,7 @@ if arch == 'riscv'
   code_dom = ['domain/riscv_asm.S']
   trans_code += ['transition/riscv_asm.S']
   c_flags = ['-DCONFIG_RISCV']
-  linking += ['pthread', '-Wl,--section-start=.data=0x16000']
+  linking += ['-pthread', '-Wl,--section-start=.data=0x16000']
 else
   code_dom = ['domain/asm.S']
   trans_code += ['transition/asm.S']
