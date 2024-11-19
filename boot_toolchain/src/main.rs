@@ -31,7 +31,7 @@ const TEST_ARGS: &[&str] = &[
     "-enable-kvm",
 ];
 const TEST_TIMEOUT_SECS: u64 = 10;
-const QCOW2_CANDIDATES: &[&'static str] = &["nested.raw", "ubuntu.qcow2"];
+const QCOW2_CANDIDATES: &[&'static str] = &["ubuntu.qcow2"];
 
 // —————————————————————————————— CLI Parsing ——————————————————————————————— //
 
