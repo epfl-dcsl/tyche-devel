@@ -45,7 +45,7 @@ endif
 # Mock application to instrument with enclaves.
 mock_app = executable('mock_app',
   ['mock/main.c'],
-  c_args: ['-static'],
+  c_args: tyche_ucflags,
   link_args: ['-static'],
   install: true,
   install_dir: meson.current_source_dir(),
@@ -54,14 +54,14 @@ mock_app = executable('mock_app',
 # Mock code for the domain, it has two pages.
 mock_dom = executable('mock_dom',
   code_dom,
-  c_args: ['-static', '-nostdlib'],
+  c_args: tyche_tcflags,
   link_args: linking
   )
 
 trans_dom = executable('trans_dom',
   trans_code + c_code_capas + c_runtime_src,
   include_directories: common_includes + ['include/'], 
-  c_args: c_flags + ['-DTYCHE_USER_SPACE=2', '-nostdlib', '-static'],
+  c_args: c_flags + tyche_tcflags,
   link_args: linking,
   )
 

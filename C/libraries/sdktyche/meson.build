@@ -40,13 +40,21 @@ c_code_capas = [
     files(meson.source_root() + '/../linux/drivers/tyche/libraries/capabilities/src/tyche_api.c'),
   ]
 
-## ——————— Just checking we can compile them as standalone libraries ———————— ##
+## ——————————————————————————— SDKs as libraries ———————————————————————————— ##
 sdktyche_loader = static_library('sdktyche_loader', c_loader_src + c_back_tyche_src,
   include_directories: tyche_loader_includes, c_args: ['-DTYCHE_USER_SPACE=1', '-D_GNU_SOURCE'], link_with: elf64_static)
 
 if arch == 'x86'
 sdkkvm_loader = static_library('sdk_kvm_loader', c_loader_src + c_back_kvm_src,
   include_directories: kvm_loader_includes, c_args: ['-DTYCHE_USER_SPACE=1', '-DRUN_WITH_KVM=1'], link_with: elf64_static)
+endif
+
+## —————————————— Useful cflags for the sdk-based applications —————————————— ##
+tyche_ucflags = ['-DTYCHE_USER_SPACE=1', '-static']
+tyche_tcflags = ['-DTYCHE_USER_SPACE=2', '-nostdlib', '-static']
+if sdk == 'kvm'
+  tyche_ucflags += ['-DRUN_WITH_KVM=1']
+  tyche_tcflags += ['-DRUN_WITH_KVM=1']
 endif
 
 # TODO: figure out how to allow undefined symbols.
