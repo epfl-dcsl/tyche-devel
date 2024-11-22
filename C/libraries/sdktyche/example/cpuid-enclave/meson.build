@@ -25,7 +25,7 @@ endif
 app = executable(out_name,
   u_sources,
   include_directories: tyche_includes + [include_directories('include/')],
-  c_args: ['-DTYCHE_USER_SPACE=1', '-static'],
+  c_args: tyche_ucflags,
   link_args: ['-static'],
   link_with: tyche_loader)
 
@@ -33,7 +33,7 @@ app = executable(out_name,
 dom = executable(in_name, 
   t_sources + c_runtime_src + c_code_capas, 
   include_directories: common_includes + ['include/'], 
-  c_args: ['-DTYCHE_USER_SPACE=2', '-nostdlib', '-static'],
+  c_args: tyche_tcflags,
   link_args: linking,
   )
 
