@@ -13,6 +13,7 @@ use crate::elf::{Elf64PhdrType, ElfProgram};
 use crate::guests::ManifestInfo;
 use crate::mmu::frames::{MemoryMap, RangeFrameAllocator};
 use crate::mmu::PAGE_SIZE;
+use crate::smp::CORES_REMAP;
 use crate::{cpu, HostPhysAddr, HostVirtAddr};
 
 #[cfg(feature = "second-stage")]
@@ -69,22 +70,28 @@ impl Stage2 {
 }
 
 /// Enter stage 2.
+/// @Warning: This function is used as the landing pad for AP threads,
+/// it cannot take an argument!
 pub unsafe fn enter() {
     _enter_inner();
 }
 
 fn _enter_inner() {
-    let cpu_id = cpu::id();
+    let cpu_id = CORES_REMAP[cpu::id()].load(Ordering::SeqCst);
     // Safety:
     let info = unsafe {
         match SECOND_STAGE_ENTRIES[cpu_id] {
             Some(info) => info,
-            None => panic!("Tries to jump into stage 2 before initialisation"),
+            None => panic!(
+                "Tries to jump into stage 2 before initialisation on {}",
+                cpu_id
+            ),
         }
     };
 
     // BSP do not wait for the barrier
     if cpu_id == 0 {
+        log::info!("On BSP 0 about to jump");
         info.jump_into();
     } else {
         loop {
@@ -114,7 +121,7 @@ pub fn load(
     stage1_allocator: &impl RangeAllocator,
     stage2_allocator: &impl RangeAllocator,
     pt_mapper: &mut PtMapper<HostPhysAddr, HostVirtAddr>,
-    smp: Smp,
+    smp: &Smp,
     memory_map: MemoryMap,
 ) {
     // Read elf and allocate second stage memory
@@ -259,7 +266,7 @@ pub fn load(
     manifest.poffset = elf_range.start.as_u64();
     manifest.voffset = LOAD_VIRT_ADDR.as_u64();
     manifest.vga = info.vga_info.clone();
-    manifest.smp = smp;
+    manifest.smp = *smp;
 
     debug::hook_stage2_offsets(manifest.poffset, manifest.voffset);
     debug::tyche_hook_stage1(1);

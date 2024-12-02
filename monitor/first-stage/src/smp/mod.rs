@@ -7,6 +7,7 @@ use acpi::platform::{PlatformInfo, Processor, ProcessorState};
 use mmu::{PtFlag, PtMapper, RangeAllocator};
 use x86_64::instructions::tlb;
 
+use crate::cpu::MAX_CPU_NUM;
 use crate::mmu::PAGE_SIZE;
 use crate::vmx::{HostPhysAddr, HostVirtAddr};
 use crate::{cpu, idt, second_stage};
@@ -28,6 +29,10 @@ static CPU_STATUS: [AtomicBool; 256] = [FALSE; 256];
 pub static BSP_READY: AtomicBool = FALSE;
 
 const STACK_SIZE: usize = 5 * 0x1000;
+
+/// Global variable to keep track of core remappings.
+const NO_REMAP: AtomicUsize = AtomicUsize::new(usize::MAX);
+pub static CORES_REMAP: [AtomicUsize; MAX_CPU_NUM] = [NO_REMAP; MAX_CPU_NUM];
 
 extern "C" {
     fn ap_trampoline_start();
@@ -140,7 +145,17 @@ pub unsafe fn boot(
 ) {
     let processor_info = platform_info.processor_info.as_ref().unwrap();
     let bsp: Processor = processor_info.boot_processor;
-    let ap: &Vec<Processor> = processor_info.application_processors.as_ref();
+    let ap: &Vec<&Processor> = &processor_info
+        .application_processors
+        .iter()
+        .filter(|p| p.state != ProcessorState::Disabled)
+        .collect::<Vec<_>>();
+    // Setup the BSP thread's id.
+    CORES_REMAP[0].store(0, Ordering::SeqCst);
+    for (idx, v) in ap.iter().enumerate() {
+        log::info!("A processor {:?}", *v);
+        CORES_REMAP[v.processor_uid as usize].store(idx + 1, Ordering::SeqCst);
+    }
 
     // TODO: disable PIC (mask all interrupts)
 
