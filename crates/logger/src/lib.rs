@@ -3,8 +3,11 @@
 use core::sync::atomic::{AtomicBool, Ordering};
 
 use log::{LevelFilter, Metadata, Record};
+#[cfg(not(feature = "vga"))]
 use qemu::_print;
 use spin::Mutex;
+#[cfg(feature = "vga")]
+use vga::_print;
 
 static LOGGER: LockedLogger = LockedLogger(Mutex::new(Logger {}));
 static IS_INITIALIZED: AtomicBool = AtomicBool::new(false);
