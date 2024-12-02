@@ -90,10 +90,13 @@ pub struct Manifest {
 }
 
 /// Suport for x86_64 SMP
+#[derive(Clone, Copy)]
 #[repr(C)]
 pub struct Smp {
     /// SMP info: number of available cores
     pub smp: usize,
+    /// SMP core map, as some processors do not number cores linearly.
+    pub smp_map: [usize; 256],
     /// ACPI MP Wakeup Mailbox Address
     pub mailbox: u64,
     /// The CR3 value for MP wakeup
@@ -142,6 +145,7 @@ macro_rules! make_manifest {
                 iommu: 0,
                 smp: $crate::Smp {
                     smp: 0,
+                    smp_map: [usize::MAX; 256],
                     mailbox: 0,
                     wakeup_cr3: 0,
                 },

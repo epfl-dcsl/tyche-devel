@@ -15,9 +15,10 @@ use log::LevelFilter;
 use mmu::{PtMapper, RangeAllocator};
 use s1::acpi::AcpiInfo;
 use s1::acpi_handler::TycheACPIHandler;
+use s1::cpu::MAX_CPU_NUM;
 use s1::guests::Guest;
 use s1::mmu::MemoryMap;
-use s1::smp::allocate_wakeup_page_tables;
+use s1::smp::{allocate_wakeup_page_tables, CORES_REMAP};
 use s1::{guests, println, second_stage, smp, HostPhysAddr, HostVirtAddr};
 use stage_two_abi::{Smp, VgaInfo};
 use x86_64::registers::control::Cr4;
@@ -131,8 +132,13 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     unsafe {
         smp::boot(acpi_platform_info, &host_allocator, &mut pt_mapper);
     }
+    let mut core_map: [usize; MAX_CPU_NUM] = [usize::MAX; MAX_CPU_NUM];
+    for i in 0..MAX_CPU_NUM {
+        core_map[i] = CORES_REMAP[i].load(Ordering::SeqCst);
+    }
     let smp_info = Smp {
         smp: s1::cpu::cores(),
+        smp_map: core_map,
         mailbox,
         wakeup_cr3,
     };
@@ -212,7 +218,7 @@ fn launch_guest(
             stage1_allocator,
             &mut stage2_allocator,
             &mut pt_mapper,
-            smp,
+            &smp,
             memory_map,
         );
         smp::BSP_READY.store(true, Ordering::SeqCst);
