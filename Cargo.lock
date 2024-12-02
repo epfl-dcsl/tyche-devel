@@ -566,6 +566,7 @@ dependencies = [
  "log",
  "qemu",
  "spin 0.9.4",
+ "vga",
 ]
 
 [[package]]

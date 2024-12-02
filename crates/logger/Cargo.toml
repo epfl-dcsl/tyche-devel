@@ -3,7 +3,12 @@ name = "logger"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+# Print to VGA text mode
+vga = ["dep:vga"]
+
 [dependencies]
 log = { workspace = true }
 spin = { workspace = true }
 qemu = { path = "../qemu/"}
+vga = { path = "../../crates/vga/", optional = true }
