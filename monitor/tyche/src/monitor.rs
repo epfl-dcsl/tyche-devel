@@ -1,3 +1,5 @@
+use core::sync::atomic::AtomicUsize;
+
 use attestation::hashing::hash_region;
 use capa_engine::config::NB_CORES;
 use capa_engine::utils::BitmapIterator;
@@ -44,11 +46,26 @@ pub static CORE_UPDATES: [Mutex<Buffer<CoreUpdate>>; NB_CORES] = [EMPTY_UPDATE_B
 // —————————————————————— Constants for initialization —————————————————————— //
 const EMPTY_UPDATE_BUFFER: Mutex<Buffer<CoreUpdate>> = Mutex::new(Buffer::new());
 
+// ————————————————————————— Static core remapping —————————————————————————— //
+
+pub const CORE_REMAP_DEFAULT: AtomicUsize = AtomicUsize::new(usize::MAX);
+pub static CORES_REMAP: [AtomicUsize; NB_CORES] = [CORE_REMAP_DEFAULT; NB_CORES];
+
 // —————————————————————————— Trying to generalize —————————————————————————— //
+
+/// Logical identifiers for cores.
+type LogicalID = usize;
+/// Physical identifiers for cores.
+type PhysicalID = usize;
 
 pub trait PlatformState {
     type DomainData;
     type Context;
+    fn logical_id() -> LogicalID {
+        let lid = CORES_REMAP[cpuid()].load(core::sync::atomic::Ordering::SeqCst);
+        assert!(lid != usize::MAX);
+        lid
+    }
     fn find_buff(
         engine: &MutexGuard<CapaEngine>,
         domain: Handle<Domain>,
@@ -85,6 +102,7 @@ pub trait PlatformState {
         update: &CoreUpdate,
     );
 
+    //TODO: check whether this is correct with logical IDs.
     fn platform_shootdown(&mut self, domain: &Handle<Domain>, core: usize, trigger: bool);
 
     fn set_core(
@@ -181,7 +199,7 @@ pub trait Monitor<T: PlatformState + 'static> {
         let mut locked = CAPA_ENGINE.try_lock();
         while locked.is_none() {
             //TODO: fix me
-            Self::apply_core_updates(state, dom, cpuid());
+            Self::apply_core_updates(state, dom, T::logical_id());
             locked = CAPA_ENGINE.try_lock();
         }
         locked.unwrap()
@@ -221,7 +239,7 @@ pub trait Monitor<T: PlatformState + 'static> {
 
         // TODO: taken from part of init_vcpu.
         engine
-            .start_domain_on_core(domain, cpuid())
+            .start_domain_on_core(domain, T::logical_id())
             .expect("Failed to start initial domain on core");
         domain
     }
@@ -229,7 +247,7 @@ pub trait Monitor<T: PlatformState + 'static> {
     fn start_initial_domain(state: &mut T) -> Handle<Domain> {
         let mut dom = INITIAL_DOMAIN.lock().unwrap();
         let mut engine = Self::lock_engine(state, &mut dom);
-        engine.start_domain_on_core(dom, cpuid()).unwrap();
+        engine.start_domain_on_core(dom, T::logical_id()).unwrap();
         dom
     }
 
@@ -359,7 +377,7 @@ pub trait Monitor<T: PlatformState + 'static> {
         let domain = engine.get_domain_capa(*current, domain)?;
         let result: &mut [usize] = &mut [0; 15];
         state.get_core_gp(&mut engine, &domain, core, result)?;
-        state.dump_in_gp(&mut engine, current, cpuid(), &result)?;
+        state.dump_in_gp(&mut engine, current, T::logical_id(), &result)?;
         Ok(())
     }
 
@@ -379,7 +397,7 @@ pub trait Monitor<T: PlatformState + 'static> {
             return Err(CapaError::InvalidCore);
         }
         let mut values: [(usize, usize); 6] = [(0, 0); 6];
-        state.extract_from_gp(&mut engine, current, cpuid(), &mut values)?;
+        state.extract_from_gp(&mut engine, current, T::logical_id(), &mut values)?;
         let domain = engine.get_domain_capa(*current, domain)?;
         for e in values {
             // Signal to skip.
@@ -396,7 +414,7 @@ pub trait Monitor<T: PlatformState + 'static> {
         current: &mut Handle<Domain>,
         domain: LocalCapa,
     ) -> Result<LocalCapa, CapaError> {
-        let core = cpuid();
+        let core = T::logical_id();
         let mut engine = Self::lock_engine(state, current);
         //TODO: fix that.
         let capa = engine.seal(*current, core, domain)?;
@@ -576,11 +594,11 @@ pub trait Monitor<T: PlatformState + 'static> {
         state: &mut T,
         current: &mut Handle<Domain>,
         capa: LocalCapa,
-        cpuid: usize,
+        logical_core: usize,
         delta: usize,
     ) -> Result<(), CapaError> {
         let mut engine = Self::lock_engine(state, current);
-        engine.switch(*current, cpuid, delta, capa)?;
+        engine.switch(*current, logical_core, delta, capa)?;
         Self::apply_updates(state, &mut engine);
         Ok(())
     }
@@ -659,13 +677,13 @@ pub trait Monitor<T: PlatformState + 'static> {
                 return Ok(true);
             }
             calls::SEAL_DOMAIN => {
-                log::trace!("Seal Domain on core {}", cpuid());
+                log::trace!("Seal Domain on core {}", T::logical_id());
                 let capa = Self::do_seal(state, domain, LocalCapa::new(args[0]))?;
                 res[0] = capa.as_usize();
                 return Ok(true);
             }
             calls::SEND => {
-                log::trace!("Send on core {}", cpuid());
+                log::trace!("Send on core {}", T::logical_id());
                 Self::do_send(
                     state,
                     domain,
@@ -675,7 +693,7 @@ pub trait Monitor<T: PlatformState + 'static> {
                 return Ok(true);
             }
             calls::SEND_REGION => {
-                log::trace!("Send region on core {}", cpuid());
+                log::trace!("Send region on core {}", T::logical_id());
                 Self::do_send_region(
                     state,
                     domain,
@@ -691,7 +709,7 @@ pub trait Monitor<T: PlatformState + 'static> {
                 return Ok(true);
             }
             calls::SEGMENT_REGION => {
-                log::trace!("Segment region on core {}", cpuid());
+                log::trace!("Segment region on core {}", T::logical_id());
                 let (to_send, to_revoke) = Self::do_segment_region(
                     state,
                     domain,
@@ -706,7 +724,7 @@ pub trait Monitor<T: PlatformState + 'static> {
                 return Ok(true);
             }
             calls::REVOKE => {
-                log::trace!("Revoke on core {}", cpuid());
+                log::trace!("Revoke on core {}", T::logical_id());
                 Self::do_revoke(state, domain, LocalCapa::new(args[0]))?;
                 return Ok(true);
             }
@@ -717,7 +735,7 @@ pub trait Monitor<T: PlatformState + 'static> {
                 return Ok(true);
             }
             calls::ENUMERATE => {
-                log::trace!("Enumerate on core {}", cpuid());
+                log::trace!("Enumerate on core {}", T::logical_id());
                 if let Some((info, next, _idx)) =
                     Self::do_enumerate(state, domain, NextCapaToken::from_usize(args[0]))
                 {
@@ -734,12 +752,18 @@ pub trait Monitor<T: PlatformState + 'static> {
             calls::SWITCH => {
                 log::trace!(
                     "Switch on core {} from {} with capa {} quantum {}",
-                    cpuid(),
+                    T::logical_id(),
                     domain.idx(),
                     args[0],
                     args[1],
                 );
-                Self::do_switch(state, domain, LocalCapa::new(args[0]), cpuid(), args[1])?;
+                Self::do_switch(
+                    state,
+                    domain,
+                    LocalCapa::new(args[0]),
+                    T::logical_id(),
+                    args[1],
+                )?;
                 return Ok(false);
             }
             calls::RETURN_TO_MANAGER => {
@@ -764,12 +788,12 @@ pub trait Monitor<T: PlatformState + 'static> {
                     "Debug called with {:#x} from dom{} on core {}\n\n",
                     args[0],
                     domain.idx(),
-                    cpuid()
+                    T::logical_id()
                 );
                 return Ok(false);
             }
             calls::CONFIGURE => {
-                log::trace!("Configure on core {}", cpuid());
+                log::trace!("Configure on core {}", T::logical_id());
                 let result = if let Some(bitmap) = permission::PermissionIndex::from_usize(args[0])
                 {
                     let mut value = args[2] as u64;
@@ -803,7 +827,7 @@ pub trait Monitor<T: PlatformState + 'static> {
                 return Ok(true);
             }
             calls::GET_CONFIG_CORE => {
-                log::trace!("Get config core on core {}", cpuid());
+                log::trace!("Get config core on core {}", T::logical_id());
                 let value = Self::do_get_core(
                     state,
                     domain,
@@ -825,7 +849,7 @@ pub trait Monitor<T: PlatformState + 'static> {
                 return Ok(true);
             }
             calls::READ_ALL_GP => {
-                log::trace!("Read all gp on core {}", cpuid());
+                log::trace!("Read all gp on core {}", T::logical_id());
                 Self::do_get_all_gp(
                     state,
                     domain,
@@ -838,7 +862,7 @@ pub trait Monitor<T: PlatformState + 'static> {
                 todo!("Implement!!!");
             }
             calls::WRITE_FIELDS => {
-                log::trace!("Write fields on core {}", cpuid());
+                log::trace!("Write fields on core {}", T::logical_id());
                 Self::do_write_fields(
                     state,
                     domain,
@@ -851,7 +875,7 @@ pub trait Monitor<T: PlatformState + 'static> {
                 todo!("Implement!!!");
             }
             calls::REVOKE_ALIASED_REGION => {
-                log::trace!("Revoke aliased region on core {}", cpuid());
+                log::trace!("Revoke aliased region on core {}", T::logical_id());
                 Self::do_revoke_region(
                     state,
                     domain,
@@ -882,7 +906,7 @@ pub trait Monitor<T: PlatformState + 'static> {
 
     fn do_handle_violation(state: &mut T, current: &mut Handle<Domain>) -> Result<(), CapaError> {
         let mut engine = Self::lock_engine(state, current);
-        let core = cpuid();
+        let core = T::logical_id();
         state.context_interrupted(current, core);
         engine.handle_violation(*current, core)?;
         Self::apply_updates(state, &mut engine);
@@ -894,7 +918,7 @@ pub trait Monitor<T: PlatformState + 'static> {
             log::trace!("Update: {}", update);
             match update {
                 capa_engine::Update::PermissionUpdate { domain, core_map } => {
-                    let core_id = cpuid();
+                    let core_id = T::logical_id();
                     log::trace!(
                         "cpu {} processes PermissionUpdate with core_map={:b}",
                         core_id,
@@ -943,7 +967,7 @@ pub trait Monitor<T: PlatformState + 'static> {
                 } => {
                     let core_map = engine.get_domain_core_map(domain).unwrap();
                     let cores = engine.get_domain_cores(domain).unwrap();
-                    let core_id = cpuid();
+                    let core_id = T::logical_id();
 
                     // All the possible cores need to block on the domain sync.
                     let mut all_cores_count = core_map.count_ones() as usize;
@@ -1036,7 +1060,7 @@ pub trait Monitor<T: PlatformState + 'static> {
     }
 
     fn apply_core_updates(state: &mut T, current: &mut Handle<Domain>, core_id: usize) {
-        let core = cpuid();
+        let core = T::logical_id();
         let mut update_queue = CORE_UPDATES[core_id].lock();
         while let Some(update) = update_queue.pop() {
             state.apply_core_update(current, core, &update);

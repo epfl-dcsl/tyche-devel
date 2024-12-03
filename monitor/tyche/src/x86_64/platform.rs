@@ -23,7 +23,7 @@ use super::init::NB_BOOTED_CORES;
 use super::perf::PerfEvent;
 use super::state::{DataX86, StateX86, VmxState, CONTEXTS, DOMAINS, IOMMU, TLB_FLUSH};
 use super::vmx_helper::{dump_host_state, load_host_state};
-use super::{cpuid, perf, vmx_helper};
+use super::{perf, vmx_helper};
 use crate::allocator::{self, allocator};
 use crate::calls::{MONITOR_FAILURE, MONITOR_SUCCESS};
 use crate::monitor::{CoreUpdate, Monitor, PlatformState};
@@ -144,7 +144,7 @@ impl PlatformState for StateX86 {
         self.vmxon.init_frame(frame);
         // Init the host state.
         {
-            let current_ctxt = Self::get_context(current, cpuid());
+            let current_ctxt = Self::get_context(current, Self::logical_id());
             let mut values: [usize; 13] = [0; 13];
             dump_host_state(&mut self.vcpu, &mut values).or(Err(CapaError::InvalidValue))?;
             // Switch to the target frame.
@@ -187,7 +187,7 @@ impl PlatformState for StateX86 {
     }
 
     fn revoke_domain(domain: Handle<Domain>) {
-        let ctxt = Self::get_context(domain, cpuid());
+        let ctxt = Self::get_context(domain, Self::logical_id());
         if ctxt.launched {
             vmx::ActiveVmcs::vmclear_cached(&ctxt.vmcs.unwrap()).unwrap();
         }
@@ -549,7 +549,7 @@ impl MonitorX86 {
             Self::start_initial_domain(&mut state)
         };
         let dom = StateX86::get_domain(domain);
-        let mut ctx = StateX86::get_context(domain, cpuid());
+        let mut ctx = StateX86::get_context(domain, StateX86::logical_id());
         ctx.vmcs = Some(*state.vcpu.frame());
         state
             .vcpu
@@ -583,7 +583,7 @@ impl MonitorX86 {
     }
 
     pub fn emulate_cpuid(domain: &mut Handle<Domain>) {
-        let mut context = StateX86::get_context(*domain, cpuid());
+        let mut context = StateX86::get_context(*domain, StateX86::logical_id());
         let input_eax = context.get_current(VmcsField::GuestRax, None).unwrap();
         let input_ecx = context.get_current(VmcsField::GuestRcx, None).unwrap();
         let mut eax: usize;
@@ -626,7 +626,7 @@ impl MonitorX86 {
     }
 
     fn emulate_cpuid_cached(&self, domain: Handle<Domain>) -> Result<(), ()> {
-        let mut context = StateX86::get_context(domain, cpuid());
+        let mut context = StateX86::get_context(domain, StateX86::logical_id());
 
         if context.nb_active_cpuid_entries == 0 {
             // No cached cpuid
@@ -694,7 +694,7 @@ impl MonitorX86 {
     }
 
     pub fn main_loop(&mut self, mut state: StateX86, mut domain: Handle<Domain>) {
-        let core_id = cpuid();
+        let core_id = StateX86::logical_id();
         let mut result = unsafe {
             let mut context = StateX86::get_context(domain, core_id);
             self.run_vcpu(&mut state, &mut context)
@@ -717,7 +717,7 @@ impl MonitorX86 {
                         "Guest crash: {:?} | dom{} | core {}",
                         err,
                         domain.idx(),
-                        cpuid()
+                        StateX86::logical_id()
                     );
                     log::error!("Vcpu: {:x?}", state.vcpu);
                     HandlerResult::Crash
@@ -751,7 +751,7 @@ impl MonitorX86 {
         match reason {
             VmxExitReason::Vmcall => {
                 let (vmcall, arg_1, arg_2, arg_3, arg_4, arg_5, arg_6) = {
-                    let mut context = StateX86::get_context(*domain, cpuid());
+                    let mut context = StateX86::get_context(*domain, StateX86::logical_id());
                     let vmcall = context.get_current(VmcsField::GuestRax, None).unwrap();
                     let arg_1 = context.get_current(VmcsField::GuestRdi, None).unwrap();
                     let arg_2 = context.get_current(VmcsField::GuestRsi, None).unwrap();
@@ -798,7 +798,7 @@ impl MonitorX86 {
                     _ => Self::do_monitor_call(vs, domain, vmcall, &args, &mut res)
                 };
                 // Put the results back.
-                let mut context = StateX86::get_context(*domain, cpuid());
+                let mut context = StateX86::get_context(*domain, StateX86::logical_id());
                 match success {
                     Ok(true) => {
                           context.set(VmcsField::GuestRax, MONITOR_SUCCESS, None).unwrap();
@@ -811,7 +811,7 @@ impl MonitorX86 {
                     },
                     Ok(false) => {},
                     Err(e) => {
-                        log::error!("Failure monitor call: {:?}, call: {:?} for dom {} on core {}", e, vmcall, domain.idx(), cpuid());
+                        log::error!("Failure monitor call: {:?}, call: {:?} for dom {} on core {}", e, vmcall, domain.idx(), StateX86::logical_id());
                         context.set(VmcsField::GuestRax, MONITOR_FAILURE, None).unwrap();
                         log::debug!("The vcpu: {:#x?}", vs.vcpu);
                         drop(context);
@@ -830,7 +830,7 @@ impl MonitorX86 {
                 Ok(HandlerResult::Resume)
             }
         VmxExitReason::InitSignal /*if domain.idx() == 0*/ => {
-            log::trace!("cpu {} received init signal", cpuid());
+            log::trace!("cpu {} received init signal", StateX86::logical_id());
             Ok(HandlerResult::Resume)
         }
         VmxExitReason::Cpuid => {
@@ -874,7 +874,7 @@ impl MonitorX86 {
             perf::event(PerfEvent::ControlRegisterAccess);
             // Handle some of these only for dom0, the other domain's problems
             // are for now forwarded to the manager domain.
-            let mut context = StateX86::get_context(*domain, cpuid());
+            let mut context = StateX86::get_context(*domain, StateX86::logical_id());
             let qualification = vs.vcpu.exit_qualification().or(Err(CapaError::PlatformError))?.control_register_accesses();
             match qualification {
                 exit_qualification::ControlRegisterAccesses::MovToCr(cr, reg) => {
@@ -903,7 +903,7 @@ impl MonitorX86 {
             let addr = vs.vcpu.guest_phys_addr().or(Err(CapaError::PlatformError))?;
             log::error!(
                 "EPT Violation on dom0 core {}! virt: 0x{:x}, phys: 0x{:x}",
-                cpuid(),
+                StateX86::logical_id(),
                 vs.vcpu
                     .guest_linear_addr()
                     .expect("unable to get the virt addr")
@@ -917,7 +917,7 @@ impl MonitorX86 {
         }
         VmxExitReason::Xsetbv if domain.idx() == 0 => {
             perf::event(PerfEvent::Xsetbv);
-            let mut context = StateX86::get_context(*domain, cpuid());
+            let mut context = StateX86::get_context(*domain, StateX86::logical_id());
             let ecx = context.get_current(VmcsField::GuestRcx, None).or(Err(CapaError::PlatformError))?;
             let eax = context.get_current(VmcsField::GuestRax, None).or(Err(CapaError::PlatformError))?;
             let edx = context.get_current(VmcsField::GuestRdx, None).or(Err(CapaError::PlatformError))?;
@@ -942,7 +942,7 @@ impl MonitorX86 {
         }
         VmxExitReason::Wrmsr if domain.idx() == 0 => {
             perf::event(PerfEvent::Msr);
-            let mut context = StateX86::get_context(*domain, cpuid());
+            let mut context = StateX86::get_context(*domain, StateX86::logical_id());
             let ecx = context.get_current(VmcsField::GuestRcx, None).or(Err(CapaError::PlatformError))?;
             if ecx >= 0x4B564D00 && ecx <= 0x4B564DFF {
                 // Custom MSR range, used by KVM
@@ -957,7 +957,7 @@ impl MonitorX86 {
         }
         VmxExitReason::Rdmsr if domain.idx() == 0 => {
             perf::event(PerfEvent::Msr);
-            let mut context = StateX86::get_context(*domain, cpuid());
+            let mut context = StateX86::get_context(*domain, StateX86::logical_id());
             let ecx = context.get_current(VmcsField::GuestRcx, None).or(Err(CapaError::PlatformError))?;
             log::trace!("rdmsr 0x{:x}", ecx);
             if ecx >= 0xc0010000 && ecx <= 0xc0020000 {
@@ -998,7 +998,7 @@ impl MonitorX86 {
         | VmxExitReason::AccessToGdtrOrIdtr
         | VmxExitReason::AccessToLdtrOrTr
         | VmxExitReason::Hlt => {
-            log::trace!("Handling {:?} for dom {} on core {}", reason, domain.idx(), cpuid());
+            log::trace!("Handling {:?} for dom {} on core {}", reason, domain.idx(), StateX86::logical_id());
             match reason {
                 VmxExitReason::EptViolation => perf::event(PerfEvent::EptViolation),
                 VmxExitReason::VmxPreemptionTimerExpired => perf::event(PerfEvent::VmxTimer),
@@ -1037,7 +1037,7 @@ impl MonitorX86 {
                 "Emulation is not yet implemented for exit reason: {:?}",
                 reason
             );
-            log::info!("Dom: {} on core {}\n{:?}", domain.idx(), cpuid(), vs.vcpu);
+            log::info!("Dom: {} on core {}\n{:?}", domain.idx(), StateX86::logical_id(), vs.vcpu);
             Ok(HandlerResult::Crash)
         }
         }
@@ -1048,7 +1048,7 @@ impl MonitorX86 {
         domain: Handle<Domain>,
         args: &[usize; 6],
     ) -> Result<bool, CapaError> {
-        let mut context = StateX86::get_context(domain, cpuid());
+        let mut context = StateX86::get_context(domain, StateX86::logical_id());
         if context.nb_active_cpuid_entries >= context.cpuid_entries.len() {
             return Err(CapaError::OutOfMemory);
         }

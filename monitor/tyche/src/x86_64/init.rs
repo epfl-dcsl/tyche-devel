@@ -3,13 +3,16 @@
 use core::arch::asm;
 use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
+use capa_engine::config::NB_CORES;
 use stage_two_abi::Manifest;
 use vmx::fields::VmcsField;
 pub use vmx::ActiveVmcs;
 
+use super::state::StateX86;
 use super::{arch, cpuid};
 use crate::allocator;
 use crate::debug::qemu;
+use crate::monitor::{PlatformState, CORES_REMAP};
 use crate::statics::get_manifest;
 use crate::x86_64::platform::MonitorX86;
 
@@ -28,11 +31,9 @@ pub static NB_BOOTED_CORES: AtomicUsize = AtomicUsize::new(0);
 static mut MANIFEST: Option<&'static Manifest> = None;
 
 pub fn arch_entry_point(log_level: log::LevelFilter) -> ! {
-    let cpuid = cpuid();
-
-    if cpuid == 0 {
+    if cpuid() == 0 {
         logger::init(log_level);
-        log::info!("CPU{}: Hello from second stage!", cpuid);
+        log::info!("CPU{}: Hello from second stage!", cpuid());
         #[cfg(feature = "bare_metal")]
         log::info!("Running on bare metal");
 
@@ -63,7 +64,8 @@ pub fn arch_entry_point(log_level: log::LevelFilter) -> ! {
     }
     // The APs spin until the manifest is fetched, and then initialize the second stage
     else {
-        log::info!("CPU{}: Hello from second stage!", cpuid);
+        let lid = StateX86::logical_id();
+        log::info!("CPU{}: Hello from second stage!", lid);
 
         // SAFETY: we only perform read accesses and we ensure the BSP initialized the manifest.
         let manifest = unsafe {
@@ -71,7 +73,7 @@ pub fn arch_entry_point(log_level: log::LevelFilter) -> ! {
             MANIFEST.as_ref().unwrap()
         };
 
-        init_arch(manifest, cpuid);
+        init_arch(manifest, lid);
 
         // Wait until the BSP mark second stage as initialized (e.g. all APs are up).
         NB_BOOTED_CORES.fetch_add(1, Ordering::SeqCst);
@@ -79,15 +81,16 @@ pub fn arch_entry_point(log_level: log::LevelFilter) -> ! {
             core::hint::spin_loop();
         }
 
-        log::info!("CPU{}: Waiting on mailbox", cpuid);
+        log::info!("CPU{}|Lid{}: Waiting on mailbox", cpuid(), lid);
 
         // SAFETY: only called once on the BSP
         let mut monitor = MonitorX86 {};
         let (state, domain) = unsafe {
             let (mut state, domain) = MonitorX86::init(manifest, false);
-            wait_on_mailbox(manifest, &mut state.vcpu, cpuid);
+            wait_on_mailbox(manifest, &mut state.vcpu, lid);
             (state, domain)
         };
+        log::info!("CPU{}|LID{}: Waiting on mailbox", cpuid(), lid);
 
         // Launch guest and exit
         monitor.launch_guest(manifest, state, domain);
@@ -103,6 +106,16 @@ pub fn init_arch(manifest: &Manifest, cpuid: usize) {
             options(nomem, nostack, preserves_flags)
         );
         if cpuid == 0 {
+            // Safety check to harmonize the statics.
+            assert!(NB_CORES <= manifest.smp.smp_map.len());
+            for i in NB_CORES..manifest.smp.smp_map.len() {
+                assert!(manifest.smp.smp_map[i] == usize::MAX);
+            }
+            // Initialize the core remapping.
+            for i in 0..NB_CORES {
+                CORES_REMAP[i].store(manifest.smp.smp_map[i], Ordering::SeqCst);
+            }
+            // Initialize arch specific structures.
             arch::init();
         }
         arch::setup(cpuid);
