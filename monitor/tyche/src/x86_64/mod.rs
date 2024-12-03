@@ -15,11 +15,12 @@ pub use init::arch_entry_point;
 pub use vmx::{ActiveVmcs, VmxError as BackendError};
 
 use crate::debug::qemu::ExitCode;
+use crate::monitor::PhysicalID;
 
 // —————————————————————————————— x86_64 Arch ——————————————————————————————— //
-pub fn cpuid() -> usize {
+pub fn cpuid() -> PhysicalID {
     let cpuid = unsafe { core::arch::x86_64::__cpuid(0x01) };
-    ((cpuid.ebx & 0xffffffff) >> 24) as usize
+    PhysicalID(((cpuid.ebx & 0xffffffff) >> 24) as usize)
 }
 
 /// Halt the CPU in a spinloop;

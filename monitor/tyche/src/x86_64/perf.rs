@@ -153,7 +153,7 @@ pub fn display_stats() {
 /// To be safe this function must never be called if another reference is still alive on that
 /// core.
 unsafe fn get_perf_ctx() -> &'static mut PerfContext {
-    &mut PERF_CONTEXTS[StateX86::logical_id()]
+    &mut PERF_CONTEXTS[StateX86::logical_id().as_usize()]
 }
 
 impl PerfContext {
@@ -232,7 +232,7 @@ impl PerfContext {
         }
 
         // We only print stats for one CPU for now
-        if StateX86::logical_id() != DISPLAY_CORE {
+        if StateX86::logical_id().as_usize() != DISPLAY_CORE {
             return;
         }
 

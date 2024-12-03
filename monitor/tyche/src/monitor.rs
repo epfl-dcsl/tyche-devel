@@ -1,3 +1,4 @@
+use core::fmt;
 use core::sync::atomic::AtomicUsize;
 
 use attestation::hashing::hash_region;
@@ -19,7 +20,7 @@ use crate::calls;
 #[derive(Debug, Clone, Copy)]
 pub enum CoreUpdate {
     TlbShootdown {
-        src_core: usize,
+        src_core: LogicalID,
     },
     Switch {
         domain: Handle<Domain>,
@@ -54,17 +55,56 @@ pub static CORES_REMAP: [AtomicUsize; NB_CORES] = [CORE_REMAP_DEFAULT; NB_CORES]
 // —————————————————————————— Trying to generalize —————————————————————————— //
 
 /// Logical identifiers for cores.
-type LogicalID = usize;
+#[derive(PartialEq, Eq, Debug, Clone, Copy)]
+pub struct LogicalID(pub usize);
 /// Physical identifiers for cores.
-type PhysicalID = usize;
+#[derive(PartialEq, Eq, Debug, Clone, Copy)]
+pub struct PhysicalID(pub usize);
+
+impl LogicalID {
+    pub fn as_usize(self) -> usize {
+        self.0
+    }
+    pub fn physical(self) -> PhysicalID {
+        for (i, v) in CORES_REMAP.iter().enumerate() {
+            if Self(v.load(core::sync::atomic::Ordering::SeqCst)) == self {
+                return PhysicalID(i);
+            }
+        }
+        panic!("Unable to find the physical ID for {}", self);
+    }
+}
+
+impl fmt::Display for LogicalID {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.0) // Format the inner `usize` value
+    }
+}
+
+impl PhysicalID {
+    pub fn as_usize(self) -> usize {
+        self.0
+    }
+    pub fn as_u32(self) -> u32 {
+        self.0 as u32
+    }
+}
+
+impl fmt::Display for PhysicalID {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.0) // Format the inner `usize` value
+    }
+}
+
+// ——————————————————————— Platform dependent traits ———————————————————————— //
 
 pub trait PlatformState {
     type DomainData;
     type Context;
     fn logical_id() -> LogicalID {
-        let lid = CORES_REMAP[cpuid()].load(core::sync::atomic::Ordering::SeqCst);
+        let lid = CORES_REMAP[cpuid().as_usize()].load(core::sync::atomic::Ordering::SeqCst);
         assert!(lid != usize::MAX);
-        lid
+        LogicalID(lid)
     }
     fn find_buff(
         engine: &MutexGuard<CapaEngine>,
@@ -80,14 +120,14 @@ pub trait PlatformState {
         engine: MutexGuard<CapaEngine>,
         current: Handle<Domain>,
         domain: Handle<Domain>,
-        core: usize,
+        core: LogicalID,
     ) -> Result<(), CapaError>;
 
     fn platform_init_io_mmu(&self, addr: usize);
 
     fn get_domain(domain: Handle<Domain>) -> MutexGuard<'static, Self::DomainData>;
 
-    fn get_context(domain: Handle<Domain>, core: usize) -> MutexGuard<'static, Self::Context>;
+    fn get_context(domain: Handle<Domain>, core: LogicalID) -> MutexGuard<'static, Self::Context>;
 
     fn update_permission(domain: Handle<Domain>, engine: &mut MutexGuard<CapaEngine>) -> bool;
 
@@ -98,18 +138,18 @@ pub trait PlatformState {
     fn apply_core_update(
         &mut self,
         domain: &mut Handle<Domain>,
-        core_id: usize,
+        core_id: LogicalID,
         update: &CoreUpdate,
     );
 
     //TODO: check whether this is correct with logical IDs.
-    fn platform_shootdown(&mut self, domain: &Handle<Domain>, core: usize, trigger: bool);
+    fn platform_shootdown(&mut self, domain: &Handle<Domain>, core: LogicalID, trigger: bool);
 
     fn set_core(
         &mut self,
         engine: &mut MutexGuard<CapaEngine>,
         domain: &Handle<Domain>,
-        core: usize,
+        core: LogicalID,
         idx: usize,
         value: usize,
     ) -> Result<(), CapaError>;
@@ -118,7 +158,7 @@ pub trait PlatformState {
         &mut self,
         engine: &mut MutexGuard<CapaEngine>,
         domain: &Handle<Domain>,
-        core: usize,
+        core: LogicalID,
         idx: usize,
     ) -> Result<usize, CapaError>;
 
@@ -126,7 +166,7 @@ pub trait PlatformState {
         &mut self,
         engine: &mut MutexGuard<CapaEngine>,
         domain: &Handle<Domain>,
-        core: usize,
+        core: LogicalID,
         result: &mut [usize],
     ) -> Result<(), CapaError>;
 
@@ -134,7 +174,7 @@ pub trait PlatformState {
         &mut self,
         engine: &mut MutexGuard<CapaEngine>,
         domain: &mut Handle<Domain>,
-        core: usize,
+        core: LogicalID,
         src: &[usize],
     ) -> Result<(), CapaError>;
 
@@ -142,7 +182,7 @@ pub trait PlatformState {
         &mut self,
         engine: &mut MutexGuard<CapaEngine>,
         domain: &Handle<Domain>,
-        core: usize,
+        core: LogicalID,
         res: &mut [(usize, usize); 6],
     ) -> Result<(), CapaError>;
 
@@ -175,13 +215,13 @@ pub trait PlatformState {
     /// This assumes that the engine is locked!
     fn prepare_notify(domain: &Handle<Domain>, core_count: usize);
 
-    fn notify_cores(domain: &Handle<Domain>, core_id: usize, core_map: usize);
+    fn notify_cores(domain: &Handle<Domain>, core_id: LogicalID, core_map: usize);
 
     fn acknowledge_notify(domain: &Handle<Domain>);
 
     fn finish_notify(domain: &Handle<Domain>);
 
-    fn context_interrupted(&mut self, domain: &Handle<Domain>, core: usize);
+    fn context_interrupted(&mut self, domain: &Handle<Domain>, core: LogicalID);
 
     fn find_hpa(
         &mut self,
@@ -199,7 +239,7 @@ pub trait Monitor<T: PlatformState + 'static> {
         let mut locked = CAPA_ENGINE.try_lock();
         while locked.is_none() {
             //TODO: fix me
-            Self::apply_core_updates(state, dom, T::logical_id());
+            Self::apply_core_updates(state, dom);
             locked = CAPA_ENGINE.try_lock();
         }
         locked.unwrap()
@@ -239,7 +279,7 @@ pub trait Monitor<T: PlatformState + 'static> {
 
         // TODO: taken from part of init_vcpu.
         engine
-            .start_domain_on_core(domain, T::logical_id())
+            .start_domain_on_core(domain, T::logical_id().as_usize())
             .expect("Failed to start initial domain on core");
         domain
     }
@@ -247,7 +287,9 @@ pub trait Monitor<T: PlatformState + 'static> {
     fn start_initial_domain(state: &mut T) -> Handle<Domain> {
         let mut dom = INITIAL_DOMAIN.lock().unwrap();
         let mut engine = Self::lock_engine(state, &mut dom);
-        engine.start_domain_on_core(dom, T::logical_id()).unwrap();
+        engine
+            .start_domain_on_core(dom, T::logical_id().as_usize())
+            .unwrap();
         dom
     }
 
@@ -320,7 +362,7 @@ pub trait Monitor<T: PlatformState + 'static> {
         state: &mut T,
         current: &mut Handle<Domain>,
         domain: LocalCapa,
-        core: usize,
+        core: LogicalID,
         idx: usize,
         value: usize,
     ) -> Result<(), CapaError> {
@@ -331,7 +373,7 @@ pub trait Monitor<T: PlatformState + 'static> {
             domain,
             permission::PermissionIndex::AllowedCores,
         )?;
-        if cores & (1 << core) == 0 {
+        if cores & (1 << core.as_usize()) == 0 {
             return Err(CapaError::InvalidCore);
         }
         let domain = engine.get_domain_capa(*current, domain)?;
@@ -342,7 +384,7 @@ pub trait Monitor<T: PlatformState + 'static> {
         state: &mut T,
         current: &mut Handle<Domain>,
         domain: LocalCapa,
-        core: usize,
+        core: LogicalID,
         idx: usize,
     ) -> Result<usize, CapaError> {
         let mut engine = Self::lock_engine(state, current);
@@ -352,7 +394,7 @@ pub trait Monitor<T: PlatformState + 'static> {
             domain,
             permission::PermissionIndex::AllowedCores,
         )?;
-        if cores & (1 << core) == 0 {
+        if cores & (1 << core.as_usize()) == 0 {
             return Err(CapaError::InvalidCore);
         }
         let domain = engine.get_domain_capa(*current, domain)?;
@@ -363,7 +405,7 @@ pub trait Monitor<T: PlatformState + 'static> {
         state: &mut T,
         current: &mut Handle<Domain>,
         domain: LocalCapa,
-        core: usize,
+        core: LogicalID,
     ) -> Result<(), CapaError> {
         let mut engine = Self::lock_engine(state, current);
         let core_map = engine.get_child_permission(
@@ -371,7 +413,7 @@ pub trait Monitor<T: PlatformState + 'static> {
             domain,
             permission::PermissionIndex::AllowedCores,
         )?;
-        if core_map & (1 << core) == 0 {
+        if core_map & (1 << core.as_usize()) == 0 {
             return Err(CapaError::InvalidCore);
         }
         let domain = engine.get_domain_capa(*current, domain)?;
@@ -385,7 +427,7 @@ pub trait Monitor<T: PlatformState + 'static> {
         state: &mut T,
         current: &mut Handle<Domain>,
         domain: LocalCapa,
-        core: usize,
+        core: LogicalID,
     ) -> Result<(), CapaError> {
         let mut engine = Self::lock_engine(state, current);
         let core_map = engine.get_child_permission(
@@ -393,7 +435,7 @@ pub trait Monitor<T: PlatformState + 'static> {
             domain,
             permission::PermissionIndex::AllowedCores,
         )?;
-        if core_map & (1 << core) == 0 {
+        if core_map & (1 << core.as_usize()) == 0 {
             return Err(CapaError::InvalidCore);
         }
         let mut values: [(usize, usize); 6] = [(0, 0); 6];
@@ -417,7 +459,7 @@ pub trait Monitor<T: PlatformState + 'static> {
         let core = T::logical_id();
         let mut engine = Self::lock_engine(state, current);
         //TODO: fix that.
-        let capa = engine.seal(*current, core, domain)?;
+        let capa = engine.seal(*current, core.as_usize(), domain)?;
         if let Ok(domain_capa) = engine.get_domain_capa(*current, domain) {
             calculate_attestation_hash(&mut engine, domain_capa);
         }
@@ -594,11 +636,11 @@ pub trait Monitor<T: PlatformState + 'static> {
         state: &mut T,
         current: &mut Handle<Domain>,
         capa: LocalCapa,
-        logical_core: usize,
+        core: LogicalID,
         delta: usize,
     ) -> Result<(), CapaError> {
         let mut engine = Self::lock_engine(state, current);
-        engine.switch(*current, logical_core, delta, capa)?;
+        engine.switch(*current, core.as_usize(), delta, capa)?;
         Self::apply_updates(state, &mut engine);
         Ok(())
     }
@@ -635,9 +677,9 @@ pub trait Monitor<T: PlatformState + 'static> {
         state: &mut T,
         current: &mut Handle<Domain>,
         domain: LocalCapa,
-        core: usize,
+        core: LogicalID,
     ) -> Result<LocalCapa, CapaError> {
-        if core > T::max_cpus() {
+        if core.as_usize() > T::max_cpus() {
             log::error!(
                 "Attempt to set context on unallowed core {} max_cpus {}",
                 core,
@@ -647,7 +689,7 @@ pub trait Monitor<T: PlatformState + 'static> {
         }
 
         let mut engine = Self::lock_engine(state, current);
-        let capa = engine.create_switch_on_core(*current, core, domain)?;
+        let capa = engine.create_switch_on_core(*current, core.as_usize(), domain)?;
         let domain = engine.get_domain_capa(*current, domain)?;
         T::create_context(state, engine, *current, domain, core)?;
         return Ok(capa);
@@ -820,7 +862,7 @@ pub trait Monitor<T: PlatformState + 'static> {
                     state,
                     domain,
                     LocalCapa::new(args[0]),
-                    T::remap_core(args[1]),
+                    LogicalID(T::remap_core(args[1])),
                     args[2],
                     args[3],
                 )?;
@@ -832,7 +874,7 @@ pub trait Monitor<T: PlatformState + 'static> {
                     state,
                     domain,
                     LocalCapa::new(args[0]),
-                    T::remap_core(args[1]),
+                    LogicalID(T::remap_core(args[1])),
                     args[2],
                 )?;
                 res[0] = value;
@@ -843,7 +885,7 @@ pub trait Monitor<T: PlatformState + 'static> {
                     state,
                     domain,
                     LocalCapa::new(args[0]),
-                    T::remap_core(args[1]),
+                    LogicalID(T::remap_core(args[1])),
                 )?;
                 res[0] = capa.as_usize();
                 return Ok(true);
@@ -854,7 +896,7 @@ pub trait Monitor<T: PlatformState + 'static> {
                     state,
                     domain,
                     LocalCapa::new(args[0]),
-                    T::remap_core(args[1]),
+                    LogicalID(T::remap_core(args[1])),
                 )?;
                 return Ok(false);
             }
@@ -867,7 +909,7 @@ pub trait Monitor<T: PlatformState + 'static> {
                     state,
                     domain,
                     LocalCapa::new(args[0]),
-                    T::remap_core(args[1]),
+                    LogicalID(T::remap_core(args[1])),
                 )?;
                 return Ok(true);
             }
@@ -908,7 +950,7 @@ pub trait Monitor<T: PlatformState + 'static> {
         let mut engine = Self::lock_engine(state, current);
         let core = T::logical_id();
         state.context_interrupted(current, core);
-        engine.handle_violation(*current, core)?;
+        engine.handle_violation(*current, core.as_usize())?;
         Self::apply_updates(state, &mut engine);
         Ok(())
     }
@@ -927,7 +969,7 @@ pub trait Monitor<T: PlatformState + 'static> {
                     // Do we have to process updates
                     if T::update_permission(domain, engine) {
                         let mut core_count = core_map.count_ones() as usize;
-                        if (1 << core_id) & core_map != 0 {
+                        if (1 << core_id.as_usize()) & core_map != 0 {
                             state.platform_shootdown(&domain, core_id, true);
                         } else {
                             // We will wait on the barrier.
@@ -936,7 +978,7 @@ pub trait Monitor<T: PlatformState + 'static> {
                         // Prepare the update.
                         T::prepare_notify(&domain, core_count);
                         for core in BitmapIterator::new(core_map) {
-                            if core == core_id {
+                            if LogicalID(core) == core_id {
                                 continue;
                             }
                             let mut core_updates = CORE_UPDATES[core as usize].lock();
@@ -971,7 +1013,7 @@ pub trait Monitor<T: PlatformState + 'static> {
 
                     // All the possible cores need to block on the domain sync.
                     let mut all_cores_count = core_map.count_ones() as usize;
-                    if (core_map & (1 << core_id)) == 0 {
+                    if (core_map & (1 << core_id.as_usize())) == 0 {
                         // Add the current core the list.
                         all_cores_count += 1;
                     } else {
@@ -994,7 +1036,7 @@ pub trait Monitor<T: PlatformState + 'static> {
                     T::prepare_notify(&domain, all_cores_count);
                     T::prepare_notify(&manager, all_cores_count);
                     for core in BitmapIterator::new(core_map) {
-                        if core == core_id {
+                        if LogicalID(core) == core_id {
                             continue;
                         }
                         // If the core is part of the ones where the manager needs to be scheduled,
@@ -1059,9 +1101,9 @@ pub trait Monitor<T: PlatformState + 'static> {
         }
     }
 
-    fn apply_core_updates(state: &mut T, current: &mut Handle<Domain>, core_id: usize) {
+    fn apply_core_updates(state: &mut T, current: &mut Handle<Domain>) {
         let core = T::logical_id();
-        let mut update_queue = CORE_UPDATES[core_id].lock();
+        let mut update_queue = CORE_UPDATES[core.as_usize()].lock();
         while let Some(update) = update_queue.pop() {
             state.apply_core_update(current, core, &update);
         }
