@@ -16,6 +16,7 @@ use mmu::FrameAllocator;
 use riscv_csrs::mstatus;
 
 use crate::debug::qemu::ExitCode;
+use crate::monitor::PhysicalID;
 use crate::println;
 
 #[derive(Debug)]
@@ -101,12 +102,12 @@ pub fn exit_qemu(exit_code: ExitCode) {
     }
 }
 
-pub fn cpuid() -> usize {
+pub fn cpuid() -> PhysicalID {
     let hartid: usize;
 
     unsafe {
         asm!("csrr {}, mhartid", out(reg) hartid);
     }
 
-    hartid
+    PhysicalID(hartid)
 }

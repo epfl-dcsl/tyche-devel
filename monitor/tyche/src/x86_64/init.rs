@@ -12,7 +12,7 @@ use super::state::StateX86;
 use super::{arch, cpuid};
 use crate::allocator;
 use crate::debug::qemu;
-use crate::monitor::{PlatformState, CORES_REMAP};
+use crate::monitor::{PhysicalID, PlatformState, CORES_REMAP};
 use crate::statics::get_manifest;
 use crate::x86_64::platform::MonitorX86;
 
@@ -31,7 +31,7 @@ pub static NB_BOOTED_CORES: AtomicUsize = AtomicUsize::new(0);
 static mut MANIFEST: Option<&'static Manifest> = None;
 
 pub fn arch_entry_point(log_level: log::LevelFilter) -> ! {
-    if cpuid() == 0 {
+    if cpuid() == PhysicalID(0) {
         logger::init(log_level);
         log::info!("CPU{}: Hello from second stage!", cpuid());
         #[cfg(feature = "bare_metal")]
@@ -73,7 +73,7 @@ pub fn arch_entry_point(log_level: log::LevelFilter) -> ! {
             MANIFEST.as_ref().unwrap()
         };
 
-        init_arch(manifest, lid);
+        init_arch(manifest, lid.as_usize());
 
         // Wait until the BSP mark second stage as initialized (e.g. all APs are up).
         NB_BOOTED_CORES.fetch_add(1, Ordering::SeqCst);
@@ -87,7 +87,7 @@ pub fn arch_entry_point(log_level: log::LevelFilter) -> ! {
         let mut monitor = MonitorX86 {};
         let (state, domain) = unsafe {
             let (mut state, domain) = MonitorX86::init(manifest, false);
-            wait_on_mailbox(manifest, &mut state.vcpu, lid);
+            wait_on_mailbox(manifest, &mut state.vcpu, lid.as_usize());
             (state, domain)
         };
         log::info!("CPU{}|LID{}: Waiting on mailbox", cpuid(), lid);

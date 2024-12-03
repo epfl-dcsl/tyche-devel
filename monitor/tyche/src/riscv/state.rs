@@ -14,7 +14,7 @@ use riscv_utils::{
 };
 use spin::{Mutex, MutexGuard};
 
-use crate::monitor::{PlatformState, CAPA_ENGINE};
+use crate::monitor::{LogicalID, PlatformState, CAPA_ENGINE};
 use crate::riscv::context::ContextRiscv;
 // ———————————————————————————————— Globals ————————————————————————————————— //
 
@@ -56,7 +56,7 @@ pub struct StateRiscv {}
 impl StateRiscv {
     pub fn save_current_regs(
         current_domain: &Handle<Domain>,
-        hart: usize,
+        hart: LogicalID,
         reg_state: &RegisterState,
     ) {
         let dom_ctx = &mut Self::get_context(*current_domain, hart);
@@ -65,7 +65,7 @@ impl StateRiscv {
 
     pub fn load_current_regs(
         current_domain: &Handle<Domain>,
-        hart: usize,
+        hart: LogicalID,
         reg_state: &mut RegisterState,
     ) {
         let dom_ctx = Self::get_context(*current_domain, hart);

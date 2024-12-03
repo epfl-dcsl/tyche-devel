@@ -26,7 +26,7 @@ use super::vmx_helper::{dump_host_state, load_host_state};
 use super::{perf, vmx_helper};
 use crate::allocator::{self, allocator};
 use crate::calls::{MONITOR_FAILURE, MONITOR_SUCCESS};
-use crate::monitor::{CoreUpdate, Monitor, PlatformState};
+use crate::monitor::{CoreUpdate, LogicalID, Monitor, PlatformState};
 use crate::x86_64::context::CpuidEntry;
 use crate::x86_64::state::TLB_FLUSH_BARRIERS;
 use crate::{calls, MonitorErrors};
@@ -111,8 +111,8 @@ impl PlatformState for StateX86 {
         DOMAINS[domain.idx()].lock()
     }
 
-    fn get_context(domain: Handle<Domain>, core: usize) -> MutexGuard<'static, Self::Context> {
-        CONTEXTS[domain.idx()][core].lock()
+    fn get_context(domain: Handle<Domain>, core: LogicalID) -> MutexGuard<'static, Self::Context> {
+        CONTEXTS[domain.idx()][core.as_usize()].lock()
     }
 
     fn remap_core(core: usize) -> usize {
@@ -132,7 +132,7 @@ impl PlatformState for StateX86 {
         _engine: MutexGuard<CapaEngine>,
         current: Handle<Domain>,
         domain: Handle<Domain>,
-        core: usize,
+        core: LogicalID,
     ) -> Result<(), CapaError> {
         let allocator = allocator();
         let dest = &mut Self::get_context(domain, core);
@@ -196,7 +196,7 @@ impl PlatformState for StateX86 {
     fn apply_core_update(
         &mut self,
         current_domain: &mut Handle<Domain>,
-        core: usize,
+        core: LogicalID,
         update: &CoreUpdate,
     ) {
         let vcpu = &mut self.vcpu;
@@ -285,7 +285,7 @@ impl PlatformState for StateX86 {
         }
     }
 
-    fn platform_shootdown(&mut self, domain: &Handle<Domain>, core: usize, trigger: bool) {
+    fn platform_shootdown(&mut self, domain: &Handle<Domain>, core: LogicalID, trigger: bool) {
         let dom = Self::get_domain(*domain);
         let new_epts = dom.ept.unwrap().as_usize() | EPT_ROOT_FLAGS;
         let mut context = Self::get_context(*domain, core);
@@ -303,7 +303,7 @@ impl PlatformState for StateX86 {
         &mut self,
         engine: &mut MutexGuard<CapaEngine>,
         domain: &Handle<Domain>,
-        core: usize,
+        core: LogicalID,
         idx: usize,
         value: usize,
     ) -> Result<(), CapaError> {
@@ -325,7 +325,7 @@ impl PlatformState for StateX86 {
         &mut self,
         engine: &mut MutexGuard<CapaEngine>,
         domain: &Handle<Domain>,
-        core: usize,
+        core: LogicalID,
         idx: usize,
     ) -> Result<usize, CapaError> {
         let mut ctxt = Self::get_context(*domain, core);
@@ -354,7 +354,7 @@ impl PlatformState for StateX86 {
         &mut self,
         engine: &mut MutexGuard<CapaEngine>,
         domain: &Handle<Domain>,
-        core: usize,
+        core: LogicalID,
         result: &mut [usize],
     ) -> Result<(), CapaError> {
         let ctxt = Self::get_context(*domain, core);
@@ -374,7 +374,7 @@ impl PlatformState for StateX86 {
         &mut self,
         _engine: &mut MutexGuard<CapaEngine>,
         domain: &mut Handle<Domain>,
-        core: usize,
+        core: LogicalID,
         src: &[usize],
     ) -> Result<(), CapaError> {
         let mut ctxt = Self::get_context(*domain, core);
@@ -386,7 +386,7 @@ impl PlatformState for StateX86 {
         &mut self,
         _engine: &mut MutexGuard<CapaEngine>,
         domain: &Handle<Domain>,
-        core: usize,
+        core: LogicalID,
         res: &mut [(usize, usize); 6],
     ) -> Result<(), CapaError> {
         let mut ctxt = Self::get_context(*domain, core);
@@ -464,12 +464,12 @@ impl PlatformState for StateX86 {
         TLB_FLUSH_BARRIERS[domain.idx()].set_count(core_count);
     }
 
-    fn notify_cores(_domain: &Handle<Domain>, core_id: usize, core_map: usize) {
-        for core in BitmapIterator::new(core_map as u64) {
+    fn notify_cores(_domain: &Handle<Domain>, core_id: LogicalID, core_map: usize) {
+        for core in BitmapIterator::new(core_map as u64).map(|x| LogicalID(x)) {
             if core == core_id {
                 continue;
             }
-            x2apic::send_init_assert(core as u32);
+            x2apic::send_init_assert(core.physical().as_u32());
         }
     }
 
@@ -487,7 +487,7 @@ impl PlatformState for StateX86 {
         TLB_FLUSH[domain.idx()].store(false, Ordering::SeqCst);
     }
 
-    fn context_interrupted(&mut self, domain: &Handle<Domain>, core: usize) {
+    fn context_interrupted(&mut self, domain: &Handle<Domain>, core: LogicalID) {
         let mut context = Self::get_context(*domain, core);
         context.interrupted = true;
     }
@@ -708,7 +708,7 @@ impl MonitorX86 {
                         .expect("Failed to handle VM exit");
 
                     // Apply core-local updates before returning
-                    Self::apply_core_updates(&mut state, &mut domain, core_id);
+                    Self::apply_core_updates(&mut state, &mut domain);
 
                     res
                 }

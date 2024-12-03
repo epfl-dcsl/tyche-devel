@@ -20,7 +20,7 @@ use riscv_utils::*;
 use spin::{Mutex, MutexGuard};
 
 use crate::arch::cpuid;
-use crate::monitor::{CoreUpdate, Monitor, PlatformState, CAPA_ENGINE, INITIAL_DOMAIN};
+use crate::monitor::{CoreUpdate, LogicalID, Monitor, PlatformState, CAPA_ENGINE, INITIAL_DOMAIN};
 use crate::riscv::context::ContextRiscv;
 use crate::riscv::filtered_fields::RiscVField;
 use crate::riscv::state::{DataRiscv, StateRiscv, CONTEXTS, DOMAINS, MONITOR_IPI_SYNC};
@@ -501,8 +501,8 @@ impl PlatformState for StateRiscv {
         DOMAINS[domain.idx()].lock()
     }
 
-    fn get_context(domain: Handle<Domain>, core: usize) -> MutexGuard<'static, Self::Context> {
-        CONTEXTS[domain.idx()][core].lock()
+    fn get_context(domain: Handle<Domain>, core: LogicalID) -> MutexGuard<'static, Self::Context> {
+        CONTEXTS[domain.idx()][core.as_usize()].lock()
     }
 
     #[cfg(not(feature = "visionfive2"))]
@@ -535,7 +535,7 @@ impl PlatformState for StateRiscv {
         _engine: MutexGuard<CapaEngine>,
         current: Handle<Domain>,
         domain: Handle<Domain>,
-        core: usize,
+        core: LogicalID,
     ) -> Result<(), CapaError> {
         let ctx = &mut Self::get_context(domain, core);
         ctx.satp = 0;
@@ -641,7 +641,7 @@ impl PlatformState for StateRiscv {
     fn apply_core_update(
         &mut self,
         current_domain: &mut Handle<Domain>,
-        core_id: usize,
+        core_id: LogicalID,
         update: &CoreUpdate,
     ) {
         log::debug!("Core Update: {}", update);
@@ -651,7 +651,7 @@ impl PlatformState for StateRiscv {
                 // Rewrite the PMPs
                 let domain = StateRiscv::get_domain(*current_domain);
                 Self::update_pmps(domain);
-                MONITOR_IPI_SYNC[src_core].fetch_sub(1, Ordering::SeqCst);
+                MONITOR_IPI_SYNC[src_core.as_usize()].fetch_sub(1, Ordering::SeqCst);
             }
             CoreUpdate::Switch {
                 domain,
@@ -695,7 +695,7 @@ impl PlatformState for StateRiscv {
         }
     }
 
-    fn platform_shootdown(&mut self, domain: &Handle<Domain>, core: usize, trigger: bool) {
+    fn platform_shootdown(&mut self, domain: &Handle<Domain>, core: LogicalID, trigger: bool) {
         let mut domain_data = Self::get_domain(*domain);
         Self::update_pmps(domain_data);
     }
@@ -704,7 +704,7 @@ impl PlatformState for StateRiscv {
         &mut self,
         engine: &mut MutexGuard<CapaEngine>,
         domain: &Handle<Domain>,
-        core: usize,
+        core: LogicalID,
         idx: usize,
         value: usize,
     ) -> Result<(), CapaError> {
@@ -725,7 +725,7 @@ impl PlatformState for StateRiscv {
         &mut self,
         engine: &mut MutexGuard<CapaEngine>,
         domain: &Handle<Domain>,
-        core: usize,
+        core: LogicalID,
         idx: usize,
     ) -> Result<usize, CapaError> {
         let ctx = Self::get_context(*domain, core);
@@ -742,7 +742,7 @@ impl PlatformState for StateRiscv {
         &mut self,
         engine: &mut MutexGuard<CapaEngine>,
         domain: &Handle<Domain>,
-        core: usize,
+        core: LogicalID,
         result: &mut [usize],
     ) -> Result<(), CapaError> {
         todo!();
@@ -752,7 +752,7 @@ impl PlatformState for StateRiscv {
         &mut self,
         _engine: &mut MutexGuard<CapaEngine>,
         domain: &mut Handle<Domain>,
-        core: usize,
+        core: LogicalID,
         src: &[usize],
     ) -> Result<(), CapaError> {
         todo!();
@@ -762,7 +762,7 @@ impl PlatformState for StateRiscv {
         &mut self,
         _engine: &mut MutexGuard<CapaEngine>,
         domain: &Handle<Domain>,
-        core: usize,
+        core: LogicalID,
         res: &mut [(usize, usize); 6],
     ) -> Result<(), CapaError> {
         // On riscv, we only use this function for one field at a time.
@@ -810,14 +810,15 @@ impl PlatformState for StateRiscv {
 
     fn prepare_notify(domain: &Handle<Domain>, core_count: usize) {
         if core_count > 0 {
-            MONITOR_IPI_SYNC[cpuid()].fetch_add(core_count - 1, Ordering::SeqCst);
+            MONITOR_IPI_SYNC[Self::logical_id().as_usize()]
+                .fetch_add(core_count - 1, Ordering::SeqCst);
         }
     }
 
-    fn notify_cores(_domain: &Handle<Domain>, core_id: usize, core_map: usize) {
+    fn notify_cores(_domain: &Handle<Domain>, core_id: LogicalID, core_map: usize) {
         let src_hartid = cpuid();
         for hart in BitmapIterator::new(core_map as u64) {
-            if hart != src_hartid {
+            if hart != src_hartid.as_usize() {
                 log::debug!("Sending IPI from hart {} to hart {}", src_hartid, hart);
                 aclint_mswi_send_ipi(hart);
             }
@@ -830,13 +831,13 @@ impl PlatformState for StateRiscv {
 
     fn finish_notify(domain: &Handle<Domain>) {
         let src_hartid = cpuid();
-        while MONITOR_IPI_SYNC[src_hartid].load(Ordering::SeqCst) > 0 {
+        while MONITOR_IPI_SYNC[src_hartid.as_usize()].load(Ordering::SeqCst) > 0 {
             core::hint::spin_loop();
-            process_tlb_ipis(src_hartid);
+            process_tlb_ipis(src_hartid.as_usize());
         }
     }
 
-    fn context_interrupted(&mut self, domain: &Handle<Domain>, core: usize) {
+    fn context_interrupted(&mut self, domain: &Handle<Domain>, core: LogicalID) {
         todo!();
     }
 
@@ -906,24 +907,24 @@ impl MonitorRiscv {
         *initial_domain = Some(domain);
     }
 
-    pub fn get_active_dom(hartid: usize) -> (Option<Handle<Domain>>) {
-        return *ACTIVE_DOMAIN[hartid].lock();
+    pub fn get_active_dom(hartid: LogicalID) -> (Option<Handle<Domain>>) {
+        return *ACTIVE_DOMAIN[hartid.as_usize()].lock();
     }
 
-    pub fn set_active_dom(hartid: usize, domain: Handle<Domain>) {
-        let mut active_domain = ACTIVE_DOMAIN[hartid].lock();
+    pub fn set_active_dom(hartid: LogicalID, domain: Handle<Domain>) {
+        let mut active_domain = ACTIVE_DOMAIN[hartid.as_usize()].lock();
         *active_domain = Some(domain);
     }
 
     pub fn start_initial_domain_on_cpu() -> (Handle<Domain>) {
-        let hartid = cpuid();
+        let hartid = StateRiscv::logical_id();
         log::debug!("Creating initial domain.");
         let mut engine = CAPA_ENGINE.lock();
         let initial_domain = INITIAL_DOMAIN
             .lock()
             .expect("CapaEngine is not initialized yet");
         engine
-            .start_domain_on_core(initial_domain, hartid)
+            .start_domain_on_core(initial_domain, hartid.as_usize())
             .expect("Failed to allocate initial domain");
 
         let domain = StateRiscv::get_domain(initial_domain);
@@ -951,7 +952,7 @@ impl MonitorRiscv {
         let mut mip: usize = 0;
         let mut mideleg: usize = 0;
         let mut satp: usize = 0;
-        let hartid: usize = cpuid();
+        let hartid = StateRiscv::logical_id();
 
         unsafe {
             asm!("csrr {}, mcause", out(reg) mcause);
@@ -996,12 +997,12 @@ impl MonitorRiscv {
         // mcause register holds the cause of the machine mode trap
         match mcause {
             mcause::MSWI => {
-                process_ipi(hartid);
+                process_ipi(hartid.physical().as_usize());
                 let active_dom = Self::get_active_dom(hartid);
                 match active_dom {
                     Some(mut domain) => {
                         let mut state = StateRiscv {};
-                        MonitorRiscv::apply_core_updates(&mut state, &mut domain, hartid);
+                        MonitorRiscv::apply_core_updates(&mut state, &mut domain);
                     }
                     None => {}
                 }
@@ -1122,7 +1123,7 @@ impl MonitorRiscv {
 
     pub fn wrapper_monitor_call() {
         let mut active_dom: Handle<Domain>;
-        let hartid = cpuid();
+        let hartid = StateRiscv::logical_id();
         active_dom = Self::get_active_dom(hartid).unwrap();
         let (tyche_call, arg_1, arg_2, arg_3, arg_4, arg_5, arg_6) = {
             let ctx = &mut StateRiscv::get_context(active_dom, hartid);
@@ -1159,7 +1160,7 @@ impl MonitorRiscv {
             }
         }
         drop(ctx);
-        Self::apply_core_updates(&mut state, &mut active_dom, hartid);
+        Self::apply_core_updates(&mut state, &mut active_dom);
         // Neelu: active_dom is automatically set to the domain to execute on a switch.
         // Neelu: If a switch doesn't occur, it remains the same.
         Self::set_active_dom(hartid, active_dom);

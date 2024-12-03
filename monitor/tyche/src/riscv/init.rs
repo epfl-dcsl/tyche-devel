@@ -10,6 +10,7 @@ use riscv_utils::{
 
 use super::{arch, launch_guest};
 use crate::debug::qemu;
+use crate::monitor::LogicalID;
 use crate::riscv::cpuid;
 use crate::riscv::platform::MonitorRiscv;
 
@@ -50,7 +51,7 @@ pub fn arch_entry_point(hartid: usize, manifest: RVManifest, log_level: log::Lev
         log::info!("Initial domain is ready.");
 
         //Set the active domain.
-        MonitorRiscv::set_active_dom(hartid, domain);
+        MonitorRiscv::set_active_dom(LogicalID(hartid), domain);
 
         //monitor::do_debug();
 
@@ -107,7 +108,7 @@ pub fn arch_entry_point(hartid: usize, manifest: RVManifest, log_level: log::Lev
 
         let mut domain = MonitorRiscv::start_initial_domain_on_cpu();
 
-        MonitorRiscv::set_active_dom(hartid, domain);
+        MonitorRiscv::set_active_dom(LogicalID(hartid), domain);
 
         let jump_addr = HART_START_ADDR[hartid].load(Ordering::SeqCst);
         let jump_arg = HART_START_ARG1[hartid].load(Ordering::SeqCst);
