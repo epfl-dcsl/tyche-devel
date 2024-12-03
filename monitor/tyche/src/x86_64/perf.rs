@@ -5,7 +5,8 @@ use core::cmp;
 
 use capa_engine::config::NB_CORES;
 
-use crate::arch::cpuid;
+use super::state::StateX86;
+use crate::monitor::PlatformState;
 
 const PERF_ENABLED: bool = false;
 const DISPLAY_CORE: usize = 4;
@@ -152,7 +153,7 @@ pub fn display_stats() {
 /// To be safe this function must never be called if another reference is still alive on that
 /// core.
 unsafe fn get_perf_ctx() -> &'static mut PerfContext {
-    &mut PERF_CONTEXTS[cpuid()]
+    &mut PERF_CONTEXTS[StateX86::logical_id()]
 }
 
 impl PerfContext {
@@ -231,7 +232,7 @@ impl PerfContext {
         }
 
         // We only print stats for one CPU for now
-        if cpuid() != DISPLAY_CORE {
+        if StateX86::logical_id() != DISPLAY_CORE {
             return;
         }
 
@@ -242,7 +243,11 @@ impl PerfContext {
         }
 
         log::info!("----- Perf Events ------");
-        log::info!("ts:    {} -- core {}", ts - self.last_display, cpuid());
+        log::info!(
+            "ts:    {} -- core {}",
+            ts - self.last_display,
+            StateX86::logical_id()
+        );
 
         let mut sum = 0;
         let mut sum_square = 0;
