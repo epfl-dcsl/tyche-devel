@@ -87,7 +87,7 @@ pub fn arch_entry_point(log_level: log::LevelFilter) -> ! {
         let mut monitor = MonitorX86 {};
         let (state, domain) = unsafe {
             let (mut state, domain) = MonitorX86::init(manifest, false);
-            wait_on_mailbox(manifest, &mut state.vcpu, lid.as_usize());
+            wait_on_mailbox(manifest, &mut state.vcpu, cpuid().as_usize());
             (state, domain)
         };
         log::info!("CPU{}|LID{}: Waiting on mailbox", cpuid(), lid);

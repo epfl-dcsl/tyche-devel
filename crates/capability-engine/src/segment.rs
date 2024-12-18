@@ -15,10 +15,12 @@ pub type RegionHash = [u8; 32];
 pub(crate) type RegionPool = GenArena<RegionCapa, NB_REGIONS>;
 pub const EMPTY_REGION_CAPA: RegionCapa = RegionCapa::new_invalid();
 
+#[derive(PartialEq, Eq)]
 pub enum RegionKind {
     Root,
     Alias(Handle<RegionCapa>),
     Carve(Handle<RegionCapa>),
+    Device,
 }
 
 pub struct RegionCapa {
@@ -104,10 +106,19 @@ impl RegionCapa {
     pub fn reset_hash(&mut self) {
         self.hash = None;
     }
+
+    /// For the moment, devices cannot be space-partitionned or shared.
+    pub fn fragmentable(&self) -> Result<(), CapaError> {
+        if self.kind == RegionKind::Device {
+            return Err(CapaError::InvalidRegion);
+        }
+        Ok(())
+    }
 }
 
 pub(crate) fn create_root_region(
     domain: Handle<Domain>,
+    kind: RegionKind,
     regions: &mut RegionPool,
     domains: &mut DomainPool,
     tracker: &mut TrackerPool,
@@ -122,10 +133,13 @@ pub(crate) fn create_root_region(
     if !access.is_valid() {
         return Err(CapaError::InvalidOperation);
     }
+    if kind != RegionKind::Root && kind != RegionKind::Device {
+        return Err(CapaError::InvalidOperation);
+    }
 
     // Create and insert capa
     let region = regions
-        .allocate(RegionCapa::new(domain, RegionKind::Root, access).confidential(true))
+        .allocate(RegionCapa::new(domain, kind, access).confidential(true))
         .unwrap();
     let local_capa = insert_capa(domain, region, regions, domains)?;
     activate_region(domain, access, domains, updates, tracker)?;
@@ -169,6 +183,7 @@ pub(crate) fn alias(
     let region = &regions[handle];
     let domain = region.domain;
 
+    region.fragmentable()?;
     // Check capacity (1 region + 1 local capa)
     regions.has_capacity_for(1)?;
     domain::has_capacity_for(domain, 1, regions, domains)?;
@@ -211,6 +226,7 @@ pub(crate) fn carve(
 ) -> Result<LocalCapa, CapaError> {
     let (region_access, domain) = {
         let region = &regions[handle];
+        region.fragmentable()?;
         (region.access, region.domain)
     };
 
@@ -267,7 +283,7 @@ pub(crate) fn revoke(
     //let region_owner = region.domain;
     let region_access = region.access;
     let parent = match region.kind {
-        RegionKind::Root => panic!("Trying to revoke a root region"),
+        RegionKind::Root | RegionKind::Device => panic!("Trying to revoke a root or device region"),
         RegionKind::Alias(h) => h,
         RegionKind::Carve(h) => h,
     };
@@ -414,7 +430,9 @@ fn validate_child_list(region: Handle<RegionCapa>, regions: &RegionPool) {
 
         // Check overlap rules
         match current.kind {
-            RegionKind::Root => panic!("Root region can't be a child"),
+            RegionKind::Root | RegionKind::Device => {
+                panic!("Root or device region cannot be a child")
+            }
             RegionKind::Alias(parent) => {
                 assert!(parent == region, "Invalid parent");
                 if let Some(last_carve) = last_carve {

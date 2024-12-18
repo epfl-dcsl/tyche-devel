@@ -252,16 +252,51 @@ pub trait Monitor<T: PlatformState + 'static> {
             .create_manager_domain(permission::monitor_inter_perm::ALL)
             .unwrap();
         Self::apply_updates(state, &mut engine);
-        engine
-            .create_root_region(
-                domain,
-                AccessRights {
-                    start: 0,
-                    end: manifest.poffset as usize,
-                    ops: MEMOPS_ALL,
-                },
-            )
-            .unwrap();
+
+        // Construct the address space with devices.
+        let mut start: usize = 0;
+        for i in 0..manifest.nb_devices {
+            let device = manifest.devices[i];
+            // Normal RAM memory.
+            if start < device.start as usize && start < manifest.poffset as usize {
+                // Create a region.
+                engine
+                    .create_root_region(
+                        domain,
+                        AccessRights {
+                            start,
+                            end: device.start as usize,
+                            ops: MEMOPS_ALL,
+                        },
+                    )
+                    .unwrap();
+            }
+            // Add the device.
+            engine
+                .create_root_device(
+                    domain,
+                    AccessRights {
+                        start: device.start as usize,
+                        end: (device.start + device.size) as usize,
+                        ops: MEMOPS_ALL,
+                    },
+                )
+                .unwrap();
+            start = (device.start + device.size) as usize;
+        }
+        // The last entry if physical memory space is greater than device space.
+        if start < manifest.poffset as usize {
+            engine
+                .create_root_region(
+                    domain,
+                    AccessRights {
+                        start,
+                        end: manifest.poffset as usize,
+                        ops: MEMOPS_ALL,
+                    },
+                )
+                .unwrap();
+        }
         //TODO: call the platform?
         Self::apply_updates(state, &mut engine);
         // Save the initial domain.

@@ -153,7 +153,6 @@ pub unsafe fn boot(
     // Setup the BSP thread's id.
     CORES_REMAP[0].store(0, Ordering::SeqCst);
     for (idx, v) in ap.iter().enumerate() {
-        log::info!("A processor {:?}", *v);
         CORES_REMAP[v.processor_uid as usize].store(idx + 1, Ordering::SeqCst);
     }
 

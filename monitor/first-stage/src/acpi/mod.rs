@@ -6,6 +6,7 @@ use alloc::vec::Vec;
 use core::{mem, ptr};
 
 use mmu::{PtFlag, PtMapper, RangeAllocator};
+use stage_two_abi::Device;
 use tables::{dmar, McfgItem, Rsdp, SdtHeader};
 
 use crate::vmx::{HostPhysAddr, HostVirtAddr};
@@ -120,7 +121,6 @@ impl AcpiInfo {
     }
 
     unsafe fn handle_dmar_table(&mut self, header: &SdtHeader) {
-        log::info!("ACPI: parsing 'DMAR' table");
         header.verify_checksum().expect("Invalid DMAR checksum");
 
         let table_ptr = (header as *const _) as *const u8;
@@ -319,5 +319,90 @@ impl AcpiInfo {
             .verify_checksum()
             .expect("New MADT Entry Checksum Error");
         madt_range.start.as_u64()
+    }
+
+    pub fn enumerate_mcfg_item(
+        &self,
+        item: &McfgItem,
+        physical_memory_offset: HostVirtAddr,
+    ) -> Vec<Device> {
+        let mut result = Vec::new();
+        let base = item.base_address;
+        for bus in item.start_bus..=item.end_bus {
+            for device in 0u8..=31 {
+                for func in 0u8..=7 {
+                    let addr = base
+                        + ((bus as u64) << 20)
+                        + ((device as u64) << 15)
+                        + ((func as u64) << 12);
+                    let vendor_id = (addr + physical_memory_offset.as_u64()) as *const u16;
+                    unsafe {
+                        //The vendor_id is valid, parse the bars.
+                        if *vendor_id != 0xffff {
+                            let bars = self.parse_bars(vendor_id as *mut u32);
+                            for (start, size) in bars {
+                                if start == 0 || size == 0 {
+                                    continue;
+                                }
+                                result.push(Device { start, size });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        result
+    }
+
+    pub unsafe fn parse_bars(&self, config_space: *mut u32) -> [(u64, u64); 6] {
+        const NUM_BARS: usize = 6;
+        const BAR_OFFSET: usize = 4; // BARs start at offset 0x10 in the config space
+
+        let mut bars: [(u64, u64); 6] = [(0, 0); 6];
+        let mut offset = BAR_OFFSET;
+
+        for i in 0..NUM_BARS {
+            // Read the current BAR
+            let original_value = core::ptr::read_volatile(config_space.add(offset) as *const u32);
+
+            // Skip unused BARs
+            if original_value == 0 {
+                offset += 1; // Move to the next BAR
+                continue;
+            }
+
+            // Check if the BAR is 64-bit or 32-bit
+            let is_64_bit = (original_value & 0b110) == 0b100;
+
+            // Write 0xFFFFFFFF to the BAR
+            core::ptr::write_volatile(config_space.add(offset), 0xFFFFFFFF);
+
+            // Read back the size mask
+            let size_mask = core::ptr::read_volatile(config_space.add(offset) as *const u32);
+
+            // Restore the original value
+            core::ptr::write_volatile(config_space.add(offset), original_value);
+
+            // Compute the size by inverting the size mask and aligning it
+            let size = !(size_mask & 0xFFFFFFF0) + 1;
+
+            // Extract the base address (only relevant bits)
+            let mut base_address = u64::from(original_value & 0xFFFFFFF0);
+
+            if is_64_bit {
+                // For 64-bit BARs, read the high 32 bits
+                let high_value =
+                    core::ptr::read_volatile(config_space.add(offset + 1) as *const u32);
+                base_address |= u64::from(high_value) << 32;
+
+                // Increment the offset to skip the next BAR as it's part of this one
+                offset += 1;
+            }
+
+            bars[i] = (base_address, size as u64);
+
+            offset += 1; // Move to the next BAR
+        }
+        bars
     }
 }

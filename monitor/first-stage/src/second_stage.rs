@@ -6,7 +6,7 @@ use core::sync::atomic::{AtomicBool, Ordering};
 
 use mmu::frame_allocator::PhysRange;
 use mmu::{PtFlag, PtMapper, RangeAllocator};
-use stage_two_abi::{EntryPoint, Manifest, Smp};
+use stage_two_abi::{Device, EntryPoint, Manifest, Smp};
 
 use crate::cpu::MAX_CPU_NUM;
 use crate::elf::{Elf64PhdrType, ElfProgram};
@@ -123,6 +123,7 @@ pub fn load(
     pt_mapper: &mut PtMapper<HostPhysAddr, HostVirtAddr>,
     smp: &Smp,
     memory_map: MemoryMap,
+    devices: &Vec<Device>,
 ) {
     // Read elf and allocate second stage memory
     let mut second_stage = ElfProgram::new(SECOND_STAGE);
@@ -149,7 +150,7 @@ pub fn load(
     if info.iommu != 0 {
         // Map I/O MMU page, using one to one mapping
         // TODO: unmap from guest EPT
-        log::info!("Setup I/O MMU");
+        log::info!("Setup I/O MMU at {:x}", info.iommu);
         let virt_addr = HostVirtAddr::new(info.iommu as usize);
         let phys_addr = HostPhysAddr::new(info.iommu as usize);
         let size = 0x1000;
@@ -267,7 +268,11 @@ pub fn load(
     manifest.voffset = LOAD_VIRT_ADDR.as_u64();
     manifest.vga = info.vga_info.clone();
     manifest.smp = *smp;
-
+    // Copy the vector of devices into the array.
+    for (i, d) in devices.iter().enumerate() {
+        manifest.devices[i] = *d;
+    }
+    manifest.nb_devices = devices.len();
     debug::hook_stage2_offsets(manifest.poffset, manifest.voffset);
     debug::tyche_hook_stage1(1);
 
