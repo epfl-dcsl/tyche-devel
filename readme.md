@@ -120,3 +120,8 @@ cd ./scripts/new-vm
 ./tyche-convert-image.sh -in tyche-base.qcow2 -out ../../ubuntu.qcow2
 ```
 The final image is now ready to use and placed in `tyche-devel/ubuntu.qcow` where it gets picked up by the regular `just linux` command.
+
+## Notes for baremetal
+
+Right now, you should disable Trusted Execution from the BIOS if you attempt to boot on baremetal and do not emulate the IOMMU for Linux Dom0.
+It seems that Trusted Execution technology on Intel traps non-root access to certain DMAR registers (such as the read only capa register for the iommu) and triggers an INIT VMExit.

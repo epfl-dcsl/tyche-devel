@@ -18,6 +18,7 @@ pub mod serde {
     pub const REGION_ROOT:     u8 = 0b10000000;
     pub const REGION_ALIAS:    u8 = 0b10000001;
     pub const REGION_CARVE:    u8 = 0b10000010;
+    pub const REGION_DEVICE:   u8 = 0b10000011;
     pub const REGION_HAS_HASH: u8 = 0b10000101;
     pub const REGION_NO_HASH:  u8 = 0b10000100;
 
@@ -113,6 +114,7 @@ fn serialize_region(
         crate::segment::RegionKind::Root => serde::REGION_ROOT,
         crate::segment::RegionKind::Alias(_) => serde::REGION_ALIAS,
         crate::segment::RegionKind::Carve(_) => serde::REGION_CARVE,
+        crate::segment::RegionKind::Device => serde::REGION_DEVICE,
     };
     buff.u8(kind)?;
     if !region.is_root() {

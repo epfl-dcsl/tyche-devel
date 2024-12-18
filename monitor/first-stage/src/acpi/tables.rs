@@ -62,6 +62,7 @@ impl Rsdp {
 // ————————————————————————————— Shared Header —————————————————————————————— //
 
 /// Shared header for System Description Tables.
+#[derive(Debug)]
 #[repr(C, packed)]
 pub struct SdtHeader {
     pub signature: [u8; 4],

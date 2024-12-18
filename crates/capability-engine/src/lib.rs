@@ -190,6 +190,25 @@ impl CapaEngine {
         self.domains.get(domain).ok_or(CapaError::InvalidCapa)?;
         segment::create_root_region(
             domain,
+            segment::RegionKind::Root,
+            &mut self.regions,
+            &mut self.domains,
+            &mut self.tracker,
+            &mut self.updates,
+            access,
+        )
+    }
+
+    pub fn create_root_device(
+        &mut self,
+        domain: DomainHandle,
+        access: AccessRights,
+    ) -> Result<LocalCapa, CapaError> {
+        log::trace!("Create new root device");
+        self.domains.get(domain).ok_or(CapaError::InvalidCapa)?;
+        segment::create_root_region(
+            domain,
+            segment::RegionKind::Device,
             &mut self.regions,
             &mut self.domains,
             &mut self.tracker,

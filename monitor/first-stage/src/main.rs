@@ -6,6 +6,7 @@
 
 extern crate alloc;
 
+use alloc::vec::Vec;
 use core::panic::PanicInfo;
 use core::sync::atomic::Ordering;
 
@@ -20,7 +21,7 @@ use s1::guests::Guest;
 use s1::mmu::MemoryMap;
 use s1::smp::{allocate_wakeup_page_tables, CORES_REMAP};
 use s1::{guests, println, second_stage, smp, HostPhysAddr, HostVirtAddr};
-use stage_two_abi::{Smp, VgaInfo};
+use stage_two_abi::{Device, Smp, VgaInfo, MANIFEST_NB_DEVICES};
 use x86_64::registers::control::Cr4;
 
 const LOG_LEVEL: LevelFilter = LevelFilter::Info;
@@ -116,14 +117,29 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     };
     let wakeup_cr3 = allocate_wakeup_page_tables(&host_allocator);
 
+    // Parse all the devices.
+    let mut devices = Vec::new();
+    if let Some(mcfg_entries) = &acpi_info.mcfg {
+        for e in mcfg_entries {
+            devices.extend(acpi_info.enumerate_mcfg_item(e, physical_memory_offset));
+        }
+    }
+    // Ensure we did not discover more devices than supported and sort them.
+    assert!(devices.len() <= MANIFEST_NB_DEVICES);
+    devices.sort_by(|a, b| a.start.cmp(&b.start));
+
     // Check I/O MMU support
     if let Some(iommus) = &acpi_info.iommu {
-        let iommu_addr = HostVirtAddr::new(
-            iommus[0].base_address.as_usize() + physical_memory_offset.as_usize(),
-        );
-        let iommu = unsafe { vtd::Iommu::new(iommu_addr) };
-        log::info!("IO MMU: capabilities {:?}", iommu.get_capability(),);
-        log::info!("        extended {:?}", iommu.get_extended_capability());
+        log::info!("There is an IOMMU CAPABILITY len: {}", iommus.len());
+        for io in iommus {
+            log::info!("IO mmu base addr: {:x}", io.base_address.as_usize());
+            let iommu_addr =
+                HostVirtAddr::new(io.base_address.as_usize() + physical_memory_offset.as_usize());
+            let iommu = unsafe { vtd::Iommu::new(iommu_addr) };
+            log::info!("IO MMU: capabilities {:?}", iommu.get_capability());
+            log::info!("        extended {:?}", iommu.get_extended_capability());
+            log::info!("Raw {:x}", iommu.get_capability().bits());
+        }
     } else {
         log::info!("IO MMU: None");
     }
@@ -158,6 +174,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             pt_mapper,
             rsdp as u64,
             smp_info,
+            &devices,
         )
     } else if cfg!(feature = "guest_rawc") {
         launch_guest(
@@ -170,6 +187,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             pt_mapper,
             rsdp as u64,
             smp_info,
+            &devices,
         )
     } else if cfg!(feature = "no_guest") {
         launch_guest(
@@ -182,6 +200,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             pt_mapper,
             rsdp as u64,
             smp_info,
+            &devices,
         )
     } else {
         panic!("Unrecognized guest");
@@ -198,6 +217,7 @@ fn launch_guest(
     mut pt_mapper: PtMapper<HostPhysAddr, HostVirtAddr>,
     rsdp: u64,
     smp: Smp,
+    devices: &Vec<Device>,
 ) -> ! {
     let mut stage2_allocator = second_stage::second_stage_allocator(stage1_allocator);
     unsafe {
@@ -220,6 +240,7 @@ fn launch_guest(
             &mut pt_mapper,
             &smp,
             memory_map,
+            devices,
         );
         smp::BSP_READY.store(true, Ordering::SeqCst);
         second_stage::enter();

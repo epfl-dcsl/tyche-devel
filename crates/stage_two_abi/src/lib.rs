@@ -69,6 +69,9 @@ macro_rules! entry_point {
 
 // ———————————————————————————————— Manifest ———————————————————————————————— //
 
+/// Maximum number of devices supported.
+pub const MANIFEST_NB_DEVICES: usize = 100;
+
 /// The second stage manifest, describing the state of the system at the time the second stage is
 /// entered.
 #[repr(C)]
@@ -87,6 +90,10 @@ pub struct Manifest {
     pub iommu: u64,
     /// SMP info:
     pub smp: Smp,
+    /// Devices detected by stage 1.
+    pub devices: [Device; MANIFEST_NB_DEVICES],
+    /// Number of valid devices.
+    pub nb_devices: usize,
 }
 
 /// Suport for x86_64 SMP
@@ -101,6 +108,12 @@ pub struct Smp {
     pub mailbox: u64,
     /// The CR3 value for MP wakeup
     pub wakeup_cr3: u64,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct Device {
+    pub start: u64,
+    pub size: u64,
 }
 
 impl Manifest {
@@ -149,6 +162,8 @@ macro_rules! make_manifest {
                     mailbox: 0,
                     wakeup_cr3: 0,
                 },
+                devices: [$crate::Device { start: 0, size: 0 }; $crate::MANIFEST_NB_DEVICES],
+                nb_devices: 0,
             };
             static TAKEN: AtomicBool = AtomicBool::new(false);
 
