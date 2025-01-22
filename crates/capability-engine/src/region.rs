@@ -16,6 +16,7 @@ bitflags! {
         const HASH = 1 << 4; // Flag for do we want to hash particular RegionCapa
         const CLEANUP = 1 << 5;
         const VITAL = 1 << 6;
+        const UNCACHEABLE = 1 << 7;
     }
 }
 
@@ -53,12 +54,23 @@ impl MemOps {
         !self.intersects(MEMOPS_ALL)
     }
 
-    pub fn as_counters(&self) -> (usize, usize, usize, usize) {
+    pub fn as_counters(&self) -> (usize, usize, usize, usize, usize) {
         let read_count: usize = if self.contains(Self::READ) { 1 } else { 0 };
         let write_count: usize = if self.contains(Self::WRITE) { 1 } else { 0 };
         let exec_count: usize = if self.contains(Self::EXEC) { 1 } else { 0 };
         let super_count: usize = if self.contains(Self::SUPER) { 1 } else { 0 };
-        (read_count, write_count, exec_count, super_count)
+        let uncache_count: usize = if self.contains(Self::UNCACHEABLE) {
+            1
+        } else {
+            0
+        };
+        (
+            read_count,
+            write_count,
+            exec_count,
+            super_count,
+            uncache_count,
+        )
     }
 }
 
@@ -116,6 +128,7 @@ pub(crate) const EMPTY_REGION: Region = Region {
     write_count: 0,
     exec_count: 0,
     super_count: 0,
+    uncache_count: 0,
     ref_count: 0,
     next: None,
 };
@@ -128,6 +141,7 @@ pub struct Region {
     write_count: usize,
     exec_count: usize,
     super_count: usize,
+    uncache_count: usize,
     ref_count: usize,
     next: Option<Handle<Region>>,
 }
@@ -142,7 +156,7 @@ impl Region {
             );
             panic!("Invalid region");
         }
-        let (r, w, x, s) = ops.as_counters();
+        let (r, w, x, s, u) = ops.as_counters();
         Self {
             start,
             end,
@@ -150,6 +164,7 @@ impl Region {
             write_count: w,
             exec_count: x,
             super_count: s,
+            uncache_count: u,
             ref_count: 1,
             next: None,
         }
@@ -170,6 +185,7 @@ impl Region {
             && self.write_count == other.write_count
             && self.exec_count == other.exec_count
             && self.super_count == other.super_count
+            && self.uncache_count == other.uncache_count
     }
 
     pub fn get_ops(&self) -> MemOps {
@@ -185,6 +201,9 @@ impl Region {
         }
         if self.super_count > 0 {
             ops |= MemOps::SUPER;
+        }
+        if self.uncache_count > 0 {
+            ops |= MemOps::UNCACHEABLE;
         }
         ops
     }
@@ -478,6 +497,7 @@ impl RegionTracker {
             write_count: region.write_count,
             exec_count: region.exec_count,
             super_count: region.super_count,
+            uncache_count: region.uncache_count,
             ref_count: region.ref_count,
             next: region.next,
         };
@@ -798,6 +818,7 @@ mod tests {
             write_count: 0,
             exec_count: 0,
             super_count: 0,
+            uncache_count: 0,
             ref_count: 0,
             next: None,
         };
@@ -833,12 +854,15 @@ mod tests {
         tracker
             .add_region(0x300, 0x400, MEMOPS_ALL, &mut pool)
             .unwrap();
-        snap("{[0x300, 0x400 | 1 (1 - 1 - 1 - 1)]}", &tracker.iter(&pool));
+        snap(
+            "{[0x300, 0x400 | 1 (1 - 1 - 1 - 1 - 0)]}",
+            &tracker.iter(&pool),
+        );
         tracker
             .add_region(0x100, 0x200, MEMOPS_ALL, &mut pool)
             .unwrap();
         snap(
-            "{[0x100, 0x200 | 1 (1 - 1 - 1 - 1)] -> [0x300, 0x400 | 1 (1 - 1 - 1 - 1)]}",
+            "{[0x100, 0x200 | 1 (1 - 1 - 1 - 1 - 0)] -> [0x300, 0x400 | 1 (1 - 1 - 1 - 1 - 0)]}",
             &tracker.iter(&pool),
         );
 
@@ -847,12 +871,15 @@ mod tests {
         tracker
             .add_region(0x200, 0x400, MEMOPS_ALL, &mut pool)
             .unwrap();
-        snap("{[0x200, 0x400 | 1 (1 - 1 - 1 - 1)]}", &tracker.iter(&pool));
+        snap(
+            "{[0x200, 0x400 | 1 (1 - 1 - 1 - 1 - 0)]}",
+            &tracker.iter(&pool),
+        );
         tracker
             .add_region(0x100, 0x300, MEMOPS_ALL, &mut pool)
             .unwrap();
         snap(
-            "{[0x100, 0x200 | 1 (1 - 1 - 1 - 1)] -> [0x200, 0x300 | 2 (2 - 2 - 2 - 2)] -> [0x300, 0x400 | 1 (1 - 1 - 1 - 1)]}",
+            "{[0x100, 0x200 | 1 (1 - 1 - 1 - 1 - 0)] -> [0x200, 0x300 | 2 (2 - 2 - 2 - 2 - 0)] -> [0x300, 0x400 | 1 (1 - 1 - 1 - 1 - 0)]}",
             &tracker.iter(&pool),
         );
 
@@ -861,12 +888,15 @@ mod tests {
         tracker
             .add_region(0x100, 0x400, MEMOPS_ALL, &mut pool)
             .unwrap();
-        snap("{[0x100, 0x400 | 1 (1 - 1 - 1 - 1)]}", &tracker.iter(&pool));
+        snap(
+            "{[0x100, 0x400 | 1 (1 - 1 - 1 - 1 - 0)]}",
+            &tracker.iter(&pool),
+        );
         tracker
             .add_region(0x200, 0x300, MEMOPS_ALL, &mut pool)
             .unwrap();
         snap(
-            "{[0x100, 0x200 | 1 (1 - 1 - 1 - 1)] -> [0x200, 0x300 | 2 (2 - 2 - 2 - 2)] -> [0x300, 0x400 | 1 (1 - 1 - 1 - 1)]}",
+            "{[0x100, 0x200 | 1 (1 - 1 - 1 - 1 - 0)] -> [0x200, 0x300 | 2 (2 - 2 - 2 - 2 - 0)] -> [0x300, 0x400 | 1 (1 - 1 - 1 - 1 - 0)]}",
             &tracker.iter(&pool),
         );
 
@@ -875,34 +905,43 @@ mod tests {
         tracker
             .add_region(0x100, 0x400, MEMOPS_ALL, &mut pool)
             .unwrap();
-        snap("{[0x100, 0x400 | 1 (1 - 1 - 1 - 1)]}", &tracker.iter(&pool));
+        snap(
+            "{[0x100, 0x400 | 1 (1 - 1 - 1 - 1 - 0)]}",
+            &tracker.iter(&pool),
+        );
         tracker
             .add_region(0x500, 0x1000, MEMOPS_ALL, &mut pool)
             .unwrap();
         snap(
-            "{[0x100, 0x400 | 1 (1 - 1 - 1 - 1)] -> [0x500, 0x1000 | 1 (1 - 1 - 1 - 1)]}",
+            "{[0x100, 0x400 | 1 (1 - 1 - 1 - 1 - 0)] -> [0x500, 0x1000 | 1 (1 - 1 - 1 - 1 - 0)]}",
             &tracker.iter(&pool),
         );
         tracker
             .add_region(0x200, 0x600, MEMOPS_ALL, &mut pool)
             .unwrap();
-        snap("{[0x100, 0x200 | 1 (1 - 1 - 1 - 1)] -> [0x200, 0x400 | 2 (2 - 2 - 2 - 2)] -> [0x400, 0x500 | 1 (1 - 1 - 1 - 1)] -> [0x500, 0x600 | 2 (2 - 2 - 2 - 2)] -> [0x600, 0x1000 | 1 (1 - 1 - 1 - 1)]}", &tracker.iter(&pool));
+        snap("{[0x100, 0x200 | 1 (1 - 1 - 1 - 1 - 0)] -> [0x200, 0x400 | 2 (2 - 2 - 2 - 2 - 0)] -> [0x400, 0x500 | 1 (1 - 1 - 1 - 1 - 0)] -> [0x500, 0x600 | 2 (2 - 2 - 2 - 2 - 0)] -> [0x600, 0x1000 | 1 (1 - 1 - 1 - 1 - 0)]}", &tracker.iter(&pool));
 
         // Region is overlapping two adjacent regions
         let mut tracker = RegionTracker::new();
         tracker
             .add_region(0x200, 0x300, MEMOPS_ALL, &mut pool)
             .unwrap();
-        snap("{[0x200, 0x300 | 1 (1 - 1 - 1 - 1)]}", &tracker.iter(&pool));
+        snap(
+            "{[0x200, 0x300 | 1 (1 - 1 - 1 - 1 - 0)]}",
+            &tracker.iter(&pool),
+        );
         tracker
             .add_region(0x300, 0x400, MEMOPS_ALL, &mut pool)
             .unwrap();
-        snap("{[0x200, 0x400 | 1 (1 - 1 - 1 - 1)]}", &tracker.iter(&pool));
+        snap(
+            "{[0x200, 0x400 | 1 (1 - 1 - 1 - 1 - 0)]}",
+            &tracker.iter(&pool),
+        );
         tracker
             .add_region(0x100, 0x500, MEMOPS_ALL, &mut pool)
             .unwrap();
         snap(
-            "{[0x100, 0x200 | 1 (1 - 1 - 1 - 1)] -> [0x200, 0x400 | 2 (2 - 2 - 2 - 2)] -> [0x400, 0x500 | 1 (1 - 1 - 1 - 1)]}",
+            "{[0x100, 0x200 | 1 (1 - 1 - 1 - 1 - 0)] -> [0x200, 0x400 | 2 (2 - 2 - 2 - 2 - 0)] -> [0x400, 0x500 | 1 (1 - 1 - 1 - 1 - 0)]}",
             &tracker.iter(&pool),
         );
 
@@ -911,23 +950,32 @@ mod tests {
         tracker
             .add_region(0x100, 0x200, MEMOPS_ALL, &mut pool)
             .unwrap();
-        snap("{[0x100, 0x200 | 1 (1 - 1 - 1 - 1)]}", &tracker.iter(&pool));
+        snap(
+            "{[0x100, 0x200 | 1 (1 - 1 - 1 - 1 - 0)]}",
+            &tracker.iter(&pool),
+        );
         tracker
             .add_region(0x100, 0x200, MEMOPS_ALL, &mut pool)
             .unwrap();
-        snap("{[0x100, 0x200 | 2 (2 - 2 - 2 - 2)]}", &tracker.iter(&pool));
+        snap(
+            "{[0x100, 0x200 | 2 (2 - 2 - 2 - 2 - 0)]}",
+            &tracker.iter(&pool),
+        );
 
         // Regions have the same end
         let mut tracker = RegionTracker::new();
         tracker
             .add_region(0x200, 0x300, MEMOPS_ALL, &mut pool)
             .unwrap();
-        snap("{[0x200, 0x300 | 1 (1 - 1 - 1 - 1)]}", &tracker.iter(&pool));
+        snap(
+            "{[0x200, 0x300 | 1 (1 - 1 - 1 - 1 - 0)]}",
+            &tracker.iter(&pool),
+        );
         tracker
             .add_region(0x100, 0x300, MEMOPS_ALL, &mut pool)
             .unwrap();
         snap(
-            "{[0x100, 0x200 | 1 (1 - 1 - 1 - 1)] -> [0x200, 0x300 | 2 (2 - 2 - 2 - 2)]}",
+            "{[0x100, 0x200 | 1 (1 - 1 - 1 - 1 - 0)] -> [0x200, 0x300 | 2 (2 - 2 - 2 - 2 - 0)]}",
             &tracker.iter(&pool),
         );
     }
@@ -945,7 +993,7 @@ mod tests {
         tracler
             .add_region(0x200, 0x400, MEMOPS_ALL, &mut pool)
             .unwrap();
-        snap("{[0x100, 0x200 | 1 (1 - 1 - 1 - 1)] -> [0x200, 0x300 | 2 (2 - 2 - 2 - 2)] -> [0x300, 0x400 | 1 (1 - 1 - 1 - 1)] -> [0x600, 0x1000 | 1 (1 - 1 - 1 - 1)]}", &tracler.iter(&pool));
+        snap("{[0x100, 0x200 | 1 (1 - 1 - 1 - 1 - 0)] -> [0x200, 0x300 | 2 (2 - 2 - 2 - 2 - 0)] -> [0x300, 0x400 | 1 (1 - 1 - 1 - 1 - 0)] -> [0x600, 0x1000 | 1 (1 - 1 - 1 - 1 - 0)]}", &tracler.iter(&pool));
 
         assert_eq!(tracler.get_refcount(0x0, 0x50, &pool), 0);
         assert_eq!(tracler.get_refcount(0x0, 0x100, &pool), 0);
@@ -1000,14 +1048,15 @@ impl<'a> fmt::Display for RegionIterator<'a> {
         for (_, region) in self.clone() {
             write!(
                 f,
-                "[0x{:x}, 0x{:x} | {} ({} - {} - {} - {})]",
+                "[0x{:x}, 0x{:x} | {} ({} - {} - {} - {} - {})]",
                 region.start,
                 region.end,
                 region.ref_count,
                 region.read_count,
                 region.write_count,
                 region.exec_count,
-                region.super_count
+                region.super_count,
+                region.uncache_count,
             )?;
             if region.next.is_some() {
                 write!(f, " -> ")?;
@@ -1062,5 +1111,22 @@ impl fmt::Display for MemOps {
             write!(f, "_")?;
         }
         write!(f, "")
+    }
+}
+
+impl fmt::Display for Region {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "[0x{:x}, 0x{:x} | {} ({} - {} - {} - {} - {})]",
+            self.start,
+            self.end,
+            self.ref_count,
+            self.read_count,
+            self.write_count,
+            self.exec_count,
+            self.super_count,
+            self.uncache_count,
+        )
     }
 }

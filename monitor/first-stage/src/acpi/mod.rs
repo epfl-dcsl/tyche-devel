@@ -340,11 +340,15 @@ impl AcpiInfo {
                         //The vendor_id is valid, parse the bars.
                         if *vendor_id != 0xffff {
                             let bars = self.parse_bars(vendor_id as *mut u32);
-                            for (start, size) in bars {
+                            for (start, size, is_mem) in bars {
                                 if start == 0 || size == 0 {
                                     continue;
                                 }
-                                result.push(Device { start, size });
+                                result.push(Device {
+                                    start,
+                                    size,
+                                    is_mem,
+                                });
                             }
                         }
                     }
@@ -354,14 +358,36 @@ impl AcpiInfo {
         result
     }
 
-    pub unsafe fn parse_bars(&self, config_space: *mut u32) -> [(u64, u64); 6] {
-        const NUM_BARS: usize = 6;
+    // The code follows the documentation from: https://wiki.osdev.org/PCI#Address_and_size_of_the_BAR
+    pub unsafe fn parse_bars(&self, config_space: *mut u32) -> [(u64, u64, bool); 6] {
         const BAR_OFFSET: usize = 4; // BARs start at offset 0x10 in the config space
 
-        let mut bars: [(u64, u64); 6] = [(0, 0); 6];
+        let mut bars: [(u64, u64, bool); 6] = [(0, 0, false); 6];
         let mut offset = BAR_OFFSET;
 
-        for i in 0..NUM_BARS {
+        let _reg2 = core::ptr::read_volatile(config_space.add(2));
+        let reg3 = core::ptr::read_volatile(config_space.add(3));
+
+        // The 0x80 mask represents a multifunction device.
+        let num_bars = match (reg3 >> 16) & 0xFF {
+            // General device.
+            0x0 | 0x80 => 6,
+            // PCI-to-PCI bridge.
+            0x1 | 0x81 => 2,
+            // PCI-toCardbus bridge.
+            0x2 | 0x82 => {
+                log::info!("PCI-toCardbus.. ignore?");
+                return bars;
+            }
+            _ => {
+                panic!(
+                    "Invalid header type in PCI config space {:#x}",
+                    ((reg3 >> 16) & 0xFF)
+                );
+            }
+        };
+
+        for i in 0..num_bars {
             // Read the current BAR
             let original_value = core::ptr::read_volatile(config_space.add(offset) as *const u32);
 
@@ -371,8 +397,11 @@ impl AcpiInfo {
                 continue;
             }
 
+            // Check if the BAR is memory mapped or io.
+            let is_mem = (original_value & 0b1) == 0;
+
             // Check if the BAR is 64-bit or 32-bit
-            let is_64_bit = (original_value & 0b110) == 0b100;
+            let is_64_bit = is_mem && ((original_value & 0b110) == 0b100);
 
             // Write 0xFFFFFFFF to the BAR
             core::ptr::write_volatile(config_space.add(offset), 0xFFFFFFFF);
@@ -384,23 +413,30 @@ impl AcpiInfo {
             core::ptr::write_volatile(config_space.add(offset), original_value);
 
             // Compute the size by inverting the size mask and aligning it
-            let size = !(size_mask & 0xFFFFFFF0) + 1;
+            let size = if is_mem {
+                !(size_mask & 0xFFFFFFF0) + 1
+            } else {
+                (!size_mask & 0xFFFF) + 1
+            };
 
             // Extract the base address (only relevant bits)
-            let mut base_address = u64::from(original_value & 0xFFFFFFF0);
+            let mut base_address = if is_mem {
+                u64::from(original_value & 0xFFFFFFF0)
+            } else {
+                u64::from(original_value & 0xFFFFFFFC)
+            };
 
             if is_64_bit {
                 // For 64-bit BARs, read the high 32 bits
                 let high_value =
                     core::ptr::read_volatile(config_space.add(offset + 1) as *const u32);
-                base_address |= u64::from(high_value) << 32;
+                base_address |= u64::from(high_value & 0xFFFFFFFF) << 32;
 
                 // Increment the offset to skip the next BAR as it's part of this one
                 offset += 1;
             }
 
-            bars[i] = (base_address, size as u64);
-
+            bars[i] = (base_address, size as u64, is_mem);
             offset += 1; // Move to the next BAR
         }
         bars

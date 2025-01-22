@@ -576,7 +576,10 @@ mod tests {
         tracker
             .add_region(0x10, 0x20, MEMOPS_ALL, &mut pool)
             .unwrap();
-        snap("{[0x10, 0x20 | 1 (1 - 1 - 1 - 1)]}", &tracker.iter(&pool));
+        snap(
+            "{[0x10, 0x20 | 1 (1 - 1 - 1 - 1 - 0)]}",
+            &tracker.iter(&pool),
+        );
         snap(
             "{[0x10, 0x20 at 0x10, rep 1 | RWXS]}",
             &remapper.remap(tracker.permissions(&pool)),
@@ -596,7 +599,7 @@ mod tests {
         tracker
             .add_region(0x40, 0x50, MemOps::READ, &mut pool)
             .unwrap();
-        snap("{[0x10, 0x20 | 1 (1 - 1 - 1 - 1)] -> [0x30, 0x40 | 1 (1 - 1 - 1 - 1)] -> [0x40, 0x50 | 1 (1 - 0 - 0 - 0)]}", &tracker.iter(&pool));
+        snap("{[0x10, 0x20 | 1 (1 - 1 - 1 - 1 - 0)] -> [0x30, 0x40 | 1 (1 - 1 - 1 - 1 - 0)] -> [0x40, 0x50 | 1 (1 - 0 - 0 - 0 - 0)]}", &tracker.iter(&pool));
         snap(
             "{[0x10, 0x20 at 0x110, rep 1 | RWXS] -> [0x30, 0x40 at 0x30, rep 1 | RWXS] -> [0x40, 0x50 at 0x40, rep 1 | R___]}",
             &remapper.remap(tracker.permissions(&pool)),
@@ -636,7 +639,7 @@ mod tests {
             .remove_region(0x40, 0x50, MemOps::READ, &mut pool)
             .unwrap();
         snap(
-            "{[0x10, 0x20 | 1 (1 - 1 - 1 - 1)] -> [0x30, 0x40 | 1 (1 - 1 - 1 - 1)]}",
+            "{[0x10, 0x20 | 1 (1 - 1 - 1 - 1 - 0)] -> [0x30, 0x40 | 1 (1 - 1 - 1 - 1 - 0)]}",
             &tracker.iter(&pool),
         );
         snap(
@@ -671,7 +674,7 @@ mod tests {
             .add_region(0x40, 0x60, MEMOPS_ALL, &mut pool)
             .unwrap();
         snap(
-            "{[0x10, 0x30 | 1 (1 - 1 - 1 - 1)] -> [0x40, 0x60 | 1 (1 - 1 - 1 - 1)]}",
+            "{[0x10, 0x30 | 1 (1 - 1 - 1 - 1 - 0)] -> [0x40, 0x60 | 1 (1 - 1 - 1 - 1 - 0)]}",
             &tracker.iter(&pool),
         );
         snap(
@@ -700,7 +703,7 @@ mod tests {
             .add_region(0x30, 0x40, MEMOPS_ALL, &mut pool)
             .unwrap();
         snap(
-            "{[0x10, 0x30 | 1 (1 - 1 - 1 - 1)] -> [0x30, 0x40 | 2 (2 - 2 - 2 - 2)]}",
+            "{[0x10, 0x30 | 1 (1 - 1 - 1 - 1 - 0)] -> [0x30, 0x40 | 2 (2 - 2 - 2 - 2 - 0)]}",
             &tracker.iter(&pool),
         );
 
@@ -727,7 +730,10 @@ mod tests {
         tracker
             .add_region(0x10, 0x40, MEMOPS_ALL, &mut pool)
             .unwrap();
-        snap("{[0x10, 0x40 | 1 (1 - 1 - 1 - 1)]}", &tracker.iter(&pool));
+        snap(
+            "{[0x10, 0x40 | 1 (1 - 1 - 1 - 1 - 0)]}",
+            &tracker.iter(&pool),
+        );
 
         remapper.map_range(0x20, 0x100, 0x10, 1).unwrap();
         remapper.map_range(0x30, 0x200, 0x10, 1).unwrap();
@@ -753,7 +759,10 @@ mod tests {
         tracker
             .add_region(0x10, 0x60, MEMOPS_ALL, &mut pool)
             .unwrap();
-        snap("{[0x10, 0x60 | 1 (1 - 1 - 1 - 1)]}", &tracker.iter(&pool));
+        snap(
+            "{[0x10, 0x60 | 1 (1 - 1 - 1 - 1 - 0)]}",
+            &tracker.iter(&pool),
+        );
         snap(
             "{[0x10, 0x60 at 0x10, rep 1 | RWXS]}",
             &remapper.remap(tracker.permissions(&pool)),
@@ -779,7 +788,10 @@ mod tests {
         tracker
             .add_region(0x40, 0x60, MEMOPS_ALL, &mut pool)
             .unwrap();
-        snap("{[0x10, 0x60 | 1 (1 - 1 - 1 - 1)]}", &tracker.iter(&pool));
+        snap(
+            "{[0x10, 0x60 | 1 (1 - 1 - 1 - 1 - 0)]}",
+            &tracker.iter(&pool),
+        );
         snap(
             "{[0x10, 0x60 at 0x100, rep 1 | RWXS]}",
             &remapper.remap(tracker.permissions(&pool)),
@@ -804,7 +816,7 @@ mod tests {
         remapper
             .map_range(0x12fcd6000, 0xe0000, 0x20000, 1)
             .unwrap();
-        snap("{[0x12fcb6000, 0x12fcd6000 | 1 (1 - 1 - 1 - 1)] -> [0x12fcd6000, 0x12fcf6000 | 2 (2 - 2 - 2 - 2)]}", &tracker.iter(&pool));
+        snap("{[0x12fcb6000, 0x12fcd6000 | 1 (1 - 1 - 1 - 1 - 0)] -> [0x12fcd6000, 0x12fcf6000 | 2 (2 - 2 - 2 - 2 - 0)]}", &tracker.iter(&pool));
         snap("{[0x12fcb6000, 0x12fcf6000 at 0xfffc0000, rep 1] -> [0x12fcd6000, 0x12fcf6000 at 0xe0000, rep 1]}", remapper.iter_segments());
     }
 
@@ -817,7 +829,10 @@ mod tests {
         tracker
             .add_region(0x20, 0x80, MEMOPS_ALL, &mut pool)
             .unwrap();
-        snap("{[0x20, 0x80 | 1 (1 - 1 - 1 - 1)]}", &tracker.iter(&pool));
+        snap(
+            "{[0x20, 0x80 | 1 (1 - 1 - 1 - 1 - 0)]}",
+            &tracker.iter(&pool),
+        );
         remapper.map_range(0x20, 0x200, 0x60, 1).unwrap();
         snap("{[0x20, 0x80 at 0x200, rep 1]}", remapper.iter_segments());
         snap(
@@ -828,7 +843,10 @@ mod tests {
         tracker
             .add_region(0x80, 0xa0, MEMOPS_ALL, &mut pool)
             .unwrap();
-        snap("{[0x20, 0xa0 | 1 (1 - 1 - 1 - 1)]}", &tracker.iter(&pool));
+        snap(
+            "{[0x20, 0xa0 | 1 (1 - 1 - 1 - 1 - 0)]}",
+            &tracker.iter(&pool),
+        );
         let err = remapper.map_range(0x80, 0x220, 0x20, 1);
         assert!(err.is_err());
         assert_eq!(err.err().unwrap(), CapaError::AlreadyAliased);
@@ -858,7 +876,10 @@ mod tests {
         tracker
             .add_region(0x30, 0x60, MEMOPS_ALL, &mut pool)
             .unwrap();
-        snap("{[0x30, 0x60 | 1 (1 - 1 - 1 - 1)]}", &tracker.iter(&pool));
+        snap(
+            "{[0x30, 0x60 | 1 (1 - 1 - 1 - 1 - 0)]}",
+            &tracker.iter(&pool),
+        );
 
         let iterator = SingleSegmentIterator {
             regions: tracker.permissions(&pool),
@@ -913,7 +934,7 @@ mod tests {
             .add_region(0x70, 0x80, MEMOPS_ALL, &mut pool)
             .unwrap();
         snap(
-            "{[0x30, 0x60 | 1 (1 - 1 - 1 - 1)] -> [0x70, 0x80 | 1 (1 - 1 - 1 - 1)]}",
+            "{[0x30, 0x60 | 1 (1 - 1 - 1 - 1 - 0)] -> [0x70, 0x80 | 1 (1 - 1 - 1 - 1 - 0)]}",
             &tracker.iter(&pool),
         );
 

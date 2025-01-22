@@ -114,6 +114,7 @@ pub struct Smp {
 pub struct Device {
     pub start: u64,
     pub size: u64,
+    pub is_mem: bool,
 }
 
 impl Manifest {
@@ -162,7 +163,11 @@ macro_rules! make_manifest {
                     mailbox: 0,
                     wakeup_cr3: 0,
                 },
-                devices: [$crate::Device { start: 0, size: 0 }; $crate::MANIFEST_NB_DEVICES],
+                devices: [$crate::Device {
+                    start: 0,
+                    size: 0,
+                    is_mem: false,
+                }; $crate::MANIFEST_NB_DEVICES],
                 nb_devices: 0,
             };
             static TAKEN: AtomicBool = AtomicBool::new(false);

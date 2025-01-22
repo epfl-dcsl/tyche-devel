@@ -26,6 +26,7 @@ fn hash_capa_info(
                 start,
                 end,
                 unique,
+                kind: _,
                 children: _,
                 ops,
             } => {

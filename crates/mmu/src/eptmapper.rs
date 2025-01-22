@@ -80,7 +80,15 @@ impl EptMapper {
                     if (*entry & EPT_PRESENT.bits()) == 0 {
                         return WalkNext::Leaf;
                     }
-                    log::info!("{:?} -> 0x{:x} | {:x?}", level, addr.as_usize(), entry);
+                    let memory_flags =
+                        EptMemoryType::from_bits(EptMemoryType::all().bits() & *entry);
+                    log::info!(
+                        "{:?} -> 0x{:x} | {:x?} -> mem type {:?}",
+                        level,
+                        addr.as_usize(),
+                        entry,
+                        memory_flags
+                    );
                     if (*entry & EptEntryFlags::PAGE.bits()) != 0 {
                         return WalkNext::Leaf;
                     }
@@ -99,6 +107,7 @@ impl EptMapper {
         hpa: HostPhysAddr,
         size: usize,
         prot: EptEntryFlags,
+        mem_type: EptMemoryType,
     ) {
         unsafe {
             self.walk_range(
@@ -123,7 +132,7 @@ impl EptMapper {
                             *entry = hphys as u64
                                 | EptEntryFlags::PAGE.bits()
                                 | prot.bits()
-                                | EptMemoryType::WB.bits()
+                                | mem_type.bits()
                                 | (1 << 7);
                             return WalkNext::Leaf;
                         }
@@ -135,13 +144,16 @@ impl EptMapper {
                             *entry = hphys as u64
                                 | EptEntryFlags::PAGE.bits()
                                 | prot.bits()
-                                | EptMemoryType::WB.bits();
+                                | mem_type.bits();
                             return WalkNext::Leaf;
                         }
                     }
                     if level == Level::L1 {
+                        if (hphys % PAGE_SIZE) != 0 {
+                            log::info!("\n\nAbout to crash due to hphys {:#x}\n\n", hphys);
+                        }
                         assert!(hphys % PAGE_SIZE == 0);
-                        *entry = hphys as u64 | prot.bits() | EptMemoryType::WB.bits();
+                        *entry = hphys as u64 | prot.bits() | mem_type.bits();
                         return WalkNext::Leaf;
                     }
                     let frame = allocator
@@ -255,6 +267,8 @@ impl EptMapper {
                                 | EptEntryFlags::WRITE
                                 | EptEntryFlags::USER_EXECUTE
                                 | EPT_PRESENT,
+                            //TODO we should check that.
+                            EptMemoryType::WB,
                         );
                     }
                     // Some mapping on the left.
@@ -269,6 +283,7 @@ impl EptMapper {
                                 | EptEntryFlags::WRITE
                                 | EptEntryFlags::USER_EXECUTE
                                 | EPT_PRESENT,
+                            EptMemoryType::WB,
                         );
                     }
                     return WalkNext::Leaf;

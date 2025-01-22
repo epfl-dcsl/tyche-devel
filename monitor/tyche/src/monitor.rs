@@ -11,9 +11,10 @@ use capa_engine::{
 use spin::{Mutex, MutexGuard};
 use stage_two_abi::Manifest;
 
+use crate::allocator::PAGE_SIZE;
 use crate::arch::cpuid;
 use crate::attestation_domain::calculate_attestation_hash;
-use crate::calls;
+use crate::{align_down, align_up, calls};
 
 // ———————————————————————————————— Updates ————————————————————————————————— //
 /// Per-core updates
@@ -255,17 +256,32 @@ pub trait Monitor<T: PlatformState + 'static> {
 
         // Construct the address space with devices.
         let mut start: usize = 0;
+
         for i in 0..manifest.nb_devices {
-            let device = manifest.devices[i];
-            // Normal RAM memory.
-            if start < device.start as usize && start < manifest.poffset as usize {
+            let device = &manifest.devices[i];
+            if device.start % PAGE_SIZE != 0 || device.size % PAGE_SIZE != 0 {
+                // For the moment, let's filter the weird ones out.
+                continue;
+            }
+
+            let aligned_start = align_down(device.start as usize, PAGE_SIZE as usize);
+            let possible_end = usize::min(
+                align_down(device.start as usize, PAGE_SIZE as usize),
+                manifest.poffset as usize,
+            );
+
+            // There is a RAM memory gap and it is at least a page.
+            if start < aligned_start
+                && start < possible_end
+                && (possible_end - start) >= PAGE_SIZE as usize
+            {
                 // Create a region.
                 engine
                     .create_root_region(
                         domain,
                         AccessRights {
                             start,
-                            end: device.start as usize,
+                            end: possible_end,
                             ops: MEMOPS_ALL,
                         },
                     )
@@ -278,11 +294,12 @@ pub trait Monitor<T: PlatformState + 'static> {
                     AccessRights {
                         start: device.start as usize,
                         end: (device.start + device.size) as usize,
-                        ops: MEMOPS_ALL,
+                        ops: MEMOPS_ALL.union(MemOps::UNCACHEABLE),
                     },
                 )
                 .unwrap();
-            start = (device.start + device.size) as usize;
+            // Align up.
+            start = align_up((device.start + device.size) as usize, PAGE_SIZE as usize);
         }
         // The last entry if physical memory space is greater than device space.
         if start < manifest.poffset as usize {
@@ -343,10 +360,10 @@ pub trait Monitor<T: PlatformState + 'static> {
                 next_capa = next_next_capa;
                 log::info!(" - {} @{}", info, idx);
             }
-            log::info!(
-                "tracker: {}",
-                engine.get_domain_regions(domain).expect("Invalid domain")
-            );
+            log::info!("Tracker:");
+            for r in engine.get_domain_regions(domain).expect("Invalid domain") {
+                log::info!("{}", r.1);
+            }
             callback(domain, &mut engine);
         }
     }
