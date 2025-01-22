@@ -4,7 +4,7 @@ use core::fmt;
 
 use crate::domain::{Domain, DomainPool};
 use crate::gen_arena::Handle;
-use crate::segment::{RegionCapa, RegionPool};
+use crate::segment::{RegionCapa, RegionKind, RegionPool};
 use crate::{CapaError, MemOps};
 
 #[derive(Clone, Copy, Debug)]
@@ -27,6 +27,7 @@ pub enum CapaInfo {
         start: usize,
         end: usize,
         unique: bool,
+        kind: RegionKind,
         children: bool,
         ops: MemOps,
     },
@@ -60,6 +61,7 @@ impl CapaInfo {
             CapaInfo::Region {
                 start,
                 end,
+                kind: _,
                 unique,
                 children: _,
                 ops,
@@ -133,6 +135,7 @@ impl CapaInfo {
                     start: v1,
                     end: v2,
                     unique: unique,
+                    kind: RegionKind::Root,
                     children: false, // TODO: we do not track children in serialization
                     ops: ops,
                 }
@@ -204,6 +207,7 @@ impl Capa {
                 Some(CapaInfo::Region {
                     start: region.access.start,
                     end: region.access.end,
+                    kind: region.kind,
                     unique: region.is_confidential,
                     children: region.child_list_head.is_some(),
                     ops: region.access.ops,
@@ -267,17 +271,19 @@ impl fmt::Display for CapaInfo {
             CapaInfo::Region {
                 start,
                 end,
+                kind,
                 unique,
                 children,
                 ops,
             } => {
                 let c = if *unique { 'U' } else { '_' };
                 let p = if *children { 'P' } else { '_' };
-                write!(
-                    f,
-                    "Region([0x{:x}, 0x{:x} | {}{}{}])",
-                    start, end, p, c, ops
-                )
+                let n = if *kind == RegionKind::Device {
+                    "Device"
+                } else {
+                    "Region"
+                };
+                write!(f, "{}([0x{:x}, 0x{:x} | {}{}{}])", n, start, end, p, c, ops)
             }
             CapaInfo::RegionRevoke {
                 start,

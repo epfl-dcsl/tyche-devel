@@ -7,7 +7,7 @@ use mmu::eptmapper::EPT_ROOT_FLAGS;
 use mmu::{EptMapper, FrameAllocator, IoPtFlag, IoPtMapper};
 use spin::{Mutex, MutexGuard};
 use utils::{GuestPhysAddr, HostPhysAddr, HostVirtAddr};
-use vmx::bitmaps::{EptEntryFlags, PinbasedControls};
+use vmx::bitmaps::{EptEntryFlags, EptMemoryType, PinbasedControls};
 use vmx::fields::VmcsField;
 use vmx::{ActiveVmcs, VmxExitReason, Vmxon};
 use vtd::Iommu;
@@ -187,12 +187,22 @@ impl StateX86 {
                     flags |= EptEntryFlags::USER_EXECUTE;
                 }
             }
+            // The way I understand it, PAT ignore needs to be set if cr0.CD = 0.
+            // See Intel doc 29.3.7.2 Memory Type Used for Translated Guest-Physical Addresses.
+            // If cr0.CD=1, everything ends up cache-disabled.
+            let mem_type = if range.ops.contains(MemOps::UNCACHEABLE) {
+                flags |= EptEntryFlags::IGNORE_PAT;
+                EptMemoryType::UC
+            } else {
+                EptMemoryType::WB
+            };
             mapper.map_range(
                 allocator,
                 GuestPhysAddr::new(range.gpa),
                 HostPhysAddr::new(range.hpa),
                 range.size,
                 flags,
+                mem_type,
             );
         }
 

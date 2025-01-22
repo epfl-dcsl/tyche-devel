@@ -6,7 +6,7 @@ use core::iter::Iterator;
 
 use bit_field::BitField;
 
-use crate::msr::*;
+pub use crate::msr::*;
 
 // An x2apic implementation
 pub struct X2Apic {

@@ -671,6 +671,25 @@ impl CapaEngine {
         self.switch(domain, core_id, 0, capa)
     }
 
+    pub fn find_device<F: Fn(&AccessRights) -> bool>(
+        &self,
+        domain: Handle<Domain>,
+        f: F,
+    ) -> Option<LocalCapa> {
+        let dom = &self.domains[domain];
+        let capa = dom.find_capa(|x| match x {
+            Capa::Region(h) => {
+                let reg = self.regions.get(*h).ok_or(CapaError::InvalidCapa).unwrap();
+                if reg.is_device() && f(&reg.access) {
+                    return true;
+                }
+                return false;
+            }
+            _ => false,
+        });
+        capa
+    }
+
     pub fn enumerate(
         &mut self,
         domain: Handle<Domain>,

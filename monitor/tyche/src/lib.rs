@@ -33,3 +33,22 @@ pub mod arch {
 pub enum MonitorErrors {
     DomainRevoked = 66,
 }
+
+// helper functions.
+
+pub fn align_down(val: usize, alignment: usize) -> usize {
+    assert!(
+        alignment.is_power_of_two(),
+        "`alignment` must be a power of two"
+    );
+    let aligned = val & !(alignment - 1);
+    aligned
+}
+
+pub fn align_up(val: usize, alignment: usize) -> usize {
+    assert!(
+        alignment.is_power_of_two(),
+        "`alignment` must be a power of two"
+    );
+    return (val + alignment - 1) & !(alignment - 1);
+}

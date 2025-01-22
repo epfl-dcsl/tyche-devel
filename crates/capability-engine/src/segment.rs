@@ -15,7 +15,7 @@ pub type RegionHash = [u8; 32];
 pub(crate) type RegionPool = GenArena<RegionCapa, NB_REGIONS>;
 pub const EMPTY_REGION_CAPA: RegionCapa = RegionCapa::new_invalid();
 
-#[derive(PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum RegionKind {
     Root,
     Alias(Handle<RegionCapa>),
@@ -72,6 +72,12 @@ impl RegionCapa {
     pub fn is_root(&self) -> bool {
         match self.kind {
             RegionKind::Root => true,
+            _ => false,
+        }
+    }
+    pub fn is_device(&self) -> bool {
+        match self.kind {
+            RegionKind::Device => true,
             _ => false,
         }
     }
