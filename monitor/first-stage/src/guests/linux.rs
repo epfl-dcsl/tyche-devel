@@ -33,7 +33,7 @@ static COMMAND_LINE: &'static [u8] =
     b"root=/dev/sdb2 apic=debug earlyprintk=serial,ttyS0 console=ttyS0 iommu=on iommu.passthrough=1 intremap=nopost iommu.strict=1 tyche.use_reserved_memory=1 tyche.reserved_base=0x200000000 tyche.reserved_size=4 memmap=4G$0x200000000\0";
 #[cfg(feature = "bare_metal")]
 static COMMAND_LINE: &'static [u8] =
-    b"root=/dev/sdb2 root=/dev/nvme0n1p2 apic=debug earlyprintk=serial,ttyS0,115200 console=ttyS0,115200 iommu.passthrough=1 vt.handoff=7\0";
+    b"root=/dev/sdb2 root=/dev/nvme0n1p2 apic=x2apic intremap=no_x2apic_optout earlyprintk=serial,ttyS0,115200 console=ttyS0,115200 iommu.passthrough=1 vt.handoff=7\0";
 
 pub struct Linux {}
 
