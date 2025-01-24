@@ -38,17 +38,22 @@ pub enum HandlerResult {
     Crash,
 }
 
-#[cfg(not(feature = "bare_metal"))]
+//TODO(charly): see comment below.
+//#[cfg(not(feature = "bare_metal"))]
 pub fn remap_core(core: usize) -> usize {
     core
 }
 
-#[cfg(not(feature = "bare_metal"))]
+//TODO(charly) see comment below.
+//#[cfg(not(feature = "bare_metal"))]
 pub fn remap_core_bitmap(bitmap: u64) -> u64 {
     bitmap
 }
 
-#[cfg(feature = "bare_metal")]
+//TODO(charly), TODO(aghosn) check if the new parsing of logical cores solves
+//the issue on the EPFL machine and if we can remove these. For the moment,
+//I comment them out.
+/*#[cfg(feature = "bare_metal")]
 pub fn remap_core(core: usize) -> usize {
     // Our harware has hyper-threads, and renames all co-located threads
     if core < 8 {
@@ -68,7 +73,7 @@ pub fn remap_core_bitmap(bitmap: u64) -> u64 {
     }
 
     new_bitmap
-}
+}*/
 
 impl PlatformState for StateX86 {
     type DomainData = DataX86;
