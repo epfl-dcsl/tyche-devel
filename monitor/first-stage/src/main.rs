@@ -124,6 +124,20 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             devices.extend(acpi_info.enumerate_mcfg_item(e, physical_memory_offset));
         }
     }
+
+    // For now, model iommus as devices such that they are mapped uncachable.
+    // Note: On the MSR baremetal, mapping an iommu cachable triggers an
+    // InitSignal upon reading the capa or ecapa register in the intel iommu driver.
+    if let Some(iommus) = &acpi_info.iommu {
+        for io in iommus {
+            devices.push(Device {
+                start: io.base_address.as_u64(),
+                size: io.size as u64,
+                is_mem: true,
+            });
+        }
+    }
+
     // Ensure we did not discover more devices than supported and sort them.
     assert!(devices.len() <= MANIFEST_NB_DEVICES);
     devices.sort_by(|a, b| a.start.cmp(&b.start));
