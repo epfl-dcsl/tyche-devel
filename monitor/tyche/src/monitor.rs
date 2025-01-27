@@ -401,6 +401,23 @@ pub trait Monitor<T: PlatformState + 'static> {
         Ok(engine.get_child_permission(*current, domain, bitmap)? as usize)
     }
 
+    fn validate_child_core(
+        engine: &mut CapaEngine,
+        parent: &Handle<Domain>,
+        child: LocalCapa,
+        core: LogicalID,
+    ) -> Result<(), CapaError> {
+        let cores = engine.get_child_permission(
+            *parent,
+            child,
+            permission::PermissionIndex::AllowedCores,
+        )?;
+        if cores & (1 << core.as_usize()) == 0 {
+            return Err(CapaError::InvalidCore);
+        }
+        return Ok(());
+    }
+
     fn do_get_self(
         state: &mut T,
         current: &mut Handle<Domain>,
@@ -420,14 +437,7 @@ pub trait Monitor<T: PlatformState + 'static> {
     ) -> Result<(), CapaError> {
         let mut engine = Self::lock_engine(state, current);
         // Check the core is valid.
-        let cores = engine.get_child_permission(
-            *current,
-            domain,
-            permission::PermissionIndex::AllowedCores,
-        )?;
-        if cores & (1 << core.as_usize()) == 0 {
-            return Err(CapaError::InvalidCore);
-        }
+        Self::validate_child_core(&mut engine, current, domain, core)?;
         let domain = engine.get_domain_capa(*current, domain)?;
         state.set_core(&mut engine, &domain, core, idx, value)
     }
@@ -441,14 +451,7 @@ pub trait Monitor<T: PlatformState + 'static> {
     ) -> Result<usize, CapaError> {
         let mut engine = Self::lock_engine(state, current);
         // Check the core is valid.
-        let cores = engine.get_child_permission(
-            *current,
-            domain,
-            permission::PermissionIndex::AllowedCores,
-        )?;
-        if cores & (1 << core.as_usize()) == 0 {
-            return Err(CapaError::InvalidCore);
-        }
+        Self::validate_child_core(&mut engine, current, domain, core)?;
         let domain = engine.get_domain_capa(*current, domain)?;
         state.get_core(&mut engine, &domain, core, idx)
     }
@@ -460,14 +463,7 @@ pub trait Monitor<T: PlatformState + 'static> {
         core: LogicalID,
     ) -> Result<(), CapaError> {
         let mut engine = Self::lock_engine(state, current);
-        let core_map = engine.get_child_permission(
-            *current,
-            domain,
-            permission::PermissionIndex::AllowedCores,
-        )?;
-        if core_map & (1 << core.as_usize()) == 0 {
-            return Err(CapaError::InvalidCore);
-        }
+        Self::validate_child_core(&mut engine, current, domain, core)?;
         let domain = engine.get_domain_capa(*current, domain)?;
         let result: &mut [usize] = &mut [0; 15];
         state.get_core_gp(&mut engine, &domain, core, result)?;
@@ -482,14 +478,7 @@ pub trait Monitor<T: PlatformState + 'static> {
         core: LogicalID,
     ) -> Result<(), CapaError> {
         let mut engine = Self::lock_engine(state, current);
-        let core_map = engine.get_child_permission(
-            *current,
-            domain,
-            permission::PermissionIndex::AllowedCores,
-        )?;
-        if core_map & (1 << core.as_usize()) == 0 {
-            return Err(CapaError::InvalidCore);
-        }
+        Self::validate_child_core(&mut engine, current, domain, core)?;
         let mut values: [(usize, usize); 6] = [(0, 0); 6];
         state.extract_from_gp(&mut engine, current, T::logical_id(), &mut values)?;
         let domain = engine.get_domain_capa(*current, domain)?;
