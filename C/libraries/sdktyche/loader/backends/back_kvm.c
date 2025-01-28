@@ -127,7 +127,6 @@ failure:
 
 int backend_td_create(tyche_domain_t* domain)
 {
-  msg_t info = {UNINIT_USIZE, UNINIT_USIZE};
   usize perms_coremap = 0;
   // Open the kvm driver.
   int kvm_fd = open(KVM_DRIVER, O_RDWR);

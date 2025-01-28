@@ -26,9 +26,13 @@
 #define ALL_CORES (~(usize)(0))
 #define DEFAULT_CORES ((usize)1)
 #define NO_CORES ((usize)(0))
-#define ALL_TRAPS (~(usize)(0))
-#define NO_TRAPS ((usize)(0))
 #define DEFAULT_PERM ((usize)0)
+
+#define ENABLE_TRAP (~(usize)(0))
+#define DISABLE_TRAP ((usize)(0))
+
+extern usize ALL_TRAPS[NB_TRAP_PERMS];
+extern usize NO_TRAPS[NB_TRAP_PERMS];
 
 /// KVM imposes a limit on the size of a contiguous memory segment.
 #define MAX_SLOT_SIZE (0x400000)
@@ -159,8 +163,9 @@ typedef struct {
   /// The domain's core map.
   usize core_map;
 
-  /// The domain's trap bitmap.
-  usize traps;
+  /// The domain's trap bitmaps.
+  /// index 0 first 32 are exceptions, the rest are the 256-32 signals.
+  usize traps[NB_TRAP_PERMS];
 
   /// The domain's permissions.
   usize perms;

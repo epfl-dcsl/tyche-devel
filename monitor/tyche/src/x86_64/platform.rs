@@ -13,7 +13,7 @@ use mmu::FrameAllocator;
 use spin::MutexGuard;
 use stage_two_abi::{GuestInfo, Manifest};
 use utils::HostPhysAddr;
-use vmx::bitmaps::exit_qualification;
+use vmx::bitmaps::{exit_qualification, PinbasedControls};
 use vmx::fields::VmcsField;
 use vmx::{VmxError, VmxExitReason};
 
@@ -134,7 +134,7 @@ impl PlatformState for StateX86 {
 
     fn create_context(
         &mut self,
-        _engine: MutexGuard<CapaEngine>,
+        engine: &mut MutexGuard<CapaEngine>,
         current: Handle<Domain>,
         domain: Handle<Domain>,
         core: LogicalID,
@@ -157,6 +157,21 @@ impl PlatformState for StateX86 {
             // Init to the default values.
             let info: GuestInfo = Default::default();
             vmx_helper::default_vmcs_config(&mut self.vcpu, &info, false);
+            // If we need to trap ext_intr, we enable external interrupt exiting.
+            if Self::should_trap_external_interrupt(engine, &domain) {
+                self.vcpu
+                    .set_pin_based_ctrls(
+                        self.vcpu
+                            .get_pin_based_ctrls()
+                            .unwrap()
+                            .union(PinbasedControls::EXTERNAL_INTERRUPT_EXITING),
+                    )
+                    .unwrap();
+            }
+            // Set the exception bitmap too.
+            let exception = Self::translated_exception(engine, &domain);
+            self.vcpu.set_exception_bitmap(exception).unwrap();
+
             let vpid = (domain.idx() + 1) as u16; // VPID 0 is reserved for VMX root execution
             self.vcpu.set_vpid(vpid).expect("Failled to install VPID");
 
@@ -322,6 +337,31 @@ impl PlatformState for StateX86 {
         if engine.is_domain_sealed(*domain) && ((1 << idx) & bitmap == 0) {
             return Err(CapaError::InsufficientPermissions);
         }
+        // Special cases: Exception bitmap and external interrupts.
+        // As these relate to domain configuration, we need to take extra care when
+        // setting the fields.
+        match field {
+            VmcsField::ExceptionBitmap => {
+                if value as u32 != Self::translated_exception(engine, domain).bits() {
+                    return Err(CapaError::AlreadyFrozen);
+                }
+            }
+            VmcsField::PinBasedVmExecControl => {
+                let should_trap = StateX86::should_trap_external_interrupt(engine, domain);
+                let traps =
+                    (value & PinbasedControls::EXTERNAL_INTERRUPT_EXITING.bits() as usize) != 0;
+                if traps != should_trap {
+                    log::error!(
+                        "Attempt to change external interrupt traps from {} to {}",
+                        should_trap,
+                        traps
+                    );
+                    return Err(CapaError::AlreadyFrozen);
+                }
+            }
+            _ => { /*Nothing to do*/ }
+        }
+
         ctxt.set(field, value, None)
             .or(Err(CapaError::PlatformError))
     }
@@ -864,7 +904,7 @@ impl MonitorX86 {
                 vs.vcpu.next_instruction().or(Err(CapaError::PlatformError))?;
                 return Ok(HandlerResult::Resume);
             }
-            match Self::do_handle_violation(vs, domain) {
+            match Self::do_switch_to_manager(vs, domain) {
                 Ok(_) => {
                     return Ok(HandlerResult::Resume);
                 }
@@ -1026,7 +1066,7 @@ impl MonitorX86 {
                 }*/
                 x2apic::send_eoi();
             }
-            match Self::do_handle_violation(vs, domain) {
+            match Self::do_switch_to_manager(vs, domain) {
                 Ok(_) => {
                     return Ok(HandlerResult::Resume);
                 }

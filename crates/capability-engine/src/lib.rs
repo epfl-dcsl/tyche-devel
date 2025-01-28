@@ -61,6 +61,7 @@ pub enum CapaError {
     WrongCapabilityType,
     CapabilityDoesNotExist,
     AlreadySealed,
+    AlreadyFrozen,
     InsufficientPermissions,
     InvalidPermissions,
     OutOfMemory,
@@ -123,6 +124,24 @@ impl CapaEngine {
                     handle,
                     &mut self.domains,
                     permission::PermissionIndex::AllowedTraps,
+                    trap_bits::ALL,
+                )?;
+                domain::set_permission(
+                    handle,
+                    &mut self.domains,
+                    permission::PermissionIndex::AllowedTraps1,
+                    trap_bits::ALL,
+                )?;
+                domain::set_permission(
+                    handle,
+                    &mut self.domains,
+                    permission::PermissionIndex::AllowedTraps2,
+                    trap_bits::ALL,
+                )?;
+                domain::set_permission(
+                    handle,
+                    &mut self.domains,
+                    permission::PermissionIndex::AllowedTraps3,
                     trap_bits::ALL,
                 )?;
                 log::info!("About to seal");
@@ -647,7 +666,7 @@ impl CapaEngine {
         dom.get_manager().ok_or(CapaError::CapabilityDoesNotExist)
     }
 
-    pub fn handle_violation(
+    pub fn switch_to_manager(
         &mut self,
         domain: Handle<Domain>,
         core_id: usize,
@@ -738,6 +757,32 @@ impl CapaEngine {
         capa: LocalCapa,
     ) -> Result<Handle<Domain>, CapaError> {
         self.domains[domain].get(capa)?.as_domain()
+    }
+
+    // Preclude modifications to a domain's permissions.
+    // This allows to serialize the creation of a domain. First configure its permissions,
+    // then do its contexts. Otherwise implementations on e.g., x86 would need to track
+    // the mappings between exception bitmaps/external interrupts and domain permissions.
+    pub fn freeze_permissions(&mut self, domain: Handle<Domain>) -> Result<(), CapaError> {
+        // This should not be called if the domain is already sealed.
+        if self.domains[domain].is_sealed() {
+            return Err(CapaError::AlreadySealed);
+        }
+        // First check that we do not have a switch capa on ANY core.
+        let has_switch = self.domains[domain].find_capa(|x| match x {
+            Capa::Switch { to: _, core: _ } => {
+                return true;
+            }
+            _ => {
+                return false;
+            }
+        });
+        if has_switch.is_some() {
+            return Err(CapaError::InvalidOperation);
+        }
+        // Okay we can freeze the perimission.
+        self.domains[domain].freeze_permissions();
+        Ok(())
     }
 
     pub fn get_region_capa(

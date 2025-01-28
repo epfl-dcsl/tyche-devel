@@ -10,6 +10,7 @@
 #include <string.h>
 #include <sys/ucontext.h>
 #include <time.h>
+#include <stdbool.h>
 #include <ucontext.h>
 
 // ———————————————————————————— Local Variables ————————————————————————————— //
@@ -26,7 +27,7 @@ FILE *tychools_response;
 // ———————————————————————————————— Helpers ————————————————————————————————— //
 
 /// Looks up for the shared memory region with the enclave.
-static void *find_default_shared(tyche_domain_t *enclave) {
+/*static void *find_default_shared(tyche_domain_t *enclave) {
   domain_shared_memory_t *shared_sec = NULL;
   if (enclave == NULL) {
     ERROR("Supplied enclave is null.");
@@ -41,21 +42,30 @@ static void *find_default_shared(tyche_domain_t *enclave) {
   ERROR("Unable to find the shared buffer for the enclave!");
 failure:
   return NULL;
-}
+}*/
 
 // ————————————————————————— Application functions —————————————————————————— //
 
 /// Calls the enclave twice to print a message.
 int run_hogger() {
+  bool infinite_hog = false;
   TEST(enclave != NULL);
-  LOG("Executing hogger enclave\n");
+  if (getenv("HOG") != NULL) {
+    infinite_hog = true;
+  }
+  LOG("Executing hogger enclave: infinite? %d\n", infinite_hog);
 
   // Call the enclave.
-  if (sdk_call_domain_for(enclave, 1 << 16) != SUCCESS) {
-    ERROR("Unable to call the enclave %d!", enclave->handle);
-    goto failure;
+  for (int i = 0; i < 80; i ++) {
+    if ((infinite_hog && sdk_call_domain(enclave) != SUCCESS) ||
+        (!infinite_hog && sdk_call_domain_for(enclave, 1 << 26) != SUCCESS)) {
+      ERROR("Unable to call the enclave %d!", enclave->handle);
+      goto failure;
+    }
+    printf(".");
   }
-  LOG("We came back from the hogger!");
+  printf("\n");
+  LOG("We are done with the hogger!");
 
   // Clean up.
   if (sdk_delete_domain(enclave) != SUCCESS) {
@@ -80,7 +90,7 @@ int main(int argc, char *argv[]) {
     goto failure;
   }
   // Init the enclave.
-  if (sdk_create_domain(enclave, argv[0], core_mask, ALL_TRAPS, DEFAULT_PERM) !=
+  if (sdk_create_domain(enclave, argv[0], core_mask, NO_TRAPS, DEFAULT_PERM) !=
       SUCCESS) {
     ERROR("Unable to parse the enclave");
     goto failure;

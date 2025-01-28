@@ -48,14 +48,16 @@ static int default_vcpu(tyche_domain_t* domain, backend_vcpu_info_t* vcpu) {
     ERROR("The provided vcpu is null");
     goto failure;
   }
-  // Set the bitmap for exceptions.
   msg.core = vcpu->core_id;
-  msg.idx = EXCEPTION_BITMAP;
-  msg.value = ~(domain->traps);
+  //TODO: deprecated, this is handled from the configuration.
+  // Set the bitmap for exceptions.
+  /*msg.idx = EXCEPTION_BITMAP;
+  // The exception bitmap corresponds to the first 32 bits of the first trap.
+  msg.value = ~((usize)((uint32_t)domain->traps[0]));
   if (ioctl(domain->handle, TYCHE_SET_DOMAIN_CORE_CONFIG, &msg) != SUCCESS) {
     ERROR("Unable to set bitmap.");
     goto failure;
-  } 
+  }*/
   // Set the cr0.
   msg.idx = GUEST_CR0;
   msg.value = DEFAULT_CR0;

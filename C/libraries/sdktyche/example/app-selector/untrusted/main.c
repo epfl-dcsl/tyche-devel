@@ -45,7 +45,7 @@ failure:
 void malicious_handler(int signo, siginfo_t *info, void *uap) {
   LOG("Handler called for address %llx and signo %d", (usize)info->si_addr,
       signo);
-  ucontext_t *context = uap;
+  //ucontext_t *context = uap;
   // context->uc_mcontext.gregs[REG_RIP] += 6;
   has_faulted = SUCCESS;
 
@@ -256,6 +256,7 @@ application_tpe dispatcher[] = {
 int main(int argc, char *argv[]) {
   // Figure out sched-affinity.
   usize core_mask = sdk_pin_to_current_core();
+  usize BRK_TRAPS[NB_TRAP_PERMS] = {ENABLE_TRAP - ( 1 << 3), ENABLE_TRAP, ENABLE_TRAP, ENABLE_TRAP};
 
   // Allocate the enclave.
   enclave = malloc(sizeof(tyche_domain_t));
@@ -266,7 +267,7 @@ int main(int argc, char *argv[]) {
   application_e application = parse_application();
   // Init the enclave.
   if (application == BREAKPOINT) {
-    if (sdk_create_domain(enclave, argv[0], core_mask, ALL_TRAPS - (1 << 3),
+    if (sdk_create_domain(enclave, argv[0], core_mask, BRK_TRAPS,
                           DEFAULT_PERM) != SUCCESS) {
       ERROR("Unable to parse the enclave");
       goto failure;

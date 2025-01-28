@@ -20,7 +20,7 @@ int sdk_create_domain(
     tyche_domain_t* encl,
     const char* self,
     usize cores,
-    usize traps,
+    usize traps[NB_TRAP_PERMS],
     usize perms);
 
 /// Transitions into the domain.

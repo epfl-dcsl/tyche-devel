@@ -2,12 +2,13 @@ use core::sync::atomic::{AtomicBool, Ordering};
 
 use capa_engine::config::{NB_CORES, NB_DOMAINS, NB_REMAP_REGIONS};
 use capa_engine::context::{RegisterContext, RegisterState};
+use capa_engine::permission::{trap_bits, PermissionIndex};
 use capa_engine::{CapaEngine, CapaError, Domain, Handle, LocalCapa, MemOps, Remapper};
 use mmu::eptmapper::EPT_ROOT_FLAGS;
 use mmu::{EptMapper, FrameAllocator, IoPtFlag, IoPtMapper};
 use spin::{Mutex, MutexGuard};
 use utils::{GuestPhysAddr, HostPhysAddr, HostVirtAddr};
-use vmx::bitmaps::{EptEntryFlags, EptMemoryType, PinbasedControls};
+use vmx::bitmaps::{EptEntryFlags, EptMemoryType, ExceptionBitmap, PinbasedControls};
 use vmx::fields::VmcsField;
 use vmx::{ActiveVmcs, VmxExitReason, Vmxon};
 use vtd::Iommu;
@@ -323,5 +324,29 @@ impl StateX86 {
         ))
         .expect("Failed to update EPT");
         Ok(())
+    }
+
+    pub fn should_trap_external_interrupt(
+        engine: &mut MutexGuard<CapaEngine>,
+        domain: &Handle<Domain>,
+    ) -> bool {
+        for i in PermissionIndex::AllowedTraps as usize..=PermissionIndex::AllowedTraps3 as usize {
+            let p = PermissionIndex::from_usize(i).unwrap();
+            let perm = engine.get_domain_permission(*domain, p);
+            if ((p != PermissionIndex::AllowedTraps) && perm != trap_bits::ALL)
+                || (p == PermissionIndex::AllowedTraps && perm != trap_bits::ALL_NO_EXCEPT)
+            {
+                return true;
+            }
+        }
+        false
+    }
+
+    pub fn translated_exception(
+        engine: &mut MutexGuard<CapaEngine>,
+        domain: &Handle<Domain>,
+    ) -> ExceptionBitmap {
+        let perm = engine.get_domain_permission(*domain, PermissionIndex::AllowedTraps) as u32;
+        return ExceptionBitmap::from_bits_truncate(!(perm));
     }
 }
