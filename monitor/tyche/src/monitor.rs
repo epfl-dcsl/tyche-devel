@@ -118,7 +118,7 @@ pub trait PlatformState {
     fn max_cpus() -> usize;
     fn create_context(
         &mut self,
-        engine: MutexGuard<CapaEngine>,
+        engine: &mut MutexGuard<CapaEngine>,
         current: Handle<Domain>,
         domain: Handle<Domain>,
         core: LogicalID,
@@ -692,7 +692,7 @@ pub trait Monitor<T: PlatformState + 'static> {
         core_id: usize,
     ) -> Result<(), CapaError> {
         let mut engine = Self::lock_engine(state, current);
-        engine.handle_violation(*current, core_id)?;
+        engine.switch_to_manager(*current, core_id)?;
         Self::apply_updates(state, &mut engine);
         Ok(())
     }
@@ -732,7 +732,8 @@ pub trait Monitor<T: PlatformState + 'static> {
         let mut engine = Self::lock_engine(state, current);
         let capa = engine.create_switch_on_core(*current, core.as_usize(), domain)?;
         let domain = engine.get_domain_capa(*current, domain)?;
-        T::create_context(state, engine, *current, domain, core)?;
+        engine.freeze_permissions(domain)?;
+        T::create_context(state, &mut engine, *current, domain, core)?;
         return Ok(capa);
     }
 
@@ -851,16 +852,8 @@ pub trait Monitor<T: PlatformState + 'static> {
             }
             calls::RETURN_TO_MANAGER => {
                 log::trace!("Return to manager from dom {}", domain.idx());
-                Self::do_handle_violation(state, domain)?;
+                Self::do_switch_to_manager(state, domain)?;
                 //Self::do_return_to_manager(state, domain, cpuid())?;
-                return Ok(false);
-            }
-            calls::CALL_MANAGER => {
-                log::trace!("Calling manager from dom {}", domain.idx());
-                // This is handled like a violation. with the exception that
-                // we move the instruction pointer before.
-                // TODO(aghosn): might end up doing the same for regular vms.
-                Self::do_handle_violation(state, domain)?;
                 return Ok(false);
             }
             calls::EXIT => {
@@ -987,11 +980,11 @@ pub trait Monitor<T: PlatformState + 'static> {
         }
     }
 
-    fn do_handle_violation(state: &mut T, current: &mut Handle<Domain>) -> Result<(), CapaError> {
+    fn do_switch_to_manager(state: &mut T, current: &mut Handle<Domain>) -> Result<(), CapaError> {
         let mut engine = Self::lock_engine(state, current);
         let core = T::logical_id();
         state.context_interrupted(current, core);
-        engine.handle_violation(*current, core.as_usize())?;
+        engine.switch_to_manager(*current, core.as_usize())?;
         Self::apply_updates(state, &mut engine);
         Ok(())
     }

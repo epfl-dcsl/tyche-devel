@@ -1,19 +1,23 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd)]
-#[repr(usize)]
+#[repr(u64)]
 pub enum PermissionIndex {
     MonitorInterface = 0,
+    // 256 possible values
     AllowedTraps = 1,
-    AllowedCores = 2,
-    MgmtRead16 = 3,
-    MgmtWrite16 = 4,
-    MgmtRead32 = 5,
-    MgmtWrite32 = 6,
-    MgmtRead64 = 7,
-    MgmtWrite64 = 8,
-    MgmtReadNat = 9,
-    MgmtWriteNat = 10,
-    MgmtReadGp = 11,
-    MgmtWriteGp = 12,
+    AllowedTraps1 = 2,
+    AllowedTraps2 = 3,
+    AllowedTraps3 = 4,
+    AllowedCores = 5,
+    MgmtRead16 = 6,
+    MgmtWrite16 = 7,
+    MgmtRead32 = 8,
+    MgmtWrite32 = 9,
+    MgmtRead64 = 10,
+    MgmtWrite64 = 11,
+    MgmtReadNat = 12,
+    MgmtWriteNat = 13,
+    MgmtReadGp = 14,
+    MgmtWriteGp = 15,
 }
 
 impl PermissionIndex {
@@ -25,17 +29,20 @@ impl PermissionIndex {
         match idx {
             0 => Some(Self::MonitorInterface),
             1 => Some(Self::AllowedTraps),
-            2 => Some(Self::AllowedCores),
-            3 => Some(Self::MgmtRead16),
-            4 => Some(Self::MgmtWrite16),
-            5 => Some(Self::MgmtRead32),
-            6 => Some(Self::MgmtWrite32),
-            7 => Some(Self::MgmtRead64),
-            8 => Some(Self::MgmtWrite64),
-            9 => Some(Self::MgmtReadNat),
-            10 => Some(Self::MgmtWriteNat),
-            11 => Some(Self::MgmtReadGp),
-            12 => Some(Self::MgmtWriteGp),
+            2 => Some(Self::AllowedTraps1),
+            3 => Some(Self::AllowedTraps2),
+            4 => Some(Self::AllowedTraps3),
+            5 => Some(Self::AllowedCores),
+            6 => Some(Self::MgmtRead16),
+            7 => Some(Self::MgmtWrite16),
+            8 => Some(Self::MgmtRead32),
+            9 => Some(Self::MgmtWrite32),
+            10 => Some(Self::MgmtRead64),
+            11 => Some(Self::MgmtWrite64),
+            12 => Some(Self::MgmtReadNat),
+            13 => Some(Self::MgmtWriteNat),
+            14 => Some(Self::MgmtReadGp),
+            15 => Some(Self::MgmtWriteGp),
             _ => None,
         }
     }
@@ -70,12 +77,17 @@ pub mod trap_bits {
 
     /// All traps can be handled by the domain.
     pub const ALL: u64 = !(NONE);
+
+    /// Trap bits without exceptions. Use only for first bitmap.
+    pub const ALL_NO_EXCEPT: u64 = !((1 << 32) - 1);
 }
 
 pub struct Permissions {
+    pub freezed: bool,
     pub perm: [u64; PermissionIndex::size()],
 }
 
 pub const DEFAULT: Permissions = Permissions {
+    freezed: false,
     perm: [0; PermissionIndex::size()],
 };

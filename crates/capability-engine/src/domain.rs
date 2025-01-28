@@ -230,6 +230,7 @@ impl Domain {
         if self.is_sealed {
             Err(CapaError::AlreadySealed)
         } else {
+            self.permissions.freezed = true;
             self.is_sealed = true;
             Ok(())
         }
@@ -237,6 +238,14 @@ impl Domain {
 
     pub fn is_sealed(&self) -> bool {
         self.is_sealed
+    }
+
+    pub fn freeze_permissions(&mut self) {
+        self.permissions.freezed = true;
+    }
+
+    pub fn is_frozen_permissions(&self) -> bool {
+        self.permissions.freezed
     }
 
     pub fn is_io(&self) -> bool {
@@ -401,6 +410,9 @@ pub(crate) fn set_permission(
     let domain = &mut domains[domain];
     if domain.is_sealed() {
         return Err(CapaError::AlreadySealed);
+    }
+    if domain.is_frozen_permissions() {
+        return Err(CapaError::AlreadyFrozen);
     }
     domain.permissions.perm[perm as usize] = value;
     Ok(())

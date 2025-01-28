@@ -24,6 +24,10 @@
 #include "backend.h"
 #include "tyche_api.h"
 
+
+// ———————————————————————————————— globals ————————————————————————————————— //
+usize ALL_TRAPS[NB_TRAP_PERMS] = {ENABLE_TRAP, ENABLE_TRAP, ENABLE_TRAP, ENABLE_TRAP};
+usize NO_TRAPS[NB_TRAP_PERMS] = {DISABLE_TRAP, DISABLE_TRAP, DISABLE_TRAP, DISABLE_TRAP};
 // ———————————————————————————— Local Functions ————————————————————————————— //
 // Hash the region
 static uint32_t PF_H = 1 << 3;
@@ -281,7 +285,7 @@ failure:
 int init_domain_with_cores_traps(
     tyche_domain_t* domain,
     usize cores,
-    usize traps,
+    usize traps[NB_TRAP_PERMS],
     usize perms);
 
 /// Parses an ELF binary created by tychools.
@@ -298,14 +302,14 @@ int load_domain(tyche_domain_t* domain);
 int init_domain_with_cores_traps(
     tyche_domain_t* domain,
     usize cores,
-    usize traps,
+    usize traps[NB_TRAP_PERMS],
     usize perms)
 {
   if (domain == NULL || domain->parser.elf.memory.start == NULL) {
     ERROR("Null argument provided: domain(%p)", domain);
     goto failure;
   }
-  domain->traps = traps;
+  memcpy(domain->traps, traps, sizeof(usize) * NB_TRAP_PERMS);
   domain->core_map = cores;
   domain->perms = perms;
   if (parse_domain(domain) != SUCCESS) {
@@ -446,7 +450,6 @@ failure:
 int load_domain(tyche_domain_t* domain)
 {
     //ERROR("Loading domain");
-  usize size = 0;
   usize phys_size = 0;
   domain_mslot_t *slot = NULL;
   if (domain == NULL) {
@@ -590,11 +593,15 @@ int load_domain(tyche_domain_t* domain)
   DEBUG("Done mprotecting domain %d's sections", domain->handle);
 
   // Set the traps.
-  if (backend_td_config(
-        domain, TYCHE_CONFIG_TRAPS, domain->traps) != SUCCESS) {
-    ERROR("Unable to set the traps for the domain %d", domain->handle);
-    goto failure;
+  for (usize i = TYCHE_CONFIG_TRAPS; i <= TYCHE_CONFIG_TRAPS3; i++) {
+    int idx = (int)(i - TYCHE_CONFIG_TRAPS);
+    if (backend_td_config(
+        domain, i, domain->traps[idx]) != SUCCESS) {
+      ERROR("Unable to set the traps for the domain %d", domain->handle);
+      goto failure;
+    }
   }
+
   // Set the cores. 
   if (backend_td_config(
         domain, TYCHE_CONFIG_CORES, domain->core_map) != SUCCESS) {
@@ -647,7 +654,7 @@ int sdk_create_domain(
     tyche_domain_t* dom,
     const char* self,
     usize cores,
-    usize traps,
+    usize traps[NB_TRAP_PERMS],
     usize perms)
 {
   char* dump =  NULL;

@@ -29,11 +29,11 @@ failure:
   // Something went wrong.
   int *pewpew = (int*) 0xdeadbabe;
   *pewpew = 0x666;
+  return next;
 }
 
 void trusted_main(void)
 {
-  capa_index_t ret_handle = 0;
   // Call the domain's main.
   trusted_entry(); 
 

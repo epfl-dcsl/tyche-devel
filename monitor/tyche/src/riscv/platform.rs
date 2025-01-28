@@ -532,7 +532,7 @@ impl PlatformState for StateRiscv {
 
     fn create_context(
         &mut self,
-        _engine: MutexGuard<CapaEngine>,
+        _engine: &mut MutexGuard<CapaEngine>,
         current: Handle<Domain>,
         domain: Handle<Domain>,
         core: LogicalID,
