@@ -3,6 +3,7 @@ use core::sync::atomic::AtomicUsize;
 
 use attestation::hashing::hash_region;
 use capa_engine::config::NB_CORES;
+use capa_engine::permission::PermissionIndex;
 use capa_engine::utils::BitmapIterator;
 use capa_engine::{
     permission, AccessRights, Buffer, CapaEngine, CapaError, CapaInfo, Domain, Handle, LocalCapa,
@@ -231,6 +232,13 @@ pub trait PlatformState {
         gpa: usize,
         size: usize,
     ) -> Result<(usize, usize), CapaError>;
+
+    fn inject_interrupt(
+        &mut self,
+        engine: &mut MutexGuard<CapaEngine>,
+        domain: &Handle<Domain>,
+        trapnr: u8,
+    ) -> Result<(), CapaError>;
 }
 
 pub trait Monitor<T: PlatformState + 'static> {
@@ -978,6 +986,28 @@ pub trait Monitor<T: PlatformState + 'static> {
                 return Err(CapaError::InvalidOperation);
             }
         }
+    }
+
+    fn do_route_interrupt(
+        state: &mut T,
+        current: &mut Handle<Domain>,
+        trapnr: u8,
+    ) -> Result<(), CapaError> {
+        let mut engine = Self::lock_engine(state, current);
+        let perm_idx = PermissionIndex::from_usize(
+            (trapnr as u64 / PermissionIndex::nb_entries_per_bitmap()
+                + PermissionIndex::AllowedTraps as u64) as usize,
+        )
+        .ok_or(CapaError::InvalidValue)?;
+        let perm = engine.get_domain_permission(*current, perm_idx);
+        // The domain cannot handle the interrupt.
+        // TODO(aghosn): for the moment this only supports a chain of 1.
+        if (trapnr as u64 % PermissionIndex::nb_entries_per_bitmap()) & perm == 0 {
+            drop(engine);
+            return Self::do_switch_to_manager(state, current);
+        };
+        state.inject_interrupt(&mut engine, current, trapnr)?;
+        Ok(())
     }
 
     fn do_switch_to_manager(state: &mut T, current: &mut Handle<Domain>) -> Result<(), CapaError> {

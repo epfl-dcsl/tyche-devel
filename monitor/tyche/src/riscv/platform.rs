@@ -851,6 +851,15 @@ impl PlatformState for StateRiscv {
     ) -> Result<(usize, usize), CapaError> {
         Ok((gpa, size))
     }
+
+    fn inject_interrupt(
+        &mut self,
+        engine: &mut MutexGuard<CapaEngine>,
+        domain: &Handle<Domain>,
+        trapnr: u8,
+    ) -> Result<(), CapaError> {
+        todo!("Unimplemented");
+    }
 }
 
 // ————————————————————————— Monitor Implementation ————————————————————————— //
