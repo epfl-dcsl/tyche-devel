@@ -561,6 +561,26 @@ impl PlatformState for StateX86 {
         // Not found, we assume the result is Identity mapped.
         Ok((gpa, size))
     }
+
+    fn inject_interrupt(
+        &mut self,
+        _engine: &mut MutexGuard<CapaEngine>,
+        _domain: &Handle<Domain>,
+        trapnr: u8,
+    ) -> Result<(), CapaError> {
+        let interrupt = self.vcpu.interrupt_info().unwrap();
+        if interrupt.is_none()
+            || !interrupt.unwrap().valid()
+            || interrupt.unwrap().vector() != trapnr
+        {
+            log::error!("Invalid interrupt in the injection.");
+            return Err(CapaError::InvalidOperation);
+        }
+        self.vcpu
+            .inject_interrupt(interrupt.unwrap())
+            .map_err(|_| CapaError::PlatformError)?;
+        return Ok(());
+    }
 }
 
 // ————————————————————— Monitor Implementation on X86 —————————————————————— //
@@ -1065,6 +1085,24 @@ impl MonitorX86 {
                     *address_eoi = 0;
                 }*/
                 x2apic::send_eoi();
+            }
+            // Route the interrupt.
+            if reason == VmxExitReason::ExternalInterrupt || reason == VmxExitReason::Exception {
+                match vs.vcpu.interrupt_info().unwrap() {
+                    Some(exit) if exit.valid() => {
+                        match Self::do_route_interrupt(vs, domain, exit.vector()) {
+                            Ok(_) => {
+                                return Ok(HandlerResult::Resume);
+                            }
+                            Err(e) =>  {
+                                log::error!("Unable to handle {:?}, {:?} trapnr {}",
+                                    reason, e, exit.vector());
+                                return Ok(HandlerResult::Crash);
+                            }
+                        }
+                    }
+                    _ => {/*Nothing to do*/}
+                }
             }
             match Self::do_switch_to_manager(vs, domain) {
                 Ok(_) => {

@@ -46,6 +46,10 @@ impl PermissionIndex {
             _ => None,
         }
     }
+
+    pub fn nb_entries_per_bitmap() -> u64 {
+        64
+    }
 }
 
 #[rustfmt::skip]
