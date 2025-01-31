@@ -13,7 +13,7 @@ use mmu::FrameAllocator;
 use spin::MutexGuard;
 use stage_two_abi::{GuestInfo, Manifest};
 use utils::HostPhysAddr;
-use vmx::bitmaps::{exit_qualification, PinbasedControls};
+use vmx::bitmaps::{exit_qualification, ExitControls, PinbasedControls, RFlags};
 use vmx::fields::VmcsField;
 use vmx::{VmxError, VmxExitReason};
 
@@ -167,6 +167,15 @@ impl PlatformState for StateX86 {
                             .union(PinbasedControls::EXTERNAL_INTERRUPT_EXITING),
                     )
                     .unwrap();
+                /*Check if we can capture the interrupt number.*/
+                if Self::should_ack_interrupt(engine, &domain) {
+                    let exit_ctrl = self
+                        .vcpu
+                        .get_vm_exit_ctrls()
+                        .unwrap()
+                        .union(ExitControls::ACK_INTERRUPT_ON_EXIT);
+                    self.vcpu.set_vm_exit_ctrls(exit_ctrl).unwrap();
+                }
             }
             // Set the exception bitmap too.
             let exception = Self::translated_exception(engine, &domain);
@@ -575,6 +584,13 @@ impl PlatformState for StateX86 {
         {
             log::error!("Invalid interrupt in the injection.");
             return Err(CapaError::InvalidOperation);
+        }
+        // Check if interrupts are blocked.
+        if self.vcpu.get(VmcsField::GuestRflags).unwrap() & RFlags::INTERRUPT_FLAG.bits() as usize
+            == 0
+        {
+            //TODO: decide what we do in this case.
+            return Ok(());
         }
         self.vcpu
             .inject_interrupt(interrupt.unwrap())
@@ -1087,7 +1103,8 @@ impl MonitorX86 {
                 x2apic::send_eoi();
             }
             // Route the interrupt.
-            if reason == VmxExitReason::ExternalInterrupt || reason == VmxExitReason::Exception {
+            // TODO: we might need to ack interrupt to check the value.
+            if reason == VmxExitReason::ExternalInterrupt {
                 match vs.vcpu.interrupt_info().unwrap() {
                     Some(exit) if exit.valid() => {
                         match Self::do_route_interrupt(vs, domain, exit.vector()) {
