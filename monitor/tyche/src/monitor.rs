@@ -999,10 +999,11 @@ pub trait Monitor<T: PlatformState + 'static> {
                 + PermissionIndex::AllowedTraps as u64) as usize,
         )
         .ok_or(CapaError::InvalidValue)?;
+        let perm_bit = trapnr as u64 % PermissionIndex::nb_entries_per_bitmap();
         let perm = engine.get_domain_permission(*current, perm_idx);
         // The domain cannot handle the interrupt.
         // TODO(aghosn): for the moment this only supports a chain of 1.
-        if (trapnr as u64 % PermissionIndex::nb_entries_per_bitmap()) & perm == 0 {
+        if (1 << perm_bit) & perm == 0 {
             drop(engine);
             return Self::do_switch_to_manager(state, current);
         };

@@ -334,12 +334,29 @@ impl StateX86 {
             let p = PermissionIndex::from_usize(i).unwrap();
             let perm = engine.get_domain_permission(*domain, p);
             if ((p != PermissionIndex::AllowedTraps) && perm != trap_bits::ALL)
-                || (p == PermissionIndex::AllowedTraps && perm != trap_bits::ALL_NO_EXCEPT)
+                || (p == PermissionIndex::AllowedTraps
+                    && (perm >> 32) ^ (trap_bits::ALL_NO_EXCEPT >> 32) != 0)
             {
                 return true;
             }
         }
         false
+    }
+
+    pub fn should_ack_interrupt(
+        engine: &mut MutexGuard<CapaEngine>,
+        domain: &Handle<Domain>,
+    ) -> bool {
+        for i in PermissionIndex::AllowedTraps as usize..=PermissionIndex::AllowedTraps3 as usize {
+            let p = PermissionIndex::from_usize(i).unwrap();
+            let perm = engine.get_domain_permission(*domain, p);
+            if ((p != PermissionIndex::AllowedTraps) && perm == trap_bits::NONE)
+                || (p == PermissionIndex::AllowedTraps && (perm >> 31) == 0)
+            {
+                return false;
+            }
+        }
+        true
     }
 
     pub fn translated_exception(

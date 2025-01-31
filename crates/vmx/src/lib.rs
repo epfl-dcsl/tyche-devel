@@ -403,6 +403,24 @@ impl<'vmx> ActiveVmcs<'vmx> {
         Ok(Some(info))
     }
 
+    pub fn idt_vectoring_info(&self) -> Result<Option<VmExitInterrupt>, VmxError> {
+        let mut info =
+            VmExitInterrupt::from_u32(unsafe { VmcsField::IdtVectoringInfoField.vmread()? } as u32);
+        if !info.valid() {
+            return Ok(None);
+        }
+
+        if info.error_code_valid() {
+            _ = info.set_error_code(unsafe {
+                {
+                    VmcsField::VmExitIntrErrorCode.vmread()? as u32
+                }
+            });
+        }
+
+        Ok(Some(info))
+    }
+
     /// Initializes the MSR bitmaps, default to deny all reads and writes.
     ///
     /// SAFETY: The frame must be valid and becomes entirely owned by the VMCS, that is any future
