@@ -3,7 +3,6 @@ use core::sync::atomic::AtomicUsize;
 
 use attestation::hashing::hash_region;
 use capa_engine::config::NB_CORES;
-use capa_engine::permission::PermissionIndex;
 use capa_engine::utils::BitmapIterator;
 use capa_engine::{
     permission, AccessRights, Buffer, CapaEngine, CapaError, CapaInfo, Domain, Handle, LocalCapa,
@@ -26,7 +25,7 @@ pub enum CoreUpdate {
     },
     Switch {
         domain: Handle<Domain>,
-        return_capa: LocalCapa,
+        return_capa: Option<LocalCapa>,
         delta: usize,
     },
     Trap {
@@ -431,7 +430,7 @@ pub trait Monitor<T: PlatformState + 'static> {
         current: &mut Handle<Domain>,
         bitmap: permission::PermissionIndex,
     ) -> Result<usize, CapaError> {
-        let mut engine = Self::lock_engine(state, current);
+        let engine = Self::lock_engine(state, current);
         Ok(engine.get_domain_permission(*current, bitmap) as usize)
     }
 
@@ -994,19 +993,14 @@ pub trait Monitor<T: PlatformState + 'static> {
         trapnr: u8,
     ) -> Result<(), CapaError> {
         let mut engine = Self::lock_engine(state, current);
-        let perm_idx = PermissionIndex::from_usize(
-            (trapnr as u64 / PermissionIndex::nb_entries_per_bitmap()
-                + PermissionIndex::AllowedTraps as u64) as usize,
-        )
-        .ok_or(CapaError::InvalidValue)?;
-        let perm_bit = trapnr as u64 % PermissionIndex::nb_entries_per_bitmap();
-        let perm = engine.get_domain_permission(*current, perm_idx);
-        // The domain cannot handle the interrupt.
-        // TODO(aghosn): for the moment this only supports a chain of 1.
-        if (1 << perm_bit) & perm == 0 {
-            drop(engine);
-            return Self::do_switch_to_manager(state, current);
+        if !engine.allowed_trap(current, trapnr) {
+            let core = T::logical_id();
+            state.context_interrupted(current, core);
+            engine.handle_trap(*current, core.as_usize(), trapnr)?;
+            Self::apply_updates(state, &mut engine);
+            return Ok(());
         };
+        // reinject the interrupt in the current domain
         state.inject_interrupt(&mut engine, current, trapnr)?;
         Ok(())
     }
@@ -1144,21 +1138,6 @@ pub trait Monitor<T: PlatformState + 'static> {
                             domain,
                             return_capa,
                             delta,
-                        })
-                        .unwrap();
-                }
-                capa_engine::Update::Trap {
-                    manager,
-                    trap,
-                    info,
-                    core,
-                } => {
-                    let mut core_updates = CORE_UPDATES[core as usize].lock();
-                    core_updates
-                        .push(CoreUpdate::Trap {
-                            manager,
-                            trap,
-                            info,
                         })
                         .unwrap();
                 }

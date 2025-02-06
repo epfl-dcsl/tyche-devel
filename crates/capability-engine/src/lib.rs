@@ -443,11 +443,16 @@ impl CapaEngine {
     }
 
     pub fn get_domain_permission(
-        &mut self,
+        &self,
         domain: Handle<Domain>,
         perm: permission::PermissionIndex,
     ) -> u64 {
         domain::get_permission(domain, &self.domains, perm)
+    }
+
+    pub fn allowed_trap(&self, domain: &Handle<Domain>, trapnr: u8) -> bool {
+        // Safe to unwrap as we take an u8 in entry.
+        self.domains[*domain].can_handle(trapnr)
     }
 
     /// Seal a domain and return a switch handle for that domain.
@@ -467,7 +472,11 @@ impl CapaEngine {
         );*/
         let trans = self.domains[domain]
             .find_capa(|x| match x {
-                Capa::Switch { to, core: c } => {
+                Capa::Switch {
+                    to,
+                    core: c,
+                    resume: false,
+                } => {
                     if *to == capa && *c == core {
                         return true;
                     }
@@ -519,7 +528,11 @@ impl CapaEngine {
         }
         let capa = insert_capa(
             domain,
-            Capa::Switch { to: capa, core },
+            Capa::Switch {
+                to: capa,
+                core,
+                resume: false,
+            },
             &mut self.regions,
             &mut self.domains,
         )?;
@@ -588,19 +601,29 @@ impl CapaEngine {
     ) -> Result<(), CapaError> {
         let mut quantum = delta;
         // Check the domain can be scheduled on the core.
-        let (next_dom, _) = self.domains[domain].get(capa)?.as_switch()?;
+        let (next_dom, _, resume) = self.domains[domain].get(capa)?.as_switch()?;
         if (1 << core) & self.domains[next_dom].core_map() == 0 {
             log::error!("Attempt to schedule domain on unallowed core {}", core);
             log::error!("allowed: {:b}", self.domains[next_dom].core_map());
             log::error!("request: {:b}", 1 << core);
             return Err(CapaError::InvalidCore);
         }
-        let return_capa = insert_capa(
-            next_dom,
-            Capa::Switch { to: domain, core },
-            &mut self.regions,
-            &mut self.domains,
-        )?;
+        // If the switch capa is not a return from interrupt.
+        let return_capa = if !resume {
+            let capa = insert_capa(
+                next_dom,
+                Capa::Switch {
+                    to: domain,
+                    core,
+                    resume: false,
+                },
+                &mut self.regions,
+                &mut self.domains,
+            )?;
+            Some(capa)
+        } else {
+            None
+        };
         remove_capa(domain, capa, &mut self.domains).unwrap(); // We already checked the capa
         self.domains[next_dom].execute_on_core(core);
         self.domains[domain].remove_from_core(core);
@@ -640,22 +663,41 @@ impl CapaEngine {
         &mut self,
         domain: Handle<Domain>,
         core: usize,
-        trap: u64,
-        info: u64,
+        trap: u8,
     ) -> Result<(), CapaError> {
-        if self.domains[domain].can_handle(trap) {
+        let dom = &self.domains[domain];
+        if dom.can_handle(trap) {
             log::error!("The domain is able to handle its own trap, why did we exit?");
             return Err(CapaError::ValidTrapCausedExit);
         }
-        //TODO: fix transition capa. This entire path is unstable and should be removed.
-        let manager = domain::find_trap_handler(domain, trap, &self.domains)
+        let dest = domain::find_trap_handler(domain, trap, &self.domains)
             .ok_or(CapaError::CouldNotHandleTrap)?;
-        self.updates
-            .push(Update::Trap {
-                manager,
-                trap,
-                info,
+
+        // Regardless of whether or not the dest is the manager, we create a new
+        // resume (return from interrupt) capability.
+        // We give it to the dest before effecting the switch.
+        let return_capa = insert_capa(
+            dest,
+            Capa::Switch {
+                to: domain,
                 core,
+                resume: true,
+            },
+            &mut self.regions,
+            &mut self.domains,
+        )?;
+
+        // Effect the switch on the core.
+        self.domains[dest].execute_on_core(core);
+        self.domains[domain].remove_from_core(core);
+        self.cores[core].set_domain(dest);
+
+        self.updates
+            .push(Update::Switch {
+                domain: dest,
+                return_capa: Some(return_capa),
+                core,
+                delta: 0,
             })
             .unwrap();
         Ok(())
@@ -676,7 +718,11 @@ impl CapaEngine {
         let manager = dom.get_manager().ok_or(CapaError::CouldNotHandleTrap)?;
         let capa = dom
             .find_capa(|x| match x {
-                Capa::Switch { to, core } => {
+                Capa::Switch {
+                    to,
+                    core,
+                    resume: _,
+                } => {
                     if *to == manager && *core == core_id {
                         return true;
                     }
@@ -770,7 +816,11 @@ impl CapaEngine {
         }
         // First check that we do not have a switch capa on ANY core.
         let has_switch = self.domains[domain].find_capa(|x| match x {
-            Capa::Switch { to: _, core: _ } => {
+            Capa::Switch {
+                to: _,
+                core: _,
+                resume: _,
+            } => {
                 return true;
             }
             _ => {

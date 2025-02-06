@@ -233,7 +233,7 @@ impl StateX86 {
         current_ctx: &mut MutexGuard<Contextx86>,
         next_ctx: &mut MutexGuard<Contextx86>,
         next_domain: MutexGuard<DataX86>,
-        return_capa: LocalCapa,
+        return_capa: Option<LocalCapa>,
         delta: usize,
     ) -> Result<(), CapaError> {
         perf::start_step(0);
@@ -281,7 +281,7 @@ impl StateX86 {
                 .set(VmcsField::GuestRax, MONITOR_SWITCH_INTERRUPTED, None)
                 .or(Err(CapaError::PlatformError))?;
             next_ctx
-                .set(VmcsField::GuestRdi, return_capa.as_usize(), None)
+                .set(VmcsField::GuestRdi, return_capa.unwrap().as_usize(), None)
                 .or(Err(CapaError::PlatformError))?;
         } else if next_ctx.interrupted {
             // Case 2: do not put the return capa.
@@ -292,7 +292,7 @@ impl StateX86 {
                 .set(VmcsField::GuestRax, MONITOR_SUCCESS, None)
                 .or(Err(CapaError::PlatformError))?;
             next_ctx
-                .set(VmcsField::GuestRdi, return_capa.as_usize(), None)
+                .set(VmcsField::GuestRdi, return_capa.unwrap().as_usize(), None)
                 .or(Err(CapaError::PlatformError))?;
         }
 

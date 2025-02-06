@@ -205,10 +205,6 @@ impl Domain {
         self.id
     }
 
-    pub fn traps(&self) -> u64 {
-        self.permissions.perm[PermissionIndex::AllowedTraps as usize]
-    }
-
     pub fn cores(&self) -> u64 {
         self.cores
     }
@@ -221,9 +217,15 @@ impl Domain {
         self.permissions.perm[PermissionIndex::MonitorInterface as usize]
     }
     /// Returns Wether or not this domain can handle the given trap
-    pub fn can_handle(&self, trap: u64) -> bool {
-        let traps = self.permissions.perm[PermissionIndex::AllowedTraps as usize];
-        traps & trap != 0 && self.is_sealed
+    pub fn can_handle(&self, trapnr: u8) -> bool {
+        let perm_idx = PermissionIndex::from_usize(
+            (trapnr as u64 / PermissionIndex::nb_entries_per_bitmap()
+                + PermissionIndex::AllowedTraps as u64) as usize,
+        )
+        .unwrap();
+        let perm_bit = trapnr as u64 % PermissionIndex::nb_entries_per_bitmap();
+        return self.is_sealed
+            && (((1 << perm_bit) & self.permissions.perm[perm_idx as usize]) != 0);
     }
 
     pub fn seal(&mut self) -> Result<(), CapaError> {
@@ -475,7 +477,11 @@ pub(crate) fn create_switch(
     regions: &mut RegionPool,
     domains: &mut DomainPool,
 ) -> Result<LocalCapa, CapaError> {
-    let capa = Capa::Switch { to: domain, core };
+    let capa = Capa::Switch {
+        to: domain,
+        core,
+        resume: false,
+    };
     insert_capa(domain, capa, regions, domains)
 }
 
@@ -571,12 +577,12 @@ pub(crate) fn deactivate_region(
 /// Return none if no suitable manager exists.
 pub(crate) fn find_trap_handler(
     domain: Handle<Domain>,
-    trap: u64,
+    trap: u8,
     domains: &DomainPool,
 ) -> Option<Handle<Domain>> {
     let mut handle = domain;
     while let Some(manager) = domains.get(handle) {
-        if manager.traps() & trap != 0 {
+        if manager.can_handle(trap) {
             return Some(handle);
         }
         let Some(next_handle) = manager.manager else {
