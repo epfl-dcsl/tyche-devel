@@ -282,17 +282,8 @@ impl PlatformState for StateX86 {
                     curr_ctx.interrupted = true;
                     let mut next_ctx = Self::get_context(*next, core);
                     let next_dom = Self::get_domain(*next);
-                    Self::switch_domain(
-                        vcpu,
-                        &mut curr_ctx,
-                        &mut next_ctx,
-                        next_dom,
-                        // Fake the capa, it's just passed into the domain as idx
-                        // TODO it should actually be removed from the call altogether.
-                        LocalCapa::new(0),
-                        0,
-                    )
-                    .expect("Unable to perform the switch");
+                    Self::switch_domain(vcpu, &mut curr_ctx, &mut next_ctx, next_dom, None, 0)
+                        .expect("Unable to perform the switch");
                     // Notify that we preemted the domain.
                     // This has to be done after the switch to override the exit
                     // reason.

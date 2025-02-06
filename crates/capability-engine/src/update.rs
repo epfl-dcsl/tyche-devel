@@ -23,19 +23,9 @@ pub enum Update {
     },
     Switch {
         domain: Handle<Domain>,
-        return_capa: LocalCapa,
+        return_capa: Option<LocalCapa>,
         core: usize,
         delta: usize,
-    },
-    Trap {
-        /// The manager responsible for handling the trap
-        manager: Handle<Domain>,
-        /// The trap to handle
-        trap: u64,
-        /// Trap information
-        info: u64,
-        /// Core on which the trap happenend
-        core: usize,
     },
     Cleanup {
         start: usize,
@@ -130,16 +120,6 @@ impl fmt::Display for Update {
             Update::CreateDomain { domain } => write!(f, "CreateDomain({})", domain),
             Update::Switch { domain, core, .. } => write!(f, "Switch({}, core {})", domain, core),
             Update::Cleanup { start, end } => write!(f, "Cleanup([0x{:x}, 0x{:x}])", start, end),
-            Update::Trap {
-                manager,
-                trap,
-                info: _,
-                core,
-            } => write!(
-                f,
-                "Trap(manager: {}, trap: {}, core: {})",
-                manager, trap, core
-            ),
         }
     }
 }

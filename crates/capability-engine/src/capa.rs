@@ -18,6 +18,8 @@ pub enum Capa {
     Switch {
         to: Handle<Domain>,
         core: usize,
+        // if true, this is a one shot capa to return from an interrupt.
+        resume: bool,
     },
 }
 
@@ -192,9 +194,9 @@ impl Capa {
         }
     }
 
-    pub fn as_switch(self) -> Result<(Handle<Domain>, usize), CapaError> {
+    pub fn as_switch(self) -> Result<(Handle<Domain>, usize, bool), CapaError> {
         match self {
-            Capa::Switch { to, core } => Ok((to, core)),
+            Capa::Switch { to, core, resume } => Ok((to, core, resume)),
             _ => Err(CapaError::WrongCapabilityType),
         }
     }
@@ -235,7 +237,11 @@ impl Capa {
                     domain_id: domain.id(),
                 })
             }
-            Capa::Switch { to, core } => {
+            Capa::Switch {
+                to,
+                core,
+                resume: _,
+            } => {
                 let domain = &domains[to];
                 Some(CapaInfo::Switch {
                     domain_id: domain.id(),

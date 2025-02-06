@@ -662,7 +662,7 @@ impl PlatformState for StateRiscv {
                     "Domain Switch on core {} for domain {}, return_capa: {:x}",
                     core_id,
                     domain,
-                    return_capa.as_usize()
+                    return_capa.unwrap().as_usize()
                 );
 
                 let current_ctx = &mut StateRiscv::get_context(*current_domain, core_id);
@@ -681,7 +681,7 @@ impl PlatformState for StateRiscv {
                 );
 
                 next_ctx.reg_state.a0 = 0x0;
-                next_ctx.reg_state.a1 = return_capa.as_usize() as isize;
+                next_ctx.reg_state.a1 = return_capa.unwrap().as_usize() as isize;
                 *current_domain = domain;
             }
             CoreUpdate::Trap {
