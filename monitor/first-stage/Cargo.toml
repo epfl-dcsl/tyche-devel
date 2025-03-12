@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [features]
+default = ["color-dom0"]
 # Print to VGA text mode
 vga = ["dep:vga"]
 bare_metal = []
@@ -13,18 +14,21 @@ guest_linux = []
 guest_rawc = []
 no_guest = []
 second-stage = []
+#If enabled, we apply memory coloring for dom0.
+color-dom0 = []
 
 [dependencies]
 # Internal
 stage_two_abi = { path = "../../crates/stage_two_abi" }
 vmx = { path = "../../crates/vmx/" }
 vtd = { path = "../../crates/vtd/" }
-mmu = { path = "../../crates/mmu/" }
+mmu = { path = "../../crates/mmu/", features=["coloring-allocator"] }
 qemu = { path = "../../crates/qemu/" }
 debug = { path = "../../crates/debug/" }
 logger = { path = "../../crates/logger/" }
 vga = { path = "../../crates/vga/", optional = true }
 x2apic = { path = "../../crates/x2apic/" }
+utils = { path = "../../crates/utils" }
 
 # External
 bootloader = { workspace = true }

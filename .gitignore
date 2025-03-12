@@ -10,10 +10,12 @@ OVMF-pure-efi.fd
 
 # Disk images
 *.qcow2
+*.raw
 
 # Byproducts
 *compile_commands.json
 *.cache/
 
 # vs code folder 
-.vscode/*
+.vscode/*nested.raw
+scripts/new-vm/qemu-serial.txt

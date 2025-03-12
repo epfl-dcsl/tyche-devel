@@ -1,23 +1,32 @@
+use core::cmp::max;
 use core::marker::PhantomData;
 
 use bitflags::bitflags;
 use utils::HostVirtAddr;
+use vmx::ept::PAGE_SIZE;
 
 use super::frame_allocator::FrameAllocator;
 use super::walker::{Address, Level, WalkNext, Walker};
+use crate::frame_allocator::PhysRange;
 
 static PAGE_MASK: usize = !(0x1000 - 1);
 
 pub const ADDRESS_MASK: u64 = 0x7fffffffff000;
 
+#[derive(Clone)]
 pub struct PtMapper<PhysAddr, VirtAddr> {
     /// Offset between host physical memory and virtual memory.
+    /// We use this to easily to a "reverse lookup", i.e. phys to virt
     host_offset: usize,
     /// Offset between host physical and guest physical.
     offset: usize,
     root: PhysAddr,
+    /// If true, the mapper may use 1GB and 2MB entries when creating new mappings
+    /// this assumes that the underlying physical memory is contiguous
     enable_pse: bool,
     _virt: PhantomData<VirtAddr>,
+    //keep track of the largest vaddr used by these tables
+    highest_used_vaddr: VirtAddr,
 }
 
 bitflags! {
@@ -52,15 +61,15 @@ where
     PhysAddr: Address,
     VirtAddr: Address,
 {
-    type PhysAddr = PhysAddr;
-    type VirtAddr = VirtAddr;
+    type WalkerPhysAddr = PhysAddr;
+    type WalkerVirtAddr = VirtAddr;
 
-    fn translate(&self, phys_addr: Self::PhysAddr) -> HostVirtAddr {
+    fn translate(&self, phys_addr: Self::WalkerPhysAddr) -> HostVirtAddr {
         HostVirtAddr::new(phys_addr.as_usize() + self.offset + self.host_offset)
     }
 
     //#[cfg(not(feature = "visionfive2"))]
-    fn root(&mut self) -> (Self::PhysAddr, Level) {
+    fn root(&mut self) -> (Self::WalkerPhysAddr, Level) {
         (self.root, Level::L4)
     }
 
@@ -69,8 +78,8 @@ where
         todo!();
     } */
 
-    fn get_phys_addr(entry: u64) -> Self::PhysAddr {
-        Self::PhysAddr::from_u64(entry & ADDRESS_MASK)
+    fn get_phys_addr(entry: u64) -> Self::WalkerPhysAddr {
+        Self::WalkerPhysAddr::from_u64(entry & ADDRESS_MASK)
     }
 }
 
@@ -86,6 +95,7 @@ where
             root,
             enable_pse: true,
             _virt: PhantomData,
+            highest_used_vaddr: VirtAddr::from_u64(0),
         }
     }
 
@@ -93,6 +103,10 @@ where
         let mut r = Self::new(host_offset, offset, root);
         r.enable_pse = false;
         r
+    }
+
+    pub fn get_pt_root(&self) -> PhysAddr {
+        self.root
     }
 
     pub fn translate(&mut self, virt_addr: VirtAddr) -> Option<PhysAddr> {
@@ -121,9 +135,128 @@ where
         phys_addr
     }
 
-    pub fn map_range(
+    pub fn get_highest_vaddr(&mut self) -> VirtAddr {
+        self.highest_used_vaddr
+    }
+
+    pub fn get_entry(&mut self, v: VirtAddr) -> Option<PhysAddr> {
+        let target_vaddr = v;
+        let mut target_paddr: Option<PhysAddr> = None;
+        //log::info!("searching ptmapper for 0x{:x}", v.as_u64());
+        let walk_result = unsafe {
+            self.walk_range(
+                target_vaddr,
+                VirtAddr::from_usize(target_vaddr.as_usize() + PAGE_SIZE),
+                &mut |addr, entry, level| {
+                    let flags = PtFlag::from_bits_truncate(*entry);
+                    let phys = *entry & ((1 << 63) - 1) & (PAGE_MASK as u64);
+
+                    // Print if present
+                    if flags.contains(PtFlag::PRESENT) {
+                        /*let padding = match level {
+                            Level::L4 => "",
+                            Level::L3 => "  ",
+                            Level::L2 => "    ",
+                            Level::L1 => "      ",
+                        };
+                        log::info!(
+                            "{}{:?} Virt: 0x{:x} - Phys: 0x{:x} - {:?}\n",
+                            padding,
+                            level,
+                            addr.as_usize(),
+                            phys,
+                            flags
+                        );*/
+                        if addr == target_vaddr && level == Level::L1 {
+                            target_paddr = Some(PhysAddr::from_u64(phys));
+                            WalkNext::Abort
+                        } else {
+                            WalkNext::Continue
+                        }
+                    } else {
+                        WalkNext::Leaf
+                    }
+                },
+            )
+        };
+        match (walk_result, target_paddr) {
+            (Ok(_), None) => None,
+            (Ok(_), Some(v)) => Some(v),
+            (Err(_), None) => panic!("get_entry, page table walk failed"),
+            //when we reach the target node, we immediately abort the Pt walk with WalkNext::Abort
+            //This will cause the walker to return an error. However, since target_paddr was set to Some
+            //we know that we reached target node
+            (Err(_), Some(v)) => Some(v),
+        }
+    }
+
+    /// Convenience wrapper around `map_range` that maps the contiguous virtual address range from
+    /// `virt_addr` to `virt_addr+size`, to the physical memory
+    /// contained in `phys_ranges`. The start addresses of the physical ranges have to be page aligned
+    /// # Return Value
+    /// If `phys_ranges` is to small to map `size` bytes, an error is returned, that states the remaining,
+    /// unmapped bytes
+    pub fn map_range_scattered<T: FrameAllocator>(
         &mut self,
-        allocator: &impl FrameAllocator,
+        allocator: &T,
+        virt_addr: VirtAddr,
+        phys_ranges: &[PhysRange],
+        size: usize,
+        prot: PtFlag,
+    ) -> Result<(), usize> {
+        //number of bytes that still need to be mapped
+        let mut remaining_bytes = size;
+        //log::info!("initial remaining_bytes: 0x{:x}", remaining_bytes);
+        let mut next_virt_addr = virt_addr;
+        for (_, phys_range) in phys_ranges.iter().enumerate() {
+            /*log::info!(
+                "{:2} processing phys_range {:x?}",
+                phys_range_idx,
+                phys_range
+            );*/
+            assert_eq!(phys_range.start.as_usize() % PAGE_SIZE, 0);
+            let phys_addr = PhysAddr::from_usize(phys_range.start.as_usize());
+
+            //compute number of bytes that we can map in this iteration
+            let mapping_size = if remaining_bytes > phys_range.size() {
+                phys_range.size()
+            } else {
+                remaining_bytes
+            };
+
+            /* We disable pse here to prevent usage of 1GB and 2MB mappings, as the current
+             * implementation of this feature assumes all remaining bytes to be physicallay contiguous
+             * which might not be the case for our phys range. Could be optimized later on, by adjusting
+             * based on phys range size.
+             */
+            /*log::info!("map_range_scattered: calling map_range with vaddr 0x{:x}, paddr 0x{:x}, size 0x{:x}",
+            next_virt_addr.as_u64(), phys_addr.as_u64(), mapping_size);*/
+            self.enable_pse = false;
+            self.map_range(allocator, next_virt_addr, phys_addr, mapping_size, prot);
+            self.enable_pse = true;
+            remaining_bytes -= mapping_size;
+
+            //log::info!("new remaining_bytes: 0x{:x}", remaining_bytes);
+            if remaining_bytes == 0 {
+                return Ok(());
+            }
+
+            next_virt_addr = next_virt_addr
+                .add(mapping_size as u64)
+                .expect("virt addr overflow");
+        }
+        if remaining_bytes > 0 {
+            Err(remaining_bytes)
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Creates mapping from `virt_addr`` to `phys_addr`, assuming physically contiguous memory
+    /// See `map_range_scattered` if you want to map scattered physical memory pages
+    pub fn map_range<T: FrameAllocator>(
+        &mut self,
+        allocator: &T,
         virt_addr: VirtAddr,
         phys_addr: PhysAddr,
         size: usize,
@@ -131,6 +264,7 @@ where
     ) {
         // Align physical address first
         let phys_addr = PhysAddr::from_usize(phys_addr.as_usize() & PAGE_MASK);
+        // this is supposed to handle host phys to guest phys, in stage1 ctx this is always 0
         let offset = self.offset;
         let enable_pse = self.enable_pse;
         unsafe {
@@ -146,7 +280,9 @@ where
                         return WalkNext::Continue;
                     }
 
-                    let end = virt_addr.as_usize() + size;
+                    let end: usize = virt_addr.as_usize() + size;
+                    //luca: this is the phys addr to to which the pte will point
+                    //here we make use of the identity mapping assumption in the address calucation
                     let phys = phys_addr.as_u64() + (addr.as_u64() - virt_addr.as_u64());
                     // Opportunity to map a 1GB region
                     if level == Level::L3 {
@@ -184,6 +320,10 @@ where
                 },
             )
             .expect("Failed to map PTs");
+            self.highest_used_vaddr = VirtAddr::from_usize(max(
+                self.highest_used_vaddr.as_usize(),
+                virt_addr.as_usize() + size,
+            ));
         }
     }
 

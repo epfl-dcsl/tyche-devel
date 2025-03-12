@@ -1,8 +1,8 @@
 use mmu::RangeAllocator;
 use stage_two_abi::{GuestInfo, VgaInfo};
 
-use crate::acpi::AcpiInfo;
-use crate::mmu::MemoryMap;
+use crate::acpi::{AcpiInfo, IommuInfo};
+use crate::mmu::partitioned_memory_map::PartitionedMemoryMap;
 
 pub mod boot_params;
 pub mod linux;
@@ -17,10 +17,12 @@ pub enum HandlerResult {
     Crash,
 }
 
+#[derive(Clone)]
 pub struct ManifestInfo {
     pub guest_info: GuestInfo,
     pub vga_info: VgaInfo,
-    pub iommu: u64,
+    pub iommu: Option<IommuInfo>,
+    pub dom0_gpa_additional_mem: usize,
 }
 
 impl Default for ManifestInfo {
@@ -29,6 +31,7 @@ impl Default for ManifestInfo {
             guest_info: Default::default(),
             vga_info: VgaInfo::no_vga(),
             iommu: Default::default(),
+            dom0_gpa_additional_mem: Default::default(),
         }
     }
 }
@@ -39,7 +42,7 @@ pub trait Guest {
         acpi: &AcpiInfo,
         host_allocator: &impl RangeAllocator,
         guest_allocator: &impl RangeAllocator,
-        memory_map: &MemoryMap,
+        color_map: &PartitionedMemoryMap,
         rsdp: u64,
     ) -> ManifestInfo;
 }

@@ -127,10 +127,10 @@ impl StateX86 {
             let gpa = range.start;
             iopt_mapper.map_range(
                 allocator,
-                GuestPhysAddr::new(gpa),
-                HostPhysAddr::new(range.start),
+                &GuestPhysAddr::new(gpa),
+                &HostPhysAddr::new(range.start),
                 range.size(),
-                IoPtFlag::READ | IoPtFlag::WRITE | IoPtFlag::EXECUTE,
+                (IoPtFlag::READ | IoPtFlag::WRITE | IoPtFlag::EXECUTE).bits(),
             )
         }
 

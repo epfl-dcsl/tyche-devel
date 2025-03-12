@@ -1,4 +1,5 @@
 use alloc::vec::Vec;
+use mmu::frame_allocator::PhysRange;
 use core::arch::global_asm;
 use core::arch::x86_64::_rdtsc;
 use core::sync::atomic::*;
@@ -122,20 +123,23 @@ unsafe fn allocate_stack_section(
     stack_allocator: &impl RangeAllocator,
     mapper: &mut PtMapper<HostPhysAddr, HostVirtAddr>,
 ) {
-    let stack_range = stack_allocator
-        .allocate_range(STACK_SIZE)
+    let mut stack_ranges: Vec<PhysRange> = Vec::new();
+    stack_allocator
+        .allocate_range(STACK_SIZE, |pr: PhysRange| stack_ranges.push(pr))
         .expect("AP stack frame");
-
-    mapper.map_range(
-        stack_allocator,
-        HostVirtAddr::new(stack_range.start.as_usize()),
-        stack_range.start,
-        stack_range.end.as_usize() - stack_range.start.as_usize(),
-        PtFlag::WRITE | PtFlag::PRESENT | PtFlag::USER,
-    );
+    let stack_vaddr = HostVirtAddr::new(stack_ranges[0].start.as_usize());
+    mapper
+        .map_range_scattered(
+            stack_allocator,
+            stack_vaddr,
+            &stack_ranges,
+            STACK_SIZE,
+            PtFlag::WRITE | PtFlag::PRESENT | PtFlag::USER,
+        )
+        .expect("error mapping stack");
 
     // obviously rsp moves in the opposite direction as I expected x_x...
-    (RSP_PTR_PADDR as *mut usize).write(stack_range.end.as_usize());
+    (RSP_PTR_PADDR as *mut usize).write(stack_vaddr.as_usize() + STACK_SIZE);
 }
 
 pub unsafe fn boot(

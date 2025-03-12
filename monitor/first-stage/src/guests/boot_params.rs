@@ -481,23 +481,25 @@ pub enum BootParamError {
     E820Configuration,
 }
 
+#[derive(Debug)]
+pub struct E820Entry {
+    pub addr: GuestPhysAddr,
+    pub size: u64,
+    pub mem_type: E820Types,
+}
+
 impl BootParams {
     /// Adds an e820 region to the e820 map.
     /// Returns Ok(()) if successful, or an error if there is no space left in the map.
-    pub fn add_e820_entry(
-        &mut self,
-        addr: GuestPhysAddr,
-        size: u64,
-        mem_type: E820Types,
-    ) -> Result<(), BootParamError> {
+    pub fn add_e820_entry(&mut self, entry: E820Entry) -> Result<(), BootParamError> {
         if self.e820_entries >= self.e820_table.len() as u8 {
             return Err(BootParamError::E820Configuration);
         }
 
         let idx = self.e820_entries as usize;
-        self.e820_table[idx].addr = addr.as_u64();
-        self.e820_table[idx].size = size;
-        self.e820_table[idx].typ = mem_type as u32;
+        self.e820_table[idx].addr = entry.addr.as_u64();
+        self.e820_table[idx].size = entry.size;
+        self.e820_table[idx].typ = entry.mem_type as u32;
         self.e820_entries += 1;
 
         Ok(())
@@ -513,6 +515,7 @@ impl BootParams {
     }
 }
 
+#[derive(Debug)]
 #[repr(u32)]
 pub enum E820Types {
     Ram = 1,

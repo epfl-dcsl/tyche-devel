@@ -5,6 +5,8 @@
 
 #![no_std]
 
+use core::slice;
+use mmu::memory_painter::MemoryRange;
 #[cfg(target_arch = "riscv64")]
 use riscv_tyche::RVManifest;
 
@@ -69,12 +71,33 @@ macro_rules! entry_point {
 
 // ———————————————————————————————— Manifest ———————————————————————————————— //
 
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MemoryRegionKind {
+    UseableRAM,
+    Reserved,
+}
+
+/// Represent a physical memory region.
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+#[repr(C)]
+pub struct MemoryRegion {
+    /// The physical start address of the region.
+    pub start: u64,
+    /// The physical end address (exclusive) of the region.
+    pub end: u64,
+    pub kind: MemoryRegionKind,
+}
+
+
+
 /// Maximum number of devices supported.
 pub const MANIFEST_NB_DEVICES: usize = 100;
 
 /// The second stage manifest, describing the state of the system at the time the second stage is
 /// entered.
 #[repr(C)]
+#[derive(Debug)]
 pub struct Manifest {
     /// The root of the page tables for stage 2.
     pub cr3: u64,
@@ -87,9 +110,20 @@ pub struct Manifest {
     /// VGA infor, in case VGA screen is available.
     pub vga: VgaInfo,
     /// Optionnal address of the I/O MMU. Absent if set to 0.
-    pub iommu: u64,
+    pub iommu_hva: u64,
+    pub iommu_hpa: u64,
     /// SMP info:
     pub smp: Smp,
+    /// Used to transfer memory regions from stage1 to stage2
+    pub raw_mem_regions_slice: [u8; 4096],
+    /// Number of entries in `raw_mem_regions_slice` that contains valid data
+    pub raw_mem_regions_slice_valid_entries: usize,
+    /// Memory exclusive to dom0
+    pub dom0_memory: MemoryRange,
+    /// Memory to use for other domains
+    pub remaining_dom_memory: MemoryRange,
+    /// If != 0, dom0 has the additional mem for usage with TDs mapped at this addr
+    pub dom0_gpa_additional_mem: usize,
     /// Devices detected by stage 1.
     pub devices: [Device; MANIFEST_NB_DEVICES],
     /// Number of valid devices.
@@ -97,7 +131,7 @@ pub struct Manifest {
 }
 
 /// Suport for x86_64 SMP
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 #[repr(C)]
 pub struct Smp {
     /// SMP info: number of available cores
@@ -133,6 +167,16 @@ impl Manifest {
 
         Some(manifest)
     }
+
+    /// Return parsed slice for the raw u8 memory regions stored in the Manifset
+    pub fn get_boot_mem_regions(&self) -> &[MemoryRegion] {
+        unsafe {
+            slice::from_raw_parts(
+                self.raw_mem_regions_slice.as_ptr() as *const MemoryRegion,
+                self.raw_mem_regions_slice_valid_entries,
+            )
+        }
+    }
 }
 
 // ———————————————————————————————— Statics ————————————————————————————————— //
@@ -146,6 +190,7 @@ macro_rules! make_manifest {
     () => {
         pub fn get_manifest() -> &'static mut $crate::Manifest {
             use core::sync::atomic::{AtomicBool, Ordering};
+            use mmu::memory_painter::{MemoryRange, ColorRange};
 
             // Crearte the manifest
             #[used]
@@ -156,13 +201,29 @@ macro_rules! make_manifest {
                 voffset: 0,
                 info: $crate::GuestInfo::default_config(),
                 vga: $crate::VgaInfo::no_vga(),
-                iommu: 0,
+                iommu_hva: 0,
+                iommu_hpa: 0,
                 smp: $crate::Smp {
                     smp: 0,
                     smp_map: [usize::MAX; 256],
                     mailbox: 0,
                     wakeup_cr3: 0,
                 },
+                raw_mem_regions_slice: [0_u8; 4096],
+                raw_mem_regions_slice_valid_entries: 0,
+                /// Memory exclusive to dom0
+                dom0_memory: MemoryRange::ColoredRange(ColorRange {
+                    first_color: 0,
+                    color_count: 0,
+                    mem_bytes: 0,
+                }),
+                /// Memory to use for other domains
+                remaining_dom_memory: MemoryRange::ColoredRange(ColorRange {
+                    first_color: 0,
+                    color_count: 0,
+                    mem_bytes: 0,
+                }),
+                dom0_gpa_additional_mem: 0,
                 devices: [$crate::Device {
                     start: 0,
                     size: 0,
@@ -175,9 +236,10 @@ macro_rules! make_manifest {
             /// SAFETY: We return the manifest only once. This is ensured using an atomic boolean
             /// that we set to true the first time the reference is taken.
             unsafe {
-                TAKEN
-                    .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-                    .expect("The manifest can only be retrieved once");
+                //TODO: put back in after finding a good place to pass the manifset information down to the ept creation
+                /*TAKEN
+                .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+                .expect("The manifest can only be retrieved once");*/
                 &mut __MANIFEST
             }
         }

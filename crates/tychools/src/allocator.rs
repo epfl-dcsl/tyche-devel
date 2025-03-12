@@ -75,8 +75,4 @@ unsafe impl<'a, const N: usize> FrameAllocator for Allocator<'a, N> {
     fn get_physical_offset(&self) -> HostVirtAddr {
         todo!("Implement")
     }
-
-    fn get_boundaries(&self) -> (usize, usize) {
-        todo!("Not needed")
-    }
 }

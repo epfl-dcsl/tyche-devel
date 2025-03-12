@@ -5,6 +5,7 @@ use vmx::bitmaps::{EptEntryFlags, EptMemoryType};
 use vmx::ept::{GIANT_PAGE_SIZE, HUGE_PAGE_SIZE, PAGE_SIZE};
 
 use crate::frame_allocator::FrameAllocator;
+use crate::ioptmapper::PAGE_MASK;
 use crate::walker::{Address, Level, WalkNext, Walker};
 
 pub const ADDRESS_MASK: u64 = 0x7fffffffff000;
@@ -26,25 +27,55 @@ pub const EPT_PRESENT: EptEntryFlags = EptEntryFlags::READ
 pub const EPT_ROOT_FLAGS: usize = (6 << 0) | (3 << 3);
 
 unsafe impl Walker for EptMapper {
-    type PhysAddr = HostPhysAddr;
-    type VirtAddr = GuestPhysAddr;
+    type WalkerPhysAddr = HostPhysAddr;
+    type WalkerVirtAddr = GuestPhysAddr;
 
-    fn translate(&self, phys_addr: Self::PhysAddr) -> HostVirtAddr {
+    fn translate(&self, phys_addr: Self::WalkerPhysAddr) -> HostVirtAddr {
         HostVirtAddr::new(phys_addr.as_usize() + self.host_offset)
     }
 
-    fn root(&mut self) -> (Self::PhysAddr, Level) {
+    fn root(&mut self) -> (Self::WalkerPhysAddr, Level) {
         (self.root, self.level)
     }
 
-    fn get_phys_addr(entry: u64) -> Self::PhysAddr {
-        Self::PhysAddr::from_u64(entry & ADDRESS_MASK)
+    fn get_phys_addr(entry: u64) -> Self::WalkerPhysAddr {
+        Self::WalkerPhysAddr::from_u64(entry & ADDRESS_MASK)
     }
 }
 
 impl EptMapper {
+    /// Get HPA for GPA, preserves offset bits
+    pub fn lookup(&mut self, gpa: GuestPhysAddr) -> Option<HostPhysAddr> {
+        let offset_bits = gpa.as_u64() & PAGE_MASK as u64;
+        let mut result_hpa = None;
+        let walk_result = unsafe {
+            self.walk_range(
+                gpa,
+                GuestPhysAddr::new(gpa.as_usize() + PAGE_SIZE),
+                &mut |_, entry, level| {
+                    if (*entry & EPT_PRESENT.bits()) == 0 {
+                        return WalkNext::Leaf;
+                    }
+                    if level == Level::L1 || *entry & EptEntryFlags::PAGE.bits() != 0 {
+                        result_hpa = Some(Self::get_hpa(*entry));
+                        return WalkNext::Abort;
+                    }
+                    return WalkNext::Continue;
+                },
+            )
+        };
+        //When we find the translation, we abort walk with WalkNext::Abort, this will cause the walker to reutrn an error
+        //Thus, we check if we have Some result_hpa to distinguish a failed walk from the deliberate abort
+        match (result_hpa, walk_result) {
+            //Walk succeeded but GPA is not mapped
+            (None, Ok(_)) => return None,
+            //Walk succeeded and GPA is mapped
+            (Some(hpa), _) => return Some(HostPhysAddr::from_u64(hpa | offset_bits)),
+            //Walk failed, mapping status unknown, should not happen if PTs are well formed
+            _ => panic!("EPT walk failed"),
+        }
+    }
     /// Creates a new EPT mapper.
-
     //#[cfg(not(features = "visionfive2"))]
     pub fn new(host_offset: usize, root: HostPhysAddr) -> Self {
         Self {
@@ -69,6 +100,10 @@ impl EptMapper {
         }
     }
 
+    fn get_hpa(entry: u64) -> u64 {
+        let hfn_mask = 0xFFFFFFFFFF000_u64;
+        entry & hfn_mask
+    }
     pub fn debug_range(&mut self, gpa: GuestPhysAddr, size: usize) {
         let (phys_addr, _) = self.root();
         log::info!("EPT root: 0x{:x}", phys_addr.as_usize());
@@ -83,11 +118,12 @@ impl EptMapper {
                     let memory_flags =
                         EptMemoryType::from_bits(EptMemoryType::all().bits() & *entry);
                     log::info!(
-                        "{:?} -> 0x{:x} | {:x?} -> mem type {:?}",
+                        "{:?} -> 0x{:x} | {:x?} -> mem type {:?} , hpa 0x{:x}",
                         level,
                         addr.as_usize(),
                         entry,
-                        memory_flags
+                        memory_flags,
+                        Self::get_hpa(*entry)
                     );
                     if (*entry & EptEntryFlags::PAGE.bits()) != 0 {
                         return WalkNext::Leaf;
@@ -98,6 +134,38 @@ impl EptMapper {
             .expect("Failed to print the epts");
         }
     }
+
+    /// Scan the PT starting at from `gpa` to `gpa+size` and report the first gpa in that
+    /// range that is already mapped to sth. Otherwise return None
+    pub fn get_first_used_in_range(
+        &mut self,
+        gpa: GuestPhysAddr,
+        size: usize,
+    ) -> Option<(GuestPhysAddr, Level)> {
+        let mut found_leaf_in_range = None;
+        unsafe {
+            self.walk_range(
+                gpa,
+                GuestPhysAddr::new(gpa.as_usize() + size),
+                &mut |addr, entry, level| {
+                    if (*entry & EPT_PRESENT.bits()) != 0 {
+                        if (level == Level::L3 || level == Level::L2)
+                            && ((*entry & EptEntryFlags::PAGE.bits()) != 0)
+                        {
+                            found_leaf_in_range = Some((addr, level));
+                            return WalkNext::Abort;
+                        }
+                        found_leaf_in_range = Some((addr, level));
+                        return WalkNext::Abort;
+                    }
+                    WalkNext::Continue
+                },
+            )
+            .expect("failed to scan through ept");
+        }
+        found_leaf_in_range
+    }
+
 
     /// Maps a range of physical memory to the given virtual memory.
     pub fn map_range(

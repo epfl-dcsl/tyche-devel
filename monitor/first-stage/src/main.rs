@@ -11,14 +11,16 @@ use core::panic::PanicInfo;
 use core::sync::atomic::Ordering;
 
 use acpi::AcpiTables;
+use bootloader::boot_info::{MemoryRegion, MemoryRegionKind};
 use bootloader::{entry_point, BootInfo};
 use log::LevelFilter;
+use mmu::memory_painter::{ActiveMemoryColoring, MemoryColoring};
 use mmu::{PtMapper, RangeAllocator};
 use s1::acpi::AcpiInfo;
 use s1::acpi_handler::TycheACPIHandler;
 use s1::cpu::MAX_CPU_NUM;
 use s1::guests::Guest;
-use s1::mmu::MemoryMap;
+use s1::mmu::partitioned_memory_map::PartitionedMemoryMap;
 use s1::smp::{allocate_wakeup_page_tables, CORES_REMAP};
 use s1::{guests, println, second_stage, smp, HostPhysAddr, HostVirtAddr};
 use stage_two_abi::{Device, Smp, VgaInfo, MANIFEST_NB_DEVICES};
@@ -27,6 +29,20 @@ use x86_64::registers::control::Cr4;
 const LOG_LEVEL: LevelFilter = LevelFilter::Info;
 
 entry_point!(kernel_main);
+
+fn sort_memregions(mem_regions: &mut [MemoryRegion]) {
+    let mut swapped = true;
+
+    while swapped {
+        swapped = false;
+        for i in 1..mem_regions.len() {
+            if mem_regions[i - 1].start > mem_regions[i].start {
+                mem_regions.swap(i - 1, i);
+                swapped = true;
+            }
+        }
+    }
+}
 
 fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     // Initialize display, if any
@@ -37,6 +53,12 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     logger::init(LOG_LEVEL);
     println!("============= First Stage =============");
 
+    //For some reason there is an unsorted entry in there which would make the memory hole detection logic more complex
+    sort_memregions(&mut boot_info.memory_regions);
+    for mr in boot_info.memory_regions.iter() {
+        println!("{:x?}", mr);
+    }
+
     // Initialize memory management
     let physical_memory_offset = HostVirtAddr::new(
         boot_info
@@ -45,11 +67,19 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             .expect("The bootloader must be configured with 'map-physical-memory'")
             as usize,
     );
-    let (host_allocator, guest_allocator, memory_map, mut pt_mapper) = unsafe {
+    let memsize: u64 = boot_info
+        .memory_regions
+        .iter()
+        .filter(|mr| mr.kind == MemoryRegionKind::Usable)
+        .map(|mr| mr.end - mr.start)
+        .sum();
+    println!("Total Usable Memsize: {} GiB", memsize / (1 << 30));
+    let (stage1_allocator, mut stage2_allocator, guest_allocator, memory_map, mut pt_mapper) = unsafe {
         s1::init_memory(physical_memory_offset, &mut boot_info.memory_regions)
             .expect("Failed to initialize memory")
     };
-
+    log::info!("Color Count {}", ActiveMemoryColoring::COLOR_COUNT);
+    memory_map.print_layout();
     // Initialize kernel structures
     s1::init();
 
@@ -111,11 +141,11 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         acpi_info.add_mp_wakeup_entry(
             rsdp,
             physical_memory_offset,
-            &host_allocator,
+            &stage1_allocator,
             &mut pt_mapper,
         )
     };
-    let wakeup_cr3 = allocate_wakeup_page_tables(&host_allocator);
+    let wakeup_cr3 = allocate_wakeup_page_tables(&stage1_allocator);
 
     // Parse all the devices.
     let mut devices = Vec::new();
@@ -160,7 +190,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
 
     // Initiates the SMP boot process
     unsafe {
-        smp::boot(acpi_platform_info, &host_allocator, &mut pt_mapper);
+        smp::boot(acpi_platform_info, &stage1_allocator, &mut pt_mapper);
     }
     let mut core_map: [usize; MAX_CPU_NUM] = [usize::MAX; MAX_CPU_NUM];
     for i in 0..MAX_CPU_NUM {
@@ -176,12 +206,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     // Enable interrupts
     x86_64::instructions::interrupts::enable();
 
+    log::info!("calling launch_guest");
+
     // Select appropriate guest depending on selected features
     if cfg!(feature = "guest_linux") {
         launch_guest(
             &guests::linux::LINUX,
             &acpi_info,
-            &host_allocator,
+            &stage1_allocator,
+            &mut stage2_allocator,
             &guest_allocator,
             vga_info,
             memory_map,
@@ -194,7 +227,8 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         launch_guest(
             &guests::rawc::RAWC,
             &acpi_info,
-            &host_allocator,
+            &stage1_allocator,
+            &mut stage2_allocator,
             &guest_allocator,
             vga_info,
             memory_map,
@@ -207,7 +241,8 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         launch_guest(
             &guests::void::VOID_GUEST,
             &acpi_info,
-            &host_allocator,
+            &stage1_allocator,
+            &mut stage2_allocator,
             &guest_allocator,
             vga_info,
             memory_map,
@@ -225,24 +260,18 @@ fn launch_guest(
     guest: &impl Guest,
     acpi: &AcpiInfo,
     stage1_allocator: &impl RangeAllocator,
+    stage2_allocator: &mut impl RangeAllocator,
     guest_allocator: &impl RangeAllocator,
     vga_info: VgaInfo,
-    memory_map: MemoryMap,
+    color_map: PartitionedMemoryMap,
     mut pt_mapper: PtMapper<HostPhysAddr, HostVirtAddr>,
     rsdp: u64,
     smp: Smp,
     devices: &Vec<Device>,
 ) -> ! {
-    let mut stage2_allocator = second_stage::second_stage_allocator(stage1_allocator);
     unsafe {
         log::info!("Loading guest");
-        let mut info = guest.instantiate(
-            acpi,
-            &mut stage2_allocator,
-            guest_allocator,
-            &memory_map,
-            rsdp,
-        );
+        let mut info = guest.instantiate(acpi, stage2_allocator, guest_allocator, &color_map, rsdp);
         info.vga_info = vga_info;
         log::info!("Saving host state");
         guests::vmx::save_host_info(&mut info.guest_info);
@@ -250,13 +279,15 @@ fn launch_guest(
         second_stage::load(
             &info,
             stage1_allocator,
-            &mut stage2_allocator,
+            stage2_allocator,
             &mut pt_mapper,
             &smp,
-            memory_map,
+            &color_map,
             devices,
         );
+        log::info!("Finished loading stage1");
         smp::BSP_READY.store(true, Ordering::SeqCst);
+        log::info!("stage1::launch_guest : Calling second_stage::enter()");
         second_stage::enter();
     }
 

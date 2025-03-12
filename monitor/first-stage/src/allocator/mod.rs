@@ -15,7 +15,7 @@ mod utils;
 pub use fallback::FallbackAllocator;
 
 pub const HEAP_START: usize = 0x4444_4444_0000;
-pub const HEAP_SIZE: usize = 20 * 0x1000;
+pub const HEAP_SIZE: usize = 100 * (1 << 20);
 
 static IS_INITIALIZED: AtomicBool = AtomicBool::new(false);
 
@@ -29,25 +29,27 @@ pub fn init_heap(
         return Ok(());
     }
 
+    let mut heap_vaddr = HostVirtAddr::new(HEAP_START);
+    let heap_prot = PtFlag::PRESENT | PtFlag::WRITE | PtFlag::EXEC_DISABLE;
     // Find space for the heap and create the mappings
-    let heap_range = frame_allocator
-        .allocate_range(HEAP_SIZE)
-        .expect("Could not allocate kernel heap");
-    mapper.map_range(
-        frame_allocator,
-        HostVirtAddr::new(HEAP_START),
-        heap_range.start,
-        HEAP_SIZE,
-        PtFlag::PRESENT | PtFlag::WRITE | PtFlag::EXEC_DISABLE,
-    );
-
+    frame_allocator
+        .allocate_range(HEAP_SIZE, |range| {
+            mapper.map_range(
+                frame_allocator,
+                heap_vaddr,
+                range.start,
+                range.size(),
+                heap_prot,
+            );
+            heap_vaddr = heap_vaddr + range.size();
+        })
+        .expect("could not allocate kernel heap");
     // SAFETY: We check that the method is called only once and the heap is valid (mappings are
     // created just above).
     unsafe {
         tlb::flush_all(); // Update page table to prevent #PF
         GLOBAL_ALLOC.lock().init(HEAP_START, HEAP_SIZE);
     }
-
     Ok(())
 }
 

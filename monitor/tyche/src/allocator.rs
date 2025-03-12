@@ -111,10 +111,6 @@ unsafe impl<const N: usize> FrameAllocator for Allocator<N> {
         Ok(())
     }
 
-    fn get_boundaries(&self) -> (usize, usize) {
-        todo!("We don't need `get_boundaries` in stage 2, we should refactor our allocator trait")
-    }
-
     fn get_physical_offset(&self) -> HostVirtAddr {
         let inner = self.inner.lock();
         HostVirtAddr::new(inner.virt_offset)

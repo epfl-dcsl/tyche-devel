@@ -332,8 +332,8 @@ pub trait Monitor<T: PlatformState + 'static> {
         let mut initial_io_domain = IO_DOMAIN.lock();
         *initial_io_domain = Some(io_domain);
         //TODO figure that out.
-        if manifest.iommu != 0 {
-            state.platform_init_io_mmu(manifest.iommu as usize);
+        if manifest.iommu_hva != 0 {
+            state.platform_init_io_mmu(manifest.iommu_hva as usize);
         }
 
         // TODO: taken from part of init_vcpu.

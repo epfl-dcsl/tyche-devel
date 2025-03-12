@@ -56,15 +56,15 @@ where
     PhysAddr: Address,
     VirtAddr: Address,
 {
-    type PhysAddr = PhysAddr;
-    type VirtAddr = VirtAddr;
+    type WalkerPhysAddr = PhysAddr;
+    type WalkerVirtAddr = VirtAddr;
 
-    fn translate(&self, phys_addr: Self::PhysAddr) -> HostVirtAddr {
+    fn translate(&self, phys_addr: Self::WalkerPhysAddr) -> HostVirtAddr {
         HostVirtAddr::new(phys_addr.as_usize() + self.offset + self.host_offset)
     }
 
     //#[cfg(not(feature = "visionfive2"))]
-    fn root(&mut self) -> (Self::PhysAddr, Level) {
+    fn root(&mut self) -> (Self::WalkerPhysAddr, Level) {
         (self.root, self.level)
     }
 
@@ -74,8 +74,8 @@ where
         }
     */
 
-    fn get_phys_addr(entry: u64) -> Self::PhysAddr {
-        Self::PhysAddr::from_u64((entry >> RVPtFlag::flags_count()) << PAGE_OFFSET_WIDTH)
+    fn get_phys_addr(entry: u64) -> Self::WalkerPhysAddr {
+        Self::WalkerPhysAddr::from_u64((entry >> RVPtFlag::flags_count()) << PAGE_OFFSET_WIDTH)
     }
 }
 
