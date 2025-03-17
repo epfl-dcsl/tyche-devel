@@ -56,7 +56,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     //For some reason there is an unsorted entry in there which would make the memory hole detection logic more complex
     sort_memregions(&mut boot_info.memory_regions);
     for mr in boot_info.memory_regions.iter() {
-        println!("{:x?}", mr);
+        println!("{:x?}, {} MiB", mr, (mr.end - mr.start) >> 20);
     }
 
     // Initialize memory management

@@ -3,7 +3,10 @@
 use alloc::alloc::GlobalAlloc;
 use core::sync::atomic::{AtomicBool, Ordering};
 
+use bootloader::boot_info::{self, MemoryRegion, MemoryRegionKind};
+use mmu::memory_painter::MemoryColoring;
 use mmu::{PtFlag, PtMapper, RangeAllocator};
+use qemu::println;
 use x86_64::instructions::tlb;
 
 use crate::{HostPhysAddr, HostVirtAddr};
@@ -18,6 +21,29 @@ pub const HEAP_START: usize = 0x4444_4444_0000;
 pub const HEAP_SIZE: usize = 100 * (1 << 20);
 
 static IS_INITIALIZED: AtomicBool = AtomicBool::new(false);
+
+pub fn compute_heap_requirements<T: MemoryColoring>(
+    memory_regions: &[MemoryRegion],
+    painter: T,
+) -> u64 {
+    const BASE_SIZE: u64 = 80 * (1 << 20);
+    const PER_STEP_BYTES: u64 = 16;
+
+    let memsize: u64 = memory_regions
+        .iter()
+        .filter(|mr| mr.kind == MemoryRegionKind::Usable)
+        .map(|mr| mr.end - mr.start)
+        .sum();
+    let step_size = painter.step_size();
+    let additional_mem = memsize / step_size * PER_STEP_BYTES;
+    println!(
+        "BASE_SIZE = {} MiB, addiional_mem = {} bytes = {} MiB",
+        BASE_SIZE >> 20,
+        additional_mem,
+        additional_mem >> 20,
+    );
+    BASE_SIZE + additional_mem
+}
 
 /// Initializes the kernel heap.
 pub fn init_heap(

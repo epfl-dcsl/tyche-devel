@@ -1,12 +1,15 @@
 use alloc::sync::Arc;
-use alloc::vec;
+use alloc::vec::{self, Vec};
 use core::cell::Cell;
 use core::sync::atomic::{AtomicUsize, Ordering};
 
 use bootloader::boot_info::{MemoryRegion, MemoryRegionKind};
+use log::Metadata;
 use mmu::coloring_range_allocator::ColoringRangeFrameAllocator;
 use mmu::frame_allocator::PhysRange;
-use mmu::memory_painter::{ColorRange, MemoryColoring, MemoryColoringType, MemoryRange};
+use mmu::memory_painter::{
+    ActiveMemoryColoring, ColorRange, MemoryColoring, MemoryColoringType, MemoryRange,
+};
 use mmu::ptmapper::PtMapper;
 use mmu::{FrameAllocator, RangeAllocator};
 use spin::Mutex;
@@ -16,6 +19,7 @@ use x86_64::structures::paging::frame::PhysFrame;
 use x86_64::PhysAddr;
 
 use super::partitioned_memory_map::{ColorToPhysMap, PartitionedMemoryMap};
+use crate::allocator::compute_heap_requirements;
 use crate::second_stage::SECOND_STAGE_SIZE;
 use crate::{allocator, println, vmx, HostPhysAddr, HostVirtAddr};
 
@@ -151,13 +155,21 @@ pub unsafe fn init(
     // Initialize physical memory offset
     set_physical_memory_offset(physical_memory_offset);
 
+    let s1_heap_bytes = compute_heap_requirements(regions, ActiveMemoryColoring {});
+    println!("Need {} MiB for s1 heap", s1_heap_bytes >> 20);
+
     /* Locate memory region that has enough memory for the stage1 allocations.
      * We don't need to consider colors here, as stage1 in only used during early boot.
      * We expect that most systems will only have very coarse grained coloring.
      * Thus, it would be bad to "waste" a color here
      */
-    let required_bytes_stage1_alloc = SECOND_STAGE_RESERVED_MEMORY as usize - SECOND_STAGE_SIZE;
-    let stage1_contig_mr = reserve_memory_region(regions, required_bytes_stage1_alloc)
+    let required_bytes_stage1_alloc =
+        SECOND_STAGE_RESERVED_MEMORY as usize - SECOND_STAGE_SIZE + s1_heap_bytes as usize;
+    println!(
+        "Need {} MiB in total for s1 alloc",
+        required_bytes_stage1_alloc >> 20
+    );
+    let stage1_contig_mr = steal_from_last(regions, required_bytes_stage1_alloc as u64)
         .expect("failed to reserve memory for stage1");
     let stage1_allocator = RangeFrameAllocator::new(
         stage1_contig_mr.start,
@@ -166,16 +178,6 @@ pub unsafe fn init(
     );
     println!("Stage1 range: {:x?}", stage1_contig_mr);
     let stage1_mem_partition = MemoryRange::SinglePhysContigRange(stage1_contig_mr);
-
-    let stage2_contig_mr = reserve_memory_region(regions, SECOND_STAGE_RESERVED_MEMORY as usize)
-        .expect("failed to reserve memory for tage2");
-    let stage2_allocator: RangeFrameAllocator = RangeFrameAllocator::new(
-        stage2_contig_mr.start,
-        stage2_contig_mr.end,
-        physical_memory_offset,
-    );
-    let stage2_mem_partition = MemoryRange::SinglePhysContigRange(stage2_contig_mr);
-    println!("Stage2 range: {:x?}", stage2_contig_mr);
 
     // Initialize the frame allocator and the memory mapper.
     let (level_4_table_frame, _) = Cr3::read();
@@ -186,8 +188,28 @@ pub unsafe fn init(
     allocator::init_heap(&mut pt_mapper, &stage1_allocator)?;
     println!("Heap init done");
 
-    let buf = vec![0; 10000];
-    println!("test alloc done, buf[100]={}", buf[100]);
+    let merged_mrs = merge_boot_mrs(regions);
+    println!("Merged boot memory regions");
+    for mr in &merged_mrs {
+        println!("{:x?}, {} MiB", mr, (mr.end - mr.start) >> 20);
+    }
+
+    let (merged_mrs, stage2_contig_mr) =
+        reserve_memory_region(merged_mrs, SECOND_STAGE_RESERVED_MEMORY);
+    let stage2_contig_mr = stage2_contig_mr.expect("failed to reserve memory for tage2");
+
+    let stage2_allocator: RangeFrameAllocator = RangeFrameAllocator::new(
+        stage2_contig_mr.start,
+        stage2_contig_mr.end,
+        physical_memory_offset,
+    );
+    let stage2_mem_partition = MemoryRange::SinglePhysContigRange(stage2_contig_mr);
+    println!("Stage2 range: {:x?}", stage2_contig_mr);
+
+    println!("Memory Regions after stage2 alloc");
+    for mr in &merged_mrs {
+        println!("{:x?}, {} MiB", mr, (mr.end - mr.start) >> 20);
+    }
 
     //This parts requires initialized allocator
     //expensive walk over whole memory range
@@ -349,41 +371,87 @@ pub fn create_guest_allocator(
     }
 }
 
+fn steal_from_last(regions: &mut [MemoryRegion], required_bytes: u64) -> Option<PhysRange> {
+    let mr = regions.last_mut().unwrap();
+    if (mr.end - mr.start) < required_bytes {
+        return None;
+    }
+    let divider = HostPhysAddr::new((mr.end - required_bytes) as usize).align_down(PAGE_SIZE);
+    let pr = PhysRange {
+        start: divider,
+        end: HostPhysAddr::new(mr.end as usize),
+    };
+    mr.end = divider.as_u64();
+    return Some(pr);
+}
+
+/// Search for phys contig memory in last region and cut it from the end
+/// Only use this for small amount of memory to bootstrap the heap
+fn merge_boot_mrs(regions: &mut [MemoryRegion]) -> Vec<MemoryRegion> {
+    let mut merged = Vec::new();
+    let mut cur = regions[0];
+    let regions_len = regions.len();
+    for (idx, mr) in regions.iter().enumerate().skip(1) {
+        if mr.start == cur.end && mr.kind == cur.kind {
+            cur.end = mr.end;
+        } else {
+            //gap -> push
+            merged.push(cur);
+            cur = *mr;
+        }
+        if idx == regions_len - 1 {
+            merged.push(cur);
+        }
+    }
+    return merged;
+}
+
 /// Searches and returns a memory region a physically contiguous memory range
 /// of the requested size. `regions` is modified to make the memory unavailable to other parts of the system
-fn reserve_memory_region(regions: &mut [MemoryRegion], required_bytes: usize) -> Option<PhysRange> {
+fn reserve_memory_region(
+    regions: Vec<MemoryRegion>,
+    required_bytes: u64,
+) -> (Vec<MemoryRegion>, Option<PhysRange>) {
+    //search for region with sufficient size
     let mut matching_mr = None;
     for (mr_idx, mr) in regions.iter().enumerate().rev() {
-        if mr.kind == MemoryRegionKind::Usable && ((mr.end - mr.start) as usize > required_bytes) {
-            let pr = PhysRange {
-                start: HostPhysAddr::new(mr.start as usize),
-                end: HostPhysAddr::new(mr.end as usize),
-            };
-
-            matching_mr = Some((mr_idx, pr));
+        if mr.kind == MemoryRegionKind::Usable && ((mr.end - mr.start) > required_bytes) {
+            matching_mr = Some(mr_idx);
             break;
         }
     }
+    //split region and compute updated region list
     match &mut matching_mr {
-        Some((idx, pr)) => {
-            //if this is the last region, just could it short instead of marking as reserved
-            //this way another call to reserve_memory_region can easily draw from the same region again
-            if *idx == regions.len() - 1 {
-                let v = &mut regions[*idx];
+        Some(split_idx) => {
+            let mut new_regions = Vec::new();
+            for idx in 0..*split_idx {
+                new_regions.push(regions[idx]);
+            }
+            let split: MemoryRegion = regions[*split_idx];
+            let divider =
+                HostPhysAddr::new((split.start + required_bytes) as usize).align_up(PAGE_SIZE);
 
-                pr.start = HostPhysAddr::new(v.end as usize - required_bytes);
-                pr.end = HostPhysAddr::new(v.end as usize);
-                assert_eq!(pr.start.as_usize() % PAGE_SIZE, 0);
-                assert_eq!(pr.end.as_usize() % PAGE_SIZE, 0);
-
-                v.end -= required_bytes as u64;
-            } else {
-                panic!("should not happend");
+            let pr = PhysRange {
+                start: HostPhysAddr::new(split.start as usize),
+                end: divider,
+            };
+            new_regions.push(MemoryRegion {
+                start: split.start,
+                end: divider.as_u64(),
+                kind: MemoryRegionKind::Bootloader,
+            });
+            new_regions.push(MemoryRegion {
+                start: divider.as_u64(),
+                end: split.end,
+                kind: split.kind,
+            });
+            for idx in (*split_idx + 1)..regions.len() {
+                new_regions.push(regions[idx]);
             }
 
-            return Some(*pr);
+            return (new_regions, Some(pr));
         }
-        None => return None,
+        None => return (regions, None),
     }
 }
 
@@ -613,7 +681,6 @@ fn bytes_to_pages(n: usize) -> usize {
     let page_aligned = (n + PAGE_SIZE - 1) & !(PAGE_SIZE - 1);
     page_aligned / PAGE_SIZE
 }
-
 
 // ————————————————————————————————— Tests —————————————————————————————————— //
 
