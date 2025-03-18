@@ -73,3 +73,29 @@ impl Ord for PhysRange {
         self.start.cmp(&other.start).then(self.end.cmp(&other.end))
     }
 }
+
+impl From<(u64, u64)> for PhysRange {
+    fn from(range: (u64, u64)) -> Self {
+        PhysRange {
+            start: HostPhysAddr::new(range.0 as usize),
+            end: HostPhysAddr::new(range.1 as usize),
+        }
+    }
+}
+impl From<(usize, usize)> for PhysRange {
+    fn from(range: (usize, usize)) -> Self {
+        PhysRange {
+            start: HostPhysAddr::new(range.0),
+            end: HostPhysAddr::new(range.1),
+        }
+    }
+}
+
+impl From<(i32, i32)> for PhysRange {
+    fn from(range: (i32, i32)) -> Self {
+        PhysRange {
+            start: HostPhysAddr::new(range.0 as usize),
+            end: HostPhysAddr::new(range.1 as usize),
+        }
+    }
+}

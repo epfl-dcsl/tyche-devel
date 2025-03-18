@@ -35,14 +35,17 @@ pub fn compute_heap_requirements<T: MemoryColoring>(
         .map(|mr| mr.end - mr.start)
         .sum();
     let step_size = painter.step_size();
-    let additional_mem = memsize / step_size * PER_STEP_BYTES;
+    //times two because our guest allocator will copy some of the ranges
+    // the final plus X * COLOR_COUNT is just some slack
+    let coloring_map_bytes =
+        2 * (memsize / step_size * PER_STEP_BYTES + 20 * T::COLOR_COUNT as u64);
     println!(
         "BASE_SIZE = {} MiB, addiional_mem = {} bytes = {} MiB",
         BASE_SIZE >> 20,
-        additional_mem,
-        additional_mem >> 20,
+        coloring_map_bytes,
+        coloring_map_bytes >> 20,
     );
-    BASE_SIZE + additional_mem
+    BASE_SIZE + coloring_map_bytes
 }
 
 /// Initializes the kernel heap.

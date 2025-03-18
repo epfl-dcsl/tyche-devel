@@ -353,7 +353,7 @@ impl DummyMemoryColoring {
 
     //shift out this many bits of the HPA; then interpret the lowest log2(COLOR_ORDER)
     //bits as the color
-    pub const SHIFT: usize = 20;
+    pub const SHIFT: usize = 12;
 
     //DERIVED VALUES
     //mask to apply to page bits (after shifting) to get color id for address

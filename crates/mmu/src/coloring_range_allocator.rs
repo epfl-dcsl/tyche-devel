@@ -1,5 +1,6 @@
 use core::cell::{RefCell, RefMut};
 
+use crate::color_to_phys_map::ColorToPhysMap;
 use crate::frame_allocator::PhysRange;
 use crate::ioptmapper::PAGE_SIZE;
 use crate::memory_painter::{MemoryRegion, MemoryRegionKind};
@@ -23,36 +24,26 @@ pub struct ColoringRangeFrameAllocator {
 
 impl ColoringRangeFrameAllocator {
     pub fn new(
-        color_to_phys: &Vec<Vec<PhysRange>>,
+        color_to_phys: &ColorToPhysMap,
         first_color: u64,
         color_count: u64,
         phys_to_virt_offset: HostVirtAddr,
         memory_regions: Vec<MemoryRegion>,
     ) -> Self {
+        //TODO: @luca reuse color_to_phys entires and just use a min heap or sth like that to merge the different colors. This should improve startup time
         let mut ranges_vec: Vec<PhysRange> = Vec::new();
-        for color_mrs in &color_to_phys[first_color as usize..(first_color + color_count) as usize]
-        {
-            ranges_vec.append(&mut color_mrs.clone());
+        for color in first_color as usize..(first_color + color_count) as usize {
+            ranges_vec.extend_from_slice(color_to_phys.get_color(color));
         }
+        log::info!("copied into ranges_vec");
         //ensure that lowest address is at the back.
         // This way we can pop elemens from he back while we allocate and still return
         // the memory from low, to high
         ranges_vec.sort_unstable();
+        log::info!("sorted");
         ranges_vec.reverse();
-        let mut merged_vec = Vec::new();
-        let mut cur = ranges_vec[0];
-        //N.B. that memory ranges of different colors cannot overlap
-        for (idx, r) in ranges_vec.iter().enumerate().skip(1) {
-            if cur.end == r.start {
-                cur.end = r.end
-            } else {
-                merged_vec.push(cur);
-                cur = *r;
-            }
-            if idx == ranges_vec.len() - 1 {
-                merged_vec.push(cur);
-            }
-        }
+        log::info!("reversed");
+        log::info!("cleaning up");
 
         let mr_idx;
         let gpa_of_next_allocation;
@@ -65,7 +56,7 @@ impl ColoringRangeFrameAllocator {
         }
 
         Self {
-            ranges: RefCell::new(merged_vec),
+            ranges: RefCell::new(ranges_vec),
             phys_to_virt_offset,
             memory_regions,
             mr_idx,
@@ -172,12 +163,13 @@ unsafe impl RangeAllocator for ColoringRangeFrameAllocator {
 
         let mut remaining_bytes = size;
         //normal case: multiple pages, allocate frames, and group them together if they are contiguous
+        let mut prev: Option<PhysRange> = None;
         while remaining_bytes > 0 {
             let range = match ranges.last() {
                 Some(r) => *r,
                 None => return Err(()),
             };
-            if range.size() < remaining_bytes {
+            if range.size() <= remaining_bytes {
                 //Consume whole range
 
                 self.gpa_of_next_allocation
@@ -185,10 +177,29 @@ unsafe impl RangeAllocator for ColoringRangeFrameAllocator {
                 ranges.pop();
                 self.update_region(&ranges);
 
-                store_cb(range.clone());
+                // store_cb(range.clone());
+                match prev {
+                    Some(prev_range) => {
+                        //contig with prev. Remember that vec is in reversed order
+                        if prev_range.end == range.start {
+                            prev = Some(PhysRange {
+                                start: prev_range.start,
+                                end: range.end,
+                            })
+                        } else {
+                            store_cb(prev_range);
+                            prev = Some(range);
+                        }
+                    }
+                    None => prev = Some(range.clone()),
+                }
                 remaining_bytes -= range.size();
             } else {
-                //Use only part of range but round to page boundaries, even that could mean wasting some memory
+                if let Some(prev_range) = prev {
+                    store_cb(prev_range);
+                    prev = None;
+                }
+                //Use only part of range but round to page boundaries, even if that could mean wasting some memory
                 let divider =
                     HostPhysAddr::new(range.start.as_usize() + remaining_bytes).align_up(4096);
                 let allocated_range = PhysRange {
@@ -205,9 +216,18 @@ unsafe impl RangeAllocator for ColoringRangeFrameAllocator {
                     start: updated_start,
                     end: updated_end,
                 };
-                *ranges.last_mut().unwrap() = updated_range;
+                if updated_range.size() < 4096 {
+                    ranges.pop();
+                    self.update_region(&ranges);
+                } else {
+                    *ranges.last_mut().unwrap() = updated_range;
+                }
                 remaining_bytes = 0;
             }
+        }
+
+        if let Some(prev_range) = prev {
+            store_cb(prev_range);
         }
 
         Ok(())

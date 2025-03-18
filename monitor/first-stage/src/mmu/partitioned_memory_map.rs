@@ -2,6 +2,7 @@ extern crate alloc;
 use alloc::vec::Vec;
 
 use bootloader::boot_info::{MemoryRegion, MemoryRegionKind};
+use mmu::color_to_phys_map::{self, ColorToPhysMap};
 use mmu::frame_allocator::PhysRange;
 use mmu::memory_painter::{
     MemoryColoring, MemoryRange, MemoryRegion as S2MemoryRegion,
@@ -23,7 +24,7 @@ pub enum MemoryPartition {
 }
 
 /// Describes the memory layout created in stage1
-pub struct PartitionedMemoryMap {
+pub struct PartitionedMemoryMap<'a> {
     /// Memory reserved for root partition/Dom0
     pub guest: MemoryRange,
     /// Memory used for Stage 1
@@ -34,17 +35,17 @@ pub struct PartitionedMemoryMap {
     pub unused: MemoryRange,
     ///memory map from early bootloader
     all_regions: &'static [MemoryRegion],
-    color_to_phys_map: ColorToPhysMap,
+    color_to_phys_map: ColorToPhysMap<'a>,
 }
 
-impl PartitionedMemoryMap {
+impl<'a> PartitionedMemoryMap<'a> {
     pub fn new(
         stage1_mr: MemoryRange,
         stage2_mr: MemoryRange,
         guest_mr: MemoryRange,
         unused_mr: MemoryRange,
         all_regions: &'static [MemoryRegion],
-        color_to_phys_map: ColorToPhysMap,
+        color_to_phys_map: ColorToPhysMap<'a>,
     ) -> Self {
         Self {
             guest: guest_mr,
@@ -73,7 +74,6 @@ impl PartitionedMemoryMap {
             _ => panic!("Unexpected memory region kind"),
         }
     }
-
 
     pub fn print_layout(&self) {
         log::info!("guest memory range  : 0x{:x?}", self.guest);
@@ -146,9 +146,9 @@ impl PartitionedMemoryMap {
                 //that we return them int he same order, as an allocator over that range would visit them
                 let mut ranges = Vec::new();
                 for color_id in cr.first_color..(cr.first_color + cr.color_count) {
-                    ranges.push(
-                        self.color_to_phys_map.get_color_to_phys()[color_id as usize].clone(),
-                    );
+                    let mut v = Vec::new();
+                    v.extend_from_slice(self.color_to_phys_map.get_color(color_id as usize));
+                    ranges.push(v);
                 }
                 let merged_sorted_iter = AllocHeapMergedIter::new(ranges);
                 for range in merged_sorted_iter {
@@ -315,147 +315,5 @@ impl PartitionedMemoryMap {
         );
 
         (result, additional_mem_info)
-    }
-}
-
-pub struct ColorToPhysMap {
-    //for each color, all corresponding phys mem ranges
-    color_to_phys: Vec<Vec<PhysRange>>,
-    //for each color the total size of its mem ranges
-    color_to_size: Vec<usize>,
-}
-
-impl ColorToPhysMap {
-    pub fn new<T: MemoryColoring>(all_regions: &[MemoryRegion], painter: T) -> Self {
-        let mut color_to_phys = Vec::new();
-        let mut color_to_size = Vec::new();
-        for _ in 0..T::COLOR_COUNT {
-            color_to_phys.push(Vec::new());
-            color_to_size.push(0);
-        }
-        //phys range, color
-        let mut cur: Option<(PhysRange, u64)> = None;
-        let step_size = painter.step_size() as usize;
-
-        for mr in all_regions.iter() {
-            if mr.kind != MemoryRegionKind::Usable {
-                continue;
-            }
-            //inclusive
-            let mr_start_aligned = HostPhysAddr::new(mr.start as usize)
-                .align_up(step_size)
-                .as_usize();
-            //exclusive
-            let mr_end_aligned = HostPhysAddr::new(mr.end as usize)
-                .align_down(step_size)
-                .as_usize();
-
-            if mr_end_aligned <= mr_start_aligned {
-                continue;
-            }
-
-            println!(
-                "Start 0x{:08x}, End 0x{:08x}",
-                mr.start as usize, mr.end as usize
-            );
-            println!(
-                "Aligned Start 0x{:08x}, Aligned End 0x{:08x}",
-                mr_start_aligned, mr_end_aligned
-            );
-            println!(
-                "Size of aligned range: {} MiB",
-                (mr_end_aligned - mr_start_aligned) >> 20
-            );
-            for cur_addr in (mr_start_aligned..mr_end_aligned).step_by(step_size) {
-                let color = painter.compute_color(HostPhysAddr::new(cur_addr));
-
-                if let Some((mut cur_range, cur_color)) = cur {
-                    //Have current range
-                    //Case 1: color changed  or gap in paddr -> close current range
-                    if color != cur_color || cur_range.end.as_usize() != cur_addr {
-                        color_to_size[cur_color as usize] += cur_range.size();
-                        color_to_phys[cur_color as usize].push(cur_range);
-                        cur = Some((
-                            PhysRange {
-                                start: HostPhysAddr::new(cur_addr),
-                                end: HostPhysAddr::new(cur_addr + step_size),
-                            },
-                            color,
-                        ));
-                    } else {
-                        //Case 2: color stayed the same and phys contig -> extend current range
-                        cur_range.end = cur_range.end + step_size;
-                    }
-                } else {
-                    //First iteration, init current range
-                    cur = Some((
-                        PhysRange {
-                            start: HostPhysAddr::new(cur_addr),
-                            end: HostPhysAddr::new(cur_addr + step_size),
-                        },
-                        color,
-                    ))
-                }
-            }
-        }
-
-        if let Some((range, color)) = cur {
-            color_to_size[color as usize] += range.size();
-            color_to_phys[color as usize].push(range);
-        }
-
-        println!(
-            "color_to_size (total of {} MiB):",
-            color_to_size.iter().sum::<usize>() >> 20
-        );
-        for (c, v) in color_to_size.iter().enumerate() {
-            println!("\t {} {:05} MiB", c, v >> 20);
-        }
-
-        Self {
-            color_to_phys,
-            color_to_size,
-        }
-    }
-
-    pub fn get_color_to_phys(&self) -> &Vec<Vec<PhysRange>> {
-        &self.color_to_phys
-    }
-
-    pub fn get_color_to_size(&self) -> &Vec<usize> {
-        &self.color_to_size
-    }
-
-    pub fn get_color_range_size(&self, first_color: u64, color_count: u64) -> usize {
-        self.color_to_size[first_color as usize..(first_color + color_count) as usize]
-            .iter()
-            .sum()
-    }
-
-    ///compute number of colors starting from `first_allowed` that are required to cover at least `required_bytes`
-    /// Returns (incl. first color, color count, excact size in bytes)
-    pub fn contig_color_range(
-        &self,
-        first_allowed: u64,
-        required_bytes: usize,
-    ) -> Result<(u64, u64, usize), ()> {
-        let mut remaining_bytes: i64 = required_bytes as i64;
-        let mut count = 0;
-        for color_size in self.color_to_size.iter().skip(first_allowed as usize) {
-            remaining_bytes -= *color_size as i64;
-            count += 1;
-            if remaining_bytes <= 0 {
-                break;
-            }
-        }
-        if remaining_bytes > 0 {
-            Err(())
-        } else {
-            Ok((
-                first_allowed,
-                count,
-                required_bytes + remaining_bytes.abs() as usize,
-            ))
-        }
     }
 }

@@ -5,10 +5,12 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 
 use bootloader::boot_info::{MemoryRegion, MemoryRegionKind};
 use log::Metadata;
+use mmu::color_to_phys_map::ColorToPhysMap;
 use mmu::coloring_range_allocator::ColoringRangeFrameAllocator;
 use mmu::frame_allocator::PhysRange;
 use mmu::memory_painter::{
     ActiveMemoryColoring, ColorRange, MemoryColoring, MemoryColoringType, MemoryRange,
+    MemoryRegion as S2MemoryRegion,
 };
 use mmu::ptmapper::PtMapper;
 use mmu::{FrameAllocator, RangeAllocator};
@@ -18,7 +20,7 @@ use x86_64::registers::control::Cr3;
 use x86_64::structures::paging::frame::PhysFrame;
 use x86_64::PhysAddr;
 
-use super::partitioned_memory_map::{ColorToPhysMap, PartitionedMemoryMap};
+use super::partitioned_memory_map::PartitionedMemoryMap;
 use crate::allocator::compute_heap_requirements;
 use crate::second_stage::SECOND_STAGE_SIZE;
 use crate::{allocator, println, vmx, HostPhysAddr, HostVirtAddr};
@@ -215,8 +217,30 @@ pub unsafe fn init(
     //expensive walk over whole memory range
     // DO NOT MARK REGIONS AS MEMORY REGIONS AS INVALID BEYOND THIS STEP
     println!("Starting expensive paint job");
-    let color_to_phys = ColorToPhysMap::new(&regions, MemoryColoringType {});
-    println!("Finished paint job");
+    let s2_mrs: Vec<S2MemoryRegion> = merged_mrs
+        .iter()
+        .map(|v| PartitionedMemoryMap::bl_mr_to_s2_mr(v))
+        .collect();
+    let (required_ctp_bytes, _) = ColorToPhysMap::required_bytes(&s2_mrs, &ActiveMemoryColoring {});
+    let mut ctp_range = PhysRange::from((0, 0));
+    stage1_allocator
+        .allocate_range(required_ctp_bytes, |pr| {
+            ctp_range = pr;
+        })
+        .expect("failed to alloc mem for coloring table");
+    assert!(required_ctp_bytes <= ctp_range.size());
+    let ctp_ptr = (ctp_range.start.as_u64() + physical_memory_offset.as_u64()) as *mut u8;
+    let color_to_phys =
+        ColorToPhysMap::new(&s2_mrs, &ActiveMemoryColoring {}, ctp_ptr, ctp_range.size())
+            .expect("failed to construct color to phys map");
+    let mut total_colored_size = 0;
+    for c in 0..ActiveMemoryColoring::COLOR_COUNT {
+        total_colored_size += color_to_phys.get_color_size(c);
+    }
+    println!(
+        "Finished paint job. Total colored size {} MiB",
+        total_colored_size >> 20
+    );
 
     let (guest_allocator, guest_mem_partition, unused_mem_partiton) =
         create_guest_allocator(&color_to_phys, 0, physical_memory_offset, regions);
@@ -255,22 +279,28 @@ pub fn create_guest_allocator(
 ) -> (ColoringRangeFrameAllocator, MemoryRange, MemoryRange) {
     #[cfg(feature = "color-dom0")]
     {
-        log::info!("Computing number of colors required for dom0");
+        log::info!(
+            "Computing number of colors required for dom0. Need {} MiB",
+            GUEST_RESERVED_MEMORY >> 20
+        );
         let (first_guest_color, guest_color_count, guest_mem_bytes) = color_to_phys
             .contig_color_range(next_free_color, GUEST_RESERVED_MEMORY)
             .expect("failed to gather colors for guest memory");
+        log::info!("s2 mrs");
         let s2_memory_regions = memory_regions
             .iter()
             .map(|s1_mr| PartitionedMemoryMap::bl_mr_to_s2_mr(s1_mr))
             .collect();
 
+        log::info!("creating allocator");
         let guest_allocator = ColoringRangeFrameAllocator::new(
-            color_to_phys.get_color_to_phys(),
+            color_to_phys,
             first_guest_color,
             guest_color_count,
             physical_memory_offset,
             s2_memory_regions,
         );
+        log::info!("creating part memory map");
 
         let guest_mem_partition = MemoryRange::ColoredRange(ColorRange {
             first_color: first_guest_color,
