@@ -71,7 +71,6 @@ macro_rules! entry_point {
 
 // ———————————————————————————————— Manifest ———————————————————————————————— //
 
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MemoryRegionKind {
     UseableRAM,
@@ -89,10 +88,20 @@ pub struct MemoryRegion {
     pub kind: MemoryRegionKind,
 }
 
-
-
 /// Maximum number of devices supported.
 pub const MANIFEST_NB_DEVICES: usize = 100;
+
+#[derive(Debug, Default)]
+#[repr(C)]
+/// Information for passing the ColorToPhysMap to stage2
+pub struct ColorToPhysInfo {
+    /// Vaddr in s2 where s1 maped the `raw_base_ptr` of the ctpm
+    pub s2_vaddr: u64,
+    /// length of the `raw_base_ptr`
+    pub bytes: u64,
+    /// `entries_per_color` field from ctpm
+    pub entries_per_color: usize,
+}
 
 /// The second stage manifest, describing the state of the system at the time the second stage is
 /// entered.
@@ -128,6 +137,7 @@ pub struct Manifest {
     pub devices: [Device; MANIFEST_NB_DEVICES],
     /// Number of valid devices.
     pub nb_devices: usize,
+    pub color_to_phys: ColorToPhysInfo,
 }
 
 /// Suport for x86_64 SMP
@@ -190,7 +200,9 @@ macro_rules! make_manifest {
     () => {
         pub fn get_manifest() -> &'static mut $crate::Manifest {
             use core::sync::atomic::{AtomicBool, Ordering};
-            use mmu::memory_painter::{MemoryRange, ColorRange};
+
+            use mmu::memory_painter::{ColorRange, MemoryRange};
+            use stage_two_abi::ColorToPhysInfo;
 
             // Crearte the manifest
             #[used]
@@ -230,6 +242,11 @@ macro_rules! make_manifest {
                     is_mem: false,
                 }; $crate::MANIFEST_NB_DEVICES],
                 nb_devices: 0,
+                color_to_phys: ColorToPhysInfo {
+                    s2_vaddr: 0,
+                    bytes: 0,
+                    entries_per_color: 0,
+                },
             };
             static TAKEN: AtomicBool = AtomicBool::new(false);
 

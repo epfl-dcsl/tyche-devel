@@ -35,7 +35,7 @@ pub struct PartitionedMemoryMap<'a> {
     pub unused: MemoryRange,
     ///memory map from early bootloader
     all_regions: &'static [MemoryRegion],
-    color_to_phys_map: ColorToPhysMap<'a>,
+    pub color_to_phys_map: ColorToPhysMap<'a>,
 }
 
 impl<'a> PartitionedMemoryMap<'a> {

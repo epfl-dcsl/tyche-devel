@@ -13,7 +13,7 @@ use mmu::memory_painter::{
 };
 use mmu::walker::Address;
 use mmu::{PtFlag, PtMapper, RangeAllocator};
-use stage_two_abi::{Device, EntryPoint, Manifest, Smp};
+use stage_two_abi::{ColorToPhysInfo, Device, EntryPoint, Manifest, Smp};
 use x86_64::VirtAddr;
 
 use crate::cpu::MAX_CPU_NUM;
@@ -38,6 +38,7 @@ const LOAD_VIRT_ADDR: HostVirtAddr = HostVirtAddr::new(0x80000000000);
 //  Stack definitions
 const STACK_VIRT_ADDR: HostVirtAddr = HostVirtAddr::new(0x90000000000);
 const STACK_SIZE: usize = (1 << 20) * 8;
+const S2_COLOR_TO_PHYS_VADDR: HostVirtAddr = HostVirtAddr::new(0xa0000000000);
 
 /// Second stage jump structures
 static mut SECOND_STAGE_ENTRIES: [Option<Stage2>; MAX_CPU_NUM] = [None; MAX_CPU_NUM];
@@ -129,11 +130,7 @@ pub fn load(
 
     //this allocates memory for every elf segment. Currently it allocates one physical contiguous chunk
     //the elf headers are updated to point to these memory addresses (in contrast to the default addresses, this is the "relocate" part)
-    relocate_elf(
-        &mut second_stage,
-        stage2_allocator,
-        false,
-    );
+    relocate_elf(&mut second_stage, stage2_allocator, false);
     //load parsed elf binary into memory
     let mut stage2_loaded_elf = second_stage
         .load(
@@ -179,12 +176,37 @@ pub fn load(
                 iommu.size,
                 PtFlag::PRESENT | PtFlag::WRITE | PtFlag::PAGE_CACHE_DISABLE,
             ),
-            crate::elf::ELfTargetEnvironment::Guest(_) => panic!("stage2 with guest mapper"),
+            crate::elf::ELfTargetEnvironment::Guest(_) => {
+                panic!("mapping iommu: stage2 with guest mapper")
+            }
         }
     } else {
         stage2_iommu_hva = HostVirtAddr::new(0);
         iommu_hpa = HostPhysAddr::new(0);
     }
+
+    //Map Color to phys to tyche to tyche
+    match &mut stage2_loaded_elf.pt_mapper {
+        ELfTargetEnvironment::Host(mapper) => {
+            let (ctp_vaddr, len) = memory_partitions.color_to_phys_map.get_backing_mem();
+            let ctp_paddr = HostPhysAddr::new(
+                ctp_vaddr.as_usize() - stage1_allocator.get_physical_offset().as_usize(),
+            );
+            log::info!(
+                "Mapping color to phys to stage 2 : paddr 0x{:0x}, stage2 vaddr 0x{:0x}",
+                ctp_paddr.as_usize(),
+                S2_COLOR_TO_PHYS_VADDR.as_usize()
+            );
+            mapper.map_range(
+                stage2_allocator,
+                S2_COLOR_TO_PHYS_VADDR,
+                ctp_paddr,
+                len,
+                PtFlag::PRESENT | PtFlag::WRITE,
+            );
+        }
+        ELfTargetEnvironment::Guest(_) => panic!("mapping color to phys: stage2 with guest mapper"),
+    };
 
     // Map the guest (e.g. linux) memory into Tyche.
     // This is required for hashing content and writing back attestation into Linux-controlled
@@ -340,6 +362,19 @@ pub fn load(
     manifest.nb_devices = devices.len();
     manifest.dom0_memory = memory_partitions.guest;
     manifest.remaining_dom_memory = memory_partitions.unused;
+
+    {
+        let (_, len_bytes) = memory_partitions.color_to_phys_map.get_backing_mem();
+        let entries_per_color = memory_partitions
+            .color_to_phys_map
+            .get_max_entries_per_color();
+
+        manifest.color_to_phys = ColorToPhysInfo {
+            s2_vaddr: S2_COLOR_TO_PHYS_VADDR.as_u64(),
+            bytes: len_bytes as u64,
+            entries_per_color,
+        }
+    }
 
     //Copy Memory region to stage2 representation in manifset
     let manifest_s2_mem_regions: &mut [S2MemoryRegion] = unsafe {

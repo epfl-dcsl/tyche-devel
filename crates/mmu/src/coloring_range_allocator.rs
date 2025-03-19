@@ -13,7 +13,7 @@ use utils::{GuestPhysAddr, HostPhysAddr, HostVirtAddr};
 
 /// Range allocator that only returns phys contig ranges with the same color
 pub struct ColoringRangeFrameAllocator {
-    // pre computed pyhs ranges matching the colors of this allocator
+    // pre computed phys ranges matching the colors of this allocator
     ranges: RefCell<Vec<PhysRange>>,
     phys_to_virt_offset: HostVirtAddr,
     //info for computing GPAs used by stage2

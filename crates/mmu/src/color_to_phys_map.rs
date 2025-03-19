@@ -1,8 +1,6 @@
-extern crate alloc;
-use alloc::vec::Vec;
 use core::{mem, slice};
 
-use utils::HostPhysAddr;
+use utils::{HostPhysAddr, HostVirtAddr};
 
 use crate::frame_allocator::PhysRange;
 use crate::memory_painter::{MemoryColoring, MemoryRegion, MemoryRegionKind};
@@ -23,9 +21,64 @@ pub struct ColorToPhysMap<'a> {
 }
 
 impl<'a> ColorToPhysMap<'a> {
+    pub fn deserialize(
+        raw_base_ptr: u64,
+        bytes: u64,
+        entries_per_color: usize,
+        color_count: usize,
+    ) -> Self {
+        let raw_base_ptr = raw_base_ptr as *mut u8;
+        let (ranges, ranges_next_idx, exact_sizes) =
+            Self::cust_mem_into_slices(raw_base_ptr, color_count, entries_per_color);
+
+        Self {
+            raw_base_ptr,
+            bytes: bytes as usize,
+            ranges,
+            exact_sizes,
+            ranges_next_idx,
+            entries_per_color,
+        }
+    }
+
+    fn cust_mem_into_slices(
+        raw_mem_ptr: *mut u8,
+        color_count: usize,
+        entries_per_color: usize,
+    ) -> (&'a mut [PhysRange], &'a mut [usize], &'a mut [u64]) {
+        let exact_sizes =
+            unsafe { slice::from_raw_parts_mut(raw_mem_ptr as *mut u64, color_count) };
+        let mut byte_offset = (exact_sizes.len() * mem::size_of::<u64>()) as isize;
+
+        let ranges_next_idx = unsafe {
+            slice::from_raw_parts_mut(raw_mem_ptr.offset(byte_offset) as *mut usize, color_count)
+        };
+        byte_offset += (ranges_next_idx.len() * mem::size_of::<usize>()) as isize;
+
+        let ranges = unsafe {
+            slice::from_raw_parts_mut(
+                raw_mem_ptr.offset(byte_offset) as *mut PhysRange,
+                entries_per_color * color_count,
+            )
+        };
+
+        (ranges, ranges_next_idx, exact_sizes)
+    }
+
+    /// Returns the address of the main mem region backing this structures as well as its size
+    pub fn get_backing_mem(&self) -> (HostVirtAddr, usize) {
+        (HostVirtAddr::new(self.raw_base_ptr as usize), self.bytes)
+    }
+
+    /// Fixed size of each color sub array. Does not mean that we have that
+    /// many valid entries
+    pub fn get_max_entries_per_color(&self) -> usize {
+        self.entries_per_color
+    }
+
     ///return (number of required bytes, number of entries per color)
     pub fn required_bytes<T: MemoryColoring>(
-        all_regions: &Vec<MemoryRegion>,
+        all_regions: &[MemoryRegion],
         painter: &T,
     ) -> (usize, usize) {
         //compute required bytes to store color information
@@ -58,7 +111,7 @@ impl<'a> ColorToPhysMap<'a> {
     }
 
     pub fn new<T: MemoryColoring>(
-        all_regions: &Vec<MemoryRegion>,
+        all_regions: &[MemoryRegion],
         painter: &T,
         raw_mem_ptr: *mut u8,
         raw_mem_bytes: usize,
@@ -69,25 +122,8 @@ impl<'a> ColorToPhysMap<'a> {
             return Err("Insufficient memory provided");
         }
 
-        let exact_sizes =
-            unsafe { slice::from_raw_parts_mut(raw_mem_ptr as *mut u64, T::COLOR_COUNT) };
-        let mut byte_offset = (exact_sizes.len() * mem::size_of::<u64>()) as isize;
-
-        let ranges_next_idx = unsafe {
-            slice::from_raw_parts_mut(
-                raw_mem_ptr.offset(byte_offset) as *mut usize,
-                T::COLOR_COUNT,
-            )
-        };
-        byte_offset += (ranges_next_idx.len() * mem::size_of::<usize>()) as isize;
-
-        let ranges = unsafe {
-            slice::from_raw_parts_mut(
-                raw_mem_ptr.offset(byte_offset) as *mut PhysRange,
-                entries_per_color * T::COLOR_COUNT,
-            )
-        };
-
+        let (ranges, ranges_next_idx, exact_sizes) =
+            Self::cust_mem_into_slices(raw_mem_ptr, T::COLOR_COUNT, entries_per_color);
         exact_sizes.fill(0);
         ranges_next_idx.fill(0);
 
@@ -103,7 +139,7 @@ impl<'a> ColorToPhysMap<'a> {
         Ok(s)
     }
 
-    fn paint_memory<T: MemoryColoring>(&mut self, all_regions: &Vec<MemoryRegion>, painter: &T) {
+    fn paint_memory<T: MemoryColoring>(&mut self, all_regions: &[MemoryRegion], painter: &T) {
         let step_size = painter.step_size() as usize;
         let mut cur: Option<(PhysRange, u64)> = None;
         for mr in all_regions.iter() {
@@ -229,8 +265,11 @@ impl<'a> ColorToPhysMap<'a> {
     }
 }
 
+#[cfg(feature = "coloring-allocator")]
 #[cfg(test)]
 mod test {
+    extern crate alloc;
+    use alloc::vec::Vec;
 
     use super::*;
     use crate::memory_painter::MyBitmap;

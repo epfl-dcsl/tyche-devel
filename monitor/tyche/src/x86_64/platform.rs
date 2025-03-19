@@ -8,7 +8,9 @@ use capa_engine::utils::BitmapIterator;
 use capa_engine::{
     permission, AccessRights, CapaEngine, CapaError, Domain, Handle, LocalCapa, MemOps,
 };
+use mmu::color_to_phys_map::ColorToPhysMap;
 use mmu::eptmapper::EPT_ROOT_FLAGS;
+use mmu::memory_painter::{ActiveMemoryColoring, MemoryColoring};
 use mmu::FrameAllocator;
 use spin::MutexGuard;
 use stage_two_abi::{GuestInfo, Manifest};
@@ -614,7 +616,19 @@ impl MonitorX86 {
                 .expect("Failed to create VMCS")
         };
         let vcpu = vmcs.set_as_active().expect("Failed to set VMCS as active");
-        let mut state = VmxState { vcpu, vmxon };
+
+        log::info!("Reinitialzing color to phys in stage2");
+        let color_to_phys = ColorToPhysMap::deserialize(
+            manifest.color_to_phys.s2_vaddr,
+            manifest.color_to_phys.bytes,
+            manifest.color_to_phys.entries_per_color,
+            ActiveMemoryColoring::COLOR_COUNT,
+        );
+        let mut state = VmxState {
+            vcpu,
+            vmxon,
+            color_to_phys,
+        };
         let domain = if bsp {
             Self::do_init(&mut state, manifest)
         } else {

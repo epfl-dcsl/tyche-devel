@@ -4,6 +4,7 @@ use capa_engine::config::{NB_CORES, NB_DOMAINS, NB_REMAP_REGIONS};
 use capa_engine::context::{RegisterContext, RegisterState};
 use capa_engine::permission::{trap_bits, PermissionIndex};
 use capa_engine::{CapaEngine, CapaError, Domain, Handle, LocalCapa, MemOps, Remapper};
+use mmu::color_to_phys_map::ColorToPhysMap;
 use mmu::eptmapper::EPT_ROOT_FLAGS;
 use mmu::{EptMapper, FrameAllocator, IoPtFlag, IoPtMapper};
 use spin::{Mutex, MutexGuard};
@@ -26,6 +27,7 @@ use crate::sync::Barrier;
 pub struct VmxState {
     pub vcpu: ActiveVmcs<'static>,
     pub vmxon: Vmxon,
+    pub color_to_phys: ColorToPhysMap<'static>,
 }
 
 /// Static values
