@@ -1,9 +1,17 @@
+extern crate alloc;
+use alloc::vec::Vec;
+use core::marker::PhantomData;
 use core::{mem, slice};
 
 use utils::{HostPhysAddr, HostVirtAddr};
 
+use self::kmerge_iter::KmergeIter;
 use crate::frame_allocator::PhysRange;
-use crate::memory_painter::{MemoryColoring, MemoryRegion, MemoryRegionKind};
+use crate::memory_painter::{
+    ColorBitmap, MemoryColoring, MemoryRegion, MemoryRegionKind, PartitionBitmap,
+};
+
+mod kmerge_iter;
 
 pub struct ColorToPhysMap<'a> {
     /// base pointer to memory range
@@ -263,13 +271,152 @@ impl<'a> ColorToPhysMap<'a> {
             ))
         }
     }
+
+    /// Return exact size of colored memory within the given ranges
+    pub fn get_colored_size(
+        &self,
+        start: HostPhysAddr,
+        end: HostPhysAddr,
+        colors: &PartitionBitmap,
+    ) -> usize {
+        let mut size = 0;
+        for color in 0..colors.get_payload_bits_len() {
+            if !colors.get(color) {
+                continue;
+            }
+            let all_ranges = self.get_color(color);
+            let sub_start_idx = all_ranges.partition_point(|v| v.end <= start);
+            let sub = &all_ranges[sub_start_idx..];
+
+            for pr in sub {
+                if pr.start >= end {
+                    break;
+                }
+                if start >= pr.start && start < pr.end {
+                    // start fully contained, might not use full range
+                    size += pr.end.as_usize() - start.as_usize();
+                } else if end > pr.start && end < pr.end {
+                    //end fully contained, might not use full range
+                    size += end.as_usize() - pr.start.as_usize();
+                } else {
+                    size += pr.size();
+                }
+            }
+        }
+        return size;
+    }
+
+    /// Call `cb` on all memory with the specified colors in the given range.
+    /// `cb` the results of `cb` are sorted and adjacent PhysRanges are already merged
+    /// # Arguments
+    /// - `cb` callback for visited ranges. Return `false` to stop the iteraton
+    pub fn get_colored_ranges_ord<F>(
+        &self,
+        start: HostPhysAddr,
+        end: HostPhysAddr,
+        colors: &PartitionBitmap,
+        mut cb: F,
+    ) where
+        F: FnMut(PhysRange) -> bool,
+    {
+        let mut slices = Vec::new();
+        //for all colors find the sub ranges that overlap with our specified range
+        for color in 0..colors.get_payload_bits_len() {
+            if !colors.get(color) {
+                continue;
+            }
+            let all_ranges = self.get_color(color);
+            let sub_start_idx = all_ranges.partition_point(|v| v.end <= start);
+            let sub = &all_ranges[sub_start_idx..];
+            //n.b. that we operate on sub not all_ranges
+            let local_end_idx = sub.partition_point(|v| v.start < end);
+            let sub = &sub[..local_end_idx];
+            slices.push(sub);
+        }
+        let merging_iter = KmergeIter::new(slices);
+        let mut cur_opt: Option<PhysRange> = None;
+
+        //iterate over phys ranges in ascending order
+        for pr in merging_iter {
+            //fixup pr in case that it is only a partial overlap
+            let pr = if start >= pr.start && start < pr.end {
+                // start fully contained, might not use full range
+                PhysRange { start, end: pr.end }
+            } else if end > pr.start && end < pr.end {
+                //end fully contained, might not use full range
+                PhysRange {
+                    start: pr.start,
+                    end,
+                }
+            } else {
+                *pr
+            };
+
+            match &mut cur_opt {
+                Some(cur_pr) => {
+                    if cur_pr.end == pr.start {
+                        cur_pr.end = pr.end;
+                    } else {
+                        if !cb(*cur_pr) {
+                            return;
+                        }
+                        *cur_pr = pr;
+                    }
+                }
+                None => cur_opt = Some(pr),
+            }
+        }
+        if let Some(pr) = cur_opt {
+            if !cb(pr) {
+                return;
+            }
+        }
+    }
+
+    /// Compute the end HPA for such that start and end contain `colored_size` bytes considered only the specified colors
+    pub fn get_color_offset_end(
+        &self,
+        start: HostPhysAddr,
+        colored_size: usize,
+        colors: &PartitionBitmap,
+    ) -> Result<HostPhysAddr, ()> {
+        let mut curr_end = start.as_usize();
+        let mut curr_colored_size = 0;
+
+        //iterate over colored mem with OPEN end until we gathered enough mem
+        self.get_colored_ranges_ord(start, HostPhysAddr::new(usize::MAX), colors, |pr| {
+            curr_colored_size += pr.size();
+            if curr_colored_size <= colored_size {
+                curr_end = pr.end.as_usize();
+                if curr_colored_size == colored_size {
+                    false
+                } else {
+                    true
+                }
+            } else {
+                //using pr we overshot the desired size ->  cut in the middle and end iteration
+                let overshot = curr_colored_size - colored_size;
+                curr_end = pr.end.as_usize() - overshot;
+                return false;
+            }
+        });
+
+        if curr_colored_size >= colored_size {
+            Ok(HostPhysAddr::new(curr_end))
+        } else {
+            Err(())
+        }
+    }
 }
 
-#[cfg(feature = "coloring-allocator")]
 #[cfg(test)]
 mod test {
     extern crate alloc;
+    use alloc::fmt::Write;
+    use alloc::string::String;
     use alloc::vec::Vec;
+
+    use pretty_assertions::assert_eq;
 
     use super::*;
     use crate::memory_painter::MyBitmap;
@@ -387,5 +534,187 @@ mod test {
             total_size += ctp.get_color_size(idx);
         }
         assert_eq!(total_size, 2 * (1 << 20) + 4096);
+    }
+
+    #[test]
+    fn colored_size() {
+        let mut mem_regions = Vec::new();
+        mem_regions.push(MemoryRegion {
+            start: 0,
+            end: 12 * (1 << 12),
+            kind: crate::memory_painter::MemoryRegionKind::UseableRAM,
+        });
+        let (required_bytes, _) = ColorToPhysMap::required_bytes(&mem_regions, &TestColoring {});
+        let mut buf: Vec<u8> = Vec::with_capacity(required_bytes);
+
+        let ctp = ColorToPhysMap::new(
+            &mem_regions,
+            &TestColoring {},
+            buf.as_mut_ptr(),
+            required_bytes,
+        )
+        .expect("failed to create ctp");
+
+        let mut allowed_colors = PartitionBitmap::new();
+        allowed_colors.set(0, true);
+
+        //coloring has 4 colours -> 3 pages per color
+        let got_size = ctp.get_colored_size(
+            HostPhysAddr::new(0),
+            HostPhysAddr::new(12 * (1 << 12)),
+            &allowed_colors,
+        );
+        assert_eq!(got_size, 3 * (1 << 12), "Unexpected size 0x{:x}", got_size);
+
+        allowed_colors.set(3, true);
+        let got_size = ctp.get_colored_size(
+            HostPhysAddr::new(0),
+            HostPhysAddr::new(12 * (1 << 12)),
+            &allowed_colors,
+        );
+        assert_eq!(got_size, 6 * (1 << 12), "Unexpected size 0x{:x}", got_size);
+
+        //first range for first color is excluded by start paddr
+        let got_size = ctp.get_colored_size(
+            HostPhysAddr::new(1 * (1 << 12)),
+            HostPhysAddr::new(12 * (1 << 12)),
+            &allowed_colors,
+        );
+        assert_eq!(got_size, 5 * (1 << 12), "Unexpected size 0x{:x}", got_size);
+
+        //last range for last color is excluded by end paddr
+        let got_size = ctp.get_colored_size(
+            HostPhysAddr::new(0 * (1 << 12)),
+            HostPhysAddr::new(11 * (1 << 12)),
+            &allowed_colors,
+        );
+        assert_eq!(got_size, 5 * (1 << 12), "Unexpected size 0x{:x}", got_size);
+    }
+
+    #[test]
+    fn colored_ranges_ord() {
+        let mut mem_regions = Vec::new();
+        mem_regions.push(MemoryRegion {
+            start: 0,
+            end: 12 * (1 << 12),
+            kind: crate::memory_painter::MemoryRegionKind::UseableRAM,
+        });
+        let (required_bytes, _) = ColorToPhysMap::required_bytes(&mem_regions, &TestColoring {});
+        let mut buf: Vec<u8> = Vec::with_capacity(required_bytes);
+
+        let ctp = ColorToPhysMap::new(
+            &mem_regions,
+            &TestColoring {},
+            buf.as_mut_ptr(),
+            required_bytes,
+        )
+        .expect("failed to create ctp");
+
+        let mut allowed_colors = PartitionBitmap::new();
+        allowed_colors.set(0, true);
+
+        let mut got_ranges = Vec::new();
+        ctp.get_colored_ranges_ord(
+            HostPhysAddr::new(0),
+            HostPhysAddr::new(12 * (1 << 12)),
+            &allowed_colors,
+            |pr| {
+                got_ranges.push(pr);
+                true
+            },
+        );
+
+        let want = [
+            PhysRange::from((0 * (1 << 12), 1 * (1 << 12))),
+            PhysRange::from((4 * (1 << 12), 5 * (1 << 12))),
+            PhysRange::from((8 * (1 << 12), 9 * (1 << 12))),
+        ];
+
+        assert_eq!(got_ranges, want, "color 0 only failed");
+
+        //colors 0 and 1 allowed adjacent ranges should get merged
+        allowed_colors.set(1, true);
+        got_ranges.clear();
+        ctp.get_colored_ranges_ord(
+            HostPhysAddr::new(0),
+            HostPhysAddr::new(12 * (1 << 12)),
+            &allowed_colors,
+            |pr| {
+                got_ranges.push(pr);
+                true
+            },
+        );
+        let want = [
+            PhysRange::from((0 * (1 << 12), 2 * (1 << 12))),
+            PhysRange::from((4 * (1 << 12), 6 * (1 << 12))),
+            PhysRange::from((8 * (1 << 12), 10 * (1 << 12))),
+        ];
+        let mut got_str = String::new();
+        let mut want_str = String::new();
+        write!(got_str, "{:x?}", got_ranges).unwrap();
+        write!(want_str, "{:x?}", want).unwrap();
+        assert_eq!(got_str, want_str, "color 0 and 1  failed");
+
+        //add color color 3
+        allowed_colors.set(3, true);
+        got_ranges.clear();
+        ctp.get_colored_ranges_ord(
+            HostPhysAddr::new(0),
+            HostPhysAddr::new(12 * (1 << 12)),
+            &allowed_colors,
+            |pr| {
+                got_ranges.push(pr);
+                true
+            },
+        );
+        let want = [
+            PhysRange::from((0 * (1 << 12), 2 * (1 << 12))), //0+1
+            PhysRange::from((3 * (1 << 12), 6 * (1 << 12))), //3+0+1
+            PhysRange::from((7 * (1 << 12), 10 * (1 << 12))), //3+0+1
+            PhysRange::from((11 * (1 << 12), 12 * (1 << 12))), //3
+        ];
+        let mut got_str = String::new();
+        let mut want_str = String::new();
+        write!(got_str, "{:x?}", got_ranges).unwrap();
+        write!(want_str, "{:x?}", want).unwrap();
+        assert_eq!(got_str, want_str, "color 0, 1 and 3 failed");
+    }
+
+    #[test]
+    fn get_colored_offset_end() {
+        let mut mem_regions = Vec::new();
+        mem_regions.push(MemoryRegion {
+            start: 0,
+            end: 12 * (1 << 12),
+            kind: crate::memory_painter::MemoryRegionKind::UseableRAM,
+        });
+        let (required_bytes, _) = ColorToPhysMap::required_bytes(&mem_regions, &TestColoring {});
+        let mut buf: Vec<u8> = Vec::with_capacity(required_bytes);
+
+        let ctp = ColorToPhysMap::new(
+            &mem_regions,
+            &TestColoring {},
+            buf.as_mut_ptr(),
+            required_bytes,
+        )
+        .expect("failed to create ctp");
+
+        let mut allowed_colors = PartitionBitmap::new();
+        allowed_colors.set(0, true);
+        allowed_colors.set(2, true);
+
+        let got = ctp
+            .get_color_offset_end(HostPhysAddr::new(0), 2 * (1 << 12), &allowed_colors)
+            .expect("get_color_offset_end failed");
+
+        let mut got_str = String::new();
+        let mut want_str = String::new();
+        write!(got_str, "{:x?}", got.as_u64()).unwrap();
+        write!(want_str, "{:x?}", 3 * (1 << 12)).unwrap();
+        assert_eq!(got_str, want_str);
+
+        //want error because not enough mem
+        let got = ctp.get_color_offset_end(HostPhysAddr::new(0), 7 * (1 << 12), &allowed_colors);
+        assert_eq!(got, Err(()));
     }
 }

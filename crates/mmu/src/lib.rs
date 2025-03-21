@@ -14,6 +14,7 @@ pub use ioptmapper::{IoPtFlag, IoPtMapper};
 pub use ptmapper::{PtFlag, PtMapper};
 pub use riscv_ptmapper::{RVPtFlag, RVPtMapper};
 
+#[cfg(feature = "coloring-allocator")]
 pub mod color_to_phys_map;
 #[cfg(feature = "coloring-allocator")]
 pub mod coloring_range_allocator;
