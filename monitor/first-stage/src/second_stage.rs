@@ -39,6 +39,8 @@ const LOAD_VIRT_ADDR: HostVirtAddr = HostVirtAddr::new(0x80000000000);
 const STACK_VIRT_ADDR: HostVirtAddr = HostVirtAddr::new(0x90000000000);
 const STACK_SIZE: usize = (1 << 20) * 8;
 const S2_COLOR_TO_PHYS_VADDR: HostVirtAddr = HostVirtAddr::new(0xa0000000000);
+const S2_HEAP_VADDR: HostVirtAddr = HostVirtAddr::new(0xb0000000000);
+const S2_HEAP_SIZE: usize = 100 * (1 << 20);
 
 /// Second stage jump structures
 static mut SECOND_STAGE_ENTRIES: [Option<Stage2>; MAX_CPU_NUM] = [None; MAX_CPU_NUM];
@@ -208,6 +210,26 @@ pub fn load(
         ELfTargetEnvironment::Guest(_) => panic!("mapping color to phys: stage2 with guest mapper"),
     };
 
+    //Allocate heap for stage2
+    match &mut stage2_loaded_elf.pt_mapper {
+        ELfTargetEnvironment::Host(mapper) => {
+            let mut offset = 0;
+            stage2_allocator
+                .allocate_range(S2_HEAP_SIZE, |pr| {
+                    mapper.map_range(
+                        stage2_allocator,
+                        S2_HEAP_VADDR + offset,
+                        pr.start,
+                        pr.size(),
+                        PtFlag::PRESENT | PtFlag::WRITE,
+                    );
+                    offset += pr.size();
+                })
+                .expect("failed to allocate or map the heap for s2");
+        }
+        ELfTargetEnvironment::Guest(_) => panic!("mapping s2 heap with guest mapper"),
+    };
+
     // Map the guest (e.g. linux) memory into Tyche.
     // This is required for hashing content and writing back attestation into Linux-controlled
     // buffers.
@@ -348,6 +370,8 @@ pub fn load(
 
     manifest.iommu_hva = stage2_iommu_hva.as_u64();
     manifest.iommu_hpa = iommu_hpa.as_u64();
+    manifest.vaddr_heap = S2_HEAP_VADDR.as_u64();
+    manifest.size_heap = S2_HEAP_SIZE as u64;
 
     manifest.poffset = first_stage2_load_paddr
         .expect("first_stage2_load_paddr is uninitialized")

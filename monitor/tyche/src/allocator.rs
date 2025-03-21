@@ -5,6 +5,7 @@ use arena::free_list::FreeList;
 pub use mmu::FrameAllocator;
 use spin::Mutex;
 use stage_two_abi::Manifest;
+use talc::ErrOnOom;
 use utils::{Frame, HostPhysAddr, HostVirtAddr};
 
 use crate::statics::NB_PAGES;
@@ -117,9 +118,22 @@ unsafe impl<const N: usize> FrameAllocator for Allocator<N> {
     }
 }
 
+#[global_allocator]
+static ALLOCATOR: Talck<spin::Mutex<()>, ErrOnOom> = Talc::new().lock();
+
 // ————————————————————————————— Initialization ————————————————————————————— //
 
 pub fn init(manifest: &'static Manifest) {
     let mut allocator = ALLOCATOR.inner.lock();
     allocator.initialize((manifest.voffset - manifest.poffset) as usize);
+
+    if manifest.vaddr_heap == 0 || manifest.size_heap == 0 {
+        panic!("Manifest did not proviede heap for s2");
+    }
+    unsafe {
+        ALLOCATOR.lock().claim(Span::from_base_size(
+            manifest.vaddr_heap as *mut u8,
+            manifest.size_heap,
+        ));
+    }
 }

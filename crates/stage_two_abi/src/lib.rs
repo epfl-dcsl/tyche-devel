@@ -138,6 +138,10 @@ pub struct Manifest {
     /// Number of valid devices.
     pub nb_devices: usize,
     pub color_to_phys: ColorToPhysInfo,
+    /// Vaddr where stage1 mapped the heap for usage in stage2
+    pub vaddr_heap: u64,
+    /// Size of the heap
+    pub size_heap: u64,
 }
 
 /// Suport for x86_64 SMP

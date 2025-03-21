@@ -23,6 +23,8 @@ attestation = {path = "../../crates/attestation/"}
 utils = { path = "../../crates/utils/" }
 # TODO: move the untrusted dependencies behing a feature flag
 qemu = { path = "../../crates/qemu/" }
+# temp choice for global alloc
+talc = "4.4.2"
 
 
 [target.'cfg(target_arch = "x86_64")'.dependencies]
