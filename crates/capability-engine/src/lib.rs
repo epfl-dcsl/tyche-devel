@@ -247,7 +247,7 @@ impl CapaEngine {
             domain,
             &self.domains,
             permission::PermissionIndex::MonitorInterface,
-            permission::monitor_inter_perm::CARVE,
+            permission::monitor_inter_perm::ALIAS,
         )?;
 
         let region = self.domains[domain].get(region)?.as_region()?;
