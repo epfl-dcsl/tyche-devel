@@ -28,6 +28,19 @@ const char* domain_size_names[S_Max] = {
   "256k",
   "512k",
   "1M",
+  "1G",
+};
+
+const size_t domain_sizes[S_Max] = {
+    8 * 1024,             // 8k
+    16 * 1024,            // 16k
+    32 * 1024,            // 32k
+    64 * 1024,            // 64k
+    128 * 1024,           // 128k
+    256 * 1024,           // 256k
+    512 * 1024,           // 512k
+    1024 * 1024,          // 1M
+    1024L * 1024 * 1024,  // 1G
 };
 
 /// The default benchmark configuration.

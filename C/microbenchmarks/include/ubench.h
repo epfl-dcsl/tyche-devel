@@ -32,11 +32,15 @@ typedef enum domain_size_t {
   S_256k = 5,
   S_512k = 6,
   S_1M = 7,
-  S_Max = 8,
+  S_1G = 8,
+  S_Max = 9,
 } domain_size_t;
 
 /// Names for the domains.
 extern const char* domain_size_names[S_Max];
+
+/// Sizes for the domains.
+extern const size_t domain_sizes[S_Max];
 
 /// The configuration for the benchmark.
 typedef struct ubench_config_t {
