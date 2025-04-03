@@ -11,7 +11,7 @@ DST_FOLDER=$(mktemp -d)
 SRC_IMAGE=
 DST_IMAGE=
 
-NON_INTERACTIVE=""
+NON_INTERACTIVE=
 
 
 SCRIPT_PATH=$(realpath "$(dirname "$0")")
@@ -24,6 +24,7 @@ usage() {
   echo ""
   echo "-in PATH.qcow2            [Mandatory] Path to unencrypted input qcow2 disk image"
   echo "-out PATH.qcow2           [Optional] Path where the encrypted qcow2 disk is created. Defaults to the directory of the input file with -encrypted suffix"
+  echo "-q                        [Optional] Don not ask for user intearaction"
   echo ""
   exit
 }
@@ -38,6 +39,9 @@ while [ -n "$1" ]; do
       shift
       ;;
     -out) DST_IMAGE="$2"
+      shift
+      ;;
+    -q) NON_INTERACTIVE="1"
       shift
       ;;
     *)

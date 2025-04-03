@@ -14,9 +14,6 @@ NEW_VM=
 #size of the qcow2 disk image in GB
 SIZE=20
 OWNER_PUBKEY_PATH=""
-#Path to private key. public key is expected to be in the same directory, using the .pub extension
-SERVER_PRIVKEY_PATH=""
-SERVER_PUBKEY_PATH=""
 
 usage() {
   echo "Usage:"
@@ -45,11 +42,6 @@ while [ -n "$1" ]; do
       shift
       ;;
     -owner-pubkey) OWNER_PUBKEY_PATH="$2"
-      shift
-      ;;
-    -server-privkey)
-      SERVER_PRIVKEY_PATH="$2"
-      SERVER_PRIVKEY_PATH="${2}.pub"
       shift
       ;;
     -size)
@@ -101,14 +93,6 @@ if [ -z "$OWNER_PUBKEY_PATH" ]; then
   OWNER_PUBKEY_PATH="${DEFAULT_PATH}.pub"
 fi
 
-if [ -z "$SERVER_PRIVKEY_PATH" ]; then
-  mkdir -p "$KEYS_PATH"
-  DEFAULT_PATH="$KEYS_PATH/ssh-server-key-vm"
-  echo "No server ssh key provided. Generating a new keypair at $DEFAULT_PATH"
-  ssh-keygen -t ecdsa -N "" -f "$DEFAULT_PATH"
-  SERVER_PRIVKEY_PATH="$DEFAULT_PATH"
-  SERVER_PUBKEY_PATH="${DEFAULT_PATH}.pub"
-fi
 
 #Query Username and password
 echo "Enter username"
@@ -131,21 +115,6 @@ sed -i "s#<USER>#$USERNAME#g" "$USER_DATA"
 sed -i "s#<PWDHASH>#$PWHASH#g" "$USER_DATA"
 USER_PUBKEY=$(cat "$OWNER_PUBKEY_PATH")
 sed -i "s#<USER_PUBKEY>#$USER_PUBKEY#g" "$USER_DATA"
-# SERVER_PRIVKEY=$(cat "$SERVER_PRIVKEY_PATH")
-# sed -i "s#<SERVER_PRIVKEY>#$SERVER_PRIVKEY#g" user-data
-
-#Dirty hack to get all lines of our private key to be indented by 4 whitespaces
-#1) copy to file
-#2) replace each linestart with 4 whitespaces
-#3) append key after the "ecda_private: |" line in the config template
-TMP=$(mktemp)
-cp "$SERVER_PRIVKEY_PATH" "$TMP"
-sed -i 's#^#    #' "$TMP"
-sed -i "/^ *ecdsa_private: |/r $TMP" "$USER_DATA"
-rm "$TMP"
-# awk -v r="$SERVER_PRIVKEY" '{gsub(/<SERVER_PRIVKEY>/,r)}1' 
-SERVER_PUBKEY=$(cat "$SERVER_PUBKEY_PATH")
-sed -i "s#<SERVER_PUBKEY>#$SERVER_PUBKEY#g" "$USER_DATA"
 
 OUT_CFG_BLOB="$BUILD_DIR/config-blob.img"
 echo "Writing config blow to $OUT_CFG_BLOB"
