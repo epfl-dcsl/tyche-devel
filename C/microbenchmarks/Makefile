@@ -173,7 +173,7 @@ transitions: mock_app trans_dom
 	tychools instrument -s manifests/carve/transition.json $(TYCHOOLS_ARG)
 
 runbench: $(CODE_APP) $(HDRS_APP) sandboxes enclaves carve transitions 
-	$(GCC) $(ARCH_FLAGS) -DTYCHE_USER_SPACE=1 $(LOADER_BACKEND) -g $(APP_INCLUDES) -static -o $@ $(CODE_APP)
+	$(GCC) $(ARCH_FLAGS) -DTYCHE_USER_SPACE=1 $(LOADER_BACKEND) -g $(APP_INCLUDES) -static -o $@ $(CODE_APP) -lcrypto 
 
 install_disk: runbench 
 	mkdir -p $(DISK_PATH)/
