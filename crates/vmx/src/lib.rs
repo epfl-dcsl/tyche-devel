@@ -1119,6 +1119,10 @@ impl VmxExitQualification {
         exit_qualification::ApicAccessQualification::from_value(self.raw).unwrap()
     }
 
+    pub fn io_access(self) -> exit_qualification::IOInstrQualification {
+        exit_qualification::IOInstrQualification::from_value(self.raw)
+    }
+
     /// Interpretation due to access to a control register.
     pub fn control_register_accesses(self) -> exit_qualification::ControlRegisterAccesses {
         let cr_id = self.raw & 0b1111;

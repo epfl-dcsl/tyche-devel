@@ -1,8 +1,8 @@
 //! VMX bitmaps.
 //!
 //! Wrappers for simple and tape safe manipulation of bitmaps used throughout VMX operations.
-
 use bitflags::bitflags;
+use paste::paste;
 
 bitflags! {
     /// Pin-based VM-execution controls.
@@ -524,6 +524,58 @@ pub mod exit_qualification {
                 });
             }
             return None;
+        }
+    }
+
+    macro_rules! define_bitfield {
+        ($name:ident, $index:expr, $size:expr) => {
+            paste! {
+                pub const [<$name _INDEX>]: usize = $index;
+                pub const [<$name _MASK>]: usize = ((1 << $size) - 1) << $index;
+
+                #[allow(non_snake_case)]
+                #[inline]
+                pub fn [<$name _get>](val: usize) -> usize {
+                    (val & [<$name _MASK>]) >> $index
+                }
+            }
+        };
+    }
+
+    // Mask for the exit qualification to get the port
+    define_bitfield!(IO_ACCESS, 0, 2);
+    define_bitfield!(IO_DIRECTION, 3, 1);
+    define_bitfield!(IO_STRING, 4, 1);
+    define_bitfield!(IO_REP, 5, 1);
+    define_bitfield!(IO_ENCODING, 6, 1);
+    define_bitfield!(IO_PORT, 16, 16);
+
+    #[derive(Debug)]
+    pub struct IOInstrQualification {
+        pub access: u8,
+        pub direction: bool,
+        pub string: bool,
+        pub rep: bool,
+        pub encoding: bool,
+        pub port: u16,
+    }
+
+    impl IOInstrQualification {
+        pub fn from_value(value: usize) -> Self {
+            let access = IO_ACCESS_get(value) as u8;
+            let direction = IO_DIRECTION_get(value) != 0;
+            let string = IO_DIRECTION_get(value) != 0;
+            let rep = IO_REP_get(value) != 0;
+            let encoding = IO_ENCODING_get(value) != 0;
+            let port = IO_PORT_get(value) as u16;
+            Self {
+                access,
+                direction,
+                string,
+                rep,
+                encoding,
+                port,
+            }
         }
     }
 }

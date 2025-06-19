@@ -359,6 +359,13 @@ impl PlatformState for StateX86 {
                     return Err(CapaError::AlreadyFrozen);
                 }
             }
+            VmcsField::ApicAccessAddr | VmcsField::ApicAccessAddrHigh => {
+                log::info!(
+                    "\nAccessing the field {:?} setting value {:#x}\n",
+                    field,
+                    value
+                );
+            }
             _ => { /*Nothing to do*/ }
         }
 
@@ -1085,11 +1092,33 @@ impl MonitorX86 {
                 _ => (),
             }
 
+           /*if reason == VmxExitReason::EptViolation {
+                log::info!("Ept violation for dom{} at {:x}", domain.idx(), vs.vcpu.get(VmcsField::GuestRip).unwrap());
+                log::info!("Faulty address {:#x?}", vs.vcpu.guest_phys_addr().unwrap());
+                let ept_root = StateX86::get_domain(*domain).ept.unwrap();
+                let mut mapper = EptMapper::new(allocator().get_physical_offset().as_usize(), ept_root);
+                mapper.debug_range(vs.vcpu.guest_phys_addr().unwrap(), 4096);
+                log::info!("vs state: {:#x?}", vs.vcpu);
+            }*/
+            if reason == VmxExitReason::IoInstruction {
+                let qual = vs.vcpu.exit_qualification().unwrap().io_access();
+                if qual.port == 0x40 || qual.port == 0x20 {
+                    log::info!("At rip {:#x}", vs.vcpu.get(VmcsField::GuestRip).unwrap());
+                }
+            }
             if reason == VmxExitReason::ExternalInterrupt {
                 /*let address_eoi = 0xfee000b0 as *mut u32;
                 unsafe {
                     // Clear the eoi
                     *address_eoi = 0;
+                }*/
+
+                /*let apic_base = unsafe { rdmsr(IA32_APIC_BASE) };
+                if apic_base & (1 << 10) == 0 || apic_base & (1 << 11) == 0{
+                    panic!("Uh oh {:b}", apic_base);
+                }
+                if (cpuid().as_usize() == 0 && apic_base != 0xfee00d00) || (cpuid().as_usize() != 0 && apic_base != 0xfee00c00) {
+                    panic!("New value? {:#x}", apic_base);
                 }*/
                 x2apic::send_eoi();
             }
