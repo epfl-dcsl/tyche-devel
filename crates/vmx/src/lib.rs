@@ -28,7 +28,7 @@ pub use utils::{Frame, GuestPhysAddr, GuestVirtAddr, HostPhysAddr, HostVirtAddr}
 pub use crate::errors::{
     InterruptionType, VmExitInterrupt, VmxError, VmxExitReason, VmxFieldError,
 };
-use crate::fields::REGFILE_SIZE;
+use crate::{errors::VMEntryIntInfoField, fields::REGFILE_SIZE};
 
 /// Mask for keeping only the 32 lower bits.
 const LOW_32_BITS_MASK: u64 = (1 << 32) - 1;
@@ -416,6 +416,19 @@ impl<'vmx> ActiveVmcs<'vmx> {
                     VmcsField::VmExitIntrErrorCode.vmread()? as u32
                 }
             });
+        }
+
+        Ok(Some(info))
+    }
+
+    /// Parse the Interruption Information Field which
+    /// controls interrupt/execption injection upon vmentry
+    /// Table 25-17
+    pub fn interrupt_injection_info(&self) -> Result<Option<VMEntryIntInfoField>, VmxError> {
+        let info = VMEntryIntInfoField::from_u32(unsafe{VmcsField::VmEntryIntrInfoField.vmread()?} as u32);
+
+        if !info.valid() {
+            return Ok(None);
         }
 
         Ok(Some(info))

@@ -187,6 +187,49 @@ pub enum VmxFieldError {
     Unknown,
 }
 
+/// Represents the VM-Entry Interruption Information Fields
+/// Table 25-17
+#[derive(Debug)]
+pub struct VMEntryIntInfoField {
+    _raw: u32
+}
+
+
+impl VMEntryIntInfoField {
+
+    ///Instantiate from raw VMCS value
+    pub fn from_u32(value: u32) -> Self {
+        Self {
+            _raw: value
+        }
+    }
+
+    /// Bits 0:7 - Vector of interrupt or exception
+    pub fn vector(&self) -> u8 {
+        (self._raw & 0xff) as u8
+    }
+
+    /// Bits 8:10 - Interruption type
+    pub fn interruption_type(&self) -> InterruptionType {
+        InterruptionType::from_raw((self._raw >> 8) & 0x7)
+    }
+
+    /// Bit 11 - Deliver error code (0 = do not deliver; 1 = deliver)
+    pub fn deliver_error_code(&self) -> bool {
+        (self._raw & (1 << 11)) != 0
+    }
+
+    /// Bit 31 - Valid
+    pub fn valid(&self) -> bool {
+        (self._raw & (1 << 31)) != 0
+    }
+
+    /// Returns the raw 32-bit value
+    pub fn raw(&self) -> u32 {
+        self._raw
+    }
+}
+
 // See Intel SDM volume 3, chapter 28.2.2
 // There are cases (such as NMI) that are not yet handled below.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
