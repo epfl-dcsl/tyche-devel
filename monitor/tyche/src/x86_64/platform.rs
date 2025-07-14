@@ -359,13 +359,6 @@ impl PlatformState for StateX86 {
                     return Err(CapaError::AlreadyFrozen);
                 }
             }
-            VmcsField::ApicAccessAddr | VmcsField::ApicAccessAddrHigh => {
-                log::info!(
-                    "\nAccessing the field {:?} setting value {:#x}\n",
-                    field,
-                    value
-                );
-            }
             _ => { /*Nothing to do*/ }
         }
 
@@ -1100,12 +1093,7 @@ impl MonitorX86 {
                 mapper.debug_range(vs.vcpu.guest_phys_addr().unwrap(), 4096);
                 log::info!("vs state: {:#x?}", vs.vcpu);
             }*/
-            if reason == VmxExitReason::IoInstruction {
-                let qual = vs.vcpu.exit_qualification().unwrap().io_access();
-                if qual.port == 0x40 || qual.port == 0x20 {
-                    log::info!("At rip {:#x}", vs.vcpu.get(VmcsField::GuestRip).unwrap());
-                }
-            }
+
             if reason == VmxExitReason::ExternalInterrupt {
                 /*let address_eoi = 0xfee000b0 as *mut u32;
                 unsafe {
