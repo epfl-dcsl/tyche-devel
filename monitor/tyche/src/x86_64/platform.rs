@@ -26,7 +26,7 @@ use super::vmx_helper::{dump_host_state, load_host_state};
 use super::{perf, vmx_helper};
 use crate::allocator::{self, allocator};
 use crate::calls::{MONITOR_FAILURE, MONITOR_SUCCESS};
-use crate::monitor::{CoreUpdate, LogicalID, Monitor, PlatformState};
+use crate::monitor::{CoreUpdate, LogicalID, Monitor, PlatformState, COUNT_SWITCH};
 use crate::x86_64::context::CpuidEntry;
 use crate::x86_64::state::TLB_FLUSH_BARRIERS;
 use crate::{calls, MonitorErrors};
@@ -810,6 +810,9 @@ impl MonitorX86 {
                     result = unsafe {
                         let mut context = StateX86::get_context(domain, core_id);
                         context.flush(&mut state.vcpu);
+                        if domain.idx() != 0 {
+                            COUNT_SWITCH.fetch_add(1, Ordering::SeqCst);
+                        }
                         self.run_vcpu(&mut state, &mut context)
                     };
                 }
@@ -865,6 +868,11 @@ impl MonitorX86 {
                     vs.vcpu.next_instruction().or(Err(CapaError::PlatformError))?;
                 } else if vmcall == calls::EXIT {
                     return Ok(HandlerResult::Exit);
+                }
+
+                if vmcall == calls::DEBUG && args[0] == 900 {
+                    log::info!("The rflags at calibration time are {:#x}", vs.vcpu.get(VmcsField::GuestRflags).unwrap());
+                    log::info!("The vcpu: {:#x?}", vs.vcpu);
                 }
 
                 let success  = match vmcall {
@@ -1100,12 +1108,25 @@ impl MonitorX86 {
                 mapper.debug_range(vs.vcpu.guest_phys_addr().unwrap(), 4096);
                 log::info!("vs state: {:#x?}", vs.vcpu);
             }*/
-            if reason == VmxExitReason::IoInstruction {
+            if domain.idx() != 0 && reason == VmxExitReason::IoInstruction {
                 let qual = vs.vcpu.exit_qualification().unwrap().io_access();
-                if qual.port == 0x40 || qual.port == 0x20 {
-                    log::info!("At rip {:#x}", vs.vcpu.get(VmcsField::GuestRip).unwrap());
+                if !qual.direction {
+                    let mut context = StateX86::get_context(*domain, StateX86::logical_id());
+                    if qual.port == 0x20 {
+                        log::info!("PIC Master port {:#x}", context.get_current(VmcsField::GuestRax, None).unwrap());
+                    }
+                    if qual.port == 0x21 {
+                        log::info!("PIC Master data port (mask) {:#x}", context.get_current(VmcsField::GuestRax, None).unwrap());
+                    }
+                    if qual.port == 0x43 {
+                        log::info!("PIT Control port {:#x} | rflags {:#x}", context.get_current(VmcsField::GuestRax, None).unwrap(), vs.vcpu.get(VmcsField::GuestRflags).unwrap());
+                    }
+                } else if qual.port == 0x61 {
+                    let mut context = StateX86::get_context(*domain, StateX86::logical_id());
+                    log::info!("Something happening on port 0x61, read {} | rax {}?", qual.direction, context.get_current(VmcsField::GuestRax, None).unwrap());
                 }
             }
+
             if reason == VmxExitReason::ExternalInterrupt {
                 /*let address_eoi = 0xfee000b0 as *mut u32;
                 unsafe {

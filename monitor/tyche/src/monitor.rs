@@ -1,5 +1,5 @@
 use core::fmt;
-use core::sync::atomic::AtomicUsize;
+use core::sync::atomic::{AtomicU64, AtomicUsize};
 
 use attestation::hashing::hash_region;
 use capa_engine::config::NB_CORES;
@@ -52,6 +52,11 @@ const EMPTY_UPDATE_BUFFER: Mutex<Buffer<CoreUpdate>> = Mutex::new(Buffer::new())
 
 pub const CORE_REMAP_DEFAULT: AtomicUsize = AtomicUsize::new(usize::MAX);
 pub static CORES_REMAP: [AtomicUsize; NB_CORES] = [CORE_REMAP_DEFAULT; NB_CORES];
+
+pub static TRIGGER: AtomicU64 = AtomicU64::new(0);
+pub static INJECTED: AtomicU64 = AtomicU64::new(0);
+pub static ACKNOLEDGED: AtomicU64 = AtomicU64::new(0);
+pub static COUNT_SWITCH: AtomicU64 = AtomicU64::new(0);
 
 // —————————————————————————— Trying to generalize —————————————————————————— //
 
@@ -867,12 +872,56 @@ pub trait Monitor<T: PlatformState + 'static> {
                 todo!("Exit called")
             }
             calls::DEBUG => {
-                log::info!(
+                /*log::info!(
                     "Debug called with {:#x} from dom{} on core {}\n\n",
                     args[0],
                     domain.idx(),
                     T::logical_id()
-                );
+                );*/
+                if args[0] == 800 {
+                    TRIGGER.fetch_add(1, core::sync::atomic::Ordering::SeqCst);
+                }
+                if args[0] == 801 {
+                    INJECTED.fetch_add(1, core::sync::atomic::Ordering::SeqCst);
+                }
+                if args[0] == 802 {
+                    ACKNOLEDGED.fetch_add(1, core::sync::atomic::Ordering::SeqCst);
+                }
+                if args[0] >= 800 {
+                    log::info!(
+                        "[{}] TRIGGER: {}, INJECTED: {}, ACKED: {} | switches {}",
+                        args[0],
+                        TRIGGER.load(core::sync::atomic::Ordering::SeqCst),
+                        INJECTED.load(core::sync::atomic::Ordering::SeqCst),
+                        ACKNOLEDGED.load(core::sync::atomic::Ordering::SeqCst),
+                        COUNT_SWITCH.load(core::sync::atomic::Ordering::SeqCst)
+                    );
+                }
+                if args[0] == 900 {
+                    log::info!(
+                        "Starting calibration | switches {}",
+                        COUNT_SWITCH.load(core::sync::atomic::Ordering::SeqCst)
+                    );
+                }
+                if args[0] == 901 {
+                    log::info!("End of calibration with rflags");
+                    panic!("Stop the tracing here.");
+                }
+                if args[0] == 902 {
+                    log::info!("KVM cancelling injection queueing interrupt");
+                }
+                if args[0] == 920 {
+                    log::info!(
+                        "\nKVM maksing LVT0 | switches {}\n",
+                        COUNT_SWITCH.load(core::sync::atomic::Ordering::SeqCst)
+                    );
+                }
+                if args[0] == 921 {
+                    log::info!(
+                        "\nKVM unmaksing LVT0 | switches {}\n",
+                        COUNT_SWITCH.load(core::sync::atomic::Ordering::SeqCst)
+                    );
+                }
                 return Ok(false);
             }
             calls::CONFIGURE => {

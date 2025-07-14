@@ -14,7 +14,7 @@ const RUN_ARGS: &[&str] = &[
     "-machine", "q35",
     "-accel", "kvm,kernel-irqchip=split",
     "-m", "14G",
-   "-netdev", "user,id=net0,hostfwd=tcp:127.0.0.1:2222-:22",
+   "-netdev", "user,id=net0,hostfwd=tcp:127.0.0.1:2223-:22",
    "-device", "e1000,netdev=net0",
 
 ];
