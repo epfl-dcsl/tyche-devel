@@ -29,6 +29,8 @@ struct backend_vcpu_info_t {
   int fd;
   /// Vcpu core id.
   int core_id;
+  /// Vcpu id for KVM
+  int vcpu_id;
   /// kvm-specific memory mapped structure.
   struct kvm_run* kvm_run;
 

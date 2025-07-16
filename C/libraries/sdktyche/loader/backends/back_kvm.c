@@ -383,6 +383,18 @@ int backend_td_config(tyche_domain_t* domain, usize config, usize value)
  return SUCCESS;
 }
 
+static int get_kvm_vcpu_index(tyche_domain_t *domain, usize core_idx) {
+	int count = 0;
+	for (int i = 0; i < core_idx; i++) {
+		if (domain->core_map & (1ULL << i)) {
+			count++;
+		}
+	}
+	return count;
+}
+
+
+//TODO: aghosn fix the core id now that KVM handles it for us.
 int backend_td_create_vcpu(tyche_domain_t* domain, usize core_idx)
 {
   struct backend_vcpu_info_t *vcpu = NULL;
@@ -403,9 +415,10 @@ int backend_td_create_vcpu(tyche_domain_t* domain, usize core_idx)
   memset(vcpu, 0, sizeof(backend_vcpu_info_t));
   dll_init_elem(vcpu, list);
   vcpu->core_id = core_idx; 
+  vcpu->vcpu_id = get_kvm_vcpu_index(domain, core_idx);
   
   // Create the vpcu.
-  vcpu->fd = ioctl(domain->handle, KVM_CREATE_VCPU, vcpu->core_id); 
+  vcpu->fd = ioctl(domain->handle, KVM_CREATE_VCPU, vcpu->vcpu_id);
   if (vcpu->fd < 0) {
     ERROR("Unable to create vcpu for core %lld", core_idx);
     goto free_failure;
