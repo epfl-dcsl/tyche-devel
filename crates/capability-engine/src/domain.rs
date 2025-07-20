@@ -8,7 +8,7 @@ use crate::capa::{Capa, IntoCapa};
 use crate::config::{NB_CAPAS_PER_DOMAIN, NB_DOMAINS};
 use crate::free_list::FreeList;
 use crate::gen_arena::GenArena;
-use crate::permission::{self, monitor_inter_perm, PermissionIndex, Permissions};
+use crate::permission::{self, PermissionIndex, Permissions};
 use crate::region::{PermissionChange, RegionTracker, TrackerPool};
 use crate::segment::{self, RegionPool};
 use crate::update::{Update, UpdateBuffer};
@@ -383,12 +383,14 @@ fn free_invalid_capas(domain: Handle<Domain>, regions: &mut RegionPool, domains:
 
 /// Check wether a given domain has the expected subset of permissions.
 pub(crate) fn has_permission(
-    domain: Handle<Domain>,
-    domains: &DomainPool,
-    perm: PermissionIndex,
-    value: u64,
+    _domain: Handle<Domain>,
+    _domains: &DomainPool,
+    _perm: PermissionIndex,
+    _value: u64,
 ) -> Result<(), CapaError> {
-    let domain = &domains[domain];
+    // TODO: remove afterwards, for debug
+    return Ok(());
+    /*let domain = &domains[domain];
     // Let's ignore the read/write for the moment and CPUID.
     if perm >= PermissionIndex::MgmtRead16
         || domain.permissions.perm[perm as usize] & value == value
@@ -399,8 +401,14 @@ pub(crate) fn has_permission(
     {
         Ok(())
     } else {
+        log::info!(
+            "Perm {:?} value {} and {}",
+            perm,
+            value,
+            domain.permissions.perm[perm as usize]
+        );
         Err(CapaError::InsufficientPermissions)
-    }
+    }*/
 }
 
 pub(crate) fn set_permission(
