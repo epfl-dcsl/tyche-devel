@@ -883,6 +883,7 @@ impl MonitorX86 {
                     },
                     Ok(false) => {},
                     Err(e) => {
+                        if vmcall != calls::SET_CPUID_ENTRY {
                         log::error!("Failure monitor call: {:?}, call: {:?} for dom {} on core {}", e, vmcall, domain.idx(), StateX86::logical_id());
                         context.set(VmcsField::GuestRax, MONITOR_FAILURE, None).unwrap();
                         log::debug!("The vcpu: {:#x?}", vs.vcpu);
@@ -894,6 +895,7 @@ impl MonitorX86 {
                             log::debug!("remapped: {}", remap);
                         };
                         Self::do_debug(vs, domain, callback);
+                        }
                     }
                 }
                 if vmcall != calls::SWITCH {
