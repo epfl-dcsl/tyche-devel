@@ -121,6 +121,7 @@ impl PermissionChange {
 
 pub(crate) type TrackerPool = GenArena<Region, NB_TRACKER>;
 
+#[cfg(not(feature = "gen_arena_dyn"))]
 pub(crate) const EMPTY_REGION: Region = Region {
     start: 0,
     end: 0,

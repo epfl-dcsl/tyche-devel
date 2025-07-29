@@ -29,11 +29,13 @@ use cores::{Core, CoreList};
 use domain::{insert_capa, remove_capa, DomainHandle, DomainPool};
 pub use domain::{Domain, LocalCapa, NextCapaToken};
 pub use gen_arena::{GenArena, Handle};
+#[cfg(not(feature = "gen_arena_dyn"))]
+use region::EMPTY_REGION;
 pub use region::{
     AccessRights, MemOps, MemoryPermission, Region, RegionIterator, RegionTracker, MEMOPS_ALL,
     MEMOPS_EXTRAS,
 };
-use region::{PermissionIterator, TrackerPool, EMPTY_REGION};
+use region::{PermissionIterator, TrackerPool};
 pub use remapper::Remapper;
 pub use segment::EffectiveRegionIterator;
 use segment::{RegionCapa, RegionHash, RegionPool};
@@ -41,6 +43,7 @@ use update::UpdateBuffer;
 pub use update::{Buffer, Update};
 
 use crate::permission::{core_bits, trap_bits};
+#[cfg(not(feature = "gen_arena_dyn"))]
 use crate::segment::EMPTY_REGION_CAPA;
 
 /// Configuration for the static Capa Engine size.
@@ -109,7 +112,6 @@ impl CapaEngine {
 
     #[cfg(feature = "gen_arena_dyn")]
     pub fn new() -> Self {
-        const EMPTY_DOMAIN: Domain = Domain::new(0, false);
         const EMPTY_CORE: Core = Core::new();
 
         Self {

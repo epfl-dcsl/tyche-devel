@@ -41,6 +41,7 @@ pub struct Segment {
     next: Option<Handle<Segment>>,
 }
 
+#[cfg(not(feature = "gen_arena_dyn"))]
 const EMPTY_SEGMENT: Segment = Segment {
     hpa: 0,
     gpa: 0,

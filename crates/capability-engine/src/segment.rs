@@ -13,6 +13,8 @@ use crate::{
 
 pub type RegionHash = [u8; 32];
 pub(crate) type RegionPool = GenArena<RegionCapa, NB_REGIONS>;
+
+#[cfg(not(feature = "gen_arena_dyn"))]
 pub const EMPTY_REGION_CAPA: RegionCapa = RegionCapa::new_invalid();
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]

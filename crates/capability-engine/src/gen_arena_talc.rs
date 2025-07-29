@@ -1,16 +1,11 @@
 //! Generational Arena backed by `talc`
 
-#![no_std]
-#![feature(allocator_api)]
-
 extern crate alloc;
 
 use alloc::vec::Vec;
-use core::cell::{Cell, RefCell};
 use core::marker::PhantomData;
 use core::ops::{Index, IndexMut};
 
-use spin::Mutex;
 use talc::{ErrOnOom, Talc, Talck};
 
 use crate::CapaError;
@@ -18,6 +13,7 @@ use crate::CapaError;
 #[global_allocator]
 pub static GLOBAL_ALLOCATOR: Talck<spin::Mutex<()>, ErrOnOom> = Talc::new(ErrOnOom).lock();
 
+/*
 struct AllocdAdapter {
     virt_offset: Mutex<Cell<usize>>,
     inner: &'static Talck<spin::Mutex<()>, ErrOnOom>,
@@ -29,7 +25,7 @@ static CAPA_ALLOC_ADAPTER: AllocdAdapter = AllocdAdapter {
     inner: &GLOBAL_ALLOCATOR,
     allocated_mem: Mutex::new(RefCell::new(0)),
 };
-
+*/
 pub struct GenArena<T, const N: usize> {
     limit: usize,
     entries: Vec<Option<T>>,
@@ -218,7 +214,7 @@ impl<'a, T, const N: usize> Iterator for ArenaIterator<'a, T, N> {
             let idx = self.next_idx;
             self.next_idx += 1;
 
-            if let Some(ref value) = self.arena.entries[idx] {
+            if let Some(ref _value) = self.arena.entries[idx] {
                 // Valid allocated entry
                 let gen = self.arena.generations[idx];
                 return Some(Handle {
