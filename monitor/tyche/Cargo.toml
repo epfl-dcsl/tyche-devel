@@ -17,7 +17,7 @@ logger = { path = "../../crates/logger/" }
 stage_two_abi = { path = "../../crates/stage_two_abi" }
 mmu = { version = "0.1.0", path = "../../crates/mmu" }
 arena = {path = "../../crates/arena"}
-capa-engine = {path = "../../crates/capability-engine/"}
+capa-engine = {path = "../../crates/capability-engine/", features = ["gen_arena_dyn"]}
 attestation = {path = "../../crates/attestation/"}
 #Todo: should it be x86 specific?
 utils = { path = "../../crates/utils/" }

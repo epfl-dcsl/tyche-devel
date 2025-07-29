@@ -6,6 +6,10 @@ mod cores;
 mod debug;
 mod domain;
 mod free_list;
+#[cfg(not(feature = "gen_arena_dyn"))]
+mod gen_arena;
+#[cfg(feature = "gen_arena_dyn")]
+#[path = "gen_arena_talc.rs"]
 mod gen_arena;
 pub mod permission;
 mod region;
@@ -88,6 +92,7 @@ pub struct CapaEngine {
 }
 
 impl CapaEngine {
+    #[cfg(not(feature = "gen_arena_dyn"))]
     pub const fn new() -> Self {
         const EMPTY_DOMAIN: Domain = Domain::new(0, false);
         const EMPTY_CORE: Core = Core::new();
@@ -97,6 +102,21 @@ impl CapaEngine {
             domains: GenArena::new([EMPTY_DOMAIN; config::NB_DOMAINS]),
             regions: GenArena::new([EMPTY_REGION_CAPA; config::NB_REGIONS]),
             tracker: GenArena::new([EMPTY_REGION; config::NB_TRACKER]),
+            updates: UpdateBuffer::new(),
+            id_counter: 0,
+        }
+    }
+
+    #[cfg(feature = "gen_arena_dyn")]
+    pub fn new() -> Self {
+        const EMPTY_DOMAIN: Domain = Domain::new(0, false);
+        const EMPTY_CORE: Core = Core::new();
+
+        Self {
+            cores: [EMPTY_CORE; config::NB_CORES],
+            domains: GenArena::new(),
+            regions: GenArena::new(),
+            tracker: GenArena::new(),
             updates: UpdateBuffer::new(),
             id_counter: 0,
         }

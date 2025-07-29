@@ -62,9 +62,19 @@ impl Segment {
 }
 
 impl<const N: usize> Remapper<N> {
+    #[cfg(not(feature = "gen_arena_dyn"))]
     pub const fn new() -> Self {
         Remapper {
             segments: GenArena::new([EMPTY_SEGMENT; N]),
+            #[cfg(feature = "gen_arena_dyn")]
+            segments: GenArena::new(),
+            head: None,
+        }
+    }
+    #[cfg(feature = "gen_arena_dyn")]
+    pub fn new() -> Self {
+        Remapper {
+            segments: GenArena::new(),
             head: None,
         }
     }
