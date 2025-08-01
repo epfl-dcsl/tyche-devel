@@ -8,7 +8,7 @@ use capa_engine::{
     permission, AccessRights, Buffer, CapaEngine, CapaError, CapaInfo, Domain, Handle, LocalCapa,
     MemOps, NextCapaToken, MEMOPS_ALL, MEMOPS_EXTRAS,
 };
-use spin::{Mutex, MutexGuard};
+use spin::{Mutex, MutexGuard, Once};
 use stage_two_abi::Manifest;
 
 use crate::allocator::PAGE_SIZE;
@@ -40,7 +40,22 @@ pub enum CoreUpdate {
 }
 
 // ————————————————————————— Statics & Backend Data ————————————————————————— //
+
+#[cfg(feature = "gen_arena_dyn")]
+pub static CAPA_ENGINE: Once<Mutex<CapaEngine>> = Once::new();
+
+#[cfg(feature = "gen_arena_dyn")]
+pub fn capa_engine() -> &'static Mutex<CapaEngine> {
+    CAPA_ENGINE.call_once(|| Mutex::new(CapaEngine::new()))
+}
+
+#[cfg(not(feature = "gen_arena_dyn"))]
 pub static CAPA_ENGINE: Mutex<CapaEngine> = Mutex::new(CapaEngine::new());
+#[cfg(not(feature = "gen_arena_dyn"))]
+pub fn capa_engine() -> &'static Mutex<CapaEngine> {
+    &CAPA_ENGINE
+}
+
 pub static IO_DOMAIN: Mutex<Option<LocalCapa>> = Mutex::new(None);
 pub static INITIAL_DOMAIN: Mutex<Option<Handle<Domain>>> = Mutex::new(None);
 pub static CORE_UPDATES: [Mutex<Buffer<CoreUpdate>>; NB_CORES] = [EMPTY_UPDATE_BUFFER; NB_CORES];
@@ -244,18 +259,18 @@ pub trait Monitor<T: PlatformState + 'static> {
     /// This function attempts to avoid deadlocks.
     /// It forces updates to be consumed upon failed attempts.
     fn lock_engine(state: &mut T, dom: &mut Handle<Domain>) -> MutexGuard<'static, CapaEngine> {
-        let mut locked = CAPA_ENGINE.try_lock();
+        let mut locked = capa_engine().try_lock();
         while locked.is_none() {
             //TODO: fix me
             Self::apply_core_updates(state, dom);
-            locked = CAPA_ENGINE.try_lock();
+            locked = capa_engine().try_lock();
         }
         locked.unwrap()
     }
 
     fn do_init(state: &mut T, manifest: &'static Manifest) -> Handle<Domain> {
         // No one else is running yet
-        let mut engine = CAPA_ENGINE.lock();
+        let mut engine = capa_engine().lock();
         let domain = engine
             .create_manager_domain(permission::monitor_inter_perm::ALL)
             .unwrap();
@@ -841,13 +856,15 @@ pub trait Monitor<T: PlatformState + 'static> {
                 return Ok(true);
             }
             calls::SWITCH => {
-                log::trace!(
-                    "Switch on core {} from {} with capa {} quantum {}",
-                    T::logical_id(),
-                    domain.idx(),
-                    args[0],
-                    args[1],
-                );
+                if args[1] != 0 {
+                    log::trace!(
+                        "Switch on core {} from {} with capa {} quantum {}",
+                        T::logical_id(),
+                        domain.idx(),
+                        args[0],
+                        args[1],
+                    );
+                }
                 Self::do_switch(
                     state,
                     domain,
@@ -873,6 +890,7 @@ pub trait Monitor<T: PlatformState + 'static> {
                     domain.idx(),
                     T::logical_id()
                 );
+
                 return Ok(false);
             }
             calls::CONFIGURE => {

@@ -6,7 +6,7 @@ use capa_engine::permission::{trap_bits, PermissionIndex};
 use capa_engine::{CapaEngine, CapaError, Domain, Handle, LocalCapa, MemOps, Remapper};
 use mmu::eptmapper::EPT_ROOT_FLAGS;
 use mmu::{EptMapper, FrameAllocator, IoPtFlag, IoPtMapper};
-use spin::{Mutex, MutexGuard};
+use spin::{Mutex, MutexGuard, Once};
 use utils::{GuestPhysAddr, HostPhysAddr, HostVirtAddr};
 use vmx::bitmaps::{EptEntryFlags, EptMemoryType, ExceptionBitmap, PinbasedControls};
 use vmx::fields::VmcsField;
@@ -74,7 +74,10 @@ const EMPTY_DOMAIN: Mutex<DataX86> = Mutex::new(DataX86 {
     ept: None,
     ept_old: None,
     iopt: None,
+    #[cfg(not(feature = "gen_arena_dyn"))]
     remapper: Remapper::new(),
+    #[cfg(feature = "gen_arena_dyn")]
+    remapper: Once::new(),
 });
 
 /// Domain data on x86
@@ -82,7 +85,10 @@ pub struct DataX86 {
     pub ept: Option<HostPhysAddr>,
     pub ept_old: Option<HostPhysAddr>,
     pub iopt: Option<HostPhysAddr>,
+    #[cfg(not(feature = "gen_arena_dyn"))]
     pub remapper: Remapper<NB_REMAP_REGIONS>,
+    #[cfg(feature = "gen_arena_dyn")]
+    pub remapper: Once<Remapper<NB_REMAP_REGIONS>>,
 }
 
 pub type StateX86 = VmxState;

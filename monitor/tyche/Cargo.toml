@@ -4,7 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [features]
-default = []
+default = ["gen_arena_dyn"]
+gen_arena_dyn = ["capa-engine/gen_arena_dyn"]
 vga = ["dep:vga"] # Print to VGA text mode
 bare_metal = []
 visionfive2 = ["dep:riscv_serial","stage_two_abi/visionfive2","qemu/visionfive2","riscv_pmp/visionfive2","riscv_tyche/visionfive2"]
