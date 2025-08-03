@@ -21,7 +21,9 @@ use super::context::{ContextGpx86, Contextx86};
 use super::cpuid_filter::{filter_mpk, filter_tpause};
 use super::init::NB_BOOTED_CORES;
 use super::perf::PerfEvent;
-use super::state::{DataX86, StateX86, VmxState, CONTEXTS, DOMAINS, IOMMU, TLB_FLUSH};
+use super::state::{
+    contexts, domains, DataX86, StateX86, VmxState, CONTEXTS, DOMAINS, IOMMU, TLB_FLUSH,
+};
 use super::vmx_helper::{dump_host_state, load_host_state};
 use super::{perf, vmx_helper};
 use crate::allocator::{self, allocator};
@@ -112,12 +114,38 @@ impl PlatformState for StateX86 {
         iommu.set_addr(addr);
     }
 
+    #[cfg(not(feature = "gen_arena_dyn"))]
     fn get_domain(domain: Handle<Domain>) -> MutexGuard<'static, Self::DomainData> {
-        DOMAINS[domain.idx()].lock()
+        domains()[domain.idx()].lock()
     }
 
+    #[cfg(not(feature = "gen_arena_dyn"))]
     fn get_context(domain: Handle<Domain>, core: LogicalID) -> MutexGuard<'static, Self::Context> {
-        CONTEXTS[domain.idx()][core.as_usize()].lock()
+        contexts()[domain.idx()][core.as_usize()].lock()
+    }
+
+    #[cfg(feature = "gen_arena_dyn")]
+    fn get_domain(domain: Handle<Domain>) -> MutexGuard<'static, Self::DomainData> {
+        // Lock the outer map
+        let map = domains().lock();
+        // Clone the Arc so we can drop the map lock before locking the value
+        let arc = map.get(&domain).unwrap().clone();
+        drop(map); // Release map lock early to avoid deadlocks
+
+        // Lock the actual domain
+        arc.lock()
+    }
+
+    #[cfg(feature = "gen_arena_dyn")]
+    fn get_context(domain: Handle<Domain>, core: LogicalID) -> MutexGuard<'static, Self::Context> {
+        // Lock the outer map
+        let map = contexts().lock();
+        // Clone the Arc so we can drop the map lock before locking the value
+        let arc = map.get(&domain).unwrap().clone();
+        drop(map); // Release map lock early to avoid deadlocks
+
+        // Lock the actual domain
+        arc.lock()
     }
 
     fn remap_core(core: usize) -> usize {
@@ -860,6 +888,16 @@ impl MonitorX86 {
                     return Ok(HandlerResult::Exit);
                 }
 
+                if vmcall == 0x666 {
+                            let callback = |dom: Handle<Domain>, engine: &mut CapaEngine| {
+                            let dom_dat = StateX86::get_domain(dom);
+                            log::debug!("remaps {}", dom_dat.remapper.iter_segments());
+                            let remap = dom_dat.remapper.remap(engine.get_domain_permissions(dom).unwrap());
+                            log::debug!("remapped: {}", remap);
+                        };
+                        Self::do_debug(vs, domain, callback);
+                }
+
                 let success  = match vmcall {
                     calls::EXIT => return Ok(HandlerResult::Exit),
                     calls::SET_CPUID_ENTRY => {
@@ -984,6 +1022,13 @@ impl MonitorX86 {
                     .as_u64(),
                 addr.as_u64(),
             );
+    let callback = |dom: Handle<Domain>, engine: &mut CapaEngine| {
+    let dom_dat = StateX86::get_domain(dom);
+    log::debug!("remaps {}", dom_dat.remapper.iter_segments());
+    let remap = dom_dat.remapper.remap(engine.get_domain_permissions(dom).unwrap());
+    log::debug!("remapped: {}", remap);
+};
+Self::do_debug(vs, domain, callback);
             panic!("The vcpu {:x?}", vs.vcpu);
         }
         VmxExitReason::Exception if domain.idx() == 0 => {

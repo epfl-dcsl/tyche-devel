@@ -3,6 +3,7 @@
 extern crate alloc;
 
 use alloc::vec::Vec;
+use core::cmp::Ordering;
 use core::marker::PhantomData;
 use core::ops::{Index, IndexMut};
 
@@ -136,6 +137,21 @@ pub struct Handle<T> {
     idx: usize,
     gen: u64,
     _type: PhantomData<T>,
+}
+
+impl<T> PartialOrd for Handle<T> {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl<T> Ord for Handle<T> {
+    fn cmp(&self, other: &Self) -> Ordering {
+        match self.idx.cmp(&other.idx) {
+            Ordering::Equal => self.gen.cmp(&other.gen),
+            other => other,
+        }
+    }
 }
 
 impl<T> Handle<T> {

@@ -1,3 +1,8 @@
+#[cfg(feature = "gen_arena_dyn")]
+extern crate alloc;
+use alloc::collections::BTreeMap;
+use alloc::sync::Arc;
+use alloc::vec::Vec;
 use core::sync::atomic::{AtomicBool, Ordering};
 
 use capa_engine::config::{NB_CORES, NB_DOMAINS, NB_REMAP_REGIONS};
@@ -29,7 +34,10 @@ pub struct VmxState {
 }
 
 /// Static values
+
+#[cfg(not(feature = "gen_arena_dyn"))]
 pub static DOMAINS: [Mutex<DataX86>; NB_DOMAINS] = [EMPTY_DOMAIN; NB_DOMAINS];
+#[cfg(not(feature = "gen_arena_dyn"))]
 pub static CONTEXTS: [[Mutex<Contextx86>; NB_CORES]; NB_DOMAINS] =
     [EMPTY_CONTEXT_ARRAY; NB_DOMAINS];
 pub static IOMMU: Mutex<Iommu> =
@@ -37,6 +45,33 @@ pub static IOMMU: Mutex<Iommu> =
 pub const FALSE: AtomicBool = AtomicBool::new(false);
 pub static TLB_FLUSH_BARRIERS: [Barrier; NB_DOMAINS] = [Barrier::NEW; NB_DOMAINS];
 pub static TLB_FLUSH: [AtomicBool; NB_DOMAINS] = [FALSE; NB_DOMAINS];
+
+#[cfg(feature = "gen_arena_dyn")]
+pub static DOMAINS: Once<Mutex<BTreeMap<Handle<Domain>, Arc<Mutex<DataX86>>>>> = Once::new();
+
+#[cfg(feature = "gen_arena_dyn")]
+pub static CONTEXTS: Once<Mutex<BTreeMap<Handle<Domain>, Arc<Mutex<Vec<Contextx86>>>>>> =
+    Once::new();
+
+#[cfg(feature = "gen_arena_dyn")]
+pub fn domains() -> &'static Mutex<BTreeMap<Handle<Domain>, Arc<Mutex<DataX86>>>> {
+    DOMAINS.call_once(|| Mutex::new(BTreeMap::new()))
+}
+
+#[cfg(not(feature = "gen_arena_dyn"))]
+pub fn domains() -> &'static [Mutex<DataX86>; NB_DOMAINS] {
+    &DOMAINS
+}
+
+#[cfg(feature = "gen_arena_dyn")]
+pub fn contexts() -> &'static Mutex<BTreeMap<Handle<Domain>, Arc<Mutex<Vec<Contextx86>>>>> {
+    CONTEXTS.call_once(|| Mutex::new(BTreeMap::new()))
+}
+
+#[cfg(not(feature = "gen_arena_dyn"))]
+pub fn contexts() -> &'static [[Mutex<Contextx86>; NB_CORES]; NB_DOMAINS] {
+    &CONTEXTS
+}
 
 // —————————————————————————————— Empty values —————————————————————————————— //
 
