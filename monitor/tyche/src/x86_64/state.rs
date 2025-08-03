@@ -110,9 +110,9 @@ const EMPTY_DOMAIN: Mutex<DataX86> = Mutex::new(DataX86 {
     ept_old: None,
     iopt: None,
     #[cfg(not(feature = "gen_arena_dyn"))]
-    remapper: Remapper::new(),
+    rmp: Remapper::new(),
     #[cfg(feature = "gen_arena_dyn")]
-    remapper: Once::new(),
+    rmp: Once::new(),
 });
 
 /// Domain data on x86
@@ -121,9 +121,21 @@ pub struct DataX86 {
     pub ept_old: Option<HostPhysAddr>,
     pub iopt: Option<HostPhysAddr>,
     #[cfg(not(feature = "gen_arena_dyn"))]
-    pub remapper: Remapper<NB_REMAP_REGIONS>,
+    rmp: Remapper<NB_REMAP_REGIONS>,
     #[cfg(feature = "gen_arena_dyn")]
-    pub remapper: Once<Remapper<NB_REMAP_REGIONS>>,
+    rmp: Once<Remapper<NB_REMAP_REGIONS>>,
+}
+
+impl DataX86 {
+    #[cfg(not(feature = "gen_arena_dyn"))]
+    pub fn remapper(&self) -> &Remapper<NB_REMAP_REGIONS> {
+        &self.rmp
+    }
+
+    #[cfg(feature = "gen_arena_dyn")]
+    pub fn remapper(&self) -> &Remapper<NB_REMAP_REGIONS> {
+        &self.rmp.call_once(|| Remapper::new())
+    }
 }
 
 pub type StateX86 = VmxState;
@@ -213,7 +225,7 @@ impl StateX86 {
             ept_root.phys_addr,
         );
         let permission_iter = engine.get_domain_permissions(domain_handle).unwrap();
-        for range in domain.remapper.remap(permission_iter) {
+        for range in domain.remapper().remap(permission_iter) {
             if !range.ops.contains(MemOps::READ) {
                 log::error!("there is a region without read permission: {}", range);
                 continue;

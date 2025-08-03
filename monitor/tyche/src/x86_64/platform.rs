@@ -89,7 +89,7 @@ impl PlatformState for StateX86 {
     ) -> Option<usize> {
         let domain = Self::get_domain(domain_handle);
         let permission_iter = engine.get_domain_permissions(domain_handle).unwrap();
-        for range in domain.remapper.remap(permission_iter) {
+        for range in domain.remapper().remap(permission_iter) {
             let range_start = range.gpa;
             let range_end = range_start + range.size;
             if range_start <= addr
@@ -138,6 +138,7 @@ impl PlatformState for StateX86 {
 
     #[cfg(feature = "gen_arena_dyn")]
     fn get_context(domain: Handle<Domain>, core: LogicalID) -> MutexGuard<'static, Self::Context> {
+        //TODO: have to fix all of that
         // Lock the outer map
         let map = contexts().lock();
         // Clone the Arc so we can drop the map lock before locking the value
@@ -145,7 +146,7 @@ impl PlatformState for StateX86 {
         drop(map); // Release map lock early to avoid deadlocks
 
         // Lock the actual domain
-        arc.lock()
+        arc.lock()[core.as_usize()]
     }
 
     fn remap_core(core: usize) -> usize {
@@ -500,7 +501,7 @@ impl PlatformState for StateX86 {
     ) -> bool {
         let dom_dat = Self::get_domain(domain);
         dom_dat
-            .remapper
+            .remapper()
             .overlaps(alias, repeat * (region.end - region.start))
     }
 
@@ -514,7 +515,7 @@ impl PlatformState for StateX86 {
     ) -> Result<(), CapaError> {
         let mut dom_dat = Self::get_domain(domain);
         let _ = dom_dat
-            .remapper
+            .remapper()
             .map_range(region.start, alias, region.end - region.start, repeat)
             .unwrap(); // Overlap is checked again but should not be triggered.
         engine.conditional_permission_update(domain);
@@ -529,7 +530,7 @@ impl PlatformState for StateX86 {
         size: usize,
     ) -> Result<(), CapaError> {
         let mut data = Self::get_domain(domain);
-        let _ = data.remapper.unmap_gpa_range(alias, size).unwrap();
+        let _ = data.remapper().unmap_gpa_range(alias, size).unwrap();
         Ok(())
     }
 
@@ -573,7 +574,7 @@ impl PlatformState for StateX86 {
         size: usize,
     ) -> Result<(usize, usize), CapaError> {
         let dom = Self::get_domain(domain);
-        for seg in dom.remapper.iter_segments() {
+        for seg in dom.remapper().iter_segments() {
             let seg_size = seg.size * seg.repeat;
             // Okay we found the segment.
             if seg.gpa <= gpa && (seg.gpa + seg_size) > gpa {
@@ -891,8 +892,8 @@ impl MonitorX86 {
                 if vmcall == 0x666 {
                             let callback = |dom: Handle<Domain>, engine: &mut CapaEngine| {
                             let dom_dat = StateX86::get_domain(dom);
-                            log::debug!("remaps {}", dom_dat.remapper.iter_segments());
-                            let remap = dom_dat.remapper.remap(engine.get_domain_permissions(dom).unwrap());
+                            log::debug!("remaps {}", dom_dat.remapper().iter_segments());
+                            let remap = dom_dat.remapper().remap(engine.get_domain_permissions(dom).unwrap());
                             log::debug!("remapped: {}", remap);
                         };
                         Self::do_debug(vs, domain, callback);
@@ -928,8 +929,8 @@ impl MonitorX86 {
                         drop(context);
                         let callback = |dom: Handle<Domain>, engine: &mut CapaEngine| {
                             let dom_dat = StateX86::get_domain(dom);
-                            log::debug!("remaps {}", dom_dat.remapper.iter_segments());
-                            let remap = dom_dat.remapper.remap(engine.get_domain_permissions(dom).unwrap());
+                            log::debug!("remaps {}", dom_dat.remapper().iter_segments());
+                            let remap = dom_dat.remapper().remap(engine.get_domain_permissions(dom).unwrap());
                             log::debug!("remapped: {}", remap);
                         };
                         Self::do_debug(vs, domain, callback);
@@ -1024,8 +1025,8 @@ impl MonitorX86 {
             );
     let callback = |dom: Handle<Domain>, engine: &mut CapaEngine| {
     let dom_dat = StateX86::get_domain(dom);
-    log::debug!("remaps {}", dom_dat.remapper.iter_segments());
-    let remap = dom_dat.remapper.remap(engine.get_domain_permissions(dom).unwrap());
+    log::debug!("remaps {}", dom_dat.remapper().iter_segments());
+    let remap = dom_dat.remapper().remap(engine.get_domain_permissions(dom).unwrap());
     log::debug!("remapped: {}", remap);
 };
 Self::do_debug(vs, domain, callback);
