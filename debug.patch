@@ -1,0 +1,15 @@
+diff --git a/monitor/tyche/src/x86_64/guest.rs b/monitor/tyche/src/x86_64/guest.rs
+index aafd3a62..2ecd9841 100644
+--- a/monitor/tyche/src/x86_64/guest.rs
++++ b/monitor/tyche/src/x86_64/guest.rs
+@@ -699,6 +699,9 @@ fn handle_exit(
+                 }*/
+                 x2apic::send_eoi();
+             }
++            if reason != VmxExitReason::ExternalInterrupt {
++                log::info!("Exit {:?} on dom{} at rip: {:#x}", reason, domain.idx(), vs.vcpu.get(VmcsField::GuestRip).unwrap());
++            }
+             match monitor::do_handle_violation(vs, domain) {
+                 Ok(_) => {
+                     return Ok(HandlerResult::Resume);
+

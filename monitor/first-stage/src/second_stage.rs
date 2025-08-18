@@ -78,6 +78,20 @@ pub unsafe fn enter() {
 
 fn _enter_inner() {
     let cpu_id = CORES_REMAP[cpu::id()].load(Ordering::SeqCst);
+
+    // Sometimes we might fail to read the CPU logical IDs. We defensively check for a valid ID
+    // here.
+    if cpu_id >= MAX_CPU_NUM {
+        for _ in 0..20 {
+            log::error!(
+                "Invalid logical CPU ID on core {}: 0x{:x}",
+                cpu::id(),
+                cpu_id
+            );
+        }
+        panic!("Failed to read the virtual CPU ID on core {}", cpu::id());
+    }
+
     // Safety:
     let info = unsafe {
         match SECOND_STAGE_ENTRIES[cpu_id] {
