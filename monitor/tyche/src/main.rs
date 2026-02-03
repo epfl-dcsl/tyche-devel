@@ -2,6 +2,8 @@
 #![no_main]
 
 use core::panic::PanicInfo;
+use core::arch::asm;
+use riscv_tyche::{TYCHE_STACK_POINTER};
 
 use log::LevelFilter;
 #[cfg(target_arch = "riscv64")]
@@ -37,6 +39,19 @@ fn tyche_entry_point(hartid: usize, manifest: RVManifest) -> ! {
             "sb t1, 0(t0)",
         );
     } */
+
+    unsafe {
+        asm!(
+            "csrr t0, mhartid",
+            "slli t0, t0, 3",   // to index into STACK_ADDRESS
+            "la t1, {stack}",
+            "add t1, t1, t0",
+            "ld t1, 0(t1)",
+            "mv sp, t1",
+            "csrw mscratch, sp",
+            stack = sym TYCHE_STACK_POINTER,
+        )
+    }
 
     arch::arch_entry_point(hartid, manifest, LOG_LEVEL);
 }

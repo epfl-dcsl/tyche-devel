@@ -6,7 +6,7 @@ use capa_engine::{CapaEngine, Domain, Handle, MemOps};
 use riscv_pmp::csrs::{pmpaddr_csr_write, pmpcfg_csr_write};
 use riscv_pmp::{
     clear_pmp, pmp_write_compute, PMPAddressingMode, PMPWriteResponse, FROZEN_PMP_ENTRIES,
-    PMP_CFG_ENTRIES, PMP_ENTRIES,
+    PMP_CFG_ENTRIES, PMP_ENTRIES, find_lowest_available_pmp_index
 };
 use riscv_utils::{
     read_medeleg, read_mepc, read_mscratch, read_mstatus, read_satp, toggle_supervisor_interrupts,
@@ -73,19 +73,21 @@ impl StateRiscv {
     }
 
     pub fn update_pmps(domain: MutexGuard<DataRiscv>) {
-        log::debug!("Updating PMPs FOR REAL!");
+        //log::debug!("Updating PMPs FOR REAL!");
         clear_pmp();
-        for i in FROZEN_PMP_ENTRIES..PMP_ENTRIES {
+        let available_pmps_starting_index = find_lowest_available_pmp_index();
+        for i in available_pmps_starting_index..PMP_ENTRIES {
+        //for i in FROZEN_PMP_ENTRIES..PMP_ENTRIES {
             pmpaddr_csr_write(i, domain.pmpaddr[i]);
-            log::trace!(
-                "updating pmpaddr index: {}, val: {:x}",
-                i,
-                domain.pmpaddr[i]
-            );
+            // log::trace!(
+            //     "updating pmpaddr index: {}, val: {:x}",
+            //     i,
+            //     domain.pmpaddr[i]
+            // );
         }
         for i in 0..PMP_CFG_ENTRIES {
             pmpcfg_csr_write(i * 8, domain.pmpcfg[i]);
-            log::trace!("updating pmpcfg index: {}, val: {:x}", i, domain.pmpcfg[i]);
+            //log::trace!("updating pmpcfg index: {}, val: {:x}", i, domain.pmpcfg[i]);
         }
         unsafe {
             asm!("sfence.vma");
@@ -99,12 +101,12 @@ impl StateRiscv {
         next_domain: MutexGuard<DataRiscv>,
         domain: Handle<Domain>,
     ) {
-        log::debug!(
-            "writing satp: {:x} mepc {:x} mscratch: {:x}",
-            next_ctx.satp,
-            next_ctx.mepc,
-            next_ctx.sp
-        );
+        // log::debug!(
+        //     "writing satp: {:x} mepc {:x} mscratch: {:x}",
+        //     next_ctx.satp,
+        //     next_ctx.mepc,
+        //     next_ctx.sp
+        // );
         //Save current context
         //TODO: do this before.
         //current_ctx.reg_state = *current_reg_state;
@@ -165,11 +167,11 @@ impl StateRiscv {
 
         domain.pmpaddr[pmp_index] = pmp_addr;
 
-        log::trace!(
-            "Updated for DOMAIN: PMPCFG: {:x} PMPADDR: {:x} at index: {:x}",
-            domain.pmpcfg[pmp_index / 8],
-            domain.pmpaddr[pmp_index],
-            pmp_index
-        );
+        // log::trace!(
+        //     "Updated for DOMAIN: PMPCFG: {:x} PMPADDR: {:x} at index: {:x}",
+        //     domain.pmpcfg[pmp_index / 8],
+        //     domain.pmpaddr[pmp_index],
+        //     pmp_index
+        // );
     }
 }

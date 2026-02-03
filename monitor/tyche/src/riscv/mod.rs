@@ -27,6 +27,17 @@ pub fn launch_guest(hartid: usize, arg1: usize, next_addr: usize, next_mode: usi
 
     println!("============= Launching Linux from Tyche =============");
 
+
+    let mcycle: usize;
+    let minstret: usize;
+
+    unsafe {
+        asm!("csrr {}, mcycle", out(reg) mcycle);
+        asm!("csrr {}, minstret", out(reg) minstret);
+    }
+
+    log::info!("HartID: {} Mcycle : {} Minstret {} ", hartid, mcycle, minstret);
+
     // 1. Update MSTATUS - MPP=01 (S-mode), and MPIE = 0.
     let mut mstatus: usize;
     let zero: usize = 0;

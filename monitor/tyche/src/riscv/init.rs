@@ -2,7 +2,7 @@ use core::arch::asm;
 use core::sync::atomic::Ordering;
 
 use capa_engine::{Domain, Handle};
-use riscv_tyche::RVManifest;
+use riscv_tyche::{RVManifest, TYCHE_STACK_POINTER};
 use riscv_utils::{
     set_mip_ssip, AVAILABLE_HART_MASK, HART_START, HART_START_ADDR, HART_START_ARG1,
     NUM_HARTS_AVAILABLE,
@@ -12,25 +12,41 @@ use super::{arch, launch_guest};
 use crate::debug::qemu;
 use crate::riscv::cpuid;
 use crate::riscv::platform::MonitorRiscv;
+use riscv_pmp::print_pmps;
 
 pub fn arch_entry_point(hartid: usize, manifest: RVManifest, log_level: log::LevelFilter) -> ! {
-    if hartid == manifest.coldboot_hartid {
+    unsafe {
+        // Set up Stack ! 
+        asm!(
+            //"li sp, 0x800f0000",   // Hard-coding ToS.... :| 
+            "csrr t0, mhartid",
+            "slli t0, t0, 3",   // to index into STACK_ADDRESS
+            "la t1, {stack}",
+            "add t1, t1, t0",
+            "ld t1, 0(t1)",
+            "mv sp, t1",
+            "addi sp, sp, -9*8",
+            stack = sym TYCHE_STACK_POINTER,
+        );
+    }
+    let m_hartid = cpuid(); // TODO: hartid is sometimes printed as 0 for hart 1... however, it still goes to the else logic? 
+    if m_hartid == manifest.coldboot_hartid {
         logger::init(log_level);
 
         log::info!(
             "============= Hello from Second Stage on Coldboot Hart ID: {} =============",
-            hartid
+            m_hartid
         );
-        log::info!(
-            "Manifest Content: {:x} {:x} {:x} {:x} {:x}",
-            manifest.coldboot_hartid,
-            manifest.next_arg1,
-            manifest.next_addr,
-            manifest.next_mode,
-            manifest.num_harts
-        );
-        let mhartid = cpuid();
-        log::debug!("==========Coldboot MHARTID: {} ===========", mhartid);
+        // log::info!(
+        //     "Manifest Content: {:x} {:x} {:x} {:x} {:x}",
+        //     manifest.coldboot_hartid,
+        //     manifest.next_arg1,
+        //     manifest.next_addr,
+        //     manifest.next_mode,
+        //     manifest.num_harts
+        // );
+        //let mhartid = cpuid();
+        // log::debug!("==========Coldboot MHARTID: {} ===========", mhartid);
 
         let mut t_num_harts = manifest.num_harts - 1;
         let mut available_harts_mask = 1;
@@ -42,15 +58,19 @@ pub fn arch_entry_point(hartid: usize, manifest: RVManifest, log_level: log::Lev
         AVAILABLE_HART_MASK.store(available_harts_mask, Ordering::SeqCst);
         NUM_HARTS_AVAILABLE.store(manifest.num_harts, Ordering::SeqCst);
 
-        arch::init(hartid);
+        arch::init(m_hartid);
+        //log::info!("Done with arch init");
         MonitorRiscv::init();
+
+        //log::info!("Done with monitor init");
 
         let mut domain = MonitorRiscv::start_initial_domain_on_cpu();
 
-        log::info!("Initial domain is ready.");
+        //log::info!("Initial domain is ready.");
+        print_pmps(m_hartid);
 
         //Set the active domain.
-        MonitorRiscv::set_active_dom(hartid, domain);
+        MonitorRiscv::set_active_dom(m_hartid, domain);
 
         //monitor::do_debug();
 
@@ -68,18 +88,18 @@ pub fn arch_entry_point(hartid: usize, manifest: RVManifest, log_level: log::Lev
             asm!("csrr {}, mideleg", out(reg) mideleg);
         }
 
-        log::info!(
-            "MIP: {:x} MIE: {:x} MSTATUS: {:x} MEDELEG: {:x} MIDELEG: {:x}",
-            mip,
-            mie,
-            mstatus,
-            medeleg,
-            mideleg
-        );
+        // //log::info!(
+        //     "MIP: {:x} MIE: {:x} MSTATUS: {:x} MEDELEG: {:x} MIDELEG: {:x}",
+        //     mip,
+        //     mie,
+        //     mstatus,
+        //     medeleg,
+        //     mideleg
+        // );
 
         //TODO: Change function name to be arch independent. Not launching guest in RV.
         launch_guest(
-            hartid,
+            m_hartid,
             manifest.next_arg1,
             manifest.next_addr,
             manifest.next_mode,
@@ -87,32 +107,33 @@ pub fn arch_entry_point(hartid: usize, manifest: RVManifest, log_level: log::Lev
 
         qemu::exit(qemu::ExitCode::Success);
     } else {
-        HART_START[hartid].store(false, Ordering::SeqCst);
+        HART_START[m_hartid].store(false, Ordering::SeqCst);
         log::info!(
             "============= Hello again from Second Stage on Warmboot Hart ID: {} HART_START: {}=============",
-            hartid, HART_START[hartid].load(Ordering::SeqCst)
+            m_hartid, HART_START[m_hartid].load(Ordering::SeqCst)
         );
-        let mhartid = cpuid();
-        log::debug!("========== Warmboot MHARTID: {} ===========", mhartid);
+        //let mhartid = cpuid();
+        //log::debug!("========== Warmboot MHARTID: {} ===========", mhartid);
 
         //First set mtvec to Tyche's trap handler.
-        arch::init(hartid);
+        arch::init(m_hartid);
 
         //spin loop until linux sends an ecall to start the hart.
-        while !HART_START[hartid].load(Ordering::SeqCst) {
+        while !HART_START[m_hartid].load(Ordering::SeqCst) {
+            //log::info!("Hart {}: Waiting for Linux's ecall", hartid);
             core::hint::spin_loop();
         }
 
-        log::info!("Done spinning for hart {}", hartid);
+        //log::info!("Done spinning for hart {}", m_hartid);
 
         let mut domain = MonitorRiscv::start_initial_domain_on_cpu();
 
-        MonitorRiscv::set_active_dom(hartid, domain);
+        MonitorRiscv::set_active_dom(m_hartid, domain);
 
-        let jump_addr = HART_START_ADDR[hartid].load(Ordering::SeqCst);
-        let jump_arg = HART_START_ARG1[hartid].load(Ordering::SeqCst);
+        let jump_addr = HART_START_ADDR[m_hartid].load(Ordering::SeqCst);
+        let jump_arg = HART_START_ARG1[m_hartid].load(Ordering::SeqCst);
 
-        log::info!("Next_addr: {:x} Next_arg1: {:x}", jump_addr, jump_arg);
+        //log::info!("Next_addr: {:x} Next_arg1: {:x}", jump_addr, jump_arg);
 
         let mip: usize;
         let mie: usize;
@@ -128,16 +149,18 @@ pub fn arch_entry_point(hartid: usize, manifest: RVManifest, log_level: log::Lev
             asm!("csrr {}, mideleg", out(reg) mideleg);
         }
 
-        log::info!(
-            "MIP: {:x} MIE: {:x} MSTATUS: {:x} MEDELEG: {:x} MIDELEG: {:x}",
-            mip,
-            mie,
-            mstatus,
-            medeleg,
-            mideleg
-        );
+        // log::info!(
+        //     "MIP: {:x} MIE: {:x} MSTATUS: {:x} MEDELEG: {:x} MIDELEG: {:x}",
+        //     mip,
+        //     mie,
+        //     mstatus,
+        //     medeleg,
+        //     mideleg
+        // );
 
-        launch_guest(hartid, jump_arg, jump_addr, manifest.next_mode);
+        print_pmps(hartid);
+
+        launch_guest(m_hartid, jump_arg, jump_addr, manifest.next_mode);
 
         qemu::exit(qemu::ExitCode::Success);
     }

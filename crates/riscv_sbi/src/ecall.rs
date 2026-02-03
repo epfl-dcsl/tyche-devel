@@ -3,7 +3,7 @@ use core::sync::atomic::Ordering;
 
 use capa_engine::Buffer;
 use qemu::println;
-use riscv_serial::write_char;
+use riscv_serial::{write_char, read_char};
 use riscv_utils::{
     aclint_mtimer_set_mtimecmp, clear_mip_stip, RegisterState, AVAILABLE_HART_MASK, HART_IPI_SYNC,
     HART_START, HART_START_ADDR, HART_START_ARG1, IPI_TYPE_SMODE, IPI_TYPE_TLB, NUM_HARTS,
@@ -14,9 +14,7 @@ use spin::Mutex;
 use crate::ipi::{aclint_mswi_send_ipi, ipi_handling_failed, process_ifence_ipi, process_tlb_ipi};
 use crate::rfence::{local_ifence, local_sfence_vma_asid};
 use crate::{
-    sbi, sbi_ext_base, sbi_ext_hsm, sbi_ext_ipi, sbi_ext_rfence, IPIRequest, ECALL_IMPID,
-    ECALL_VERSION_MAJOR, ECALL_VERSION_MINOR, SPEC_VERSION_MAJOR_MASK, SPEC_VERSION_MAJOR_OFFSET,
-    TYCHE_SBI_VERSION,
+    ECALL_IMPID, ECALL_VERSION_MAJOR, ECALL_VERSION_MINOR, IPIRequest, SPEC_VERSION_MAJOR_MASK, SPEC_VERSION_MAJOR_OFFSET, TYCHE_SBI_VERSION, sbi, sbi_ext_base, sbi_ext_hsm, sbi_ext_ipi, sbi_ext_rfence
 };
 
 pub static HART_IPI_BUFFER: [Mutex<Buffer<IPIRequest>>; NUM_HARTS] = [EMPTY_IPI_BUFFER; NUM_HARTS];
@@ -71,10 +69,29 @@ pub fn ecall_handler(
                 asm!("csrr {}, mhartid", out(reg) hartid);
             }
             clear_mip_stip();
-            aclint_mtimer_set_mtimecmp(hartid, reg_state.a0.try_into().unwrap());
+            //log::info!(" mtimecmp to set to : 0x{:x} ", reg_state.a0);
+            //aclint_mtimer_set_mtimecmp(hartid, reg_state.a0.try_into().unwrap());
+
+            //if reg_state.a0 < 0 {
+                aclint_mtimer_set_mtimecmp(hartid, reg_state.a0 as usize);
+            //} else {
+            //    aclint_mtimer_set_mtimecmp(hartid, reg_state.a0.try_into().unwrap());
+            //}
+
             // setting mie.mtie is already taken care of during set_mtimecmp.
         }
         sbi::EXT_PUTCHAR_LEGACY => write_char(reg_state.a0 as u8 as char),
+        //sbi::EXT_GETCHAR_LEGACY => {*ret = -1; },//read_char() as isize;},
+        sbi::EXT_GETCHAR_LEGACY => { *ret = read_char() as isize;
+            //log::info!("READ_CHAR RET VAL: {}", *ret);
+            // if ret_val < 0 {
+            //     *ret = -1;
+            // } else {
+            //     *ret = 0;
+            //     *out_val = ret_val as usize; 
+            // }
+        },
+        //sbi::EXT_PMU => {(*ret, *out_val) = sbi_ext_pmu_handler(reg_state.a6)},
         _ => ecall_handler_failed(reg_state.a7, reg_state.a6),
     }
 }
@@ -389,7 +406,7 @@ pub fn probe(a0: usize, a6: usize) -> (isize, usize) {
             println!("PROBING sbi::EXT_TIME/IPI/RFENCE.")
         }
         sbi::EXT_SRST => out_val = sbi_ext_srst_probe(a0),
-        sbi_ext_base::PMU_EXT => ret = -2,
+        sbi_ext_base::PMU_EXT => ret = -2,      //  { out_val = 1; ret = 0; },              //ret = -2,
         _ => ecall_handler_failed(sbi::EXT_BASE, a0),
     }
 
@@ -422,5 +439,12 @@ pub fn sbi_ext_srst_probe(_a0: usize) -> usize {
 }
 
 pub fn ecall_handler_failed(_a7: usize, _a6: usize) {
-    // panic!("SBI ecall not supported: a7 {:x} a6 {:x}.", _a7, _a6);
+    //panic!("SBI ecall not supported: a7 {:x} a6 {:x}.", _a7, _a6);
 }
+
+// pub fn sbi_ext_pmu_handler(a6: usize) -> (isize, usize) {
+//     match a6 {
+//         sbi_ext_pmu::NUM_COUNTERS => (0, 3),    // SUCCESS and 3 counters - mcycle, minstret, mtime 
+
+//     }
+// }

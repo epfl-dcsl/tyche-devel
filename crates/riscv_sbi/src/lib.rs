@@ -17,12 +17,14 @@ pub const SPEC_VERSION_MAJOR_OFFSET: usize = 24;
 
 pub mod sbi {
     pub const EXT_PUTCHAR_LEGACY: usize = 0x1;
+    pub const EXT_GETCHAR_LEGACY: usize = 0x2;
     pub const EXT_BASE: usize = 0x10;
     pub const EXT_TIME: usize = 0x54494D45;
     pub const EXT_IPI: usize = 0x735049;
     pub const EXT_RFENCE: usize = 0x52464E43;
     pub const EXT_SRST: usize = 0x53525354;
     pub const EXT_HSM: usize = 0x48534D;
+    pub const EXT_PMU: usize = 0x504D55;
 }
 
 pub mod sbi_ext_base {
@@ -34,6 +36,15 @@ pub mod sbi_ext_base {
     pub const GET_MARCHID: usize = 5;
     pub const GET_MIMPID: usize = 6;
     pub const PMU_EXT: usize = 0x504D55;
+}
+
+pub mod sbi_ext_pmu {
+    pub const NUM_COUNTERS: usize = 0;
+    pub const COUNTER_GET_INFO: usize = 1;
+    pub const COUNTER_CFG_MATCH: usize = 2;
+    pub const COUNTER_START: usize = 3;
+    pub const COUNTER_END: usize = 4;
+    pub const COUNTER_FW_READ: usize = 5;
 }
 
 pub mod sbi_ext_hsm {

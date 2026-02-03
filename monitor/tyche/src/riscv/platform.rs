@@ -8,11 +8,11 @@ use capa_engine::{
 use riscv_csrs::{mcause, *};
 use riscv_pmp::{
     clear_pmp, pmp_write_compute, PMPAddressingMode, PMPErrorCode, PMPWriteResponse,
-    FROZEN_PMP_ENTRIES, PMP_CFG_ENTRIES, PMP_ENTRIES,
+    FROZEN_PMP_ENTRIES, PMP_CFG_ENTRIES, PMP_ENTRIES, find_lowest_available_pmp_index,
 };
 use riscv_sbi::ecall::ecall_handler;
 use riscv_sbi::ipi::{aclint_mswi_send_ipi, process_ipi, process_tlb_ipis};
-use riscv_sbi::sbi::EXT_IPI;
+use riscv_sbi::sbi::{EXT_IPI, EXT_GETCHAR_LEGACY, EXT_PUTCHAR_LEGACY };
 use riscv_tyche::{
     DOM0_ROOT_REGION_2_END, DOM0_ROOT_REGION_2_START, DOM0_ROOT_REGION_END, DOM0_ROOT_REGION_START,
 };
@@ -20,6 +20,7 @@ use riscv_utils::*;
 use spin::{Mutex, MutexGuard};
 
 use crate::arch::cpuid;
+use crate::riscv::arch::{get_raw_faulting_instr, parse_mpp_return_mode, LoadInstr, StoreInstr, decode_load, decode_store, read_bytes_from_mode, store_bytes_from_mode};
 use crate::monitor::{CoreUpdate, Monitor, PlatformState, CAPA_ENGINE, INITIAL_DOMAIN};
 use crate::riscv::context::ContextRiscv;
 use crate::riscv::filtered_fields::RiscVField;
@@ -135,18 +136,46 @@ pub fn illegal_instruction_handler(
     mstatus: usize,
     reg_state: &mut RegisterState,
 ) {
+    // TODO: Neelu: Fix the assumptions here and panic if encountering something unsupported. 
     //do nothing.
+
+    //emulate CSR read 
+
+    // if (mtval & 3) == 3 {
+    //     if ((mtval & 0x7c) >> 2) == 0x1c {
+    //         if mtval == 0x10500073 {
+                //WFI
+                //log::debug!("Trapped on WFI: MEPC: {:x} RA: {:x} ", mepc, reg_state.ra);
+                //I'm also gonna raise timer interrupts to S-mode, how does that sound?
+                //set_mip_stip();
+            //} else {
+    //log::info!(" illegal instruction ... mepc: {:x} mtval: {:x}", mepc, mtval);
+    system_opcode_instr(mtval, mstatus, reg_state, mepc);
+    //         }
+    //     } else {
+    //         panic!(
+    //             "Non-Truly Illegal Instruction Trap! mepc: {:x} mtval: {:x}",
+    //             mepc, mtval
+    //         );
+    //     }
+    // } else {
+    //     panic!(
+    //         "Truly Illegal Instruction Trap! mepc: {:x} mtval: {:x}",
+    //         mepc, mtval
+    //     );
+    // }
+
 }
 
-#[cfg(not(feature = "visionfive2"))]
-pub fn misaligned_store_handler(mtval: usize, mepc: usize, reg_state: &mut RegisterState) {
-    //do nothing.
-}
+// #[cfg(not(feature = "visionfive2"))]
+// pub fn misaligned_store_handler(mtval: usize, mepc: usize, reg_state: &mut RegisterState) {
+//     //do nothing.
+// }
 
-#[cfg(not(feature = "visionfive2"))]
-pub fn misaligned_load_handler(mtval: usize, mepc: usize, reg_state: &mut RegisterState) {
-    //do nothing.
-}
+// #[cfg(not(feature = "visionfive2"))]
+// pub fn misaligned_load_handler(mtval: usize, mepc: usize, reg_state: &mut RegisterState) {
+//     //do nothing.
+// }
 
 #[cfg(feature = "visionfive2")]
 pub fn illegal_instruction_handler(
@@ -159,7 +188,7 @@ pub fn illegal_instruction_handler(
         if ((mtval & 0x7c) >> 2) == 0x1c {
             if mtval == 0x10500073 {
                 //WFI
-                log::debug!("Trapped on WFI: MEPC: {:x} RA: {:x} ", mepc, reg_state.ra);
+                //log::debug!("Trapped on WFI: MEPC: {:x} RA: {:x} ", mepc, reg_state.ra);
                 //I'm also gonna raise timer interrupts to S-mode, how does that sound?
                 //set_mip_stip();
             } else {
@@ -181,16 +210,17 @@ pub fn illegal_instruction_handler(
 
 //Todo: Move this to riscv-utils crate -- this is a quite low-level impl. so it's better to
 //modularise it appropriately.
-#[cfg(feature = "visionfive2")]
+
+// #[cfg(feature = "visionfive2")]
 pub fn misaligned_load_handler(mtval: usize, mepc: usize, reg_state: &mut RegisterState) {
     //Assumption: No H-mode extension. MTVAL2 and MTINST are zero.
     //Implies: trapped instr value is zero or special value.
 
-    log::trace!(
-        "Misaligned load handler: mtval {:x} mepc: {:x}",
-        mtval,
-        mepc
-    );
+    // log::trace!(
+    //     "Misaligned load handler: mtval {:x} mepc: {:x}",
+    //     mtval,
+    //     mepc
+    // );
 
     //get insn....
     let mut trap_state: TrapState = TrapState {
@@ -321,13 +351,14 @@ pub fn misaligned_load_handler(mtval: usize, mepc: usize, reg_state: &mut Regist
 }
 
 //Todo: There is a lot of repeated code between misaligned load/store handlers. Make it common.
-#[cfg(feature = "visionfive2")]
+
+//#[cfg(feature = "visionfive2")]
 pub fn misaligned_store_handler(mtval: usize, mepc: usize, reg_state: &mut RegisterState) {
-    log::trace!(
-        "Misaligned store handler: mtval {:x} mepc: {:x}",
-        mtval,
-        mepc
-    );
+    // log::trace!(
+    //     "Misaligned store handler: mtval {:x} mepc: {:x}",
+    //     mtval,
+    //     mepc
+    // );
 
     //get insn....
     let mut trap_state: TrapState = TrapState {
@@ -458,25 +489,157 @@ pub fn misaligned_store_handler(mtval: usize, mepc: usize, reg_state: &mut Regis
     }
 }
 
-#[repr(align(4))]
-#[naked]
-pub extern "C" fn sbi_expected_trap() {
-    unsafe {
-        asm!(
-            "csrr a4, mepc
-        sd a4, 0*8(a3)
-        csrr a4, mcause
-        sd a4, 1*8(a3)
-        csrr a4, mtval
-        sd a4, 2*8(a3)
-        csrr a4, mepc
-        addi a4, a4, 4
-        csrw mepc, a4
-        mret",
-            options(noreturn)
-        );
+
+// Emulation logic for misaligned loads and stores
+
+pub fn emulate_misaligned_load(mcause: usize, mtval: usize, mepc: usize, mstatus: usize, reg_state: &mut RegisterState) {
+    log::info!("Misaligned load handler start!");
+    let mode = parse_mpp_return_mode(mstatus);
+    let raw_instruction = unsafe { get_raw_faulting_instr(mcause, mtval, mepc, mode) };   
+    let success;
+
+    let LoadInstr {
+        rd,
+        rs1,
+        imm,
+        len,
+        is_compressed,
+        ..
+    } = decode_load(raw_instruction);
+
+    assert!(
+        len.to_bytes() == 8 || len.to_bytes() == 4 || len.to_bytes() == 2,
+        "Implement support for other than 2,4,8 bytes misaligned accesses"
+    );
+
+    // Build the value
+    // Neelu TODO: get_rs1/rs2/set_rd already do the decoding, either simplify the get and set by using the LoadInstr or get rid of it and decode_ld/st.
+    let start_addr: *const u8 = ((get_rs1(raw_instruction, reg_state) as isize + imm) as usize) as *const u8;    // TODO: get rs1 and then index into / get ptr from reg_state ... 
+
+    let rd_val = match len.to_bytes() {   
+        8 => {
+            log::info!("Misaligned load handler 8 bytes!");
+            let mut value_to_read: [u8; 8] = [0, 0, 0, 0, 0, 0, 0, 0];
+            success = unsafe { read_bytes_from_mode(start_addr, &mut value_to_read, mode) };
+            u64::from_le_bytes(value_to_read) as usize
+        }
+        4 => {
+            log::info!("Misaligned load handler 4 bytes!");
+            let mut value_to_read: [u8; 4] = [0, 0, 0, 0];
+            success = unsafe { read_bytes_from_mode(start_addr, &mut value_to_read, mode) };
+            u32::from_le_bytes(value_to_read) as usize
+        }
+        2 => {
+            log::info!("Misaligned load handler 2 bytes!");
+            let mut value_to_read: [u8; 2] = [0, 0];
+            success = unsafe { read_bytes_from_mode(start_addr, &mut value_to_read, mode) };
+            u16::from_le_bytes(value_to_read) as usize
+        }
+        _ => {
+            unreachable!("Misaligned read with an unexpected byte length")
+        }
+    };
+
+    match success {
+        Ok(_) => {
+            set_rd(raw_instruction, reg_state, rd_val);
+
+            let instr_len = if is_compressed { 2 } else { 4 };
+            unsafe {
+                asm!("csrr t0, mepc");
+                asm!("add t0, t0, {}", in(reg) instr_len);
+                asm!("csrw mepc, t0");
+            }
+
+            log::info!("Misaligned load handler end!");
+        }
+        Err(_) => panic!("Misaligned load failed"),
     }
+
+    // Neelu TODO: success failure case handling 
 }
+
+pub fn emulate_misaligned_store(mcause: usize, mtval: usize, mepc: usize, mstatus: usize, reg_state: &mut RegisterState) {
+    log::info!("Misaligned store handler start!");
+    let mode = parse_mpp_return_mode(mstatus);
+    let raw_instruction = unsafe { get_raw_faulting_instr(mcause, mtval, mepc, mode) };
+    let success;
+
+    let StoreInstr {
+        rs2,
+        rs1,
+        imm,
+        len,
+        is_compressed,
+    } = decode_store(raw_instruction);
+
+    assert!(
+        len.to_bytes() == 8 || len.to_bytes() == 4 || len.to_bytes() == 2,
+        "Implement support for other than 2,4,8 bytes misaligned accesses"
+    );
+
+    // Build the value
+    let start_addr: *mut u8 = ((get_rs1(raw_instruction, reg_state) as isize + imm) as usize) as *mut u8;
+
+    match len.to_bytes() {
+        8 => {
+            log::info!("Misaligned store handler 8 bytes!");
+            let val = get_rs2(raw_instruction, reg_state) as u64;
+            let mut value_to_store: [u8; 8] = val.to_le_bytes();
+            success = unsafe { store_bytes_from_mode(&mut value_to_store, start_addr, mode) };
+        }
+        4 => {
+            log::info!("Misaligned store handler 4 bytes!");
+            let val = get_rs2(raw_instruction, reg_state) as u32;
+            let mut value_to_store: [u8; 4] = val.to_le_bytes();
+            success = unsafe { store_bytes_from_mode(&mut value_to_store, start_addr, mode) };
+        }
+        2 => {
+            log::info!("Misaligned store handler 2 bytes!");
+            let val = get_rs2(raw_instruction, reg_state) as u16;
+            let mut value_to_store: [u8; 2] = val.to_le_bytes();
+            success = unsafe { store_bytes_from_mode(&mut value_to_store, start_addr, mode) };
+        }
+        _ => {
+            unreachable!("Misaligned write with an unexpected byte length")
+        }
+    };
+
+    match success {
+        Ok(_) => {
+            let instr_len = if is_compressed { 2 } else { 4 };
+            unsafe {
+                asm!("csrr t0, mepc");
+                asm!("add t0, t0, {}", in(reg) instr_len);
+                asm!("csrw mepc, t0");
+            }
+
+            log::info!("Misaligned store handler end!");
+        },
+        Err(_) => panic!("Misaligned store failed."),
+    }
+
+}
+
+// #[repr(align(4))]
+// #[naked]
+// pub extern "C" fn sbi_expected_trap() {
+//     unsafe {
+//         asm!(
+//             "csrr a4, mepc
+//         sd a4, 0*8(a3)
+//         csrr a4, mcause
+//         sd a4, 1*8(a3)
+//         csrr a4, mtval
+//         sd a4, 2*8(a3)
+//         csrr a4, mepc
+//         addi a4, a4, 4
+//         csrw mepc, a4
+//         mret",
+//             options(noreturn)
+//         );
+//     }
+// }
 
 // ———————————————————— Platform implementation of State ———————————————————— //
 
@@ -551,19 +714,22 @@ impl PlatformState for StateRiscv {
         engine: &mut MutexGuard<CapaEngine>,
     ) -> bool {
         let mut pmp_write_response: PMPWriteResponse;
-        let mut pmp_index = FROZEN_PMP_ENTRIES;
+        //let mut pmp_index = FROZEN_PMP_ENTRIES;
+
+        let mut pmp_index = find_lowest_available_pmp_index();
+
         for range in engine.get_domain_permissions(domain_handle).unwrap() {
             if !range.ops.contains(MemOps::READ) {
-                log::error!("there is a region without read permission: {}", range);
+                //log::error!("there is a region without read permission: {}", range);
                 continue;
             }
             //TODO: Update PMP based on specific permissions - just need to compute XWR using MemOps.
-            log::trace!(
-                "PMP Compute for Region: index: {:x} start: {:x} end: {:x}",
-                pmp_index,
-                range.start,
-                range.start + range.size()
-            );
+            // log::trace!(
+            //     "PMP Compute for Region: index: {:x} start: {:x} end: {:x}",
+            //     pmp_index,
+            //     range.start,
+            //     range.start + range.size()
+            // );
 
             if pmp_index >= PMP_ENTRIES {
                 panic!("Cannot continue running this domain: PMPOverflow");
@@ -572,25 +738,25 @@ impl PlatformState for StateRiscv {
             pmp_write_response = pmp_write_compute(pmp_index, range.start, range.size(), XWR_PERM);
 
             if pmp_write_response.write_failed {
-                log::debug!(
-                    "Attempted to compute pmp: {} start: {:x} size: {:x}",
-                    pmp_index,
-                    range.start,
-                    range.size()
-                );
+                // log::debug!(
+                //     "Attempted to compute pmp: {} start: {:x} size: {:x}",
+                //     pmp_index,
+                //     range.start,
+                //     range.size()
+                // );
                 panic!(
                     "PMP Write Not Ok - failure code: {:#?}",
                     pmp_write_response.failure_code
                 );
             } else {
-                log::debug!("PMP Write Ok");
+                //log::debug!("PMP Write Ok");
 
                 if pmp_write_response.addressing_mode == PMPAddressingMode::NAPOT {
-                    log::trace!(
-                        "NAPOT addr: {:x} cfg: {:x}",
-                        pmp_write_response.addr1,
-                        pmp_write_response.cfg1
-                    );
+                    // log::trace!(
+                    //     "NAPOT addr: {:x} cfg: {:x}",
+                    //     pmp_write_response.addr1,
+                    //     pmp_write_response.cfg1
+                    // );
                     Self::update_domain_pmp(
                         domain_handle,
                         pmp_index,
@@ -599,13 +765,13 @@ impl PlatformState for StateRiscv {
                     );
                     pmp_index = pmp_index + 1;
                 } else if pmp_write_response.addressing_mode == PMPAddressingMode::TOR {
-                    log::trace!(
-                        "TOR addr: {:x} cfg: {:x} addr: {:x} cfg: {:x}",
-                        pmp_write_response.addr1,
-                        pmp_write_response.cfg1,
-                        pmp_write_response.addr2,
-                        pmp_write_response.cfg2
-                    );
+                    // log::trace!(
+                    //     "TOR addr: {:x} cfg: {:x} addr: {:x} cfg: {:x}",
+                    //     pmp_write_response.addr1,
+                    //     pmp_write_response.cfg1,
+                    //     pmp_write_response.addr2,
+                    //     pmp_write_response.cfg2
+                    // );
                     Self::update_domain_pmp(
                         domain_handle,
                         pmp_index,
@@ -644,10 +810,10 @@ impl PlatformState for StateRiscv {
         core_id: usize,
         update: &CoreUpdate,
     ) {
-        log::debug!("Core Update: {}", update);
+        //log::debug!("Core Update: {}", update);
         match *update {
             CoreUpdate::TlbShootdown { src_core } => {
-                log::debug!("TLB Shootdown on core {} from src {}", core_id, src_core);
+                //log::debug!("TLB Shootdown on core {} from src {}", core_id, src_core);
                 // Rewrite the PMPs
                 let domain = StateRiscv::get_domain(*current_domain);
                 Self::update_pmps(domain);
@@ -658,12 +824,12 @@ impl PlatformState for StateRiscv {
                 return_capa,
                 //current_reg_state,
             } => {
-                log::debug!(
-                    "Domain Switch on core {} for domain {}, return_capa: {:x}",
-                    core_id,
-                    domain,
-                    return_capa.as_usize()
-                );
+                // log::debug!(
+                //     "Domain Switch on core {} for domain {}, return_capa: {:x}",
+                //     core_id,
+                //     domain,
+                //     return_capa.as_usize()
+                // );
 
                 let current_ctx = &mut StateRiscv::get_context(*current_domain, core_id);
                 let mut next_ctx = StateRiscv::get_context(domain, core_id);
@@ -689,7 +855,7 @@ impl PlatformState for StateRiscv {
                 trap,
                 info,
             } => {
-                log::debug!("Trap {} on core {}", trap, core_id);
+                //log::debug!("Trap {} on core {}", trap, core_id);
             }
         }
     }
@@ -712,7 +878,7 @@ impl PlatformState for StateRiscv {
         //For the moment just allow everything that's within the RiscvField
         //and ignore the rest.
         if !RiscVField::is_valid(idx) {
-            log::debug!("Attempt to set invalid field: {:x}", idx);
+            //log::debug!("Attempt to set invalid field: {:x}", idx);
             return Ok(());
         }
         let field = RiscVField::from_usize(idx).unwrap();
@@ -730,7 +896,7 @@ impl PlatformState for StateRiscv {
         let ctx = Self::get_context(*domain, core);
         //TODO: same as above, unify the implementation with permissions.
         if !RiscVField::is_valid(idx) {
-            log::debug!("Attempt to get an invalid register {:x}", idx);
+            //log::debug!("Attempt to get an invalid register {:x}", idx);
             return Ok((0));
         }
         let field = RiscVField::from_usize(idx).unwrap();
@@ -817,7 +983,7 @@ impl PlatformState for StateRiscv {
         let src_hartid = cpuid();
         for hart in BitmapIterator::new(core_map as u64) {
             if hart != src_hartid {
-                log::debug!("Sending IPI from hart {} to hart {}", src_hartid, hart);
+                //log::debug!("Sending IPI from hart {} to hart {}", src_hartid, hart);
                 aclint_mswi_send_ipi(hart);
             }
         }
@@ -848,12 +1014,14 @@ impl Monitor<StateRiscv> for MonitorRiscv {}
 
 impl MonitorRiscv {
     pub fn init() {
+        //log::debug!("MonitorRiscv init");
         let mut engine = CAPA_ENGINE.lock();
         let domain = engine
             .create_manager_domain(permission::monitor_inter_perm::ALL)
             .unwrap();
         {
             let mut state = StateRiscv {};
+            //log::debug!("MonitorRiscv init - about to apply updates");
             MonitorRiscv::apply_updates(&mut state, &mut engine);
         }
         engine
@@ -886,8 +1054,10 @@ impl MonitorRiscv {
 
         {
             let mut state = StateRiscv {};
+            //log::debug!("MonitorRiscv init - about to apply updates");
             MonitorRiscv::apply_updates(&mut state, &mut engine);
         }
+        //log::debug!("MonitorRiscv init - done creating initial domain and root regions");
 
         // Save the initial domain
         let mut initial_domain = INITIAL_DOMAIN.lock();
@@ -905,7 +1075,7 @@ impl MonitorRiscv {
 
     pub fn start_initial_domain_on_cpu() -> (Handle<Domain>) {
         let hartid = cpuid();
-        log::debug!("Creating initial domain.");
+        //log::debug!("Creating initial domain.");
         let mut engine = CAPA_ENGINE.lock();
         let initial_domain = INITIAL_DOMAIN
             .lock()
@@ -917,7 +1087,7 @@ impl MonitorRiscv {
         let domain = StateRiscv::get_domain(initial_domain);
         if !domain.data_init_done {
             //update PMP permissions.
-            log::debug!("Updating permissions for initial domain.");
+            //log::debug!("Updating permissions for initial domain.");
             StateRiscv::update_permission(initial_domain, &mut engine);
         }
         StateRiscv::update_pmps(domain);
@@ -952,28 +1122,31 @@ impl MonitorRiscv {
             asm!("csrr {}, satp", out(reg)satp);
         }
 
-        log::trace!("###### TRAP FROM HART {} ######", hartid);
+        //log::trace!("###### TRAP FROM HART {} ######", hartid);
 
-        log::trace!(
-        "mcause {:x}, mepc {:x} mstatus {:x} mtval {:x} mie {:x} mip {:x} mideleg {:x} ra {:x} a0 {:x} a1 {:x} a2 {:x} a3 {:x} a4 {:x} a5 {:x} a6 {:x} a7 {:x} satp: {:x}",
-        mcause,
-        mepc,
-        mstatus,
-        mtval,
-        mie,
-        mip,
-        mideleg,
-        reg_state.ra,
-        reg_state.a0,
-        reg_state.a1,
-        reg_state.a2,
-        reg_state.a3,
-        reg_state.a4,
-        reg_state.a5,
-        reg_state.a6,
-        reg_state.a7,
-        satp
-    );
+    //     if reg_state.a7 != EXT_GETCHAR_LEGACY && reg_state.a7 != EXT_PUTCHAR_LEGACY {
+        
+    //     log::info!(
+    //     "mcause {:x}, mepc {:x} mstatus {:x} mtval {:x} mie {:x} mip {:x} mideleg {:x} ra {:x} a0 {:x} a1 {:x} a2 {:x} a3 {:x} a4 {:x} a5 {:x} a6 {:x} a7 {:x} satp: {:x}",
+    //     mcause,
+    //     mepc,
+    //     mstatus,
+    //     mtval,
+    //     mie,
+    //     mip,
+    //     mideleg,
+    //     reg_state.ra,
+    //     reg_state.a0,
+    //     reg_state.a1,
+    //     reg_state.a2,
+    //     reg_state.a3,
+    //     reg_state.a4,
+    //     reg_state.a5,
+    //     reg_state.a6,
+    //     reg_state.a7,
+    //     satp
+    //     );
+    // }
 
         //TODO(aghosn): dump the reg_state inside the current domain?
         if let Some(active_dom) = Self::get_active_dom(hartid) {
@@ -1010,10 +1183,10 @@ impl MonitorRiscv {
             }
             mcause::ILLEGAL_INSTRUCTION => {
                 if reg_state.a7 == 0x5479636865 {
-                    log::debug!("Illegal instruction: Tyche call from U-mode using Mret");
+                    //log::debug!("Illegal instruction: Tyche call from U-mode using Mret");
                     //MPP check for U-mode.
                     //assert!((mstatus & (3 << 11)) == 0);
-                    log::debug!("Calling wrappper monitor call");
+                    //log::debug!("Calling wrappper monitor call");
                     Self::wrapper_monitor_call();
                     if let Some(active_dom) = Self::get_active_dom(hartid) {
                         let dom_ctx = &mut StateRiscv::get_context(active_dom, hartid);
@@ -1031,11 +1204,11 @@ impl MonitorRiscv {
                 if reg_state.a7 == 0x5479636865 {
                     //Tyche call
                     if reg_state.a0 == 0x5479636865 {
-                        log::debug!("Tyche is clearing SIP.SEIE");
+                        //log::debug!("Tyche is clearing SIP.SEIE");
                         clear_mip_seip();
                     } else if reg_state.a7 == 0x5479636865 {
                         //TODO(aghosn): commented this.
-                        log::debug!("Calling wrappper monitor call");
+                        //log::debug!("Calling wrappper monitor call");
                         Self::wrapper_monitor_call();
                         if let Some(active_dom) = Self::get_active_dom(hartid) {
                             let dom_ctx = &mut StateRiscv::get_context(active_dom, hartid);
@@ -1057,14 +1230,20 @@ impl MonitorRiscv {
                 if reg_state.a7 == 0x5479636865 {
                     panic!("Got a misaligned load Tyche call");
                 }
-                misaligned_load_handler(mtval, mepc, reg_state);
+                //misaligned_load_handler(mtval, mepc, reg_state);
+                
+                emulate_misaligned_load(mcause, mtval, mepc, mstatus, reg_state);
+                
                 //Reg state must be updated.
                 if let Some(active_dom) = Self::get_active_dom(hartid) {
                     StateRiscv::save_current_regs(&active_dom, hartid, reg_state);
                 }
             }
             mcause::STORE_ADDRESS_MISALIGNED => {
-                misaligned_store_handler(mtval, mepc, reg_state);
+                // misaligned_store_handler(mtval, mepc, reg_state);
+                
+                emulate_misaligned_store(mcause, mtval, mepc, mstatus, reg_state);
+
                 //Reg state must be updated.
                 if let Some(active_dom) = Self::get_active_dom(hartid) {
                     StateRiscv::save_current_regs(&active_dom, hartid, reg_state);
@@ -1132,7 +1311,7 @@ impl MonitorRiscv {
         let mut ctx = StateRiscv::get_context(active_dom, hartid);
         match success {
             Ok(true) => {
-                log::debug!("Monitor call success");
+                //log::debug!("Monitor call success");
                 ctx.reg_state.a0 = 0;
                 ctx.reg_state.a1 = res[0] as isize;
                 ctx.reg_state.a2 = res[1];

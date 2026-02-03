@@ -22,7 +22,7 @@ pub const PMP_CFG_ENTRIES: usize = 2;
 pub const FROZEN_PMP_ENTRIES: usize = 0;
 
 #[cfg(not(feature = "visionfive2"))]
-pub const FROZEN_PMP_ENTRIES: usize = 1;
+pub const FROZEN_PMP_ENTRIES: usize = 0;
 
 const PMP_CFG: usize = 0;
 const PMP_ADDR: usize = 1;
@@ -309,10 +309,34 @@ fn pmpcfg_write(index: usize, value: usize) -> Result<usize, PMPErrorCode> {
 }
 
 pub fn clear_pmp() {
-    for n in FROZEN_PMP_ENTRIES..PMP_ENTRIES {
+    // for n in FROZEN_PMP_ENTRIES..PMP_ENTRIES {  // Note: If this does not work correctly, check that the hardware correctly implements ignoring overwrites to locked PMPs
+    let available_pmps_starting_index = find_lowest_available_pmp_index();
+    for n in available_pmps_starting_index..PMP_ENTRIES {
         pmpaddr_csr_write(n, 0);
         pmpcfg_csr_write(n, 0); //Note: This only works because the frozen_pmp entry we have
                                 //has pmpcfg = 0. If that wasn't the case, clearing would
                                 //require fine-grained writes to pmpcfg.
     }
+}
+
+pub fn print_pmps(hartid: usize) {
+    for n in 0..PMP_ENTRIES {
+        log::info!("Hart {} PMP Index: {}  PMP CFG: {:b} PMP ADDR: {:x}", hartid, n, pmpcfg_read(n), pmpaddr_read(n));
+    }
+}
+
+pub fn find_lowest_available_pmp_index() -> usize {
+    let mut i: usize = 0;
+    for n in 0..PMP_ENTRIES {
+        let cfg = pmpcfg_read(n);
+        if cfg >> 7 == 1 {
+            i = n+1;
+            continue;
+        }
+        else {
+            break;
+        }
+    }
+    log::info!("Lowest available PMP index: {}",i);
+    i
 }

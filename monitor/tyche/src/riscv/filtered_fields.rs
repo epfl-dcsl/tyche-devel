@@ -34,23 +34,23 @@ impl RiscVField {
         match *self {
             Self::Medeleg => {
                 context.medeleg = value;
-                log::debug!("Setting medeleg to {:x}", context.medeleg);
+                //log::debug!("Setting medeleg to {:x}", context.medeleg);
             }
             Self::Satp => {
                 context.satp = (value >> 12) | PAGING_MODE_SV39;
-                log::debug!("Setting satp to {:x}", context.satp);
+                //log::debug!("Setting satp to {:x}", context.satp);
             }
             Self::Sp => {
                 let mut val = (value >> 3) << 3; //Forcing it to be 8 bytes aligned.
                 context.sp = val;
-                log::debug!("Setting sp to {:x}", context.sp);
+                //log::debug!("Setting sp to {:x}", context.sp);
             }
             Self::Mepc => {
                 context.mepc = value - 0x4; //This is because before returning
                                             //there's an mepc+4. A flag can be added to
                                             //determine before returning whether to inc by 4 or
                                             //not. This works for now.
-                log::debug!("Setting mepc to {:x}", context.mepc);
+                //log::debug!("Setting mepc to {:x}", context.mepc);
             }
         }
     }

@@ -7,7 +7,7 @@ edition = "2021"
 default = []
 vga = ["dep:vga"] # Print to VGA text mode
 bare_metal = []
-visionfive2 = ["dep:riscv_serial","stage_two_abi/visionfive2","qemu/visionfive2","riscv_pmp/visionfive2","riscv_tyche/visionfive2"]
+visionfive2 = ["stage_two_abi/visionfive2","qemu/visionfive2","riscv_pmp/visionfive2","riscv_tyche/visionfive2"]
 
 [dependencies]
 log = { workspace = true }
@@ -37,5 +37,5 @@ riscv_tyche = { path = "../../crates/riscv_tyche/" }
 riscv_csrs = { path = "../../crates/riscv_csrs/" }
 riscv_sbi = { path = "../../crates/riscv_sbi/" }
 riscv_pmp = { path = "../../crates/riscv_pmp/" }
-riscv_serial = { path = "../../crates/riscv_serial/" , optional = true }
+riscv_serial = { path = "../../crates/riscv_serial/" }
 

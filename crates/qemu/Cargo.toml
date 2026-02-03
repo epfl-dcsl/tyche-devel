@@ -9,10 +9,11 @@ edition = "2021"
 uart_16550 = "0.2.0"    #TODO: Neelu: This can also be made optional, only to be used for targets riscv qemu and x86. 
 spin = "0.5.2"
 
+
 [target.'cfg(target_arch = "riscv64")'.dependencies]
-riscv_serial = { path = "../riscv_serial/", optional = true }
+riscv_serial = { path = "../riscv_serial/", optional = false }
 
 [features]
-visionfive2 = ["dep:riscv_serial"]
+visionfive2 = []
 
 
