@@ -337,6 +337,6 @@ pub fn find_lowest_available_pmp_index() -> usize {
             break;
         }
     }
-    log::info!("Lowest available PMP index: {}",i);
+    //log::info!("Lowest available PMP index: {}",i);
     i
 }
