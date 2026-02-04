@@ -25,8 +25,10 @@ default_dbg         := "/tmp/dbg-" + env_var('USER')
 default_smp         := "1"
 extra_arg           := ""
 
-qemu-riscv			:= "../qemu/build/riscv64-softmmu/qemu-system-riscv64"
-drive-riscv			:= "ubuntu-22.04.3-preinstalled-server-riscv64+unmatched.img"
+# qemu-riscv			:= "../qemu/build/riscv64-softmmu/qemu-system-riscv64"
+qemu-riscv		:= "../flashpoint-devenv/qemu/build/qemu-system-riscv64"
+# drive-riscv			:= "ubuntu-22.04.3-preinstalled-server-riscv64+unmatched.img"
+drive-riscv		:= "../ubuntu-24.04.2-preinstalled-server-riscv64.img"
 kernel-riscv		:= "builds/linux-riscv/arch/riscv/boot/Image"
 bios-riscv			:= "opensbi-stage1/build/platform/generic/firmware/fw_payload.bin"
 dev-riscv			:= "-device virtio-rng-pci" 
@@ -155,7 +157,7 @@ build-linux-x86:
 	@just _build-linux-common x86
 
 build-linux-riscv:
-	@just _build-linux-common riscv CROSS_COMPILE=riscv64-unknown-linux-gnu-
+	@just _build-linux-common riscv CROSS_COMPILE=riscv64-linux-gnu-
 	./opensbi-stage1/run_build.sh
 
 _build-linux-common ARCH CROSS_COMPILE=extra_arg:
@@ -190,8 +192,8 @@ build-busybox-x86:
 	@just _build-busybox-common x86
 
 build-busybox-riscv:
-	@just _build-linux-header-common riscv CROSS_COMPILE=riscv64-unknown-linux-gnu-
-	@just _build-busybox-common riscv CROSS_COMPILE=riscv64-unknown-linux-gnu-
+	@just _build-linux-header-common riscv CROSS_COMPILE=riscv64-linux-gnu-
+	@just _build-busybox-common riscv CROSS_COMPILE=riscv64-linux-gnu-
 
 _build-busybox-common ARCH CROSS_COMPILE=extra_arg:
 	mkdir -p ./builds/busybox-{{ARCH}}
@@ -276,10 +278,10 @@ run_riscv_gdb:
 	{{qemu-riscv}} -nographic -drive "file={{drive-riscv}},format=raw,if=virtio" -cpu rv64,h=true -M virt -m 4G -bios {{bios-riscv}} -kernel {{kernel-riscv}} -append "root=/dev/vda1 rw console=ttyS0 earlycon=sbi quiet" -smp 1 {{dev-riscv}} -gdb tcp::1234 -S 
 	
 riscv_monitor_gdb:
-	riscv64-unknown-linux-gnu-gdb -q -ex "file {{bios-riscv-gdb}}" -ex "target remote localhost:1234" -ex "b parse_and_load_elf" -ex "c" 
+	riscv64-linux-gnu-gdb -q -ex "file {{bios-riscv-gdb}}" -ex "target remote localhost:1234" -ex "b parse_and_load_elf" -ex "c" 
 
 riscv_linux_gdb:
-	riscv64-unknown-linux-gnu-gdb -q -ex "add-auto-load-safe-path {{riscv-linux-dir}}" -ex "file {{riscv-vmlinux}}" -ex "set riscv use-compressed-breakpoints no" -ex "target remote localhost:1234" 
+	riscv64-linux-gnu-gdb -q -ex "add-auto-load-safe-path {{riscv-linux-dir}}" -ex "file {{riscv-vmlinux}}" -ex "set riscv use-compressed-breakpoints no" -ex "target remote localhost:1234" 
 ## ———————————————————————— Run Linux without tyche ————————————————————————— ##
 
 only-linux SMP=default_smp:

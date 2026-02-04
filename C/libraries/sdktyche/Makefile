@@ -8,7 +8,7 @@ GCC ?=gcc
 ifeq ($(ARCH), x86)
 	GCC = gcc
 else ifeq ($(ARCH), riscv)
-	GCC = riscv64-unknown-linux-gnu-gcc
+	GCC = riscv64-linux-gnu-gcc
 endif
 
 $(info GCC="$(GCC)")

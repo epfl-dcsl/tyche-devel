@@ -4,7 +4,7 @@ ifeq ($(ARCH), x86)
 	DISK = "../ubuntu.qcow2"
 	MOUNT_DIR = "/tmp/mount"
 else ifeq ($(ARCH), riscv)
-	DISK = "../ubuntu-22.04.3-preinstalled-server-riscv64+unmatched.img"
+	DISK = "../../ubuntu-24.04.2-preinstalled-server-riscv64.img"
 	MOUNT_DIR = "/tmp/ubuntu_riscv_mount/"
 endif 
 
@@ -61,7 +61,7 @@ update_disk:
 	sudo chown --recursive $(shell whoami) /tmp/ubuntu_riscv_mount/tyche
 	make ARCH=riscv -B -C libraries/sdktyche/example/app-selector install_disk
 	echo "Building tychools"
-	cargo build --manifest-path $(TYCHOOLS_PATH)/Cargo.toml --release --target=riscv64gc-unknown-linux-gnu --config target.riscv64gc-unknown-linux-gnu.linker=\"riscv64-unknown-linux-gnu-gcc\" 
+	cargo build --manifest-path $(TYCHOOLS_PATH)/Cargo.toml --release --target=riscv64gc-unknown-linux-gnu --config target.riscv64gc-unknown-linux-gnu.linker=\"riscv64-linux-gnu-gcc\" 
 	make ARCH=riscv -B -C libraries/sdktyche/example/simple-enclave install_disk
 	make ARCH=riscv -B -C microbenchmarks/ install_disk
 	cp scripts/riscv64_install_drivers.sh /tmp/ubuntu_riscv_mount/tyche

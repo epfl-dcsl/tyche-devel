@@ -7,7 +7,7 @@ KVM ?=1
 ifeq ($(ARCH), x86)
 	GCC = gcc
 else ifeq ($(ARCH), riscv)
-	GCC = riscv64-unknown-linux-gnu-gcc
+	GCC = riscv64-linux-gnu-gcc
 	KVM = 0
 	ARCH_FLAGS=-DCONFIG_RISCV
 	ALIGN_FLAGS=-Wl,--section-start=.data=0x16000 
