@@ -116,6 +116,10 @@ impl StateRiscv {
         current_ctx.medeleg = read_medeleg();
         current_ctx.mstatus = read_mstatus();
 
+        log::debug!("Switching - old domain ctx: mepc 0x{:x} satp 0x{:x}", current_ctx.mepc, current_ctx.satp);
+
+        log::debug!("Switching - new domain ctx: mepc 0x{:x} satp 0x{:x}", next_ctx.mepc, next_ctx.satp);
+
         //Switch domain
         write_satp(next_ctx.satp);
         write_mscratch(next_ctx.sp);

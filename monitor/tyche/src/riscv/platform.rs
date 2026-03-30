@@ -1182,10 +1182,12 @@ impl MonitorRiscv {
                 //panic!("MEI");
             }
             mcause::ILLEGAL_INSTRUCTION => {
+                //if ((mstatus & (3 << 11)) == 0) {
                 if reg_state.a7 == 0x5479636865 {
-                    //log::debug!("Illegal instruction: Tyche call from U-mode using Mret");
-                    //MPP check for U-mode.
-                    //assert!((mstatus & (3 << 11)) == 0);
+                    // assert!(reg_state.a7 == 0x5479636865);
+                    log::debug!("Illegal instruction: Tyche call from U-mode using Mret - mstatus: 0x{:x}, mepc: 0x{:x}", mstatus, mepc);
+                    // MPP check for U-mode.
+                    // assert!((mstatus & (3 << 11)) == 0);
                     //log::debug!("Calling wrappper monitor call");
                     Self::wrapper_monitor_call();
                     if let Some(active_dom) = Self::get_active_dom(hartid) {
@@ -1302,6 +1304,9 @@ impl MonitorRiscv {
             let arg_6: usize = ctx.reg_state.a6;
             (tyche_call, arg_1, arg_2, arg_3, arg_4, arg_5, arg_6)
         };
+
+        log::debug!("Tyche call with args: call id: 0x{:x} arg1: 0x{:x} arg2: 0x{:x} arg3: 0x{:x} arg4: 0x{:x} arg5: 0x{:x} arg6: 0x{:x}", tyche_call, arg_1, arg_2, arg_3, arg_4, arg_5, arg_6);
+
         let mut state = StateRiscv {};
         let args: [usize; 6] = [arg_1, arg_2, arg_3, arg_4, arg_5, arg_6];
         let mut res: [usize; 6] = [0; 6];
