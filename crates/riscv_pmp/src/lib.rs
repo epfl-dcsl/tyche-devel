@@ -22,7 +22,7 @@ pub const PMP_CFG_ENTRIES: usize = 2;
 pub const FROZEN_PMP_ENTRIES: usize = 0;
 
 #[cfg(not(feature = "visionfive2"))]
-pub const FROZEN_PMP_ENTRIES: usize = 1;
+pub const FROZEN_PMP_ENTRIES: usize = 2;
 
 const PMP_CFG: usize = 0;
 const PMP_ADDR: usize = 1;
@@ -314,5 +314,11 @@ pub fn clear_pmp() {
         pmpcfg_csr_write(n, 0); //Note: This only works because the frozen_pmp entry we have
                                 //has pmpcfg = 0. If that wasn't the case, clearing would
                                 //require fine-grained writes to pmpcfg.
+    }
+}
+
+pub fn print_pmps(hartid: usize) {
+    for n in 0..PMP_ENTRIES {
+        log::info!("Hart {} PMP Index: {}  PMP CFG: {:b} PMP ADDR: {:x}", hartid, n, pmpcfg_read(n), pmpaddr_read(n));
     }
 }

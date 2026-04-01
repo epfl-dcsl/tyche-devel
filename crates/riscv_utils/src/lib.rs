@@ -341,6 +341,8 @@ pub fn aclint_mtimer_set_mtimecmp(target_hartid: usize, value: usize) {
     let target_addr: usize = ACLINT_MTIMECMP_BASE_ADDR + target_hartid * ACLINT_MTIMECMP_SIZE;
     LAST_TIMER_TICK[target_hartid].store(value, Ordering::SeqCst);
 
+    log::info!("Setting timer to value: 0x{:x}", value);
+
     unsafe {
         asm!("sd {}, 0({})", in(reg) value, in(reg) target_addr);
     }

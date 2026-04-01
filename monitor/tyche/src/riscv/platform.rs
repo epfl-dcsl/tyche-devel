@@ -848,12 +848,14 @@ impl Monitor<StateRiscv> for MonitorRiscv {}
 
 impl MonitorRiscv {
     pub fn init() {
+        log::debug!("MonitorRiscv init");
         let mut engine = CAPA_ENGINE.lock();
         let domain = engine
             .create_manager_domain(permission::monitor_inter_perm::ALL)
             .unwrap();
         {
             let mut state = StateRiscv {};
+            log::debug!("MonitorRiscv init - about to apply updates");
             MonitorRiscv::apply_updates(&mut state, &mut engine);
         }
         engine
@@ -886,8 +888,10 @@ impl MonitorRiscv {
 
         {
             let mut state = StateRiscv {};
+            log::debug!("MonitorRiscv init - about to apply updates");
             MonitorRiscv::apply_updates(&mut state, &mut engine);
         }
+        log::debug!("MonitorRiscv init - done creating initial domain and root regions");
 
         // Save the initial domain
         let mut initial_domain = INITIAL_DOMAIN.lock();
