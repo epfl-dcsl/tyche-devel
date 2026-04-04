@@ -510,7 +510,7 @@ int load_domain(tyche_domain_t* domain)
       if (shared->segment->p_vaddr == seg.p_vaddr) {
         // This should be page aligned too.
         if (dest != load_dest) {
-          ERROR("A shared region is not page aligned.");
+          ERROR("A shared region is not page aligned. dest %lx and load_dest %lx", dest, load_dest);
           goto failure;
         }
         shared->untrusted_vaddr = load_dest;

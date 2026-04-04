@@ -120,7 +120,7 @@ mock_app: $(CODE_MOCK)
 
 # Mock code for the domain, it has two pages.
 mock_dom: $(CODE_DOM)
-	$(GCC) -g -nostdlib -static -o $@ $(CODE_DOM)
+	$(GCC) -g -nostdlib -static -o $@ $(CODE_DOM) $(ALIGN_FLAGS)
 
 # Transition domain
 trans_dom: $(CODE_TRANS) $(HDRS_TRANS)
