@@ -4,7 +4,7 @@ ifeq ($(ARCH), x86)
 	DISK = "../ubuntu.qcow2"
 	MOUNT_DIR = "/tmp/mount"
 else ifeq ($(ARCH), riscv)
-	DISK = "../ubuntu-22.04.3-preinstalled-server-riscv64+unmatched.img"
+	DISK = "../../ubuntu-24.04.2-preinstalled-server-riscv64.img"
 	MOUNT_DIR = "/tmp/ubuntu_riscv_mount/"
 endif 
 

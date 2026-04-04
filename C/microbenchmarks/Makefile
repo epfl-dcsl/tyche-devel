@@ -7,7 +7,7 @@ KVM ?=1
 ifeq ($(ARCH), x86)
 	GCC = gcc
 else ifeq ($(ARCH), riscv)
-	GCC = riscv64-unknown-linux-gnu-gcc
+	GCC = riscv64-linux-gnu-gcc
 	KVM = 0
 	ARCH_FLAGS=-DCONFIG_RISCV
 	ALIGN_FLAGS=-Wl,--section-start=.data=0x16000 
@@ -120,7 +120,7 @@ mock_app: $(CODE_MOCK)
 
 # Mock code for the domain, it has two pages.
 mock_dom: $(CODE_DOM)
-	$(GCC) -g -nostdlib -static -o $@ $(CODE_DOM)
+	$(GCC) -g -nostdlib -static -o $@ $(CODE_DOM) $(ALIGN_FLAGS)
 
 # Transition domain
 trans_dom: $(CODE_TRANS) $(HDRS_TRANS)
