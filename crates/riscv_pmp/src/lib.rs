@@ -22,7 +22,7 @@ pub const PMP_CFG_ENTRIES: usize = 2;
 pub const FROZEN_PMP_ENTRIES: usize = 0;
 
 #[cfg(not(feature = "visionfive2"))]
-pub const FROZEN_PMP_ENTRIES: usize = 0;
+pub const FROZEN_PMP_ENTRIES: usize = 2;
 
 const PMP_CFG: usize = 0;
 const PMP_ADDR: usize = 1;
@@ -326,7 +326,8 @@ pub fn print_pmps(hartid: usize) {
 }
 
 pub fn find_lowest_available_pmp_index() -> usize {
-    let mut i: usize = 0;
+    FROZEN_PMP_ENTRIES
+    /* let mut i: usize = 0;
     for n in 0..PMP_ENTRIES {
         let cfg = pmpcfg_read(n);
         if cfg >> 7 == 1 {
@@ -338,5 +339,5 @@ pub fn find_lowest_available_pmp_index() -> usize {
         }
     }
     //log::info!("Lowest available PMP index: {}",i);
-    i
+    i */
 }
