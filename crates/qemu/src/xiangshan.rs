@@ -1,7 +1,7 @@
 #![no_std]
 
 use core::arch::asm;
-use core::mt::Write;
+use core::fmt::Write;
 use core::ptr::read_volatile;
 use core::{fmt, ptr};
 

@@ -145,6 +145,9 @@ build-riscv:
 build-riscv-vf2:
 	{{vf2-linker-script}} cargo build {{cargo_args}}  --features "visionfive2" {{riscv}} {{tyche}} --release
 
+# Build the monitor for RISC-V64
+build-riscv-xiangshan:
+	{{riscv-linker-script}} cargo build {{cargo_args}} --features "xiangshan" {{riscv}} {{tyche}} --release
 
 ## ——————————————————————————— Linux Kernel Build ——————————————————————————— ##
 
