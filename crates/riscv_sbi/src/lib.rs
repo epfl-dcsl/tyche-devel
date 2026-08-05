@@ -17,6 +17,7 @@ pub const SPEC_VERSION_MAJOR_OFFSET: usize = 24;
 
 pub mod sbi {
     pub const EXT_PUTCHAR_LEGACY: usize = 0x1;
+    pub const EXT_GETCHAR_LEGACY: usize = 0x2;
     pub const EXT_BASE: usize = 0x10;
     pub const EXT_TIME: usize = 0x54494D45;
     pub const EXT_IPI: usize = 0x735049;

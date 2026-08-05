@@ -8,7 +8,7 @@ default = []
 vga = ["dep:vga"] # Print to VGA text mode
 bare_metal = []
 visionfive2 = ["dep:riscv_serial","stage_two_abi/visionfive2","qemu/visionfive2","riscv_pmp/visionfive2","riscv_tyche/visionfive2"]
-xiangshan = ["qemu/xiangshan","riscv_utils/xiangshan","riscv_tyche/xiangshan"]
+xiangshan = ["qemu/xiangshan","riscv_utils/xiangshan","riscv_tyche/xiangshan","riscv_sbi/xiangshan"]
 
 [dependencies]
 log = { workspace = true }

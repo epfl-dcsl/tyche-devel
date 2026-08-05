@@ -12,7 +12,13 @@ use riscv_pmp::{
 };
 use riscv_sbi::ecall::ecall_handler;
 use riscv_sbi::ipi::{aclint_mswi_send_ipi, process_ipi, process_tlb_ipis};
+
+#[cfg(not(feature = "xiangshan"))]
 use riscv_sbi::sbi::EXT_IPI;
+
+#[cfg(feature = "xiangshan")]
+use riscv_sbi::sbi::{EXT_IPI, EXT_GETCHAR_LEGACY, EXT_PUTCHAR_LEGACY};
+
 use riscv_tyche::{
     DOM0_ROOT_REGION_2_END, DOM0_ROOT_REGION_2_START, DOM0_ROOT_REGION_END, DOM0_ROOT_REGION_START,
 };
@@ -20,6 +26,10 @@ use riscv_utils::*;
 use spin::{Mutex, MutexGuard};
 
 use crate::arch::cpuid;
+
+#[cfg(feature = "xiangshan")]
+use crate::riscv::arch::{get_raw_faulting_instr, parse_mpp_return_mode, LoadInstr, StoreInstr, decode_load, decode_store, read_bytes_from_mode, store_bytes_from_mode};
+
 use crate::monitor::{CoreUpdate, Monitor, PlatformState, CAPA_ENGINE, INITIAL_DOMAIN};
 use crate::riscv::context::ContextRiscv;
 use crate::riscv::filtered_fields::RiscVField;
@@ -128,7 +138,7 @@ pub extern "C" fn exit_handler_failed(mcause: usize) {
     );
 }
 
-#[cfg(not(feature = "visionfive2"))]
+#[cfg(all(not(feature = "visionfive2"), not(feature = "xiangshan")))]
 pub fn illegal_instruction_handler(
     mepc: usize,
     mtval: usize,
@@ -138,17 +148,17 @@ pub fn illegal_instruction_handler(
     //do nothing.
 }
 
-#[cfg(not(feature = "visionfive2"))]
+#[cfg(all(not(feature = "visionfive2"), not(feature = "xiangshan")))]
 pub fn misaligned_store_handler(mtval: usize, mepc: usize, reg_state: &mut RegisterState) {
     //do nothing.
 }
 
-#[cfg(not(feature = "visionfive2"))]
+#[cfg(all(not(feature = "visionfive2"), not(feature = "xiangshan")))]
 pub fn misaligned_load_handler(mtval: usize, mepc: usize, reg_state: &mut RegisterState) {
     //do nothing.
 }
 
-#[cfg(feature = "visionfive2")]
+#[cfg(all(feature = "visionfive2", not(feature = "xiangshan")))]
 pub fn illegal_instruction_handler(
     mepc: usize,
     mtval: usize,
@@ -181,7 +191,7 @@ pub fn illegal_instruction_handler(
 
 //Todo: Move this to riscv-utils crate -- this is a quite low-level impl. so it's better to
 //modularise it appropriately.
-#[cfg(feature = "visionfive2")]
+#[cfg(all(feature = "visionfive2", not(feature = "xiangshan")))]
 pub fn misaligned_load_handler(mtval: usize, mepc: usize, reg_state: &mut RegisterState) {
     //Assumption: No H-mode extension. MTVAL2 and MTINST are zero.
     //Implies: trapped instr value is zero or special value.
@@ -321,7 +331,7 @@ pub fn misaligned_load_handler(mtval: usize, mepc: usize, reg_state: &mut Regist
 }
 
 //Todo: There is a lot of repeated code between misaligned load/store handlers. Make it common.
-#[cfg(feature = "visionfive2")]
+#[cfg(all(feature = "visionfive2", not(feature = "xiangshan")))]
 pub fn misaligned_store_handler(mtval: usize, mepc: usize, reg_state: &mut RegisterState) {
     log::trace!(
         "Misaligned store handler: mtval {:x} mepc: {:x}",
@@ -457,6 +467,148 @@ pub fn misaligned_store_handler(mtval: usize, mepc: usize, reg_state: &mut Regis
         asm!("csrw mepc, t0");
     }
 }
+
+#[cfg(all(feature = "xiangshan", not(feature = "visionfive2")))]
+pub fn illegal_instruction_handler(
+    mepc: usize,
+    mtval: usize,
+    mstatus: usize,
+    reg_state: &mut RegisterState,
+) {
+    system_opcode_instr(mtval, mstatus, reg_state, mepc);
+}
+
+#[cfg(all(feature = "xiangshan", not(feature = "visionfive2")))]
+pub fn emulate_misaligned_load(mcause: usize, mtval: usize, mepc: usize, mstatus: usize, reg_state: &mut RegisterState) {
+    log::info!("Misaligned load handler start!");
+    let mode = parse_mpp_return_mode(mstatus);
+    let raw_instruction = unsafe { get_raw_faulting_instr(mcause, mtval, mepc, mode) };   
+    let success;
+
+    let LoadInstr {
+        rd,
+        rs1,
+        imm,
+        len,
+        is_compressed,
+        ..
+    } = decode_load(raw_instruction);
+
+    assert!(
+        len.to_bytes() == 8 || len.to_bytes() == 4 || len.to_bytes() == 2,
+        "Implement support for other than 2,4,8 bytes misaligned accesses"
+    );
+
+    // Build the value
+    // Neelu TODO: get_rs1/rs2/set_rd already do the decoding, either simplify the get and set by using the LoadInstr or get rid of it and decode_ld/st.
+    let start_addr: *const u8 = ((get_rs1(raw_instruction, reg_state) as isize + imm) as usize) as *const u8;    // TODO: get rs1 and then index into / get ptr from reg_state ... 
+
+    let rd_val = match len.to_bytes() {   
+        8 => {
+            log::info!("Misaligned load handler 8 bytes!");
+            let mut value_to_read: [u8; 8] = [0, 0, 0, 0, 0, 0, 0, 0];
+            success = unsafe { read_bytes_from_mode(start_addr, &mut value_to_read, mode) };
+            u64::from_le_bytes(value_to_read) as usize
+        }
+        4 => {
+            log::info!("Misaligned load handler 4 bytes!");
+            let mut value_to_read: [u8; 4] = [0, 0, 0, 0];
+            success = unsafe { read_bytes_from_mode(start_addr, &mut value_to_read, mode) };
+            u32::from_le_bytes(value_to_read) as usize
+        }
+        2 => {
+            log::info!("Misaligned load handler 2 bytes!");
+            let mut value_to_read: [u8; 2] = [0, 0];
+            success = unsafe { read_bytes_from_mode(start_addr, &mut value_to_read, mode) };
+            u16::from_le_bytes(value_to_read) as usize
+        }
+        _ => {
+            unreachable!("Misaligned read with an unexpected byte length")
+        }
+    };
+
+    match success {
+        Ok(_) => {
+            set_rd(raw_instruction, reg_state, rd_val);
+
+            let instr_len = if is_compressed { 2 } else { 4 };
+            unsafe {
+                asm!("csrr t0, mepc");
+                asm!("add t0, t0, {}", in(reg) instr_len);
+                asm!("csrw mepc, t0");
+            }
+
+            log::info!("Misaligned load handler end!");
+        }
+        Err(_) => panic!("Misaligned load failed"),
+    }
+
+    // Neelu TODO: success failure case handling 
+}
+
+#[cfg(all(feature = "xiangshan", not(feature = "visionfive2")))]
+pub fn emulate_misaligned_store(mcause: usize, mtval: usize, mepc: usize, mstatus: usize, reg_state: &mut RegisterState) {
+    log::info!("Misaligned store handler start!");
+    let mode = parse_mpp_return_mode(mstatus);
+    let raw_instruction = unsafe { get_raw_faulting_instr(mcause, mtval, mepc, mode) };
+    let success;
+
+    let StoreInstr {
+        rs2,
+        rs1,
+        imm,
+        len,
+        is_compressed,
+    } = decode_store(raw_instruction);
+
+    assert!(
+        len.to_bytes() == 8 || len.to_bytes() == 4 || len.to_bytes() == 2,
+        "Implement support for other than 2,4,8 bytes misaligned accesses"
+    );
+
+    // Build the value
+    let start_addr: *mut u8 = ((get_rs1(raw_instruction, reg_state) as isize + imm) as usize) as *mut u8;
+
+    match len.to_bytes() {
+        8 => {
+            log::info!("Misaligned store handler 8 bytes!");
+            let val = get_rs2(raw_instruction, reg_state) as u64;
+            let mut value_to_store: [u8; 8] = val.to_le_bytes();
+            success = unsafe { store_bytes_from_mode(&mut value_to_store, start_addr, mode) };
+        }
+        4 => {
+            log::info!("Misaligned store handler 4 bytes!");
+            let val = get_rs2(raw_instruction, reg_state) as u32;
+            let mut value_to_store: [u8; 4] = val.to_le_bytes();
+            success = unsafe { store_bytes_from_mode(&mut value_to_store, start_addr, mode) };
+        }
+        2 => {
+            log::info!("Misaligned store handler 2 bytes!");
+            let val = get_rs2(raw_instruction, reg_state) as u16;
+            let mut value_to_store: [u8; 2] = val.to_le_bytes();
+            success = unsafe { store_bytes_from_mode(&mut value_to_store, start_addr, mode) };
+        }
+        _ => {
+            unreachable!("Misaligned write with an unexpected byte length")
+        }
+    };
+
+    match success {
+        Ok(_) => {
+            let instr_len = if is_compressed { 2 } else { 4 };
+            unsafe {
+                asm!("csrr t0, mepc");
+                asm!("add t0, t0, {}", in(reg) instr_len);
+                asm!("csrw mepc, t0");
+            }
+
+            log::info!("Misaligned store handler end!");
+        },
+        Err(_) => panic!("Misaligned store failed."),
+    }
+
+}
+
 
 #[repr(align(4))]
 #[naked]
@@ -1061,14 +1213,25 @@ impl MonitorRiscv {
                 if reg_state.a7 == 0x5479636865 {
                     panic!("Got a misaligned load Tyche call");
                 }
+
+                #[cfg(not(feature = "xiangshan"))]
                 misaligned_load_handler(mtval, mepc, reg_state);
+
+                #[cfg(feature = "xiangshan")]
+                emulate_misaligned_load(mcause, mtval, mepc, mstatus, reg_state);
+
                 //Reg state must be updated.
                 if let Some(active_dom) = Self::get_active_dom(hartid) {
                     StateRiscv::save_current_regs(&active_dom, hartid, reg_state);
                 }
             }
             mcause::STORE_ADDRESS_MISALIGNED => {
+                #[cfg(not(feature = "xiangshan"))]
                 misaligned_store_handler(mtval, mepc, reg_state);
+
+                #[cfg(feature = "xiangshan")]
+                emulate_misaligned_store(mcause, mtval, mepc, mstatus, reg_state);
+
                 //Reg state must be updated.
                 if let Some(active_dom) = Self::get_active_dom(hartid) {
                     StateRiscv::save_current_regs(&active_dom, hartid, reg_state);

@@ -18,7 +18,7 @@ pub use riscv64::_print;
 #[cfg(all(target_arch = "riscv64", feature = "visionfive2", not(feature = "xiangshan")))]
 pub use riscv_serial::_print;
 #[cfg(all(target_arch = "riscv64", not(feature = "visionfive2"), feature = "xiangshan"))]
-pub use xiangshan::_print;
+pub use xiangshan::{_print, write_char, read_char};
 
 
 // ———————————————————————————— Print Utilities ————————————————————————————— //

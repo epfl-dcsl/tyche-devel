@@ -3,7 +3,12 @@ use core::sync::atomic::Ordering;
 
 use capa_engine::Buffer;
 use qemu::println;
+
+#[cfg(not(feature = "xiangshan"))]
 use riscv_serial::write_char;
+#[cfg(feature = "xiangshan")]
+use qemu::{write_char, read_char};
+
 use riscv_utils::{
     aclint_mtimer_set_mtimecmp, clear_mip_stip, RegisterState, AVAILABLE_HART_MASK, HART_IPI_SYNC,
     HART_START, HART_START_ADDR, HART_START_ARG1, IPI_TYPE_SMODE, IPI_TYPE_TLB, NUM_HARTS,
@@ -71,10 +76,15 @@ pub fn ecall_handler(
                 asm!("csrr {}, mhartid", out(reg) hartid);
             }
             clear_mip_stip();
+            #[cfg(not(feature = "xiangshan"))]
             aclint_mtimer_set_mtimecmp(hartid, reg_state.a0.try_into().unwrap());
+            #[cfg(feature = "xiangshan")]
+            aclint_mtimer_set_mtimecmp(hartid, reg_state.a0 as usize);
             // setting mie.mtie is already taken care of during set_mtimecmp.
         }
         sbi::EXT_PUTCHAR_LEGACY => write_char(reg_state.a0 as u8 as char),
+        #[cfg(feature = "xiangshan")]
+        sbi::EXT_GETCHAR_LEGACY => { *ret = read_char() as isize;},
         _ => ecall_handler_failed(reg_state.a7, reg_state.a6),
     }
 }

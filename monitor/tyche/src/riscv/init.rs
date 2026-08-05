@@ -15,7 +15,7 @@ use crate::riscv::platform::MonitorRiscv;
 use riscv_pmp::print_pmps;
 
 use log::LevelFilter;
-const LOG_LEVEL: LevelFilter = LevelFilter::Info;
+const LOG_LEVEL: LevelFilter = LevelFilter::Debug;
 
 pub fn arch_entry_point(hartid: usize, manifest: RVManifest) -> ! {
     let m_hartid = cpuid(); // TODO: hartid is sometimes printed as 0 for hart 1... however, it still goes to the else logic? 
