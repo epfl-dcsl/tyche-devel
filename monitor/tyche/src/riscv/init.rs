@@ -68,6 +68,7 @@ pub fn arch_entry_point(hartid: usize, manifest: RVManifest) -> ! {
         let mstatus: usize;
         let medeleg: usize;
         let mideleg: usize;
+        let menvcfg: usize;
 
         unsafe {
             asm!("csrr {}, mip", out(reg) mip);
@@ -75,15 +76,17 @@ pub fn arch_entry_point(hartid: usize, manifest: RVManifest) -> ! {
             asm!("csrr {}, mstatus", out(reg) mstatus);
             asm!("csrr {}, medeleg", out(reg) medeleg);
             asm!("csrr {}, mideleg", out(reg) mideleg);
+            asm!("csrr {}, menvcfg", out(reg) menvcfg);
         }
 
         log::info!(
-            "MIP: {:x} MIE: {:x} MSTATUS: {:x} MEDELEG: {:x} MIDELEG: {:x}",
+            "MIP: {:x} MIE: {:x} MSTATUS: {:x} MEDELEG: {:x} MIDELEG: {:x} MENVCFG: {:x}",
             mip,
             mie,
             mstatus,
             medeleg,
-            mideleg
+            mideleg,
+            menvcfg,
         );
 
         //TODO: Change function name to be arch independent. Not launching guest in RV.

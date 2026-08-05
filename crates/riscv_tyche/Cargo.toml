@@ -10,3 +10,4 @@ riscv_utils = { path = "../riscv_utils/" }
 
 [features]
 visionfive2 = [] 
+xiangshan = []

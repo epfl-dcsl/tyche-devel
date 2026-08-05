@@ -9,3 +9,6 @@ edition = "2021"
 log = { workspace = true }
 qemu = { path = "../qemu/" }
 riscv_csrs = { path = "../riscv_csrs/" }
+
+[features]
+xiangshan = []

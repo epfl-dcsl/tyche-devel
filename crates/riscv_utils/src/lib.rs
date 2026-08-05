@@ -1,4 +1,6 @@
 #![no_std]
+#![feature(naked_functions)]
+#![feature(fn_align)]
 
 use core::arch::asm;
 use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -24,10 +26,21 @@ pub const PCI_SIZE: usize = 0x10000000;
 pub const PAGING_MODE_SV48: usize = 0x9000000000000000;
 pub const PAGING_MODE_SV39: usize = 0x8000000000000000;
 
+#[cfg(not(feature = "xiangshan"))] 
 pub const ACLINT_MSWI_BASE_ADDR: usize = 0x2000000;
-pub const ACLINT_MSWI_WORD_SIZE: usize = 4;
-
+#[cfg(not(feature = "xiangshan"))] 
 pub const ACLINT_MTIMECMP_BASE_ADDR: usize = 0x2004000;
+#[cfg(not(feature = "xiangshan"))]
+pub const ACLINT_MTIMER_VALUE_ADDRESS: usize = 0x200bff8;
+
+#[cfg(feature = "xiangshan")]
+pub const ACLINT_MSWI_BASE_ADDR: usize = 0x38000000;
+#[cfg(feature = "xiangshan")]
+pub const ACLINT_MTIMECMP_BASE_ADDR: usize = 0x38004000;
+#[cfg(feature = "xiangshan")]
+pub const ACLINT_MTIMER_VALUE_ADDRESS: usize = 0x3800bff8;
+
+pub const ACLINT_MSWI_WORD_SIZE: usize = 4;
 pub const ACLINT_MTIMECMP_SIZE: usize = 8;
 
 pub const TIMER_EVENT_TICK: usize = 0x200;
@@ -50,8 +63,6 @@ pub static LAST_TIMER_TICK: [AtomicUsize; NUM_HARTS] = [ZERO; NUM_HARTS];
 
 pub static NUM_HARTS_AVAILABLE: AtomicUsize = ZERO;
 pub static AVAILABLE_HART_MASK: AtomicUsize = ZERO;
-
-pub const ACLINT_MTIMER_VALUE_ADDRESS: usize = 0x200bff8;
 
 #[derive(Copy, Clone, Debug)]
 pub struct RegisterState {
@@ -337,6 +348,7 @@ pub fn set_mip_ssip() {
     }
 }
 
+#[cfg(not(feature = "xiangshan"))]
 pub fn aclint_mtimer_set_mtimecmp(target_hartid: usize, value: usize) {
     let target_addr: usize = ACLINT_MTIMECMP_BASE_ADDR + target_hartid * ACLINT_MTIMECMP_SIZE;
     LAST_TIMER_TICK[target_hartid].store(value, Ordering::SeqCst);
@@ -345,6 +357,19 @@ pub fn aclint_mtimer_set_mtimecmp(target_hartid: usize, value: usize) {
 
     unsafe {
         asm!("sd {}, 0({})", in(reg) value, in(reg) target_addr);
+    }
+    set_mie_mtie();
+}
+#[cfg(feature = "xiangshan")]
+pub fn aclint_mtimer_set_mtimecmp(target_hartid: usize, value: usize) {
+    let target_addr: usize = ACLINT_MTIMECMP_BASE_ADDR + target_hartid * ACLINT_MTIMECMP_SIZE;
+    LAST_TIMER_TICK[target_hartid].store(value, Ordering::SeqCst);
+
+    //log::info!("aclint_mtimer_set_mtimecmp in a0: {}", value);
+    let updated_value: usize = value + 100000;    
+
+    unsafe {
+        asm!("sd {}, 0({})", in(reg) updated_value, in(reg) target_addr);
     }
     set_mie_mtie();
 }
@@ -429,6 +454,7 @@ pub fn set_mip_stip() {
     }
 }
 
+#[cfg(not(feature = "xiangshan"))]
 pub fn system_opcode_instr(mtval: usize, mstatus: usize, reg_state: &mut RegisterState) {
     let _rs1_num: usize = (mtval >> 15) & 0x1f;
     let _do_write: usize;
@@ -454,6 +480,93 @@ pub fn system_opcode_instr(mtval: usize, mstatus: usize, reg_state: &mut Registe
         log::debug!("Truly illegal instr or Unsupported CSR emulation request");
         reg_state.a0 = -2;
     }
+}
+#[cfg(feature = "xiangshan")]
+pub fn system_opcode_instr(mtval: usize, mstatus: usize, reg_state: &mut RegisterState, mepc: usize) {
+    // let _rs1_num: usize = (mtval >> 15) & 0x1f;
+    // let _do_write: usize;
+    // let _rs1_val: u64 = get_rs1(mtval, reg_state);
+
+    // let csr_num: usize = mtval >> 20;
+
+    // let prev_mode = (mstatus >> mstatus::MPP_LOW) & mstatus::MPP_MASK;
+
+    // if prev_mode == 0x3 {
+    //     panic!("CSR emulate attempt from M-mode!");
+    // }
+
+    // if csr_num == 0xc01 {
+        //CSR_TIME
+
+        // we assume we don't have mtval ... so we get the instr ... 
+        let mut trap_state: TrapState = TrapState {
+            epc: 0,
+            cause: 0,
+            tval: 0,
+        };
+        let mut mtvec = sbi_expected_trap as *const ();
+        let mut mstatus: usize = 0;
+        let mut instr: usize = 0;
+        let mprv_bits: usize = (1 << mstatus::MPRV) | (1 << mstatus::MXR);
+        let instr_len: usize;
+    
+        unsafe {
+            asm!(
+            "mv a3, {trap_st}
+            csrrw {tvec}, mtvec, {tvec}
+            csrrs {status}, mstatus, {mprv}
+            lhu {inst}, ({epc})
+            andi a4, {inst}, 3
+            addi a4, a4, -3
+            bne a4, zero, 2f
+            lhu a4, 2({epc})
+            sll a4, a4, 16
+            add {inst}, {inst}, a4
+            2: csrw mstatus, {status}
+            csrw mtvec, {tvec}",
+            trap_st = in(reg) &trap_state,
+            tvec = inout(reg) mtvec,
+            status = inout(reg) mstatus,
+            mprv = in(reg) mprv_bits,
+            inst = inout(reg) instr,
+            epc = in(reg) mepc,
+            out("a3") _,
+            out("a4") _,
+            );
+        }
+        let csr_num: usize = instr >> 20;
+        //log::info!("Read instr: 0x{:x} -- csr_num : 0x{:x}", instr, csr_num);
+
+        let csr_val: usize; 
+        match csr_num {
+            CSR_TIME => {
+                unsafe {
+                    asm!("ld {}, 0({})",out(reg) csr_val, in(reg) ACLINT_MTIMER_VALUE_ADDRESS);
+                }
+                //log::info!("Returning MTIME: {}", csr_val);
+            },
+            CSR_CYCLE => {
+                unsafe {
+                    asm!("csrr {}, mcycle",out(reg) csr_val);
+                }
+                //log::info!("Returning MCYCLE: {}", csr_val);
+            },
+            CSR_INSTRET => {
+                unsafe {
+                    asm!("csrr {}, minstret",out(reg) csr_val);
+                }
+                //log::info!("Returning MINSTRET: {}",csr_val);
+            },
+            _ => csr_val = 0,
+        }
+        
+        //log::info!("Emulating CSR Time Read : 0x{:x}", csr_val);
+        set_rd(instr, reg_state, csr_val);
+    // } else {
+    //     //Truly Illegal.
+    //     log::debug!("Truly illegal instr or Unsupported CSR emulation request");
+    //     reg_state.a0 = -2;
+    // }
 }
 
 pub fn get_rs1(mtval: usize, reg_state: &mut RegisterState) -> u64 {
@@ -486,5 +599,25 @@ pub fn set_rd(mtval: usize, reg_state: &mut RegisterState, val: usize) {
     unsafe {
         let reg_ptr = reg_state_ptr.offset(reg_offset as isize);
         *reg_ptr = val;
+    }
+}
+
+#[repr(align(4))]
+#[naked]
+pub extern "C" fn sbi_expected_trap() {
+    unsafe {
+        asm!(
+            "csrr a4, mepc
+        sd a4, 0*8(a3)
+        csrr a4, mcause
+        sd a4, 1*8(a3)
+        csrr a4, mtval
+        sd a4, 2*8(a3)
+        csrr a4, mepc
+        addi a4, a4, 4
+        csrw mepc, a4
+        mret",
+            options(noreturn)
+        );
     }
 }

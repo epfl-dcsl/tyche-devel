@@ -14,5 +14,5 @@ riscv_serial = { path = "../riscv_serial/", optional = true }
 
 [features]
 visionfive2 = ["dep:riscv_serial"]
-
+xiangshan = []
 

@@ -7,12 +7,19 @@ pub use x86_64::{_print, exit};
 
 #[cfg(target_arch = "riscv64")]
 mod riscv64;
-#[cfg(all(target_arch = "riscv64", not(feature = "visionfive2")))]
-pub use riscv64::_print;
+#[cfg(all(target_arch = "riscv64", not(feature = "visionfive2"), feature = "xiangshan"))]
+mod xiangshan;
+
 #[cfg(target_arch = "riscv64")]
 pub use riscv64::exit;
-#[cfg(all(target_arch = "riscv64", feature = "visionfive2"))]
+
+#[cfg(all(target_arch = "riscv64", not(feature = "visionfive2"), not(feature = "xiangshan")))]
+pub use riscv64::_print;
+#[cfg(all(target_arch = "riscv64", feature = "visionfive2", not(feature = "xiangshan")))]
 pub use riscv_serial::_print;
+#[cfg(all(target_arch = "riscv64", not(feature = "visionfive2"), feature = "xiangshan"))]
+pub use xiangshan::_print;
+
 
 // ———————————————————————————— Print Utilities ————————————————————————————— //
 

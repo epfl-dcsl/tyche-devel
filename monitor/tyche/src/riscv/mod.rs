@@ -21,9 +21,33 @@ use crate::println;
 #[derive(Debug)]
 pub enum BackendError {}
 
+const MIDELEG: usize = 0x1666;
+const MEDELEG: usize = 0xf0b509;
+const MENVCFG: usize = 0xa0000000000000f0;
+const MIE: usize = 0x8;
+
 // launch the initial domain.
 pub fn launch_guest(hartid: usize, arg1: usize, next_addr: usize, next_mode: usize) {
     // 0. TODO: Sanity check for next_mode and misa-extension.
+
+    let mcycle: usize;
+    let minstret: usize;
+
+    unsafe {
+        asm!("csrr {}, mcycle", out(reg) mcycle);
+        asm!("csrr {}, minstret", out(reg) minstret);
+    }
+
+    log::info!("HartID: {} Mcycle : {} Minstret {} ", hartid, mcycle, minstret);
+
+    // Update the exception and interrupt delegation registers 
+
+    unsafe {
+        asm!("csrw mideleg, {}", in(reg) MIDELEG);
+        asm!("csrw medeleg, {}", in(reg) MEDELEG);
+        asm!("csrw menvcfg, {}", in(reg) MENVCFG);
+        asm!("csrw mie, {}", in(reg) MIE);
+    }
 
     println!("============= Launching Linux from Tyche =============");
 
