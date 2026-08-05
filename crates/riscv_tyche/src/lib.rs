@@ -12,7 +12,7 @@ use riscv_utils::{PCI_BASE_ADDRESS, PCI_SIZE, SIFIVE_TEST_SYSCON_BASE_ADDRESS};
 pub static TYCHE_STACK_POINTER: [usize; 4] = [0x80590000, 0x8058b000, 0x80586000, 0x80581000];
 
 #[cfg(not(feature = "visionfive2"))]
-pub const DOM0_ROOT_REGION_START: usize = 0x80600000;
+pub const DOM0_ROOT_REGION_START: usize = 0x80800000;
 #[cfg(not(feature = "visionfive2"))]
 pub const DOM0_ROOT_REGION_END: usize = 0x800000000;
 

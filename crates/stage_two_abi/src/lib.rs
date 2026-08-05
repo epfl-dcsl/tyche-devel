@@ -40,9 +40,21 @@ pub type EntryPoint = extern "C" fn(usize, RVManifest) -> !;
 macro_rules! entry_point {
     ($path:path) => {
         #[no_mangle]
+        #[naked]
         pub extern "C" fn _start(hartid: usize, manifest: RVManifest) -> ! {
             // Validate the signature of the entry point.
-            let f: fn(usize, RVManifest) -> ! = $path;
+            unsafe {
+                asm!(
+                    "j {tyche_entry}",
+                    tyche_entry = sym $path,
+                    options(noreturn),
+                );
+            }
+        }
+
+        pub extern "C" fn _typecheck(hartid: usize, manifest: RVManifest) -> ! {
+            // Validate the signature of the entry point.
+            let f: extern "C" fn(usize, RVManifest) -> ! = $path;
             f(hartid, manifest);
         }
     };

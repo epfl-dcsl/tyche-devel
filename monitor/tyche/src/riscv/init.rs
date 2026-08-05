@@ -14,24 +14,13 @@ use crate::riscv::cpuid;
 use crate::riscv::platform::MonitorRiscv;
 use riscv_pmp::print_pmps;
 
-pub fn arch_entry_point(hartid: usize, manifest: RVManifest, log_level: log::LevelFilter) -> ! {
-    unsafe {
-        // Set up Stack ! 
-        asm!(
-            //"li sp, 0x800f0000",   // Hard-coding ToS.... :| 
-            "csrr t0, mhartid",
-            "slli t0, t0, 3",   // to index into STACK_ADDRESS
-            "la t1, {stack}",
-            "add t1, t1, t0",
-            "ld t1, 0(t1)",
-            "mv sp, t1",
-            "addi sp, sp, -9*8",
-            stack = sym TYCHE_STACK_POINTER,
-        );
-    }
+use log::LevelFilter;
+const LOG_LEVEL: LevelFilter = LevelFilter::Info;
+
+pub fn arch_entry_point(hartid: usize, manifest: RVManifest) -> ! {
     let m_hartid = cpuid(); // TODO: hartid is sometimes printed as 0 for hart 1... however, it still goes to the else logic? 
     if m_hartid == manifest.coldboot_hartid {
-        logger::init(log_level);
+        logger::init(LOG_LEVEL);
 
         log::info!(
             "============= Hello from Second Stage on Coldboot Hart ID: {} =============",
