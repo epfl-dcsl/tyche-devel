@@ -18,6 +18,11 @@ pub const MPP_OFFSET: usize = 11;
 pub const MPP_FILTER: usize = 0b11 << MPP_OFFSET;
 pub const ILLEGAL_INSTRUCTION: usize = 2;
 
+const MENVCFG: usize = 0xa0000000000000f0;
+const MIDELEG: usize = 0x1666;
+const MEDELEG: usize = 0xf0b509;
+const MIE: usize = 0x8;
+
 #[cfg(feature = "xiangshan")]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Mode {
@@ -144,6 +149,17 @@ pub fn init(hartid: usize) {
     let mtvec_ptr = machine_trap_handler as *const ();
     //log::info!("mtvec_ptr to be set by Tyche {:p}", mtvec_ptr);
     set_mtvec(mtvec_ptr);
+
+    unsafe {
+        asm!("csrw mideleg, {}", in(reg) MIDELEG);
+        asm!("csrw medeleg, {}", in(reg) MEDELEG);
+        asm!("csrw mie, {}", in(reg) MIE);
+    }
+    
+    #[cfg(not(feature = "xiangshan"))]
+    unsafe {
+        asm!("csrw menvcfg, {}", in(reg) MENVCFG);
+    }
 }
 
 // ------------------------------ Trap Handler Setup -------------------------- //
