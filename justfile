@@ -161,7 +161,7 @@ build-linux-x86:
 # Todo: if you build linux without building the monitor, building opensbi right after will throw an error cause it won't find the monitor's binary yay ^ ^ 
 build-linux-riscv:
 	@just _build-linux-common riscv CROSS_COMPILE=riscv64-linux-gnu-
-	./opensbi-stage1/run_build.sh
+	# ./opensbi-stage1/run_build.sh
 
 _build-linux-common ARCH CROSS_COMPILE=extra_arg:
 	@just _setup-linux-config {{ARCH}}
