@@ -20,8 +20,8 @@ vga-s2              := "--features=tyche/vga"
 bare-metal-s1       := "--features=s1/bare_metal"
 bare-metal-tyche    := "--features=tyche/bare_metal"
 build_path          := justfile_directory() + "/builds"
-tpm_path            := "/tmp/tpm-dev-" + env_var('USER')
-default_dbg         := "/tmp/dbg-" + env_var('USER')
+tpm_path            := "/tmp/tpm-dev-" + env_var_or_default("USER", "root")
+default_dbg         := "/tmp/dbg-" + env_var_or_default("USER", "root")
 default_smp         := "1"
 extra_arg           := ""
 
@@ -165,7 +165,7 @@ build-linux-riscv:
 
 _build-linux-common ARCH CROSS_COMPILE=extra_arg:
 	@just _setup-linux-config {{ARCH}}
-	bear --output ./linux/compile_commands.json -- make -C ./linux ARCH={{ARCH}} O=../builds/linux-{{ARCH}} {{CROSS_COMPILE}} -j `nproc`
+	bear --output ./linux/compile_commands.json -- make -C ./linux ARCH={{ARCH}} O=../builds/linux-{{ARCH}} {{CROSS_COMPILE}} -j4
 	@just _clean-linux-config {{ARCH}}
 
 build-linux-x86-nested:
