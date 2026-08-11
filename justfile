@@ -197,6 +197,7 @@ build-busybox-x86:
 build-busybox-riscv:
 	@just _build-linux-header-common riscv CROSS_COMPILE=riscv64-linux-gnu-
 	@just _build-busybox-common riscv CROSS_COMPILE=riscv64-linux-gnu-
+	chmod 755 ./builds/ramfs-riscv/init
 
 _build-busybox-common ARCH CROSS_COMPILE=extra_arg:
 	mkdir -p ./builds/busybox-{{ARCH}}
@@ -210,6 +211,9 @@ init-ramfs-x86:
 
 init-ramfs-riscv:
 	@just _init-ramfs-common riscv
+	sudo mknod ./builds/ramfs-riscv/dev/null c 1 3
+	sudo mknod ./builds/ramfs-riscv/dev/tty c 5 0
+	sudo mknod ./builds/ramfs-riscv/dev/console c 5 1
 
 _init-ramfs-common ARCH:
 	mkdir -p ./builds/ramfs-{{ARCH}}
