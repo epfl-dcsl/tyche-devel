@@ -242,6 +242,50 @@ pub trait Monitor<T: PlatformState + 'static> {
         }
     }
 
+    fn dump_domains(engine: &mut CapaEngine, sealed_domain: Handle<Domain>) {
+        log::info!("Tyche domains after sealing {}:", sealed_domain);
+        let mut next_domain = NextCapaToken::new();
+
+        while let Some((domain, next)) = engine.enumerate_domains(next_domain) {
+            next_domain = next;
+            log::info!(
+                "Domain {}: id={} sealed={}",
+                domain,
+                engine[domain].id(),
+                engine.is_domain_sealed(domain)
+            );
+
+            let mut region_count = 0;
+            if let Ok(regions) = engine.get_domain_permissions(domain) {
+                for region in regions {
+                    if region_count == 0 {
+                        log::info!("  regions:");
+                    }
+                    log::info!("    {}", region);
+                    region_count += 1;
+                }
+            }
+            if region_count == 0 {
+                log::info!("  regions: (none)");
+            }
+
+            let mut capability_count = 0;
+            let mut next_capa = NextCapaToken::new();
+            while let Some((info, next)) = engine.enumerate(domain, next_capa) {
+                if capability_count == 0 {
+                    log::info!("  capabilities:");
+                }
+                let local_index = next.as_usize() - 1;
+                log::info!("    [{}] {}", local_index, info);
+                capability_count += 1;
+                next_capa = next;
+            }
+            if capability_count == 0 {
+                log::info!("  capabilities: (none)");
+            }
+        }
+    }
+
     fn do_create_domain(
         state: &mut T,
         current: &mut Handle<Domain>,
@@ -375,13 +419,13 @@ pub trait Monitor<T: PlatformState + 'static> {
     ) -> Result<LocalCapa, CapaError> {
         let core = cpuid();
         let mut engine = Self::lock_engine(state, current);
+        let sealed_domain = engine.get_domain_capa(*current, domain)?;
         //TODO: fix that.
         let capa = engine.seal(*current, core, domain)?;
-        if let Ok(domain_capa) = engine.get_domain_capa(*current, domain) {
-            calculate_attestation_hash(&mut engine, domain_capa);
-        }
+        calculate_attestation_hash(&mut engine, sealed_domain);
 
         Self::apply_updates(state, &mut engine);
+        Self::dump_domains(&mut engine, sealed_domain);
         Ok(capa)
     }
 
@@ -406,8 +450,10 @@ pub trait Monitor<T: PlatformState + 'static> {
             ops: prot,
         };
         let to_send = if is_shared {
+            log::info!("Alias prot for segment region {:?}", prot);
             engine.alias_region(*current, capa, access)?
         } else {
+            log::info!("Carve prot for segment region {:?}", prot);
             engine.carve_region(*current, capa, access)?
         };
         let to_revoke = engine.create_revoke_capa(*current, to_send)?;
@@ -610,19 +656,19 @@ pub trait Monitor<T: PlatformState + 'static> {
     ) -> Result<bool, CapaError> {
         match call {
             calls::CREATE_DOMAIN => {
-                log::trace!("Create domain on core {}", cpuid());
+                log::info!("Create domain on core {}", cpuid());
                 let capa = Self::do_create_domain(state, domain)?;
                 res[0] = capa.as_usize();
                 return Ok(true);
             }
             calls::SEAL_DOMAIN => {
-                log::trace!("Seal Domain on core {}", cpuid());
+                log::info!("Seal Domain on core {}", cpuid());
                 let capa = Self::do_seal(state, domain, LocalCapa::new(args[0]))?;
                 res[0] = capa.as_usize();
                 return Ok(true);
             }
             calls::SEND => {
-                log::trace!("Send on core {}", cpuid());
+                log::info!("Send on core {}", cpuid());
                 Self::do_send(
                     state,
                     domain,
@@ -632,7 +678,7 @@ pub trait Monitor<T: PlatformState + 'static> {
                 return Ok(true);
             }
             calls::SEND_REGION => {
-                log::trace!("Send region on core {}", cpuid());
+                log::info!("Send region on core {}", cpuid());
                 Self::do_send_region(
                     state,
                     domain,
@@ -648,7 +694,7 @@ pub trait Monitor<T: PlatformState + 'static> {
                 return Ok(true);
             }
             calls::SEGMENT_REGION => {
-                log::trace!("Segment region on core {}", cpuid());
+                log::info!("Segment region on core {}", cpuid());
                 let (to_send, to_revoke) = Self::do_segment_region(
                     state,
                     domain,
@@ -664,18 +710,18 @@ pub trait Monitor<T: PlatformState + 'static> {
             }
             // There are no aliases on riscv so we just ignore the alias info.
             calls::REVOKE | calls::REVOKE_ALIASED_REGION => {
-                log::trace!("Revoke on core {}", cpuid());
+                log::info!("Revoke on core {}", cpuid());
                 Self::do_revoke(state, domain, LocalCapa::new(args[0]))?;
                 return Ok(true);
             }
             calls::DUPLICATE => {
-                log::trace!("Duplicate");
+                log::info!("Duplicate");
                 let capa = Self::do_duplicate(state, domain, LocalCapa::new(args[0]))?;
                 res[0] = capa.as_usize();
                 return Ok(true);
             }
             calls::ENUMERATE => {
-                log::trace!("Enumerate on core {}", cpuid());
+                log::info!("Enumerate on core {}", cpuid());
                 if let Some((info, next)) =
                     Self::do_enumerate(state, domain, NextCapaToken::from_usize(args[0]))
                 {
@@ -690,7 +736,7 @@ pub trait Monitor<T: PlatformState + 'static> {
                 return Ok(true);
             }
             calls::SWITCH => {
-                log::trace!(
+                log::info!(
                     "Switch on core {} from {} with capa {}",
                     cpuid(),
                     domain.idx(),
@@ -706,7 +752,7 @@ pub trait Monitor<T: PlatformState + 'static> {
                 todo!("Debug implement")
             }
             calls::CONFIGURE => {
-                log::trace!("Configure on core {}", cpuid());
+                log::info!("Configure on core {}", cpuid());
                 let result = if let Some(bitmap) = permission::PermissionIndex::from_usize(args[0])
                 {
                     let mut value = args[2] as u64;
@@ -739,7 +785,7 @@ pub trait Monitor<T: PlatformState + 'static> {
                 return Ok(true);
             }
             calls::GET_CONFIG_CORE => {
-                log::trace!("Get config core on core {}", cpuid());
+                log::info!("Get config core on core {}", cpuid());
                 let value = Self::do_get_core(
                     state,
                     domain,
@@ -760,7 +806,7 @@ pub trait Monitor<T: PlatformState + 'static> {
                 return Ok(true);
             }
             calls::READ_ALL_GP => {
-                log::trace!("Read all gp on core {}", cpuid());
+                log::info!("Read all gp on core {}", cpuid());
                 Self::do_get_all_gp(
                     state,
                     domain,
@@ -773,7 +819,7 @@ pub trait Monitor<T: PlatformState + 'static> {
                 todo!("Implement!!!");
             }
             calls::WRITE_FIELDS => {
-                log::trace!("Write fields on core {}", cpuid());
+                log::info!("Write fields on core {}", cpuid());
                 Self::do_write_fields(
                     state,
                     domain,
@@ -786,7 +832,7 @@ pub trait Monitor<T: PlatformState + 'static> {
                 todo!("Implement!!!");
             }
             /* calls::REVOKE_ALIASED_REGION => {
-                log::trace!("Revoke aliased region on core {}", cpuid());
+                log::info!("Revoke aliased region on core {}", cpuid());
                 Self::do_revoke_region(
                     state,
                     domain,
@@ -821,11 +867,11 @@ pub trait Monitor<T: PlatformState + 'static> {
 
     fn apply_updates(state: &mut T, engine: &mut MutexGuard<CapaEngine>) {
         while let Some(update) = engine.pop_update() {
-            log::trace!("Update: {}", update);
+            log::info!("Update: {}", update);
             match update {
                 capa_engine::Update::PermissionUpdate { domain, core_map } => {
                     let core_id = cpuid();
-                    log::trace!(
+                    log::info!(
                         "cpu {} processes PermissionUpdate with core_map={:b}",
                         core_id,
                         core_map
@@ -857,7 +903,7 @@ pub trait Monitor<T: PlatformState + 'static> {
                 }
                 capa_engine::Update::Cleanup { start, end } => {
                     let size = end.checked_sub(start).unwrap();
-                    log::trace!("Cleaning up region [{:#x}, {:#x}]", start, end);
+                    log::info!("Cleaning up region [{:#x}, {:#x}]", start, end);
                     // WARNING: for now we do not check that the region points to valid memory!
                     // In particular, the current root region contains more than valid ram, and also
                     // include devices.

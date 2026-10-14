@@ -8,7 +8,7 @@ use capa_engine::{
 use riscv_csrs::{mcause, *};
 use riscv_pmp::{
     clear_pmp, pmp_write_compute, PMPAddressingMode, PMPErrorCode, PMPWriteResponse,
-    FROZEN_PMP_ENTRIES, PMP_CFG_ENTRIES, PMP_ENTRIES,
+    FROZEN_PMP_ENTRIES, PMP_CFG_ENTRIES, PMP_ENTRIES, PMP_EXEC, PMP_READ, PMP_WRITE,
 };
 use riscv_sbi::ecall::ecall_handler;
 use riscv_sbi::ipi::{aclint_mswi_send_ipi, process_ipi, process_tlb_ipis};
@@ -550,6 +550,9 @@ impl PlatformState for StateRiscv {
         domain_handle: Handle<Domain>,
         engine: &mut MutexGuard<CapaEngine>,
     ) -> bool {
+        // Remove the previous software PMP layout before rebuilding it.
+        Self::clear_domain_pmp_state(domain_handle);
+
         let mut pmp_write_response: PMPWriteResponse;
         let mut pmp_index = FROZEN_PMP_ENTRIES;
         for range in engine.get_domain_permissions(domain_handle).unwrap() {
@@ -569,7 +572,10 @@ impl PlatformState for StateRiscv {
                 panic!("Cannot continue running this domain: PMPOverflow");
             }
 
-            pmp_write_response = pmp_write_compute(pmp_index, range.start, range.size(), XWR_PERM);
+            let pmp_permissions: usize = memops_to_pmp_permissions(range.ops);
+
+            pmp_write_response =
+                pmp_write_compute(pmp_index, range.start, range.size(), pmp_permissions);
 
             if pmp_write_response.write_failed {
                 log::debug!(
@@ -622,8 +628,13 @@ impl PlatformState for StateRiscv {
                 }
             }
         }
-        let mut domain = Self::get_domain(domain_handle);
-        domain.data_init_done = true;
+        {
+            let mut domain = Self::get_domain(domain_handle);
+            domain.data_init_done = true;
+        }
+        // Domains without an assigned core do not get a shootdown, so log the
+        // rebuilt per-domain image here rather than relying on hardware state.
+        Self::dump_pmps(domain_handle);
         true
     }
 
@@ -658,9 +669,10 @@ impl PlatformState for StateRiscv {
                 return_capa,
                 //current_reg_state,
             } => {
-                log::debug!(
-                    "Domain Switch on core {} for domain {}, return_capa: {:x}",
+                log::info!(
+                    "Switching domain on core {}: {} -> {} (return capability: 0x{:x})",
                     core_id,
+                    *current_domain,
                     domain,
                     return_capa.as_usize()
                 );
@@ -695,7 +707,7 @@ impl PlatformState for StateRiscv {
     }
 
     fn platform_shootdown(&mut self, domain: &Handle<Domain>, core: usize, trigger: bool) {
-        let mut domain_data = Self::get_domain(*domain);
+        let domain_data = Self::get_domain(*domain);
         Self::update_pmps(domain_data);
     }
 
@@ -1152,4 +1164,20 @@ impl MonitorRiscv {
         // Neelu: If a switch doesn't occur, it remains the same.
         Self::set_active_dom(hartid, active_dom);
     }
+}
+
+fn memops_to_pmp_permissions(ops: MemOps) -> usize {
+    let mut permissions = 0;
+
+    if ops.contains(MemOps::READ) {
+        permissions |= PMP_READ;
+    }
+    if ops.contains(MemOps::WRITE) {
+        permissions |= PMP_WRITE;
+    }
+    if ops.contains(MemOps::EXEC) {
+        permissions |= PMP_EXEC;
+    }
+
+    permissions
 }

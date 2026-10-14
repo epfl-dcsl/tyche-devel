@@ -27,8 +27,12 @@ pub const FROZEN_PMP_ENTRIES: usize = 1;
 const PMP_CFG: usize = 0;
 const PMP_ADDR: usize = 1;
 
-const XWR_MASK: usize = 7;
 const RV64_PAGESIZE_MASK: usize = 0xfffffffffffff000;
+
+pub const PMP_READ: usize = 1 << 0;
+pub const PMP_WRITE: usize = 1 << 1;
+pub const PMP_EXEC: usize = 1 << 2;
+const PMP_RWX_MASK: usize = PMP_READ | PMP_WRITE | PMP_EXEC;
 
 pub struct PMPWriteResponse {
     pub write_failed: bool,
@@ -57,6 +61,56 @@ pub enum PMPAddressingMode {
     TOR = 1,
     NA4 = 2,
     NAPOT = 3,
+}
+
+impl PMPAddressingMode {
+    /// Extract the addressing mode from one 8-bit PMP configuration entry.
+    pub fn from_cfg_byte(cfg: usize) -> Self {
+        match (cfg >> 3) & 0b11 {
+            0 => Self::OFF,
+            1 => Self::TOR,
+            2 => Self::NA4,
+            3 => Self::NAPOT,
+            _ => unreachable!(),
+        }
+    }
+}
+
+/// Decode the half-open address range represented by a PMP entry.
+///
+/// `pmpaddr` contains the raw values stored in the PMP address CSRs. An OFF
+/// entry has no range, while a TOR entry uses the preceding PMP address as its
+/// lower bound.
+pub fn pmp_decode_range(
+    pmpaddr: &[usize],
+    index: usize,
+    mode: PMPAddressingMode,
+) -> Option<(usize, usize)> {
+    let addr = *pmpaddr.get(index)?;
+
+    match mode {
+        PMPAddressingMode::OFF => None,
+        PMPAddressingMode::TOR => {
+            let start = if index == 0 {
+                0
+            } else {
+                pmpaddr[index - 1].checked_shl(2)?
+            };
+            let end = addr.checked_shl(2)?;
+            Some((start, end))
+        }
+        PMPAddressingMode::NA4 => {
+            let start = addr.checked_shl(2)?;
+            Some((start, start.checked_add(4)?))
+        }
+        PMPAddressingMode::NAPOT => {
+            let trailing_ones = addr.trailing_ones();
+            let size = 1usize.checked_shl(trailing_ones + 3)?;
+            let encoded_mask = (size >> 2) - 1;
+            let start = (addr & !encoded_mask).checked_shl(2)?;
+            Some((start, start.checked_add(size)?))
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -131,7 +185,15 @@ pub fn pmp_write_compute(
         return pmp_write_response;
     }
 
-    if region_perm & XWR_MASK != XWR_MASK {
+    // if region_perm & XWR_MASK != XWR_MASK {
+    //     pmp_write_response.failure_code = PMPErrorCode::InvalidPermissions;
+    //     return pmp_write_response;
+    // }
+
+    let has_unknown_bits: bool = region_perm & !PMP_RWX_MASK != 0;
+    let write_without_read: bool = region_perm & PMP_WRITE != 0 && region_perm & PMP_READ == 0;
+
+    if has_unknown_bits || write_without_read {
         pmp_write_response.failure_code = PMPErrorCode::InvalidPermissions;
         return pmp_write_response;
     }
@@ -314,5 +376,44 @@ pub fn clear_pmp() {
         pmpcfg_csr_write(n, 0); //Note: This only works because the frozen_pmp entry we have
                                 //has pmpcfg = 0. If that wasn't the case, clearing would
                                 //require fine-grained writes to pmpcfg.
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{pmp_decode_range, pmp_write_compute, PMPAddressingMode};
+
+    #[test]
+    fn decodes_tor_range() {
+        let addresses = [0x1000 >> 2, 0x2800 >> 2];
+        assert_eq!(
+            pmp_decode_range(&addresses, 1, PMPAddressingMode::TOR),
+            Some((0x1000, 0x2800))
+        );
+    }
+
+    #[test]
+    fn decodes_na4_range() {
+        let addresses = [0x1234 >> 2];
+        assert_eq!(
+            pmp_decode_range(&addresses, 0, PMPAddressingMode::NA4),
+            Some((0x1234, 0x1238))
+        );
+    }
+
+    #[test]
+    fn decodes_napot_range() {
+        let response = pmp_write_compute(1, 0x4000, 0x1000, 0b111);
+        let addresses = [0, response.addr1];
+        assert_eq!(response.addressing_mode, PMPAddressingMode::NAPOT);
+        assert_eq!(
+            pmp_decode_range(&addresses, 1, response.addressing_mode),
+            Some((0x4000, 0x5000))
+        );
+    }
+
+    #[test]
+    fn off_entry_has_no_range() {
+        assert_eq!(pmp_decode_range(&[0], 0, PMPAddressingMode::OFF), None);
     }
 }

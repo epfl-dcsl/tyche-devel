@@ -3,10 +3,10 @@ use core::sync::atomic::AtomicUsize;
 
 use capa_engine::config::{NB_CORES, NB_DOMAINS, NB_REMAP_REGIONS};
 use capa_engine::{CapaEngine, Domain, Handle, MemOps};
-use riscv_pmp::csrs::{pmpaddr_csr_write, pmpcfg_csr_write};
+use riscv_pmp::csrs::{pmpaddr_csr_read, pmpaddr_csr_write, pmpcfg_csr_read, pmpcfg_csr_write};
 use riscv_pmp::{
-    clear_pmp, pmp_write_compute, PMPAddressingMode, PMPWriteResponse, FROZEN_PMP_ENTRIES,
-    PMP_CFG_ENTRIES, PMP_ENTRIES,
+    clear_pmp, pmp_decode_range, pmp_write_compute, PMPAddressingMode, PMPWriteResponse,
+    FROZEN_PMP_ENTRIES, PMP_CFG_ENTRIES, PMP_ENTRIES,
 };
 use riscv_utils::{
     read_medeleg, read_mepc, read_mscratch, read_mstatus, read_satp, toggle_supervisor_interrupts,
@@ -72,23 +72,99 @@ impl StateRiscv {
         *reg_state = dom_ctx.reg_state;
     }
 
+    pub fn clear_domain_pmp_state(domain_handle: Handle<Domain>) {
+        let mut domain = Self::get_domain(domain_handle);
+
+        // Preserve reserved/frozen entries.
+        for index in FROZEN_PMP_ENTRIES..PMP_ENTRIES {
+            domain.pmpaddr[index] = 0;
+
+            let cfg_index = index / 8;
+            let cfg_shift = (index % 8) * 8;
+            domain.pmpcfg[cfg_index] &= !(0xffusize << cfg_shift);
+        }
+    }
+
     pub fn update_pmps(domain: MutexGuard<DataRiscv>) {
         log::debug!("Updating PMPs FOR REAL!");
         clear_pmp();
         for i in FROZEN_PMP_ENTRIES..PMP_ENTRIES {
             pmpaddr_csr_write(i, domain.pmpaddr[i]);
-            log::trace!(
-                "updating pmpaddr index: {}, val: {:x}",
-                i,
-                domain.pmpaddr[i]
-            );
         }
         for i in 0..PMP_CFG_ENTRIES {
             pmpcfg_csr_write(i * 8, domain.pmpcfg[i]);
-            log::trace!("updating pmpcfg index: {}, val: {:x}", i, domain.pmpcfg[i]);
         }
         unsafe {
             asm!("sfence.vma");
+        }
+    }
+
+    pub fn dump_pmps(domain_handle: Handle<Domain>) {
+        let domain = Self::get_domain(domain_handle);
+        let mut pmpaddr = domain.pmpaddr;
+        let mut pmpcfg = domain.pmpcfg;
+        drop(domain);
+
+        // Reserved entries are global and are not stored in the per-domain
+        // cache. Merge them from hardware into the domain-specific snapshot.
+        for index in 0..FROZEN_PMP_ENTRIES {
+            pmpaddr[index] = pmpaddr_csr_read(index);
+            let cfg = pmpcfg_csr_read(index);
+            let shift = (index % 8) * 8;
+            pmpcfg[index / 8] &= !(0xffusize << shift);
+            pmpcfg[index / 8] |= cfg & (0xffusize << shift);
+        }
+
+        log::info!("PMP state for domain {}:", domain_handle);
+        for (index, cfg) in pmpcfg.iter().enumerate() {
+            log::info!("  pmpcfg{}=0x{:016x}", index * 2, cfg);
+        }
+
+        for index in 0..PMP_ENTRIES {
+            let cfg = (pmpcfg[index / 8] >> ((index % 8) * 8)) & 0xff;
+            let mode = PMPAddressingMode::from_cfg_byte(cfg);
+            let read = if cfg & 0b001 != 0 { 'R' } else { '-' };
+            let write = if cfg & 0b010 != 0 { 'W' } else { '-' };
+            let execute = if cfg & 0b100 != 0 { 'X' } else { '-' };
+            let locked = cfg & 0x80 != 0;
+
+            match pmp_decode_range(&pmpaddr, index, mode) {
+                Some((start, end)) => log::info!(
+                    "  pmpaddr{}=0x{:x} cfg=0x{:02x} mode={:?} region=[0x{:x}, 0x{:x}) permissions={}{}{} locked={}",
+                    index,
+                    pmpaddr[index],
+                    cfg,
+                    mode,
+                    start,
+                    end,
+                    read,
+                    write,
+                    execute,
+                    locked
+                ),
+                None if mode == PMPAddressingMode::OFF => log::info!(
+                    "  pmpaddr{}=0x{:x} cfg=0x{:02x} mode={:?} region=disabled permissions={}{}{} locked={}",
+                    index,
+                    pmpaddr[index],
+                    cfg,
+                    mode,
+                    read,
+                    write,
+                    execute,
+                    locked
+                ),
+                None => log::info!(
+                    "  pmpaddr{}=0x{:x} cfg=0x{:02x} mode={:?} region=invalid permissions={}{}{} locked={}",
+                    index,
+                    pmpaddr[index],
+                    cfg,
+                    mode,
+                    read,
+                    write,
+                    execute,
+                    locked
+                ),
+            }
         }
     }
 
@@ -143,8 +219,9 @@ impl StateRiscv {
         //one more domain - This needs to be implemented for more generic cases via per core updates.
         toggle_supervisor_interrupts();
 
-        if (next_domain.data_init_done) {
+        if next_domain.data_init_done {
             Self::update_pmps(next_domain);
+            Self::dump_pmps(domain);
         } else {
             panic!("SOMETHING WENT WRONG! There's been an attempt to execute a domain which hasn't been completely initialized yet.");
             //let mut engine = CAPA_ENGINE.lock();
