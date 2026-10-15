@@ -16,6 +16,7 @@ use crate::riscv::platform::MonitorRiscv;
 pub fn arch_entry_point(hartid: usize, manifest: RVManifest, log_level: log::LevelFilter) -> ! {
     if hartid == manifest.coldboot_hartid {
         logger::init(log_level);
+        MonitorRiscv::set_cold_boot_hart_id(hartid);
 
         log::info!(
             "============= Hello from Second Stage on Coldboot Hart ID: {} =============",

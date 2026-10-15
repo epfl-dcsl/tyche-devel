@@ -147,7 +147,7 @@ impl CapaEngine {
     ) -> Result<(), CapaError> {
         log::trace!("Start CPU");
 
-        if core_id > self.cores.len() {
+        if core_id >= self.cores.len() {
             log::warn!(
                 "Trid to initialize core {}, but there are only {} cores",
                 core_id,
@@ -627,6 +627,19 @@ impl CapaEngine {
         Ok(self
             .regions
             .get(self.domains[domain].get(capa)?.as_region()?))
+    }
+
+    /// Return the printable description of a local capability.
+    ///
+    /// `Ok(None)` means that the capability refers to an object that has
+    /// already been invalidated.
+    pub fn get_capa_info(
+        &self,
+        domain: Handle<Domain>,
+        capa: LocalCapa,
+    ) -> Result<Option<CapaInfo>, CapaError> {
+        let capa = self.domains[domain].get(capa)?;
+        Ok(capa.info(&self.regions, &self.domains))
     }
 
     pub fn get_domain_regions<'a>(

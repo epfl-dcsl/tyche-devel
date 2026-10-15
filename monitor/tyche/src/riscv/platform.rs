@@ -1,5 +1,5 @@
 use core::arch::asm;
-use core::sync::atomic::Ordering;
+use core::sync::atomic::{AtomicUsize, Ordering};
 
 use capa_engine::utils::BitmapIterator;
 use capa_engine::{
@@ -30,6 +30,28 @@ use crate::riscv::state::{DataRiscv, StateRiscv, CONTEXTS, DOMAINS, MONITOR_IPI_
 const XWR_PERM: usize = 7;
 const EMPTY_ACTIVE_DOMAIN: Mutex<Option<Handle<Domain>>> = Mutex::new(None);
 static ACTIVE_DOMAIN: [Mutex<Option<Handle<Domain>>>; NUM_HARTS] = [EMPTY_ACTIVE_DOMAIN; NUM_HARTS];
+static COLD_BOOT_HART_ID: AtomicUsize = AtomicUsize::new(usize::MAX);
+
+#[cfg(not(feature = "visionfive2"))]
+fn logical_core_to_hart(core: usize) -> usize {
+    let boot_hart = COLD_BOOT_HART_ID.load(Ordering::SeqCst);
+    if boot_hart == usize::MAX {
+        return core;
+    }
+
+    // Linux numbers the boot hart as logical CPU 0. The remaining harts are
+    // numbered in ascending hart-ID order, skipping the boot hart.
+    if core == 0 {
+        boot_hart
+    } else {
+        let hart = core - 1;
+        if hart >= boot_hart {
+            hart + 1
+        } else {
+            hart
+        }
+    }
+}
 
 // ————————————————————————— Platform specific code ————————————————————————— //
 
@@ -507,12 +529,16 @@ impl PlatformState for StateRiscv {
 
     #[cfg(not(feature = "visionfive2"))]
     fn remap_core(core: usize) -> usize {
-        core
+        logical_core_to_hart(core)
     }
 
     #[cfg(not(feature = "visionfive2"))]
     fn remap_core_bitmap(bitmap: u64) -> u64 {
-        bitmap
+        let mut remapped = 0;
+        for core in BitmapIterator::new(bitmap) {
+            remapped |= 1 << logical_core_to_hart(core);
+        }
+        remapped
     }
 
     #[cfg(feature = "visionfive2")]
@@ -632,10 +658,11 @@ impl PlatformState for StateRiscv {
             let mut domain = Self::get_domain(domain_handle);
             domain.data_init_done = true;
         }
-        // Domains without an assigned core do not get a shootdown, so log the
-        // rebuilt per-domain image here rather than relying on hardware state.
-        Self::dump_pmps(domain_handle);
         true
+    }
+
+    fn dump_final_memory_state(engine: &mut MutexGuard<CapaEngine>, operation: &str) {
+        Self::dump_all_memory_state(engine, operation);
     }
 
     fn create_domain(domain: Handle<Domain>) {
@@ -859,6 +886,10 @@ pub struct MonitorRiscv {}
 impl Monitor<StateRiscv> for MonitorRiscv {}
 
 impl MonitorRiscv {
+    pub fn set_cold_boot_hart_id(hartid: usize) {
+        COLD_BOOT_HART_ID.store(hartid, Ordering::SeqCst);
+    }
+
     pub fn init() {
         let mut engine = CAPA_ENGINE.lock();
         let domain = engine
@@ -904,6 +935,12 @@ impl MonitorRiscv {
         // Save the initial domain
         let mut initial_domain = INITIAL_DOMAIN.lock();
         *initial_domain = Some(domain);
+        drop(initial_domain);
+
+        // The initial Linux domain is constructed directly here rather than
+        // through the SEAL_DOMAIN monitor call. Preserve the pre-launch
+        // snapshot after all of its permission updates have been applied.
+        StateRiscv::dump_all_memory_state(&mut engine, "initial Linux domain before launch");
     }
 
     pub fn get_active_dom(hartid: usize) -> (Option<Handle<Domain>>) {

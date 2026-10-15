@@ -39,6 +39,58 @@ pub static CORE_UPDATES: [Mutex<Buffer<CoreUpdate>>; NB_CORES] = [EMPTY_UPDATE_B
 // —————————————————————— Constants for initialization —————————————————————— //
 const EMPTY_UPDATE_BUFFER: Mutex<Buffer<CoreUpdate>> = Mutex::new(Buffer::new());
 
+/// Print the complete capability-engine state.
+///
+/// The layout intentionally mirrors `libtyche list`: capabilities are grouped
+/// by domain and retain their local capability-table index. Effective regions
+/// are included so the output can be compared directly with PMP snapshots.
+#[cfg(target_arch = "riscv64")]
+pub(crate) fn dump_cdt(engine: &mut CapaEngine) {
+    log::info!("CDT state:");
+    let mut next_domain = NextCapaToken::new();
+
+    while let Some((domain, next)) = engine.enumerate_domains(next_domain) {
+        next_domain = next;
+        log::info!(
+            "Domain {}: id={} sealed={}",
+            domain,
+            engine[domain].id(),
+            engine.is_domain_sealed(domain)
+        );
+
+        let mut region_count = 0;
+        if let Ok(regions) = engine.get_domain_permissions(domain) {
+            for region in regions {
+                if region_count == 0 {
+                    log::info!("  regions:");
+                }
+                log::info!("    {}", region);
+                region_count += 1;
+            }
+        }
+        if region_count == 0 {
+            log::info!("  regions: (none)");
+        }
+
+        let mut capability_count = 0;
+        let mut next_capa = NextCapaToken::new();
+        while let Some((info, next)) = engine.enumerate(domain, next_capa) {
+            if capability_count == 0 {
+                log::info!("  capabilities:");
+            }
+            let local_index = next.as_usize() - 1;
+            log::info!("    [{}] {}", local_index, info);
+            capability_count += 1;
+            next_capa = next;
+        }
+        if capability_count == 0 {
+            log::info!("  capabilities: (none)");
+        }
+    }
+
+    log::info!("End CDT state");
+}
+
 // —————————————————————————— Trying to generalize —————————————————————————— //
 
 pub trait PlatformState {
@@ -68,6 +120,11 @@ pub trait PlatformState {
     fn get_context(domain: Handle<Domain>, core: usize) -> MutexGuard<'static, Self::Context>;
 
     fn update_permission(domain: Handle<Domain>, engine: &mut MutexGuard<CapaEngine>) -> bool;
+
+    /// Print the final capability and platform permission state after a
+    /// capability operation. Platforms without PMP state may leave this as a
+    /// no-op.
+    fn dump_final_memory_state(_engine: &mut MutexGuard<CapaEngine>, _operation: &str) {}
 
     fn create_domain(domain: Handle<Domain>);
 
@@ -242,50 +299,6 @@ pub trait Monitor<T: PlatformState + 'static> {
         }
     }
 
-    fn dump_domains(engine: &mut CapaEngine, sealed_domain: Handle<Domain>) {
-        log::info!("Tyche domains after sealing {}:", sealed_domain);
-        let mut next_domain = NextCapaToken::new();
-
-        while let Some((domain, next)) = engine.enumerate_domains(next_domain) {
-            next_domain = next;
-            log::info!(
-                "Domain {}: id={} sealed={}",
-                domain,
-                engine[domain].id(),
-                engine.is_domain_sealed(domain)
-            );
-
-            let mut region_count = 0;
-            if let Ok(regions) = engine.get_domain_permissions(domain) {
-                for region in regions {
-                    if region_count == 0 {
-                        log::info!("  regions:");
-                    }
-                    log::info!("    {}", region);
-                    region_count += 1;
-                }
-            }
-            if region_count == 0 {
-                log::info!("  regions: (none)");
-            }
-
-            let mut capability_count = 0;
-            let mut next_capa = NextCapaToken::new();
-            while let Some((info, next)) = engine.enumerate(domain, next_capa) {
-                if capability_count == 0 {
-                    log::info!("  capabilities:");
-                }
-                let local_index = next.as_usize() - 1;
-                log::info!("    [{}] {}", local_index, info);
-                capability_count += 1;
-                next_capa = next;
-            }
-            if capability_count == 0 {
-                log::info!("  capabilities: (none)");
-            }
-        }
-    }
-
     fn do_create_domain(
         state: &mut T,
         current: &mut Handle<Domain>,
@@ -425,7 +438,7 @@ pub trait Monitor<T: PlatformState + 'static> {
         calculate_attestation_hash(&mut engine, sealed_domain);
 
         Self::apply_updates(state, &mut engine);
-        Self::dump_domains(&mut engine, sealed_domain);
+        T::dump_final_memory_state(&mut engine, "seal domain before launch");
         Ok(capa)
     }
 
@@ -449,15 +462,27 @@ pub trait Monitor<T: PlatformState + 'static> {
             end,
             ops: prot,
         };
+        let source = engine
+            .get_region_capa(*current, capa)?
+            .ok_or(CapaError::InvalidCapa)?
+            .get_access_rights();
+        let operation = if is_shared { "alias" } else { "carve" };
+        log::info!(
+            "{} requested by domain {}: source capability [{}] {} requested region {}",
+            operation,
+            *current,
+            capa.as_usize(),
+            source,
+            access
+        );
         let to_send = if is_shared {
-            log::info!("Alias prot for segment region {:?}", prot);
             engine.alias_region(*current, capa, access)?
         } else {
-            log::info!("Carve prot for segment region {:?}", prot);
             engine.carve_region(*current, capa, access)?
         };
         let to_revoke = engine.create_revoke_capa(*current, to_send)?;
         Self::apply_updates(state, &mut engine);
+        T::dump_final_memory_state(&mut engine, operation);
         Ok((to_send, to_revoke))
     }
 
@@ -543,6 +568,7 @@ pub trait Monitor<T: PlatformState + 'static> {
             state.map_region(&mut engine, target, alias, repeat, &region_info)?;
         }
         Self::apply_updates(state, &mut engine);
+        T::dump_final_memory_state(&mut engine, "send region");
         Ok(())
     }
 
@@ -561,8 +587,27 @@ pub trait Monitor<T: PlatformState + 'static> {
         capa: LocalCapa,
     ) -> Result<(), CapaError> {
         let mut engine = Self::lock_engine(state, current);
+        match engine.get_capa_info(*current, capa) {
+            Ok(Some(info)) => log::info!(
+                "revoke requested by domain {}: capability [{}] {}",
+                *current,
+                capa.as_usize(),
+                info
+            ),
+            Ok(None) => log::info!(
+                "revoke requested by domain {}: capability [{}] (target already invalidated)",
+                *current,
+                capa.as_usize()
+            ),
+            Err(_) => log::info!(
+                "revoke requested by domain {}: capability [{}] (unavailable)",
+                *current,
+                capa.as_usize()
+            ),
+        }
         engine.revoke(*current, capa)?;
         Self::apply_updates(state, &mut engine);
+        T::dump_final_memory_state(&mut engine, "revoke");
         Ok(())
     }
 
@@ -575,12 +620,30 @@ pub trait Monitor<T: PlatformState + 'static> {
         size: usize,
     ) -> Result<(), CapaError> {
         let mut engine = Self::lock_engine(state, current);
+        match engine.get_capa_info(*current, capa) {
+            Ok(Some(info)) => log::info!(
+                "revoke aliased region requested by domain {}: capability [{}] {} alias=[0x{:x}, 0x{:x})",
+                *current,
+                capa.as_usize(),
+                info,
+                alias,
+                alias.saturating_add(size)
+            ),
+            _ => log::info!(
+                "revoke aliased region requested by domain {}: capability [{}] alias=[0x{:x}, 0x{:x})",
+                *current,
+                capa.as_usize(),
+                alias,
+                alias.saturating_add(size)
+            ),
+        }
         {
             let dom = engine.get_domain_capa(*current, to)?;
             let _ = state.unmap_region(&mut engine, dom, alias, size).unwrap();
         }
         engine.revoke(*current, capa)?;
         Self::apply_updates(state, &mut engine);
+        T::dump_final_memory_state(&mut engine, "revoke aliased region");
         Ok(())
     }
 
@@ -633,17 +696,16 @@ pub trait Monitor<T: PlatformState + 'static> {
         let mut engine = Self::lock_engine(state, current);
         let domain = engine.get_domain_capa(*current, domain)?;
         let cores = engine.get_domain_permission(domain, permission::PermissionIndex::AllowedCores);
-        let remapped_core = T::remap_core(core);
-        if remapped_core > T::max_cpus() || (1 << remapped_core) & cores == 0 {
+        if core >= T::max_cpus() || (1 << core) & cores == 0 {
             log::error!(
                 "Attempt to set context on unallowed core {} max_cpus {} cores: 0x{:x}",
-                remapped_core,
+                core,
                 T::max_cpus(),
                 cores
             );
             return Err(CapaError::InvalidCore);
         }
-        T::create_context(state, engine, *current, domain, remapped_core)?;
+        T::create_context(state, engine, *current, domain, core)?;
         return Ok(());
     }
 

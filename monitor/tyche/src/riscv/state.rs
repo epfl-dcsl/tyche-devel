@@ -2,7 +2,7 @@ use core::arch::asm;
 use core::sync::atomic::AtomicUsize;
 
 use capa_engine::config::{NB_CORES, NB_DOMAINS, NB_REMAP_REGIONS};
-use capa_engine::{CapaEngine, Domain, Handle, MemOps};
+use capa_engine::{CapaEngine, Domain, Handle, MemOps, NextCapaToken};
 use riscv_pmp::csrs::{pmpaddr_csr_read, pmpaddr_csr_write, pmpcfg_csr_read, pmpcfg_csr_write};
 use riscv_pmp::{
     clear_pmp, pmp_decode_range, pmp_write_compute, PMPAddressingMode, PMPWriteResponse,
@@ -14,7 +14,7 @@ use riscv_utils::{
 };
 use spin::{Mutex, MutexGuard};
 
-use crate::monitor::{PlatformState, CAPA_ENGINE};
+use crate::monitor::{dump_cdt, PlatformState, CAPA_ENGINE};
 use crate::riscv::context::ContextRiscv;
 // ———————————————————————————————— Globals ————————————————————————————————— //
 
@@ -168,6 +168,20 @@ impl StateRiscv {
         }
     }
 
+    /// Dump one coherent post-operation snapshot: first the complete CDT, then
+    /// the final cached PMP image for every live domain.
+    pub fn dump_all_memory_state(engine: &mut CapaEngine, operation: &str) {
+        log::info!("Final memory state after {}:", operation);
+        dump_cdt(engine);
+
+        let mut next_domain = NextCapaToken::new();
+        while let Some((domain, next)) = engine.enumerate_domains(next_domain) {
+            next_domain = next;
+            Self::dump_pmps(domain);
+        }
+        log::info!("End final memory state after {}", operation);
+    }
+
     pub fn switch_domain(
         current_domain: &mut Handle<Domain>,
         current_ctx: &mut MutexGuard<ContextRiscv>,
@@ -221,7 +235,8 @@ impl StateRiscv {
 
         if next_domain.data_init_done {
             Self::update_pmps(next_domain);
-            Self::dump_pmps(domain);
+            let mut engine = CAPA_ENGINE.lock();
+            Self::dump_all_memory_state(&mut engine, "domain switch");
         } else {
             panic!("SOMETHING WENT WRONG! There's been an attempt to execute a domain which hasn't been completely initialized yet.");
             //let mut engine = CAPA_ENGINE.lock();

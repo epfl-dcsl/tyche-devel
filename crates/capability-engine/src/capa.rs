@@ -195,7 +195,7 @@ impl Capa {
         match self {
             Capa::None => None,
             Capa::Region(h) => {
-                let region = &regions[h];
+                let region = regions.get(h)?;
                 Some(CapaInfo::Region {
                     start: region.access.start,
                     end: region.access.end,
@@ -205,7 +205,7 @@ impl Capa {
                 })
             }
             Capa::RegionRevoke(h) => {
-                let region = &regions[h];
+                let region = regions.get(h)?;
                 Some(CapaInfo::RegionRevoke {
                     start: region.access.start,
                     end: region.access.end,
